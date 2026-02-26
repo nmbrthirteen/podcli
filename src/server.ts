@@ -293,7 +293,7 @@ export function createServer(): McpServer {
       try {
         if (action === "read_all") {
           const text = await kb.readAll();
-          return { content: [{ type: "text" as const, text: text || "Knowledge base is empty. Add .md files to ~/.podcli/knowledge/" }] };
+          return { content: [{ type: "text" as const, text: text || "Knowledge base is empty. Add .md files to .podcli/knowledge/ in the project directory." }] };
         }
         if (action === "list") {
           const files = await kb.listFiles();

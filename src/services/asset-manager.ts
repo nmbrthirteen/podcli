@@ -70,7 +70,7 @@ export class AssetManager {
     return null;
   }
 
-  /** Copy a file into ~/.podcli/assets/ and register it. */
+  /** Copy a file into .podcli/assets/ and register it. */
   async importFile(sourcePath: string, name: string, type: Asset["type"]): Promise<Asset> {
     await this.ensureDir();
     const destPath = join(this.assetsDir, basename(sourcePath));

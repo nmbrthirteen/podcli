@@ -59,8 +59,8 @@ install() {
 
   echo ""
   echo "━━━ [2/6] Creating directories ━━━"
-  CLIPPER_HOME="${PODCLI_HOME:-$HOME/.podcli}"
-  mkdir -p "$CLIPPER_HOME"/{cache/transcripts,working,working/uploads,output,logs}
+  CLIPPER_HOME="${PODCLI_HOME:-$SCRIPT_DIR/.podcli}"
+  mkdir -p "$CLIPPER_HOME"/{cache/transcripts,working,working/uploads,output,logs,assets,history,knowledge}
   echo "  ✓ $CLIPPER_HOME"
 
   echo ""

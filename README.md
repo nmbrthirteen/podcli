@@ -1,36 +1,35 @@
 # podcli
 
-AI-powered podcast clip generator. Takes a long-form podcast video, identifies viral moments, and exports upload-ready TikTok / YouTube Shorts (1080×1920, 9:16, burned captions, normalized audio).
+AI-powered podcast clip generator. Takes a long-form podcast video, identifies viral moments, and exports upload-ready TikTok / YouTube Shorts (1080x1920, 9:16, burned captions, normalized audio).
 
 ## Features
 
-- **Auto clip suggestion** — text heuristics + audio energy analysis for smarter scoring
-- **Hardware-accelerated encoding** — auto-detects VideoToolbox (Mac), NVENC (NVIDIA), VAAPI, or falls back to CPU
-- **Burned-in captions** — word-level timestamps with branded, hormozi, karaoke, or subtle styles
-- **Smooth gradient overlay** — alpha-blended PNG overlay (no banding)
-- **Smart cropping** — center crop or face detection
+- **Auto clip suggestion** — text heuristics + audio energy analysis
+- **Burned-in captions** — 4 styles: branded (dark box highlight), hormozi (bold pop-on), karaoke (progressive highlight), subtle (clean bottom text)
+- **Hardware-accelerated encoding** — auto-detects VideoToolbox (Mac), NVENC (NVIDIA), VAAPI, or CPU fallback
+- **Smart cropping** — center crop or face detection (OpenCV)
+- **Knowledge base** — drop `.md` files to give the AI context about your podcast, hosts, and style
+- **Asset management** — register logos and videos by name for quick reuse
+- **Clip history** — tracks all generated clips to avoid duplicates
 - **Transcript import** — paste `Speaker (MM:SS)` format, JSON, or drag-and-drop `.txt` files
 - **Whisper transcription** — auto-transcribe with OpenAI Whisper (tiny → large)
-- **CLI mode** — one-command processing: `./podcli process video.mp4 --top 5`
 - **Preset system** — save and load named configurations per show
-- **MCP server** — use as a Claude Desktop / Claude Code tool
+- **MCP server** — use as a Claude Desktop / Claude Code tool (7 tools)
 - **Web UI** — single-page flow: input → suggest → review → export
-
----
+- **CLI mode** — one-command processing: `./podcli process video.mp4 --top 5`
 
 ## Prerequisites
 
 | Tool | Install |
 |------|---------|
-| **Node.js** ≥ 18 | [nodejs.org](https://nodejs.org) |
-| **Python** ≥ 3.10 | [python.org](https://python.org) |
+| **Node.js** >= 18 | [nodejs.org](https://nodejs.org) |
+| **Python** >= 3.10 | [python.org](https://python.org) |
 | **FFmpeg** | `brew install ffmpeg` / `sudo apt install ffmpeg` |
-
----
 
 ## Quick Start
 
 ```bash
+git clone <repo-url> podcli
 cd podcli
 chmod +x setup.sh podcli
 ./setup.sh
@@ -41,7 +40,8 @@ This will:
 1. Check system dependencies (Node, Python, FFmpeg)
 2. Create a Python virtual environment and install packages
 3. Install Node packages and build TypeScript
-4. Launch the web UI at **http://localhost:3847**
+4. Create the local `.podcli/` data directory
+5. Launch the web UI at **http://localhost:3847**
 
 ### Setup options
 
@@ -49,81 +49,172 @@ This will:
 ./setup.sh              # full install + launch UI
 ./setup.sh --install    # install only
 ./setup.sh --ui         # launch UI only (skip install)
-./setup.sh --mcp        # print MCP config
+./setup.sh --mcp        # print MCP config for Claude
 ```
 
----
+## Usage
 
-## Usage (CLI)
-
-Process a video in one command — no UI needed:
+### Web UI
 
 ```bash
-# Basic: auto-transcribe + suggest top 5 clips + export
+./setup.sh --ui
+# → http://localhost:3847
+```
+
+1. **Set video** — drag-and-drop or enter a local path
+2. **Add transcript** — drag a `.txt` file, paste `Speaker (MM:SS)` text, or auto-transcribe with Whisper
+3. **Generate Clips** — analyzes audio energy + transcript to suggest viral moments
+4. **Review** — toggle clips on/off, pick caption style, crop mode, logo
+5. **Export** — batch-renders selected clips with hardware acceleration
+6. **Preview / Download** — watch results inline, download individual clips
+
+### CLI
+
+```bash
+# Auto-transcribe + suggest top 5 clips + export
 ./podcli process video.mp4
 
 # With existing transcript
 ./podcli process video.mp4 --transcript transcript.txt --top 5
 
-# With a saved preset
-./podcli process video.mp4 -t transcript.txt --preset myshow
-
 # Full options
 ./podcli process video.mp4 \
   --transcript transcript.txt \
   --top 8 \
-  --output ./clips \
   --caption-style branded \
   --crop center \
-  --logo ~/logo.png \
-  --time-adjust -1
+  --logo logo.png
 ```
 
 ### Presets
 
-Save your settings so you don't reconfigure each time:
-
 ```bash
-# Save a preset
-./podcli presets save myshow --caption-style branded --logo ~/logo.png --top 5
-
-# List presets
+./podcli presets save myshow --caption-style branded --logo logo.png --top 5
 ./podcli presets list
-
-# Show preset details
-./podcli presets show myshow
-
-# Use a preset
 ./podcli process video.mp4 --preset myshow
-
-# Delete a preset
-./podcli presets delete myshow
 ```
 
-Presets are stored in `~/.podcli/presets/`.
+### MCP Server (Claude integration)
 
-### System info
+podcli is a [Model Context Protocol](https://modelcontextprotocol.io) server — Claude can use it as a tool to create clips through conversation.
+
+**Claude Desktop** — add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "podcli": {
+      "command": "node",
+      "args": ["/path/to/podcli/dist/index.js"],
+      "env": {
+        "PYTHON_PATH": "/path/to/podcli/venv/bin/python3"
+      }
+    }
+  }
+}
+```
+
+**Claude Code:**
 
 ```bash
-./podcli info
+claude mcp add podcli -- node /path/to/podcli/dist/index.js
 ```
 
-Shows detected encoder (VideoToolbox, NVENC, CPU), platform, and FFmpeg flags.
+Run `./setup.sh --mcp` to get the exact config with your paths filled in.
 
----
+#### MCP Tools
 
-## Usage (Web UI)
+| Tool | Description |
+|------|-------------|
+| `transcribe_podcast` | Transcribe audio/video with Whisper |
+| `suggest_clips` | Submit clip suggestions (includes duplicate check) |
+| `create_clip` | Render a single short-form clip |
+| `batch_create_clips` | Render multiple clips in one batch |
+| `knowledge_base` | Read/write podcast context files |
+| `manage_assets` | Register/list reusable assets (logos, videos) |
+| `clip_history` | View previously created clips, check for duplicates |
 
-1. **Set video** — drag-and-drop a video file or enter a local path
-2. **Add transcript** — drag a `.txt` file, paste `Speaker (MM:SS)` text, or use Whisper auto-transcription
-3. **Click "Generate Clips"** — podcli analyzes audio energy, parses transcript, and suggests clips
-4. **Review** — toggle clips on/off, adjust settings (caption style, crop, logo)
-5. **Export** — batch-renders all selected clips with hardware acceleration
-6. **Preview / Retry / Download** — watch results inline, re-export individual clips
+## Knowledge Base
 
-The encoder badge in the header shows which encoder is active (e.g., VIDEOTOOLBOX, NVENC, or CPU).
+Drop `.md` files into `.podcli/knowledge/` to give the AI context about your podcast. The MCP server reads these before every request.
 
-### Transcript format
+Suggested files:
+- `podcast.md` — show name, format, episode structure
+- `hosts.md` — host names, speaking styles
+- `style.md` — preferred caption style, logo, colors
+- `audience.md` — target audience, platform preferences
+- `avoid.md` — topics or segments to skip
+
+Manage via the web UI at `/knowledge.html` (drag & drop, inline editor) or through the `knowledge_base` MCP tool.
+
+## Caption Styles
+
+| Style | Look |
+|-------|------|
+| **branded** | Large bold text, dark box highlight on active word, gradient overlay, optional logo |
+| **hormozi** | Bold uppercase pop-on text, yellow active word (Alex Hormozi style) |
+| **karaoke** | Full sentence visible, words highlight progressively |
+| **subtle** | Clean minimal white text at bottom |
+
+## Project Structure
+
+```
+podcli/
+├── podcli                    # CLI entry point
+├── setup.sh                  # one-command install & launch
+├── package.json
+├── .env.example
+│
+├── src/                      # TypeScript
+│   ├── index.ts              # MCP server entry (stdio)
+│   ├── server.ts             # MCP tool definitions
+│   ├── config/paths.ts
+│   ├── models/index.ts
+│   ├── handlers/             # MCP tool handlers
+│   ├── services/
+│   │   ├── python-executor.ts
+│   │   ├── file-manager.ts
+│   │   ├── asset-manager.ts
+│   │   ├── clips-history.ts
+│   │   ├── knowledge-base.ts
+│   │   └── transcript-cache.ts
+│   └── ui/
+│       ├── web-server.ts     # Express server + API
+│       └── public/           # Frontend (React SPA)
+│
+├── backend/                  # Python
+│   ├── main.py               # stdin/stdout JSON dispatcher
+│   ├── cli.py                # CLI entry point
+│   ├── presets.py
+│   ├── requirements.txt
+│   ├── services/             # Whisper, FFmpeg, captions, etc.
+│   └── config/
+│       └── caption_styles.py
+│
+└── .podcli/                  # local data (gitignored)
+    ├── assets/               # registered logos, videos
+    ├── cache/transcripts/    # cached transcriptions
+    ├── history/              # generated clip history
+    ├── knowledge/            # .md context files for AI
+    ├── output/               # rendered clips
+    ├── presets/              # saved configurations
+    └── working/              # temp files
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` (setup.sh does this automatically):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WHISPER_MODEL` | `base` | Whisper model size (tiny, base, small, medium, large) |
+| `WHISPER_DEVICE` | `auto` | `cpu`, `cuda`, or `auto` |
+| `PYTHON_PATH` | (venv) | Path to Python binary |
+| `PODCLI_HOME` | `.podcli/` | Data directory (relative to project root) |
+| `FFMPEG_PATH` | `ffmpeg` | Custom FFmpeg path |
+| `LOG_LEVEL` | `info` | Logging verbosity |
+
+## Transcript Format
 
 ```
 Speaker Name (00:00)
@@ -134,131 +225,6 @@ Their response text here.
 ```
 
 The time offset field (default: -1s) shifts all timestamps to sync with audio.
-
----
-
-## Usage (MCP Server)
-
-podcli is also a [Model Context Protocol](https://modelcontextprotocol.io) server — Claude can use it as a tool to create clips programmatically.
-
-### Claude Desktop
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "podcli": {
-      "command": "node",
-      "args": ["/absolute/path/to/podcli/dist/index.js"],
-      "env": {
-        "PYTHON_PATH": "/absolute/path/to/podcli/venv/bin/python3"
-      }
-    }
-  }
-}
-```
-
-### Claude Code
-
-```bash
-claude mcp add podcli -- node /absolute/path/to/podcli/dist/index.js
-```
-
-Or run `./setup.sh --mcp` to get the exact config with your paths filled in.
-
-### Available MCP tools
-
-| Tool | Description |
-|------|-------------|
-| `transcribe_podcast` | Transcribe audio with Whisper |
-| `suggest_clips` | Get AI-suggested clip timestamps |
-| `create_clip` | Render a single short clip |
-| `batch_clips` | Render multiple clips in one go |
-
----
-
-## Project Structure
-
-```
-podcli/
-├── podcli                    # CLI entry point (shell wrapper)
-├── setup.sh                  # one-command install & launch
-├── package.json
-├── tsconfig.json
-├── .env.example
-│
-├── src/                      # TypeScript source
-│   ├── index.ts              # MCP server entry (stdio)
-│   ├── server.ts             # MCP tool definitions
-│   ├── config/paths.ts       # path resolution
-│   ├── models/index.ts       # shared types
-│   ├── handlers/             # MCP tool handlers
-│   │   ├── transcribe.handler.ts
-│   │   ├── suggest-clips.handler.ts
-│   │   ├── create-clip.handler.ts
-│   │   └── batch-clips.handler.ts
-│   ├── services/
-│   │   ├── python-executor.ts   # spawns Python backend
-│   │   └── file-manager.ts
-│   └── ui/
-│       ├── web-server.ts        # Express server + SSE + REST API
-│       └── public/index.html    # React single-page UI
-│
-├── backend/                  # Python backend
-│   ├── main.py               # stdin/stdout JSON dispatcher
-│   ├── cli.py                # CLI entry point (argparse)
-│   ├── presets.py             # preset save/load system
-│   ├── requirements.txt
-│   ├── services/
-│   │   ├── transcription.py     # Whisper wrapper
-│   │   ├── video_processor.py   # FFmpeg clip rendering (hw-accel)
-│   │   ├── audio_analyzer.py    # RMS energy analysis for scoring
-│   │   ├── encoder.py           # hardware encoder detection
-│   │   ├── clip_generator.py    # full pipeline orchestration
-│   │   ├── caption_renderer.py  # ASS subtitle generation
-│   │   └── transcript_parser.py # Speaker (MM:SS) parser
-│   └── config/
-│       └── caption_styles.py    # ASS subtitle style presets
-│
-└── data/                     # runtime data (gitignored)
-    ├── cache/transcripts/
-    ├── working/uploads/
-    ├── output/
-    └── logs/
-```
-
----
-
-## Configuration
-
-Copy `.env.example` to `.env` (setup.sh does this automatically):
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WHISPER_MODEL` | `base` | Whisper model size |
-| `WHISPER_DEVICE` | `auto` | `cpu`, `cuda`, or `auto` |
-| `PYTHON_PATH` | (venv) | Path to Python binary |
-| `PODCLI_HOME` | `~/.podcli` | Data directory |
-| `FFMPEG_PATH` | `ffmpeg` | Custom FFmpeg path |
-| `LOG_LEVEL` | `info` | Logging verbosity |
-
----
-
-## Caption Styles
-
-| Style | Look |
-|-------|------|
-| **branded** | Gradient overlay + boxed word highlight + optional logo |
-| **hormozi** | Bold pop-on text (Alex Hormozi style) |
-| **karaoke** | Word-by-word highlight |
-| **subtle** | Clean, minimal white text |
-
----
 
 ## License
 

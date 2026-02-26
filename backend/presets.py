@@ -2,15 +2,17 @@
 Preset/template system for podcli.
 
 Save and load named configurations so you don't reconfigure settings
-for every episode. Stored as JSON in ~/.podcli/presets/
+for every episode. Stored as JSON in .podcli/presets/
 """
 
 import os
 import json
 from typing import Optional
 
+# Default to .podcli/ in the project root (two levels up from backend/)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PRESETS_DIR = os.path.join(
-    os.environ.get("PODCLI_HOME", os.path.expanduser("~/.podcli")),
+    os.environ.get("PODCLI_HOME", os.path.join(_PROJECT_ROOT, ".podcli")),
     "presets",
 )
 

@@ -1,11 +1,31 @@
 {
   "name": "podcli",
   "version": "1.0.0",
-  "description": "podcli — AI-powered podcast clip generator for TikTok/YouTube Shorts",
+  "description": "AI-powered podcast clip generator for TikTok/YouTube Shorts. Transcribe, find viral moments, export vertical clips with burned captions.",
   "type": "module",
+  "license": "MIT",
   "main": "dist/index.js",
+  "bin": {
+    "podcli": "./podcli"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "podcast",
+    "clips",
+    "tiktok",
+    "youtube-shorts",
+    "reels",
+    "video",
+    "captions",
+    "whisper",
+    "mcp",
+    "claude",
+    "ffmpeg"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/ui/public dist/ui/",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "ui": "tsx src/ui/web-server.ts",
