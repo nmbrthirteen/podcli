@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>podcli — Knowledge Base</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0b0d;
+      --surface: #131316;
+      --surface2: #1b1b20;
+      --border: #252530;
+      --border-hover: #35354a;
+      --text: #e8e8e2;
+      --text2: #77776f;
+      --text3: #4e4e48;
+      --accent: #d4874a;
+      --accent-hover: #e09860;
+      --accent-subtle: rgba(212, 135, 74, 0.10);
+      --accent-glow: rgba(212, 135, 74, 0.25);
+      --green: #4ade80;
+      --green-subtle: rgba(74, 222, 128, 0.07);
+      --green-border: rgba(74, 222, 128, 0.18);
+      --red: #f87171;
+      --red-subtle: rgba(248, 113, 113, 0.07);
+      --red-border: rgba(248, 113, 113, 0.18);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .app { max-width: 860px; margin: 0 auto; padding: 48px 32px 96px; }
+    .nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+    .logo { font-size: 13px; font-weight: 700; letter-spacing: 1.2px; color: var(--text3); text-transform: uppercase; text-decoration: none; }
+    .logo span { color: var(--accent); }
+    .nav-link {
+      font-size: 13px; font-weight: 600; color: var(--text2);
+      text-decoration: none; padding: 6px 14px;
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
+      transition: all 0.15s var(--ease);
+    }
+    .nav-link:hover { border-color: var(--border-hover); color: var(--text); }
+
+    .header { margin-bottom: 32px; }
+    h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.15; }
+    .subtitle { font-size: 14px; color: var(--text2); margin-top: 8px; line-height: 1.6; }
+    .dir-path {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-top: 10px; padding: 5px 12px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--text2);
+    }
+
+    /* ─── Drop Zone ─── */
+    .drop-zone {
+      border: 1.5px dashed var(--border); border-radius: var(--radius);
+      padding: 36px 24px; text-align: center; cursor: pointer;
+      transition: all 0.2s var(--ease); position: relative; margin-bottom: 24px;
+    }
+    .drop-zone:hover { border-color: var(--border-hover); background: rgba(255,255,255,0.012); }
+    .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-subtle); box-shadow: 0 0 0 4px var(--accent-subtle); }
+    .drop-zone .dz-icon { font-size: 28px; opacity: 0.3; margin-bottom: 8px; }
+    .drop-zone .dz-text { font-size: 13px; color: var(--text2); line-height: 1.5; }
+    .drop-zone .dz-text strong { color: var(--accent); font-weight: 600; }
+    .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+    /* ─── File Grid ─── */
+    .file-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .file-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px; cursor: pointer;
+      transition: all 0.15s var(--ease); position: relative;
+    }
+    .file-card:hover { border-color: var(--border-hover); }
+    .file-card.active { border-color: var(--accent); background: var(--accent-subtle); }
+    .file-name {
+      font-family: 'JetBrains Mono', monospace; font-size: 13px;
+      font-weight: 600; color: var(--text); margin-bottom: 4px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .file-meta { font-size: 11px; color: var(--text3); }
+    .file-preview { font-size: 12px; color: var(--text2); margin-top: 8px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .file-delete {
+      position: absolute; top: 10px; right: 10px;
+      width: 22px; height: 22px; border-radius: 6px;
+      background: transparent; border: 1px solid transparent;
+      color: var(--text3); cursor: pointer; font-size: 13px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s var(--ease); opacity: 0;
+    }
+    .file-card:hover .file-delete { opacity: 1; }
+    .file-delete:hover { border-color: var(--red-border); color: var(--red); background: var(--red-subtle); }
+
+    /* ─── Editor ─── */
+    .editor-panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden; margin-top: 20px;
+    }
+    .editor-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+    }
+    .editor-filename {
+      font-family: 'JetBrains Mono', monospace; font-size: 12px;
+      font-weight: 600; color: var(--text);
+    }
+    .editor-actions { display: flex; gap: 6px; }
+    .btn {
+      padding: 6px 14px; border-radius: var(--radius-sm); font-family: inherit;
+      font-size: 12px; font-weight: 600; cursor: pointer; border: none;
+      transition: all 0.15s var(--ease); display: inline-flex;
+      align-items: center; gap: 5px;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+    .btn-ghost:hover { border-color: var(--border-hover); color: var(--text); }
+    .editor-textarea {
+      width: 100%; min-height: 320px; padding: 16px;
+      background: transparent; border: none; color: var(--text);
+      font-family: 'JetBrains Mono', monospace; font-size: 13px;
+      line-height: 1.7; resize: vertical; outline: none;
+    }
+
+    /* ─── New File ─── */
+    .new-file-row {
+      display: flex; gap: 8px; margin-top: 16px;
+    }
+    .new-file-input {
+      flex: 1; padding: 8px 14px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text);
+      font-family: 'JetBrains Mono', monospace; font-size: 13px;
+      outline: none;
+    }
+    .new-file-input:focus { border-color: var(--accent); }
+    .new-file-input::placeholder { color: var(--text3); }
+
+    /* ─── Toast ─── */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      padding: 10px 18px; border-radius: var(--radius-sm);
+      background: var(--green-subtle); border: 1px solid var(--green-border);
+      color: var(--green); font-size: 13px; font-weight: 600;
+      animation: fadeIn 0.2s var(--ease);
+    }
+
+    .empty-state { text-align: center; padding: 48px 20px; color: var(--text3); font-size: 13px; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    @media (max-width: 640px) {
+      .app { padding: 28px 16px 64px; }
+      .file-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    function App() {
+      const [files, setFiles] = useState([]);
+      const [activeFile, setActiveFile] = useState(null);
+      const [editorContent, setEditorContent] = useState('');
+      const [dirty, setDirty] = useState(false);
+      const [dragOver, setDragOver] = useState(false);
+      const [toast, setToast] = useState(null);
+      const [newName, setNewName] = useState('');
+      const [kbDir, setKbDir] = useState('');
+
+      const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
+
+      const loadFiles = useCallback(async () => {
+        const data = await (await fetch('/api/knowledge')).json();
+        setFiles(data);
+      }, []);
+
+      useEffect(() => {
+        loadFiles();
+        fetch('/api/knowledge/dir').then(r => r.json()).then(d => setKbDir(d.path)).catch(() => {});
+      }, []);
+
+      const openFile = (f) => {
+        if (dirty && !confirm('Discard unsaved changes?')) return;
+        setActiveFile(f.filename);
+        setEditorContent(f.content);
+        setDirty(false);
+      };
+
+      const saveFile = async () => {
+        if (!activeFile) return;
+        await fetch(`/api/knowledge/${encodeURIComponent(activeFile)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: editorContent }),
+        });
+        setDirty(false);
+        showToast('Saved');
+        loadFiles();
+      };
+
+      const deleteFile = async (filename, e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete ${filename}?`)) return;
+        await fetch(`/api/knowledge/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        if (activeFile === filename) { setActiveFile(null); setEditorContent(''); }
+        showToast('Deleted');
+        loadFiles();
+      };
+
+      const createFile = async () => {
+        let name = newName.trim();
+        if (!name) return;
+        if (!name.endsWith('.md')) name += '.md';
+        await fetch(`/api/knowledge/${encodeURIComponent(name)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: `# ${name.replace('.md', '')}\n\n` }),
+        });
+        setNewName('');
+        await loadFiles();
+        // Open the new file
+        const data = await (await fetch('/api/knowledge')).json();
+        const created = data.find(f => f.filename === name);
+        if (created) openFile(created);
+        showToast('Created');
+      };
+
+      const handleDrop = async (e) => {
+        e.preventDefault();
+        setDragOver(false);
+        const dt = e.dataTransfer;
+        if (!dt.files.length) return;
+        const fd = new FormData();
+        for (const f of dt.files) {
+          if (f.name.endsWith('.md') || f.name.endsWith('.txt')) fd.append('files', f);
+        }
+        if (!fd.has('files')) return;
+        await fetch('/api/knowledge/upload', { method: 'POST', body: fd });
+        showToast(`${dt.files.length} file(s) added`);
+        loadFiles();
+      };
+
+      const handleFileInput = async (e) => {
+        const inputFiles = e.target.files;
+        if (!inputFiles.length) return;
+        const fd = new FormData();
+        for (const f of inputFiles) fd.append('files', f);
+        await fetch('/api/knowledge/upload', { method: 'POST', body: fd });
+        showToast(`${inputFiles.length} file(s) added`);
+        loadFiles();
+        e.target.value = '';
+      };
+
+      const realFiles = files.filter(f => f.filename !== 'README.md');
+
+      return (
+        <div className="app">
+          <div className="nav">
+            <a href="/" className="logo">pod<span>cli</span></a>
+            <a href="/" className="nav-link">Back to app</a>
+          </div>
+
+          <div className="header">
+            <h1>Knowledge Base</h1>
+            <p className="subtitle">
+              Add .md files to give the AI context about your podcast — hosts, style preferences, audience, topics to avoid.
+              The MCP server reads these before every request.
+            </p>
+            {kbDir && <div className="dir-path">{kbDir}</div>}
+          </div>
+
+          {/* Drop zone */}
+          <div
+            className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+          >
+            <div className="dz-icon">{'\uD83D\uDCC4'}</div>
+            <div className="dz-text">
+              Drop <strong>.md files</strong> here or click to browse
+            </div>
+            <input type="file" accept=".md,.txt" multiple onChange={handleFileInput} />
+          </div>
+
+          {/* File grid */}
+          {realFiles.length > 0 ? (
+            <div className="file-grid">
+              {realFiles.map(f => (
+                <div
+                  key={f.filename}
+                  className={`file-card ${activeFile === f.filename ? 'active' : ''}`}
+                  onClick={() => openFile(f)}
+                >
+                  <button className="file-delete" onClick={(e) => deleteFile(f.filename, e)}>{'\u00D7'}</button>
+                  <div className="file-name">{f.filename}</div>
+                  <div className="file-meta">{new Date(f.updatedAt).toLocaleDateString()}</div>
+                  <div className="file-preview">{f.content.split('\n').filter(l => l.trim() && !l.startsWith('#')).slice(0,2).join(' ')}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">
+              No knowledge files yet. Drop .md files above or create one below.
+            </div>
+          )}
+
+          {/* New file */}
+          <div className="new-file-row">
+            <input
+              className="new-file-input"
+              placeholder="new-file-name.md"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && createFile()}
+            />
+            <button className="btn btn-primary" onClick={createFile}>Create</button>
+          </div>
+
+          {/* Editor */}
+          {activeFile && (
+            <div className="editor-panel" style={{ animation: 'fadeIn 0.2s var(--ease)' }}>
+              <div className="editor-header">
+                <span className="editor-filename">{activeFile}</span>
+                <div className="editor-actions">
+                  {dirty && <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, padding: '4px 8px' }}>unsaved</span>}
+                  <button className="btn btn-ghost" onClick={() => { setActiveFile(null); setEditorContent(''); setDirty(false); }}>Close</button>
+                  <button className="btn btn-primary" onClick={saveFile}>Save</button>
+                </div>
+              </div>
+              <textarea
+                className="editor-textarea"
+                value={editorContent}
+                onChange={e => { setEditorContent(e.target.value); setDirty(true); }}
+              />
+            </div>
+          )}
+
+          {toast && <div className="toast">{toast}</div>}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

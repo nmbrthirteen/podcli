@@ -95,3 +95,41 @@ export interface SuggestedClip {
   reasoning: string;
   preview_text: string;
 }
+
+// === Asset Models ===
+
+export interface Asset {
+  name: string;
+  type: "logo" | "video" | "image" | "other";
+  path: string;
+  addedAt: string;
+}
+
+export interface AssetRegistry {
+  assets: Asset[];
+}
+
+// === Clip History Models ===
+
+export interface ClipHistoryEntry {
+  id: string;
+  source_video: string;
+  start_second: number;
+  end_second: number;
+  caption_style: string;
+  crop_strategy: string;
+  logo_path?: string;
+  title: string;
+  output_path: string;
+  file_size_mb: number;
+  duration: number;
+  created_at: string;
+}
+
+// === Knowledge Base Models ===
+
+export interface KnowledgeFile {
+  filename: string;
+  content: string;
+  updatedAt: string;
+}

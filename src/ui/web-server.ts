@@ -20,6 +20,9 @@ import { v4 as uuidv4 } from "uuid";
 import { PythonExecutor } from "../services/python-executor.js";
 import { TranscriptCache } from "../services/transcript-cache.js";
 import { FileManager } from "../services/file-manager.js";
+import { AssetManager } from "../services/asset-manager.js";
+import { ClipsHistory } from "../services/clips-history.js";
+import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths } from "../config/paths.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -30,6 +33,9 @@ const PORT = parseInt(process.env.PORT || "3847");
 const executor = new PythonExecutor();
 const cache = new TranscriptCache();
 const fileManager = new FileManager();
+const assetManager = new AssetManager();
+const clipsHistory = new ClipsHistory();
+const knowledgeBase = new KnowledgeBase();
 
 // --- State ---
 // Track active jobs so the UI can poll progress
@@ -317,11 +323,24 @@ app.post("/api/create-clip", async (req, res) => {
         job.message = event.message;
       }
     )
-    .then((result) => {
+    .then(async (result) => {
       job.status = "done";
       job.progress = 100;
       job.message = "Clip created!";
       job.result = result.data;
+      // Record to history
+      try {
+        const d = result.data as any;
+        await clipsHistory.record({
+          source_video: video_path,
+          start_second, end_second,
+          caption_style, crop_strategy,
+          logo_path: logo_path || undefined,
+          title, output_path: d.output_path || "",
+          file_size_mb: d.file_size_mb || 0,
+          duration: d.duration || 0,
+        });
+      } catch {}
     })
     .catch((err) => {
       job.status = "error";
@@ -365,11 +384,32 @@ app.post("/api/batch-clips", async (req, res) => {
         job.message = event.message;
       }
     )
-    .then((result) => {
+    .then(async (result) => {
       job.status = "done";
       job.progress = 100;
       job.message = "Batch complete!";
       job.result = result.data;
+      // Record successful clips to history
+      try {
+        const d = result.data as any;
+        if (d?.results) {
+          for (const r of d.results) {
+            if (r.status === "success" && r.output_path) {
+              await clipsHistory.record({
+                source_video: video_path,
+                start_second: r.start_second || 0,
+                end_second: r.end_second || 0,
+                caption_style: r.caption_style || "hormozi",
+                crop_strategy: r.crop_strategy || "center",
+                title: r.title || "clip",
+                output_path: r.output_path,
+                file_size_mb: r.file_size_mb || 0,
+                duration: r.duration || 0,
+              });
+            }
+          }
+        }
+      } catch {}
     })
     .catch((err) => {
       job.status = "error";
@@ -612,9 +652,141 @@ app.post("/api/presets", async (req, res) => {
   }
 });
 
+// --- Assets ---
+app.get("/api/assets", async (req, res) => {
+  try {
+    const items = await assetManager.list(req.query.type as string | undefined);
+    res.json(items);
+  } catch (err: any) {
+    res.json({ error: err.message });
+  }
+});
+
+app.post("/api/assets/register", async (req, res) => {
+  const { name, path: filePath, type = "other" } = req.body;
+  try {
+    const asset = await assetManager.register(name, filePath, type);
+    res.json(asset);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/assets/unregister", async (req, res) => {
+  try {
+    await assetManager.unregister(req.body.name);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.json({ error: err.message });
+  }
+});
+
+// --- Clip History ---
+app.get("/api/history", async (req, res) => {
+  try {
+    const source = req.query.source as string | undefined;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const entries = source
+      ? await clipsHistory.getBySource(source)
+      : await clipsHistory.list(limit);
+    res.json(entries);
+  } catch (err: any) {
+    res.json([]);
+  }
+});
+
+app.get("/api/history/check", async (req, res) => {
+  try {
+    const { source, start, end, style = "hormozi", crop = "center" } = req.query;
+    if (!source || !start || !end) {
+      res.json({ duplicate: null });
+      return;
+    }
+    const dup = await clipsHistory.findDuplicate(
+      source as string,
+      parseFloat(start as string),
+      parseFloat(end as string),
+      style as string,
+      crop as string
+    );
+    res.json({ duplicate: dup });
+  } catch (err: any) {
+    res.json({ duplicate: null });
+  }
+});
+
+// --- Knowledge Base ---
+app.get("/api/knowledge", async (_req, res) => {
+  try {
+    const files = await knowledgeBase.listFiles();
+    res.json(files);
+  } catch (err: any) {
+    res.json([]);
+  }
+});
+
+app.get("/api/knowledge/dir", (_req, res) => {
+  res.json({ path: paths.knowledge });
+});
+
+// Knowledge file upload (drag & drop .md files) — must be before :filename routes
+const knowledgeUpload = multer({
+  storage: multer.diskStorage({
+    destination: async (_req, _file, cb) => {
+      await mkdir(paths.knowledge, { recursive: true });
+      cb(null, paths.knowledge);
+    },
+    filename: (_req, file, cb) => cb(null, file.originalname),
+  }),
+  fileFilter: (_req, file, cb) => {
+    if (file.originalname.endsWith(".md") || file.originalname.endsWith(".txt")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only .md and .txt files are allowed"));
+    }
+  },
+});
+
+app.post("/api/knowledge/upload", knowledgeUpload.array("files", 50), (req, res) => {
+  const files = req.files as Express.Multer.File[];
+  if (!files || files.length === 0) {
+    res.status(400).json({ error: "No files uploaded" });
+    return;
+  }
+  res.json({ uploaded: files.map((f) => f.originalname) });
+});
+
+app.get("/api/knowledge/:filename", async (req, res) => {
+  try {
+    const content = await knowledgeBase.readFile(req.params.filename);
+    res.json({ filename: req.params.filename, content });
+  } catch (err: any) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+app.post("/api/knowledge/:filename", async (req, res) => {
+  try {
+    await knowledgeBase.writeFile(req.params.filename, req.body.content);
+    res.json({ ok: true, filename: req.params.filename });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete("/api/knowledge/:filename", async (req, res) => {
+  try {
+    await knowledgeBase.deleteFile(req.params.filename);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.json({ error: err.message });
+  }
+});
+
 // --- Start ---
 async function main() {
   await fileManager.ensureDirectories();
+  await knowledgeBase.ensureDir();
   await mkdir(uploadDir, { recursive: true });
 
   app.listen(PORT, () => {

@@ -16,6 +16,9 @@ export class FileManager {
       paths.working,
       paths.output,
       paths.logs,
+      paths.assets,
+      paths.history,
+      paths.knowledge,
     ];
     for (const dir of dirs) {
       if (!existsSync(dir)) {
