@@ -1,0 +1,23 @@
+# Transcription
+openai-whisper>=20231117
+
+# Speaker diarization (optional — only needed if you enable local speaker detection)
+# Most users don't need this: Claude handles speaker identification via MCP,
+# and the "Paste Transcript" flow supports Speaker (MM:SS) labels natively.
+# To enable: pip install pyannote.audio speechbrain && set HF_TOKEN in .env
+# pyannote.audio>=3.1.0
+# speechbrain>=1.0.0
+
+# Video/audio processing
+ffmpeg-python>=0.2.0
+pydub>=0.25.1
+
+# Face detection (optional, for smart cropping)
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+
+# Data models
+pydantic>=2.0.0
+
+# Utilities
+python-dotenv>=1.0.0

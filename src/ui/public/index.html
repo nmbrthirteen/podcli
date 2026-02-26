@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>podcli</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0b0d;
+      --surface: #131316;
+      --surface2: #1b1b20;
+      --border: #252530;
+      --border-hover: #35354a;
+      --text: #e8e8e2;
+      --text2: #77776f;
+      --text3: #4e4e48;
+      --accent: #d4874a;
+      --accent-hover: #e09860;
+      --accent-subtle: rgba(212, 135, 74, 0.10);
+      --accent-glow: rgba(212, 135, 74, 0.25);
+      --green: #4ade80;
+      --green-subtle: rgba(74, 222, 128, 0.07);
+      --green-border: rgba(74, 222, 128, 0.18);
+      --red: #f87171;
+      --red-subtle: rgba(248, 113, 113, 0.07);
+      --red-border: rgba(248, 113, 113, 0.18);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── Layout ─── */
+    .app { max-width: 1080px; margin: 0 auto; padding: 48px 32px 96px; }
+    .header { margin-bottom: 36px; }
+    .logo { font-size: 13px; font-weight: 700; letter-spacing: 1.2px; color: var(--text3); margin-bottom: 10px; text-transform: uppercase; }
+    .logo span { color: var(--accent); }
+    h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.15; }
+    .layout { display: grid; grid-template-columns: 1fr 340px; gap: 40px; align-items: start; }
+    .main-col { min-width: 0; }
+    .preview-col { position: relative; }
+
+    /* ─── Preview Panel ─── */
+    .preview-panel { position: sticky; top: 32px; }
+    .preview-player {
+      background: #000; border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden; position: relative;
+    }
+    .preview-player video {
+      width: 100%; display: block; background: #000;
+    }
+    .preview-player video.vertical {
+      max-height: 480px; width: auto; margin: 0 auto;
+    }
+    .preview-empty {
+      aspect-ratio: 16/9; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 8px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text3); font-size: 13px;
+    }
+    .preview-empty .pe-icon { font-size: 28px; opacity: 0.3; }
+
+    /* ─── Style Preview (vertical phone mockup) ─── */
+    .style-preview {
+      aspect-ratio: 9/16; width: 100%;
+      background: #111114; border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+      position: relative; user-select: none;
+    }
+    .style-preview .sp-bg {
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse at 35% 30%, rgba(80,60,40,0.18) 0%, transparent 60%),
+        radial-gradient(ellipse at 65% 55%, rgba(50,50,70,0.12) 0%, transparent 50%),
+        linear-gradient(180deg, #16161a 0%, #111114 100%);
+    }
+    .style-preview .sp-person {
+      position: absolute; top: 18%; left: 50%; transform: translateX(-50%);
+      width: 55%; aspect-ratio: 3/4;
+      background: radial-gradient(ellipse at 50% 35%, rgba(140,120,100,0.15) 0%, rgba(80,70,60,0.06) 60%, transparent 80%);
+      border-radius: 50% 50% 44% 44%;
+    }
+    .style-preview .sp-gradient {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 55%;
+      background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 40%, transparent 100%);
+      pointer-events: none;
+    }
+    .style-preview .sp-captions {
+      position: absolute; left: 0; right: 0;
+      display: flex; flex-direction: column; align-items: center;
+      padding: 0 20px; text-align: center;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.35; transition: all 0.3s var(--ease);
+    }
+    .style-preview .sp-word {
+      display: inline; transition: all 0.25s var(--ease);
+    }
+    .style-preview .sp-logo {
+      position: absolute; top: 14px; left: 14px;
+      width: 32px; height: 32px; border-radius: 7px;
+      overflow: hidden;
+    }
+    .preview-clip-range {
+      padding: 8px 12px; background: var(--surface);
+      border-top: 1px solid var(--border);
+      font-size: 12px; color: var(--text2);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .preview-clip-range .clip-name {
+      font-weight: 600; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      max-width: 200px;
+    }
+    .preview-back {
+      padding: 0; background: none; border: none; color: var(--accent);
+      font-family: inherit; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: opacity 0.15s;
+    }
+    .preview-back:hover { opacity: 0.7; }
+    .preview-settings {
+      margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .preview-tag {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 10px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 8px;
+      font-size: 11px; color: var(--text2); font-weight: 500;
+      transition: all 0.2s var(--ease);
+    }
+    .preview-tag strong { color: var(--text); font-weight: 600; text-transform: capitalize; }
+    .preview-tag.changed { border-color: var(--accent); background: var(--accent-subtle); }
+
+    /* ─── Sections ─── */
+    .section { margin-bottom: 24px; }
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.8px; color: var(--text2); margin-bottom: 10px; text-transform: uppercase; }
+
+    /* ─── Form Elements ─── */
+    input[type="text"], input[type="number"], select, textarea {
+      width: 100%; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 11px 14px;
+      color: var(--text); font-family: inherit; font-size: 14px;
+      outline: none; transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+    }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+      border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle);
+    }
+    textarea {
+      font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+      font-size: 12px; resize: vertical; min-height: 120px; line-height: 1.7;
+    }
+    select {
+      appearance: none; cursor: pointer; padding-right: 34px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%2377776f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 14px center;
+    }
+
+    /* ─── Buttons ─── */
+    .btn {
+      padding: 10px 18px; border-radius: var(--radius); font-family: inherit;
+      font-size: 13px; font-weight: 600; cursor: pointer; border: none;
+      transition: all 0.15s var(--ease); display: inline-flex;
+      align-items: center; justify-content: center; gap: 6px; text-decoration: none;
+    }
+    .btn:active:not(:disabled) { transform: scale(0.97); }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.25; cursor: not-allowed; }
+    .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+    .btn-ghost:hover { border-color: var(--border-hover); color: var(--text); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: var(--radius-sm); }
+    .btn-go {
+      width: 100%; padding: 14px; font-size: 15px; justify-content: center;
+      background: var(--accent); color: #fff; border-radius: var(--radius);
+    }
+    .btn-go:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 4px 24px var(--accent-glow); }
+    .btn-go:disabled { opacity: 0.25; cursor: not-allowed; }
+    .pill { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+    .pill-blue { background: var(--accent-subtle); color: var(--accent); }
+
+    /* ─── Drop Zone ─── */
+    .drop-zone {
+      border: 1.5px dashed var(--border); border-radius: var(--radius);
+      padding: 32px 20px; text-align: center; cursor: pointer;
+      transition: all 0.2s var(--ease); position: relative; overflow: hidden;
+    }
+    .drop-zone:hover { border-color: var(--border-hover); background: rgba(255,255,255,0.012); }
+    .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-subtle); box-shadow: 0 0 0 4px var(--accent-subtle); }
+    .drop-zone.uploading { border-color: var(--accent); border-style: solid; pointer-events: none; }
+    .drop-zone .icon { font-size: 28px; margin-bottom: 8px; opacity: 0.35; line-height: 1; }
+    .drop-zone .label { font-size: 13px; color: var(--text2); line-height: 1.5; }
+    .drop-zone .label strong { color: var(--accent); font-weight: 600; }
+    .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .upload-bar { position: absolute; bottom: 0; left: 0; height: 3px; background: var(--accent); border-radius: 0 2px 2px 0; transition: width 0.25s var(--ease); }
+
+    /* ─── File Badge ─── */
+    .file-badge {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; background: var(--green-subtle);
+      border: 1px solid var(--green-border); border-radius: var(--radius);
+    }
+    .file-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+    .file-badge .name { font-size: 13px; color: var(--green); font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-badge .meta { font-size: 11px; color: var(--text2); flex-shrink: 0; }
+
+    /* ─── Tabs ─── */
+    .tabs { display: flex; gap: 2px; background: var(--surface); border-radius: var(--radius); padding: 3px; margin-bottom: 14px; }
+    .tab {
+      flex: 1; text-align: center; padding: 8px 12px;
+      border-radius: calc(var(--radius) - 3px); font-size: 13px;
+      font-weight: 600; color: var(--text2); cursor: pointer;
+      transition: all 0.2s var(--ease); user-select: none;
+    }
+    .tab:hover:not(.active) { color: var(--text); }
+    .tab.active { background: var(--accent); color: #fff; }
+
+    /* ─── Settings ─── */
+    .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+    .field-label { font-size: 11px; color: var(--text2); font-weight: 600; display: block; margin-bottom: 6px; }
+    .row { display: flex; gap: 10px; align-items: flex-end; }
+    .row > * { flex: 1; }
+
+    /* ─── Progress ─── */
+    .progress-track { background: var(--surface2); border-radius: 4px; height: 4px; overflow: hidden; margin: 8px 0; }
+    .progress-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.5s var(--ease); }
+    .progress-fill.indeterminate { width: 35% !important; animation: shimmer 1.4s ease-in-out infinite; }
+    .status-line { font-size: 13px; color: var(--text2); display: flex; justify-content: space-between; }
+    .spinner { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; flex-shrink: 0; }
+    .spinner.sm { width: 14px; height: 14px; border-width: 1.5px; }
+
+    /* ─── Clip List ─── */
+    .clip-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 14px; margin-bottom: 4px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); transition: all 0.15s var(--ease);
+      cursor: pointer;
+    }
+    .clip-item:hover { border-color: var(--border-hover); }
+    .clip-item.dimmed { opacity: 0.35; }
+    .clip-item.active-clip { border-color: rgba(212, 135, 74, 0.3); background: rgba(212, 135, 74, 0.03); }
+    .clip-item.selected { border-color: var(--accent); background: rgba(212, 135, 74, 0.04); }
+    .checkbox {
+      width: 20px; height: 20px; border-radius: 6px;
+      border: 1.5px solid var(--border); display: flex;
+      align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.15s var(--ease); flex-shrink: 0;
+    }
+    .checkbox:hover { border-color: var(--accent); }
+    .checkbox.checked { background: var(--accent); border-color: var(--accent); }
+    .clip-info { flex: 1; min-width: 0; }
+    .clip-title { font-size: 13px; font-weight: 600; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .clip-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
+    .clip-meta .err { color: var(--red); }
+    .clip-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .clip-status { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 700; }
+    .clip-status.pending { border: 1.5px dashed var(--border); }
+    .clip-status.rendering { border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.6s linear infinite; }
+    .clip-status.exported { background: var(--green-subtle); color: var(--green); }
+    .status-dot { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 12px; }
+    .status-dot.ok { background: var(--green-subtle); color: var(--green); }
+    .status-dot.fail { background: var(--red-subtle); color: var(--red); }
+
+    /* ─── Error ─── */
+    .error-bar { padding: 12px 16px; background: var(--red-subtle); border: 1px solid var(--red-border); border-radius: var(--radius); margin-bottom: 20px; font-size: 13px; color: var(--red); display: flex; align-items: center; gap: 10px; }
+    .error-bar span { flex: 1; }
+    .spacer { height: 1px; background: var(--border); margin: 28px 0; opacity: 0.4; }
+
+    /* ─── Modal ─── */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 1000; display: flex; align-items: center; justify-content: center; cursor: pointer; animation: fadeIn 0.15s var(--ease); }
+    .modal-body { max-width: 380px; width: 92%; cursor: default; animation: scaleIn 0.2s var(--ease); }
+    .modal-body video { width: 100%; border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
+
+    /* ─── Animations ─── */
+    .fade-in { animation: fadeIn 0.3s var(--ease); }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    @keyframes scaleIn { from { opacity: 0; transform: scale(0.96) translateY(4px); } to { opacity: 1; transform: none; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes shimmer { 0% { transform: translateX(-120%); } 100% { transform: translateX(350%); } }
+    @keyframes clipReveal { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+    .clip-reveal { animation: clipReveal 0.35s var(--ease) both; }
+    @keyframes tagFlash { 0% { border-color: var(--accent); background: var(--accent-subtle); } 100% { border-color: var(--border); background: var(--surface); } }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 920px) {
+      .app { padding: 36px 20px 80px; }
+      .layout { grid-template-columns: 1fr; gap: 0; }
+      .preview-col { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const fmt = (s) => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+    const api = async (path, opts={}) => (await fetch(`/api${path}`, { headers:{'Content-Type':'application/json',...opts.headers}, ...opts })).json();
+
+    function uploadFile(file, onProgress) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const fd = new FormData();
+        fd.append('file', file);
+        xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100)); };
+        xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)); } catch(e) { reject(e); } };
+        xhr.onerror = () => reject(new Error('Upload failed'));
+        xhr.open('POST', '/api/upload');
+        xhr.send(fd);
+      });
+    }
+
+    function useJob(jobId) {
+      const [state, setState] = useState(null);
+      useEffect(() => {
+        if (!jobId) { setState(null); return; }
+        const es = new EventSource(`/api/job/${jobId}/stream`);
+        es.onmessage = e => { const d=JSON.parse(e.data); setState(d); if(d.status==='done'||d.status==='error') es.close(); };
+        es.onerror = () => es.close();
+        return () => es.close();
+      }, [jobId]);
+      return state;
+    }
+
+    function suggestClips(segments, energyScores) {
+      if (!segments?.length) return [];
+      const clips = [];
+      const kw = ['secret','mistake','important','never','always','best','how to','why','story','amazing','changed','money','learn','truth','actually','problem','solution','believe','crazy','number one','biggest','first thing','listen','here\'s the thing','let me tell you','the key','game changer','nobody talks about','most people','don\'t realize'];
+      const winSizes = [6, 8, 10, 12];
+      for (const winSize of winSizes) {
+        const step = Math.max(1, Math.floor(winSize * 0.6));
+        for (let i = 0; i < segments.length - winSize; i += step) {
+          const win = segments.slice(i, i+winSize);
+          const text = win.map(s=>s.text).join(' ');
+          const start = win[0].start, end = win[win.length-1].end, dur = end-start;
+          if (dur < 20 || dur > 90) continue;
+          let score = 0;
+          const lower = text.toLowerCase();
+          if (text.includes('?')) score+=3;
+          if (text.includes('!')) score+=2;
+          if (text.length>200) score+=1;
+          const firstText = (win[0].text||'').trim();
+          if (firstText && firstText[0] === firstText[0].toUpperCase()) score+=1;
+          kw.forEach(k=>{ if(lower.includes(k)) score+=2; });
+          if (energyScores?.length) {
+            const segE = energyScores.slice(i, i+winSize).filter(e => e > 0);
+            if (segE.length) { const avg = segE.reduce((a,b)=>a+b,0)/segE.length; const peak = Math.max(...segE); score += avg*0.5 + peak*0.3; }
+          }
+          if (score >= 3) clips.push({ title: text.slice(0,55).trim()+'...', start_second: Math.floor(start), end_second: Math.ceil(end), duration: Math.round(dur), preview: text.slice(0,100).trim(), score });
+        }
+      }
+      clips.sort((a,b)=>b.score-a.score);
+      const selected = [];
+      for (const clip of clips) {
+        const overlap = selected.some(sel => { const o = Math.min(clip.end_second, sel.end_second) - Math.max(clip.start_second, sel.start_second); return o > clip.duration * 0.5; });
+        if (!overlap) selected.push(clip);
+        if (selected.length >= 8) break;
+      }
+      selected.sort((a,b)=>a.start_second-b.start_second);
+      return selected;
+    }
+
+    const CheckIcon = () => (<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+    const CheckSmall = ({ color = 'var(--green)' }) => (<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+
+    /* ── Style Preview Component ── */
+    const STYLE_CONFIGS = {
+      branded: {
+        words: ['Did you ever,', 'felt', 'like I\u2019m in the', 'wrong place'],
+        fontSize: 19, fontWeight: 800, bottom: '30%',
+        lineHeight: 1.3, textShadow: 'none',
+        activeStyle: { background:'#1a1a1a', borderRadius:5, padding:'2px 6px', color:'#fff' },
+        normalStyle: { background:'transparent', borderRadius:5, padding:'2px 6px', color:'#fff' },
+        gradient: true,
+      },
+      hormozi: {
+        words: ['LOOKING', 'FOR', 'HIGH ENERGY'],
+        fontSize: 22, fontWeight: 900, bottom: '22%',
+        lineHeight: 1.25, textShadow: '0 2px 8px rgba(0,0,0,0.7)',
+        activeStyle: { color:'#ffff00' },
+        normalStyle: { color:'#fff' },
+        gradient: false,
+      },
+      karaoke: {
+        words: ['the secret to', 'building', 'something', 'people', 'actually want'],
+        fontSize: 15, fontWeight: 600, bottom: '22%',
+        lineHeight: 1.4, textShadow: '0 1px 6px rgba(0,0,0,0.6)',
+        activeStyle: { color:'#fff' },
+        normalStyle: { color:'rgba(255,255,255,0.35)' },
+        gradient: false,
+      },
+      subtle: {
+        words: ['the secret to building something people actually want'],
+        fontSize: 13, fontWeight: 400, bottom: '12%',
+        lineHeight: 1.5, textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+        activeStyle: { color:'rgba(255,255,255,0.9)' },
+        normalStyle: { color:'rgba(255,255,255,0.9)' },
+        gradient: false,
+      },
+    };
+
+    function StylePreview({ style, logoPath }) {
+      const [activeIdx, setActiveIdx] = useState(0);
+      const cfg = STYLE_CONFIGS[style] || STYLE_CONFIGS.branded;
+
+      useEffect(() => {
+        if (cfg.words.length <= 1) return;
+        const iv = setInterval(() => setActiveIdx(i => (i + 1) % cfg.words.length), 800);
+        return () => clearInterval(iv);
+      }, [style]);
+
+      useEffect(() => setActiveIdx(0), [style]);
+
+      const showLogo = style === 'branded' && logoPath;
+
+      return (
+        <div className="style-preview fade-in" key={style}>
+          <div className="sp-bg" />
+          <div className="sp-person" />
+          {cfg.gradient && <div className="sp-gradient" />}
+          {showLogo && (
+            <div className="sp-logo">
+              <img src={`/api/stream-source?path=${encodeURIComponent(logoPath)}`} style={{ width:'100%', height:'100%', objectFit:'contain', borderRadius:6 }} />
+            </div>
+          )}
+          <div className="sp-captions" style={{ bottom: cfg.bottom, fontSize: cfg.fontSize, fontWeight: cfg.fontWeight, lineHeight: cfg.lineHeight, textShadow: cfg.textShadow }}>
+            <div style={{ display:'flex', flexWrap:'wrap', justifyContent:'center', gap:'4px 6px' }}>
+              {cfg.words.map((w, i) => (
+                <span key={w} className="sp-word" style={i === activeIdx ? cfg.activeStyle : cfg.normalStyle}>{w}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [videoPath, setVideoPath] = useState('');
+      const [transcriptMode, setTranscriptMode] = useState('import');
+      const [transcriptText, setTranscriptText] = useState('');
+      const [timeAdjust, setTimeAdjust] = useState(-1);
+      const [whisperModel, setWhisperModel] = useState('base');
+      const [captionStyle, setCaptionStyle] = useState('branded');
+      const [cropStrategy, setCropStrategy] = useState('center');
+      const [logoPath, setLogoPath] = useState('');
+      const logoRef = useRef();
+      const [videoDragOver, setVideoDragOver] = useState(false);
+      const [transcriptDragOver, setTranscriptDragOver] = useState(false);
+      const [transcriptFileName, setTranscriptFileName] = useState('');
+
+      const [phase, setPhase] = useState('idle');
+      const [file, setFile] = useState(null);
+      const [transcript, setTranscript] = useState(null);
+      const [suggestions, setSuggestions] = useState([]);
+      const [deselected, setDeselected] = useState(new Set());
+      const [batchJobId, setBatchJobId] = useState(null);
+      const batchStream = useJob(batchJobId);
+      const [results, setResults] = useState([]);
+      const [error, setError] = useState(null);
+      const [previewFile, setPreviewFile] = useState(null);
+
+      const [whisperJobId, setWhisperJobId] = useState(null);
+      const whisperStream = useJob(whisperJobId);
+      const [retryIdx, setRetryIdx] = useState(null);
+      const [retryJobId, setRetryJobId] = useState(null);
+      const retryStream = useJob(retryJobId);
+
+      const [videoUploading, setVideoUploading] = useState(false);
+      const [uploadProgress, setUploadProgress] = useState(0);
+      const [logoUploading, setLogoUploading] = useState(false);
+      const [uploadingFileName, setUploadingFileName] = useState('');
+
+      const [encoderInfo, setEncoderInfo] = useState(null);
+      useEffect(() => { api('/encoder-info').then(d => { if(d.best) setEncoderInfo(d); }).catch(()=>{}); }, []);
+
+      // Preview panel state
+      const videoRef = useRef();
+      const [activeClipIdx, setActiveClipIdx] = useState(null);
+      const [previewSrc, setPreviewSrc] = useState(null); // null=source, string=rendered clip filename
+      const [settingsFlash, setSettingsFlash] = useState(null);
+
+      // Video source URL
+      const videoUrl = previewSrc
+        ? `/api/preview/${previewSrc}`
+        : videoPath
+          ? `/api/stream-source?path=${encodeURIComponent(videoPath)}`
+          : null;
+
+      // Seek to clip when active clip changes (and showing source)
+      useEffect(() => {
+        if (activeClipIdx === null || previewSrc) return;
+        const clip = suggestions[activeClipIdx];
+        if (!clip || !videoRef.current) return;
+        const seek = () => {
+          videoRef.current.currentTime = clip.start_second;
+          videoRef.current.play().catch(() => {});
+        };
+        if (videoRef.current.readyState >= 1) seek();
+        else videoRef.current.addEventListener('loadedmetadata', seek, { once: true });
+      }, [activeClipIdx, previewSrc]);
+
+      // Flash settings when they change
+      const flashSetting = (key) => {
+        setSettingsFlash(key);
+        setTimeout(() => setSettingsFlash(null), 600);
+      };
+
+      const onCaptionChange = (v) => { setCaptionStyle(v); flashSetting('caption'); };
+      const onCropChange = (v) => { setCropStrategy(v); flashSetting('crop'); };
+
+      // Click clip row → seek source video
+      const onClipClick = (idx) => {
+        setActiveClipIdx(idx);
+        if (previewSrc) setPreviewSrc(null);
+      };
+
+      // Play rendered clip in preview panel
+      const onPlayRendered = (filename) => {
+        setPreviewSrc(filename);
+        setActiveClipIdx(null);
+      };
+
+      // Upload
+      const doVideoUpload = useCallback(async (f) => {
+        setVideoUploading(true); setUploadProgress(0); setUploadingFileName(f.name);
+        try {
+          const d = await uploadFile(f, (pct) => setUploadProgress(pct));
+          if (d.file_path) setVideoPath(d.file_path);
+        } catch(e) { setError('Upload failed: ' + e.message); }
+        finally { setVideoUploading(false); setUploadProgress(0); setUploadingFileName(''); }
+      }, []);
+
+      // Pipeline
+      const startPipeline = async () => {
+        setError(null); setResults([]); setSuggestions([]); setDeselected(new Set());
+        setBatchJobId(null); setActiveClipIdx(null); setPreviewSrc(null);
+        setPhase('parsing');
+        const fileData = await api('/select-file', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim() }) });
+        if (fileData.error) { setError(fileData.error); setPhase('idle'); return; }
+        setFile(fileData);
+        let t = null;
+        if (transcriptMode === 'import') {
+          const text = transcriptText.trim();
+          if (!text) { setError('Paste your transcript'); setPhase('idle'); return; }
+          const isJson = text.startsWith('{') || text.startsWith('[');
+          if (isJson) {
+            const parsed = JSON.parse(text);
+            const tr = Array.isArray(parsed) ? { words: parsed } : parsed;
+            const data = await api('/import-transcript', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim(), transcript: tr }) });
+            if (data.error) { setError(data.error); setPhase('idle'); return; }
+            t = data.data;
+          } else {
+            const data = await api('/parse-transcript', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim(), raw_text: text, time_adjust: timeAdjust }) });
+            if (data.error) { setError(data.error); setPhase('idle'); return; }
+            t = data.data;
+          }
+        } else {
+          const data = await api('/transcribe', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim(), model_size: whisperModel }) });
+          if (data.cached) { t = data.data; }
+          else { setWhisperJobId(data.job_id); return; }
+        }
+        continueWithTranscript(t, fileData);
+      };
+
+      const continueWithTranscript = async (t, f) => {
+        setTranscript(t); setPhase('suggesting'); setSuggestions([]);
+        let energyScores = null;
+        const vp = f?.file_path || videoPath.trim();
+        if (vp && t?.segments?.length) {
+          try {
+            const eData = await api('/analyze-energy', { method:'POST', body: JSON.stringify({ video_path: vp, segments: t.segments }) });
+            if (eData.segment_scores) energyScores = eData.segment_scores;
+          } catch(e) {}
+        }
+        const allClips = suggestClips(t?.segments || [], energyScores);
+        if (allClips.length === 0) { setError('No clip suggestions found.'); setPhase('idle'); return; }
+        for (let i = 0; i < allClips.length; i++) {
+          await new Promise(r => setTimeout(r, i === 0 ? 150 : 250));
+          setSuggestions(prev => [...prev, allClips[i]]);
+        }
+        await new Promise(r => setTimeout(r, 300));
+        setPhase('review');
+      };
+
+      useEffect(() => {
+        if (whisperStream?.status === 'done' && whisperStream.result) { setWhisperJobId(null); continueWithTranscript(whisperStream.result, file); }
+        if (whisperStream?.status === 'error') { setError('Transcription failed: ' + whisperStream.error); setPhase('idle'); }
+      }, [whisperStream?.status]);
+
+      const startExport = async () => {
+        setPhase('exporting'); setResults([]);
+        const sc = suggestions.filter((_,i) => !deselected.has(i));
+        const data = await api('/batch-clips', { method:'POST', body: JSON.stringify({
+          video_path: file.file_path,
+          clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title.slice(0,40), caption_style: captionStyle, crop_strategy: cropStrategy })),
+          transcript_words: transcript?.words || [], logo_path: logoPath || undefined,
+        })});
+        setBatchJobId(data.job_id);
+      };
+
+      useEffect(() => {
+        if (batchStream?.status === 'done') { setPhase('done'); setResults(batchStream.result?.results || []); }
+        if (batchStream?.status === 'error') { setError('Export failed: ' + batchStream.error); setPhase('review'); }
+      }, [batchStream?.status]);
+
+      const retryClip = async (idx) => {
+        const sc = suggestions.filter((_,i) => !deselected.has(i));
+        const c = sc[idx]; setRetryIdx(idx); setRetryJobId(null);
+        const data = await api('/create-clip', { method:'POST', body: JSON.stringify({
+          video_path: file.file_path, start_second: c.start_second, end_second: c.end_second,
+          title: c.title.slice(0,40), caption_style: captionStyle, crop_strategy: cropStrategy,
+          transcript_words: transcript?.words || [], logo_path: logoPath || undefined,
+        })});
+        setRetryJobId(data.job_id);
+      };
+
+      useEffect(() => {
+        if (retryStream?.status === 'done') {
+          setResults(prev => { const n = [...prev]; n[retryIdx] = { ...retryStream.result, status: 'success' }; return n; });
+          setRetryIdx(null); setRetryJobId(null);
+        }
+      }, [retryStream?.status]);
+
+      const toggleClip = (i) => setDeselected(prev => { const n=new Set(prev); n.has(i)?n.delete(i):n.add(i); return n; });
+      const selectedCount = suggestions.length - deselected.size;
+      const handleLogoUpload = async (f) => {
+        setLogoUploading(true);
+        try { const d = await uploadFile(f, ()=>{}); if(d.file_path) setLogoPath(d.file_path); }
+        catch(e) { setError('Logo upload failed'); }
+        finally { setLogoUploading(false); }
+      };
+      const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || whisperJobId;
+      const selectedClips = suggestions.filter((_,i) => !deselected.has(i));
+
+      const getExportStatus = (resultIdx) => {
+        if (phase !== 'exporting' || !batchStream) return null;
+        const total = selectedClips.length; if (!total) return null;
+        const pct = batchStream.progress || 0;
+        const done = Math.floor(pct / (100 / total));
+        if (resultIdx < done) return 'exported';
+        if (resultIdx === done && pct < 100) return 'rendering';
+        return 'pending';
+      };
+
+      const handleVideoDrop = async (e) => { e.preventDefault(); setVideoDragOver(false); const files = e.dataTransfer?.files; if(files?.length) doVideoUpload(files[0]); };
+      const handleVideoFileSelect = async (e) => { const f = e.target.files?.[0]; if(f) doVideoUpload(f); };
+      const handleTranscriptDrop = (e) => { e.preventDefault(); setTranscriptDragOver(false); const files = e.dataTransfer?.files; if(!files?.length) return; const f=files[0]; setTranscriptFileName(f.name); const reader=new FileReader(); reader.onload=(ev)=>setTranscriptText(ev.target.result); reader.readAsText(f); };
+      const handleTranscriptFileSelect = (e) => { const f=e.target.files?.[0]; if(!f) return; setTranscriptFileName(f.name); const reader=new FileReader(); reader.onload=(ev)=>setTranscriptText(ev.target.result); reader.readAsText(f); };
+      const preventDef = (e) => e.preventDefault();
+
+      const activeClip = activeClipIdx !== null ? suggestions[activeClipIdx] : null;
+
+      return (
+        <div className="app">
+          <div className="header">
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div className="logo">pod<span>cli</span></div>
+              <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
+                {encoderInfo && (
+                  <span className="pill pill-blue" style={{ fontSize:10, letterSpacing:'0.5px' }}>
+                    {encoderInfo.best === 'libx264' ? 'CPU' : encoderInfo.best.replace('h264_','').toUpperCase()}
+                  </span>
+                )}
+                <a href="/integration.html" style={{ fontSize:12, fontWeight:600, color:'var(--text2)', textDecoration:'none', padding:'5px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', transition:'all 0.15s' }}>MCP Setup</a>
+              </div>
+            </div>
+            <h1>Create short-form clips</h1>
+          </div>
+
+          <div className="layout">
+            {/* ═══════════ LEFT COLUMN ═══════════ */}
+            <div className="main-col">
+
+              {/* Video */}
+              <div className="section">
+                <div className="section-label">Video</div>
+                {videoUploading && (
+                  <div className="drop-zone uploading fade-in">
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap: 10 }}>
+                      <div className="spinner sm" />
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>Uploading{'\u2026'} {uploadProgress}%</div>
+                        <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{uploadingFileName}</div>
+                      </div>
+                    </div>
+                    <div className="upload-bar" style={{ width: `${uploadProgress}%` }} />
+                  </div>
+                )}
+                {!videoUploading && !videoPath && (
+                  <div className={`drop-zone ${videoDragOver?'drag-over':''}`}
+                    onDragOver={e=>{preventDef(e);setVideoDragOver(true);}} onDragLeave={()=>setVideoDragOver(false)} onDrop={handleVideoDrop}>
+                    <div className="icon">{'\uD83C\uDFAC'}</div>
+                    <div className="label">Drop your video here or <strong>browse</strong></div>
+                    <input type="file" accept="video/*" onChange={handleVideoFileSelect} disabled={isProcessing} />
+                  </div>
+                )}
+                {!videoUploading && videoPath && (
+                  <div className="file-badge fade-in">
+                    <div className="dot" />
+                    <div className="name">{videoPath.split('/').pop()}</div>
+                    <button className="btn btn-ghost btn-sm" onClick={()=>setVideoPath('')} style={{padding:'4px 10px',fontSize:11}}>Clear</button>
+                  </div>
+                )}
+                <input type="text" placeholder="Or paste a local path: /Users/you/episode.mp4"
+                  value={videoPath} onChange={e=>setVideoPath(e.target.value)}
+                  disabled={isProcessing||videoUploading}
+                  style={{ marginTop:8, fontSize:12, padding:'9px 13px', background:'var(--bg)', borderColor: videoPath?'var(--green-border)':'var(--border)' }} />
+              </div>
+
+              {/* Transcript */}
+              <div className="section">
+                <div className="section-label">Transcript</div>
+                <div className="tabs">
+                  <div className={`tab ${transcriptMode==='import'?'active':''}`} onClick={()=>setTranscriptMode('import')}>Paste Transcript</div>
+                  <div className={`tab ${transcriptMode==='whisper'?'active':''}`} onClick={()=>setTranscriptMode('whisper')}>Auto (Whisper)</div>
+                </div>
+                {transcriptMode === 'import' && (
+                  <div className="fade-in">
+                    {!transcriptText && (
+                      <div className={`drop-zone ${transcriptDragOver?'drag-over':''}`}
+                        onDragOver={e=>{preventDef(e);setTranscriptDragOver(true);}} onDragLeave={()=>setTranscriptDragOver(false)}
+                        onDrop={handleTranscriptDrop} style={{marginBottom:10,padding:'22px 20px'}}>
+                        <div className="icon">{'\uD83D\uDCC4'}</div>
+                        <div className="label">Drop a transcript file or <strong>browse</strong></div>
+                        <input type="file" accept=".txt,.json,.srt,.vtt" onChange={handleTranscriptFileSelect} disabled={isProcessing} />
+                      </div>
+                    )}
+                    {transcriptText && transcriptFileName && (
+                      <div className="file-badge fade-in" style={{marginBottom:10}}>
+                        <div className="dot"/><div className="name">{transcriptFileName}</div>
+                        <div className="meta">{transcriptText.split('\n').length} lines</div>
+                        <button className="btn btn-ghost btn-sm" onClick={()=>{setTranscriptText('');setTranscriptFileName('');}} style={{padding:'4px 10px',fontSize:11}}>Clear</button>
+                      </div>
+                    )}
+                    <textarea placeholder={'Speaker (00:00)\nText of what they said...\n\nSpeaker2 (00:15)\nMore text...\n\n— or paste JSON / drag a .txt file above —'}
+                      value={transcriptText} onChange={e=>{setTranscriptText(e.target.value);setTranscriptFileName('');}}
+                      disabled={isProcessing} style={{minHeight:transcriptText?80:120}}
+                      onDragOver={e=>{preventDef(e);setTranscriptDragOver(true);}} onDrop={handleTranscriptDrop} />
+                    <div style={{display:'flex',gap:8,alignItems:'center',marginTop:10}}>
+                      <span style={{fontSize:12,color:'var(--text2)',whiteSpace:'nowrap'}}>Time offset</span>
+                      <input type="number" step="0.5" value={timeAdjust} onChange={e=>setTimeAdjust(parseFloat(e.target.value)||0)}
+                        style={{width:72,padding:'7px 10px',fontSize:12}} disabled={isProcessing} />
+                      <span style={{fontSize:11,color:'var(--text3)'}}>sec</span>
+                    </div>
+                  </div>
+                )}
+                {transcriptMode === 'whisper' && (
+                  <div className="fade-in"><div className="row"><div>
+                    <label className="field-label">Model</label>
+                    <select value={whisperModel} onChange={e=>setWhisperModel(e.target.value)} disabled={isProcessing}>
+                      <option value="tiny">Tiny (fastest)</option><option value="base">Base</option>
+                      <option value="small">Small</option><option value="medium">Medium</option>
+                      <option value="large">Large (best)</option>
+                    </select>
+                  </div></div></div>
+                )}
+              </div>
+
+              {/* Settings */}
+              <div className="section">
+                <div className="section-label">Settings</div>
+                <div className="settings-grid">
+                  <div>
+                    <label className="field-label">Caption Style</label>
+                    <select value={captionStyle} onChange={e=>onCaptionChange(e.target.value)} disabled={isProcessing}>
+                      <option value="branded">Branded</option><option value="hormozi">Hormozi</option>
+                      <option value="karaoke">Karaoke</option><option value="subtle">Subtle</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label">Crop</label>
+                    <select value={cropStrategy} onChange={e=>onCropChange(e.target.value)} disabled={isProcessing}>
+                      <option value="center">Center</option><option value="face">Face Detection</option>
+                    </select>
+                  </div>
+                </div>
+                {captionStyle === 'branded' && (
+                  <div className="fade-in" style={{display:'flex',gap:8,alignItems:'center'}}>
+                    <input type="text" placeholder="Logo image path (optional)" value={logoPath} onChange={e=>setLogoPath(e.target.value)}
+                      style={{flex:1}} disabled={isProcessing||logoUploading} />
+                    <button className="btn btn-ghost btn-sm" onClick={()=>logoRef.current?.click()} disabled={isProcessing||logoUploading} style={{minWidth:72}}>
+                      {logoUploading ? <><div className="spinner sm"/><span style={{fontSize:11}}>wait</span></> : 'Upload'}
+                    </button>
+                    <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg,.svg" style={{display:'none'}}
+                      onChange={e=>e.target.files[0]&&handleLogoUpload(e.target.files[0])} />
+                  </div>
+                )}
+              </div>
+
+              {/* Error */}
+              {error && (
+                <div className="error-bar fade-in">
+                  <span>{error}</span>
+                  <button className="btn btn-ghost btn-sm" onClick={()=>setError(null)} style={{flexShrink:0,color:'var(--red)',borderColor:'var(--red-border)'}}>Dismiss</button>
+                </div>
+              )}
+
+              {/* Generate */}
+              {phase === 'idle' && (
+                <button className="btn btn-go" disabled={!videoPath.trim()||(transcriptMode==='import'&&!transcriptText.trim())||videoUploading} onClick={startPipeline}>
+                  Generate Clips
+                </button>
+              )}
+
+              {/* Whisper progress */}
+              {whisperJobId && whisperStream && (
+                <div className="fade-in" style={{marginTop:20}}>
+                  <div className="status-line">
+                    <span style={{display:'flex',alignItems:'center',gap:8}}><div className="spinner sm"/>Transcribing{'\u2026'}</span>
+                    <span style={{fontWeight:600,fontVariantNumeric:'tabular-nums'}}>{whisperStream.progress||0}%</span>
+                  </div>
+                  <div className="progress-track"><div className="progress-fill" style={{width:`${whisperStream.progress||0}%`}}/></div>
+                  <div style={{fontSize:12,color:'var(--text3)',marginTop:4}}>{whisperStream.message}</div>
+                </div>
+              )}
+
+              {/* Parsing */}
+              {phase === 'parsing' && !whisperJobId && (
+                <div className="fade-in" style={{marginTop:20}}>
+                  <div className="status-line"><span style={{display:'flex',alignItems:'center',gap:8}}><div className="spinner sm"/>Processing transcript{'\u2026'}</span></div>
+                  <div className="progress-track"><div className="progress-fill indeterminate"/></div>
+                </div>
+              )}
+
+              {/* Suggesting (no clips yet) */}
+              {phase === 'suggesting' && suggestions.length === 0 && (
+                <div className="fade-in" style={{marginTop:20}}>
+                  <div className="status-line"><span style={{display:'flex',alignItems:'center',gap:8}}><div className="spinner sm"/>Analyzing transcript{'\u2026'}</span></div>
+                  <div className="progress-track"><div className="progress-fill indeterminate"/></div>
+                </div>
+              )}
+
+              {/* Clip list */}
+              {(phase==='suggesting'||phase==='review'||phase==='exporting'||phase==='done') && suggestions.length > 0 && (
+                <div>
+                  <div className="spacer" />
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+                    <div className="section-label" style={{margin:0,display:'flex',alignItems:'center',gap:8}}>
+                      {phase === 'suggesting' && <div className="spinner sm"/>}
+                      {phase==='suggesting' ? `Found ${suggestions.length} clip${suggestions.length!==1?'s':''}`
+                        : phase==='review' ? `Clips \u00B7 ${selectedCount} selected` : 'Clips'}
+                    </div>
+                    {phase === 'review' && (
+                      <button className="btn btn-primary btn-sm" disabled={selectedCount===0} onClick={startExport}>
+                        Export {selectedCount} clip{selectedCount!==1?'s':''}
+                      </button>
+                    )}
+                  </div>
+
+                  {suggestions.map((clip, i) => {
+                    const off = deselected.has(i);
+                    const resultIdx = [...suggestions.keys()].filter(k=>!deselected.has(k)).indexOf(i);
+                    const r = results[resultIdx];
+                    const outputFile = r?.output_path?.split('/').pop();
+                    const failed = r?.status === 'error';
+                    const isRetryingThis = retryIdx === resultIdx;
+                    const exportStatus = !off ? getExportStatus(resultIdx) : null;
+                    const isSelected = activeClipIdx === i && !previewSrc;
+
+                    return (
+                      <div key={i}
+                        className={`clip-item ${off&&phase==='review'?'dimmed':''} ${exportStatus==='rendering'?'active-clip':''} ${phase==='suggesting'?'clip-reveal':''} ${isSelected?'selected':''}`}
+                        onClick={() => onClipClick(i)}>
+
+                        {phase === 'review' && (
+                          <div className={`checkbox ${!off?'checked':''}`} onClick={(e)=>{e.stopPropagation();toggleClip(i);}}>
+                            {!off && <CheckIcon/>}
+                          </div>
+                        )}
+
+                        {phase === 'exporting' && !off && exportStatus && (
+                          <div className={`clip-status ${exportStatus}`}>{exportStatus==='exported'&&<CheckSmall/>}</div>
+                        )}
+
+                        {phase === 'done' && !off && r && (
+                          <div className={`status-dot ${failed?'fail':'ok'}`}>{failed?'\u00D7':'\u2713'}</div>
+                        )}
+
+                        <div className="clip-info">
+                          <div className="clip-title">{clip.title}</div>
+                          <div className="clip-meta">
+                            {fmt(clip.start_second)} {'\u2192'} {fmt(clip.end_second)} {'\u00B7'} {clip.duration}s
+                            {r&&!failed&&<span> {'\u00B7'} {r.file_size_mb}MB</span>}
+                            {failed&&<span className="err"> {'\u00B7'} {r.error?.slice(0,60)}</span>}
+                            {exportStatus==='rendering'&&<span style={{color:'var(--accent)'}}> {'\u00B7'} rendering{'\u2026'}</span>}
+                          </div>
+                        </div>
+
+                        {phase === 'done' && !off && r && !failed && outputFile && (
+                          <div className="clip-actions" onClick={e=>e.stopPropagation()}>
+                            <button className="btn btn-ghost btn-sm" onClick={()=>onPlayRendered(outputFile)} title="Preview">{'\u25B6'}</button>
+                            <a href={`/api/download/${outputFile}`} className="btn btn-primary btn-sm" download title="Download">{'\u2193'}</a>
+                            <button className="btn btn-ghost btn-sm" disabled={isRetryingThis} onClick={()=>retryClip(resultIdx)} title="Retry">{'\u21BB'}</button>
+                          </div>
+                        )}
+                        {phase === 'done' && !off && r && failed && (
+                          <button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();retryClip(resultIdx);}} disabled={isRetryingThis}>
+                            {isRetryingThis?'\u2026':'Retry'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {phase === 'exporting' && batchStream && (
+                    <div style={{marginTop:14}}>
+                      <div className="status-line">
+                        <span>{batchStream.message}</span>
+                        <span style={{fontWeight:600,fontVariantNumeric:'tabular-nums'}}>{batchStream.progress||0}%</span>
+                      </div>
+                      <div className="progress-track"><div className="progress-fill" style={{width:`${batchStream.progress||0}%`}}/></div>
+                    </div>
+                  )}
+
+                  {retryIdx !== null && retryStream?.status === 'running' && (
+                    <div style={{marginTop:10,padding:12,background:'var(--surface)',borderRadius:'var(--radius-sm)'}}>
+                      <div className="status-line" style={{fontSize:12}}>
+                        <span style={{display:'flex',alignItems:'center',gap:6}}><div className="spinner sm"/>Retrying{'\u2026'}</span>
+                        <span style={{fontWeight:600}}>{retryStream.progress||0}%</span>
+                      </div>
+                      <div className="progress-track"><div className="progress-fill" style={{width:`${retryStream.progress||0}%`}}/></div>
+                    </div>
+                  )}
+
+                  {phase === 'done' && (
+                    <div style={{display:'flex',gap:10,justifyContent:'center',marginTop:24}}>
+                      <button className="btn btn-ghost" onClick={()=>{setPhase('idle');setResults([]);setSuggestions([]);setBatchJobId(null);setFile(null);setTranscript(null);setActiveClipIdx(null);setPreviewSrc(null);}}>Start Over</button>
+                      <button className="btn btn-ghost" onClick={()=>{setPhase('review');setResults([]);setBatchJobId(null);}}>Re-export</button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ═══════════ RIGHT COLUMN — PREVIEW ═══════════ */}
+            <div className="preview-col">
+              <div className="preview-panel">
+
+                {/* Video player (when video loaded) */}
+                {videoUrl && (
+                  <div className="preview-player fade-in" style={{ marginBottom: 12 }}>
+                    <video
+                      key={videoUrl}
+                      ref={videoRef}
+                      src={videoUrl}
+                      controls
+                      preload="auto"
+                      className={previewSrc ? 'vertical' : ''}
+                    />
+                    {activeClip && !previewSrc && (
+                      <div className="preview-clip-range">
+                        <span className="clip-name">{activeClip.title}</span>
+                        <span>{fmt(activeClip.start_second)} {'\u2192'} {fmt(activeClip.end_second)}</span>
+                      </div>
+                    )}
+                    {previewSrc && (
+                      <div className="preview-clip-range">
+                        <span className="clip-name">Rendered clip</span>
+                        <button className="preview-back" onClick={()=>setPreviewSrc(null)}>Back to source</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Style preview mockup — always visible */}
+                <StylePreview style={captionStyle} logoPath={logoPath} />
+
+                {/* Settings tags */}
+                <div className="preview-settings">
+                  <div className={`preview-tag ${settingsFlash==='caption'?'changed':''}`}
+                    style={settingsFlash==='caption'?{animation:'tagFlash 0.6s var(--ease)'}:{}}>
+                    Caption {'\u00B7'} <strong>{captionStyle}</strong>
+                  </div>
+                  <div className={`preview-tag ${settingsFlash==='crop'?'changed':''}`}
+                    style={settingsFlash==='crop'?{animation:'tagFlash 0.6s var(--ease)'}:{}}>
+                    Crop {'\u00B7'} <strong>{cropStrategy}</strong>
+                  </div>
+                  {logoPath && (
+                    <div className="preview-tag">
+                      Logo {'\u00B7'} <strong>{logoPath.split('/').pop()}</strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Modal (mobile fallback) */}
+          {previewFile && (
+            <div className="modal-overlay" onClick={()=>setPreviewFile(null)}>
+              <div className="modal-body" onClick={e=>e.stopPropagation()}>
+                <video src={`/api/preview/${previewFile}`} controls autoPlay />
+                <div style={{textAlign:'center',marginTop:12}}>
+                  <button className="btn btn-ghost btn-sm" onClick={()=>setPreviewFile(null)}>Close</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

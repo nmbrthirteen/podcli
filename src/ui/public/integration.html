@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>podcli — Integration</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0b0d;
+      --surface: #131316;
+      --surface2: #1b1b20;
+      --border: #252530;
+      --border-hover: #35354a;
+      --text: #e8e8e2;
+      --text2: #77776f;
+      --text3: #4e4e48;
+      --accent: #d4874a;
+      --accent-hover: #e09860;
+      --accent-subtle: rgba(212, 135, 74, 0.10);
+      --accent-glow: rgba(212, 135, 74, 0.25);
+      --green: #4ade80;
+      --green-subtle: rgba(74, 222, 128, 0.07);
+      --green-border: rgba(74, 222, 128, 0.18);
+      --red: #f87171;
+      --red-subtle: rgba(248, 113, 113, 0.07);
+      --red-border: rgba(248, 113, 113, 0.18);
+      --blue: #60a5fa;
+      --blue-subtle: rgba(96, 165, 250, 0.08);
+      --blue-border: rgba(96, 165, 250, 0.18);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .app { max-width: 780px; margin: 0 auto; padding: 48px 32px 96px; }
+
+    /* ─── Header ─── */
+    .header { margin-bottom: 40px; }
+    .nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+    .logo { font-size: 13px; font-weight: 700; letter-spacing: 1.2px; color: var(--text3); text-transform: uppercase; text-decoration: none; }
+    .logo span { color: var(--accent); }
+    .nav-link {
+      font-size: 13px; font-weight: 600; color: var(--text2);
+      text-decoration: none; padding: 6px 14px;
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
+      transition: all 0.15s var(--ease);
+    }
+    .nav-link:hover { border-color: var(--border-hover); color: var(--text); }
+    h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.15; }
+    .subtitle { font-size: 14px; color: var(--text2); margin-top: 8px; line-height: 1.6; }
+
+    /* ─── Status Bar ─── */
+    .status-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px; border-radius: var(--radius);
+      font-size: 13px; font-weight: 500; margin-bottom: 32px;
+    }
+    .status-bar.ok { background: var(--green-subtle); border: 1px solid var(--green-border); color: var(--green); }
+    .status-bar.err { background: var(--red-subtle); border: 1px solid var(--red-border); color: var(--red); }
+    .status-bar.warn { background: var(--blue-subtle); border: 1px solid var(--blue-border); color: var(--blue); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .status-bar.ok .status-dot { background: var(--green); }
+    .status-bar.err .status-dot { background: var(--red); }
+    .status-bar.warn .status-dot { background: var(--blue); }
+
+    /* ─── Card ─── */
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px; margin-bottom: 20px;
+      transition: border-color 0.2s var(--ease);
+    }
+    .card:hover { border-color: var(--border-hover); }
+    .card-label {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
+      color: var(--text2); text-transform: uppercase; margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 16px; font-weight: 700; margin-bottom: 6px; display: flex;
+      align-items: center; gap: 8px;
+    }
+    .card-desc { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 16px; }
+
+    /* ─── Code Block ─── */
+    .code-block {
+      position: relative; background: #0a0a0c; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); overflow: hidden;
+    }
+    .code-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 14px; background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+    }
+    .code-filename { font-size: 11px; font-weight: 600; color: var(--text2); font-family: 'JetBrains Mono', monospace; }
+    .copy-btn {
+      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      font-family: inherit; color: var(--text2); background: transparent;
+      border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+      transition: all 0.15s var(--ease);
+    }
+    .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .copy-btn.copied { border-color: var(--green); color: var(--green); }
+    pre {
+      padding: 16px; overflow-x: auto; font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px; line-height: 1.7; color: var(--text); tab-size: 2;
+    }
+    pre .key { color: #60a5fa; }
+    pre .str { color: #4ade80; }
+    pre .comment { color: var(--text3); font-style: italic; }
+    pre .punct { color: var(--text2); }
+
+    /* ─── Steps ─── */
+    .steps { counter-reset: step; }
+    .step {
+      position: relative; padding-left: 40px; margin-bottom: 24px;
+      counter-increment: step;
+    }
+    .step::before {
+      content: counter(step);
+      position: absolute; left: 0; top: 1px;
+      width: 26px; height: 26px; border-radius: 50%;
+      background: var(--surface2); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: var(--text2);
+    }
+    .step-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+    .step-desc { font-size: 13px; color: var(--text2); line-height: 1.6; }
+    .step-desc code {
+      background: var(--surface2); padding: 2px 7px; border-radius: 5px;
+      font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
+      color: var(--accent); border: 1px solid var(--border);
+    }
+
+    /* ─── Tool List ─── */
+    .tool-grid { display: grid; gap: 8px; }
+    .tool-item {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 14px 16px; background: var(--surface2);
+      border-radius: var(--radius-sm); border: 1px solid transparent;
+      transition: border-color 0.15s var(--ease);
+    }
+    .tool-item:hover { border-color: var(--border); }
+    .tool-name {
+      font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+      font-weight: 600; color: var(--accent); white-space: nowrap;
+    }
+    .tool-desc { font-size: 12.5px; color: var(--text2); line-height: 1.5; }
+
+    /* ─── Divider ─── */
+    .divider { height: 1px; background: var(--border); margin: 32px 0; opacity: 0.4; }
+
+    /* ─── Animations ─── */
+    .fade-in { animation: fadeIn 0.3s var(--ease); }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 640px) {
+      .app { padding: 28px 16px 64px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app fade-in">
+
+    <!-- Nav -->
+    <div class="nav">
+      <a href="/" class="logo">pod<span>cli</span></a>
+      <a href="/" class="nav-link">Back to app</a>
+    </div>
+
+    <!-- Header -->
+    <div class="header">
+      <h1>MCP Integration</h1>
+      <p class="subtitle">Connect podcli to Claude Desktop, Claude Code, or any MCP-compatible client to generate clips through conversation.</p>
+    </div>
+
+    <!-- Connection Status -->
+    <div id="status-bar" class="status-bar warn">
+      <div class="status-dot"></div>
+      <span id="status-text">Checking connection...</span>
+    </div>
+
+    <!-- Setup: Claude Desktop -->
+    <div class="card">
+      <div class="card-label">Setup</div>
+      <div class="card-title">Claude Desktop</div>
+      <div class="card-desc">
+        Add podcli as an MCP server in your Claude Desktop configuration file. Claude will gain access to transcription, clip suggestion, and rendering tools.
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-title">Open your config file</div>
+          <div class="step-desc">
+            macOS: <code>~/Library/Application Support/Claude/claude_desktop_config.json</code><br>
+            Windows: <code>%APPDATA%\Claude\claude_desktop_config.json</code>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-title">Add the podcli server entry</div>
+          <div class="step-desc">Paste this into the <code>mcpServers</code> object:</div>
+        </div>
+      </div>
+
+      <div class="code-block" style="margin-bottom:16px">
+        <div class="code-header">
+          <span class="code-filename">claude_desktop_config.json</span>
+          <button class="copy-btn" onclick="copyBlock(this, 'desktop-config')">Copy</button>
+        </div>
+        <pre id="desktop-config"><span class="punct">{</span>
+  <span class="key">"mcpServers"</span><span class="punct">:</span> <span class="punct">{</span>
+    <span class="key">"podcli"</span><span class="punct">:</span> <span class="punct">{</span>
+      <span class="key">"command"</span><span class="punct">:</span> <span class="str">"node"</span><span class="punct">,</span>
+      <span class="key">"args"</span><span class="punct">:</span> <span class="punct">[</span><span class="str" id="desktop-dist-path">"<span class="comment">loading...</span>"</span><span class="punct">]</span>
+    <span class="punct">}</span>
+  <span class="punct">}</span>
+<span class="punct">}</span></pre>
+      </div>
+
+      <div class="step" style="padding-left:40px; counter-increment: step;">
+        <div class="step-title">Restart Claude Desktop</div>
+        <div class="step-desc">After saving, restart the app. You should see podcli listed in the MCP tools panel.</div>
+      </div>
+    </div>
+
+    <!-- Setup: Claude Code -->
+    <div class="card">
+      <div class="card-title">Claude Code (CLI)</div>
+      <div class="card-desc">
+        Add podcli as an MCP server in your Claude Code project or global settings.
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-title">Run this command in your terminal</div>
+          <div class="step-desc">This registers podcli as an MCP server for the current project scope:</div>
+        </div>
+      </div>
+
+      <div class="code-block">
+        <div class="code-header">
+          <span class="code-filename">terminal</span>
+          <button class="copy-btn" onclick="copyBlock(this, 'code-config')">Copy</button>
+        </div>
+        <pre id="code-config"><span id="code-cmd-text"><span class="comment"># loading path...</span></span></pre>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Available Tools -->
+    <div class="card">
+      <div class="card-label">Reference</div>
+      <div class="card-title">Available MCP Tools</div>
+      <div class="card-desc">These tools become available to Claude after connecting.</div>
+
+      <div class="tool-grid">
+        <div class="tool-item">
+          <span class="tool-name">transcribe_podcast</span>
+          <span class="tool-desc">Transcribe audio/video with Whisper. Supports model size selection, language detection, and speaker diarization.</span>
+        </div>
+        <div class="tool-item">
+          <span class="tool-name">suggest_clips</span>
+          <span class="tool-desc">Submit an array of viral moment suggestions with title, time range, and reasoning. Used by Claude to pass clip ideas.</span>
+        </div>
+        <div class="tool-item">
+          <span class="tool-name">create_clip</span>
+          <span class="tool-desc">Render a single short-form clip with caption style, crop strategy, and optional logo overlay.</span>
+        </div>
+        <div class="tool-item">
+          <span class="tool-name">batch_create_clips</span>
+          <span class="tool-desc">Render multiple clips in one call. Each clip can have its own caption style and crop settings.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Example Prompts -->
+    <div class="card">
+      <div class="card-title">Example Prompts</div>
+      <div class="card-desc">Try these with Claude after connecting:</div>
+
+      <div class="tool-grid">
+        <div class="tool-item" style="cursor:default;">
+          <span class="tool-desc" style="color:var(--text);"><em>"Transcribe /path/to/episode.mp4 and find the 5 most viral moments, then export them with hormozi captions"</em></span>
+        </div>
+        <div class="tool-item" style="cursor:default;">
+          <span class="tool-desc" style="color:var(--text);"><em>"Create a 30-second clip from 12:45 to 13:15 with branded captions and face-tracking crop"</em></span>
+        </div>
+        <div class="tool-item" style="cursor:default;">
+          <span class="tool-desc" style="color:var(--text);"><em>"Batch export all suggested clips with karaoke-style captions"</em></span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // Resolve the dist path and populate config blocks
+    async function init() {
+      try {
+        const resp = await fetch('/api/integration-info');
+        const data = await resp.json();
+
+        // Desktop config
+        const distEl = document.getElementById('desktop-dist-path');
+        if (distEl) distEl.textContent = `"${data.dist_path}"`;
+
+        // Claude Code command
+        const codeEl = document.getElementById('code-cmd-text');
+        if (codeEl) {
+          codeEl.innerHTML = `claude mcp add podcli node ${escapeHtml(data.dist_path)}`;
+        }
+
+        // Status
+        const bar = document.getElementById('status-bar');
+        const txt = document.getElementById('status-text');
+        if (data.server_ok) {
+          bar.className = 'status-bar ok';
+          txt.textContent = `Server running — ${data.tools_count} tools available`;
+        } else {
+          bar.className = 'status-bar err';
+          txt.textContent = 'Server not built. Run: npm run build';
+        }
+      } catch (e) {
+        const bar = document.getElementById('status-bar');
+        const txt = document.getElementById('status-text');
+        bar.className = 'status-bar err';
+        txt.textContent = 'Could not reach server';
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function copyBlock(btn, id) {
+      const el = document.getElementById(id);
+      const text = el.innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>

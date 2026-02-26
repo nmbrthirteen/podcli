@@ -1,0 +1,17 @@
+#!/bin/bash
+# podcli — CLI wrapper
+# Usage: ./podcli process video.mp4 --top 5 --transcript file.txt
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Use venv python if available
+if [ -f "$SCRIPT_DIR/venv/bin/python3" ]; then
+  PYTHON="$SCRIPT_DIR/venv/bin/python3"
+elif [ -f "$SCRIPT_DIR/.env" ]; then
+  PYTHON=$(grep '^PYTHON_PATH=' "$SCRIPT_DIR/.env" | cut -d'=' -f2-)
+  [ -z "$PYTHON" ] && PYTHON="python3"
+else
+  PYTHON="python3"
+fi
+
+exec "$PYTHON" "$SCRIPT_DIR/backend/cli.py" "$@"
