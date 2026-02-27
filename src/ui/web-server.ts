@@ -14,6 +14,7 @@ import multer from "multer";
 import { createReadStream, existsSync, statSync } from "fs";
 import { mkdir, readdir, unlink } from "fs/promises";
 import { join, dirname, basename, extname } from "path";
+import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
@@ -53,6 +54,50 @@ interface JobState {
 const jobs = new Map<string, JobState>();
 // Store the latest transcript per uploaded file for the session
 const sessionTranscripts = new Map<string, Record<string, unknown>>();
+
+// --- MCP ↔ UI Bridge State ---
+interface UIState {
+  videoPath: string;
+  filePath: string;
+  transcript: Record<string, unknown> | null;
+  rawTranscriptText: string;
+  suggestions: Array<Record<string, unknown>>;
+  deselectedIndices: number[];
+  settings: {
+    captionStyle: string;
+    cropStrategy: string;
+    logoPath: string;
+  };
+  phase: string;
+  lastUpdated: number;
+}
+
+const uiState: UIState = {
+  videoPath: "",
+  filePath: "",
+  transcript: null,
+  rawTranscriptText: "",
+  suggestions: [],
+  deselectedIndices: [],
+  settings: { captionStyle: "branded", cropStrategy: "center", logoPath: "" },
+  phase: "idle",
+  lastUpdated: 0,
+};
+
+// SSE clients for the global event bus
+import type { Response } from "express";
+const sseClients: Response[] = [];
+
+function broadcastSSE(event: string, data: unknown) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (let i = sseClients.length - 1; i >= 0; i--) {
+    try {
+      sseClients[i].write(payload);
+    } catch {
+      sseClients.splice(i, 1);
+    }
+  }
+}
 
 // --- Middleware ---
 app.use(express.json({ limit: "50mb" }));
@@ -117,6 +162,40 @@ app.post("/api/select-file", (req, res) => {
     filename: basename(file_path),
     size_mb: Math.round((stat.size / (1024 * 1024)) * 100) / 100,
   });
+});
+
+/**
+ * GET /api/browse-file — Open native OS file dialog and return the selected path
+ */
+app.get("/api/browse-file", (_req, res) => {
+  try {
+    let filePath: string;
+    if (process.platform === "darwin") {
+      const script = `osascript -e 'POSIX path of (choose file of type {"mp4","mov","mkv","webm","mp3","wav","m4a"})'`;
+      filePath = execSync(script, { encoding: "utf-8", timeout: 120_000 }).trim();
+    } else {
+      // Linux fallback
+      filePath = execSync(
+        `zenity --file-selection --file-filter="Media files|*.mp4 *.mov *.mkv *.webm *.mp3 *.wav *.m4a"`,
+        { encoding: "utf-8", timeout: 120_000 }
+      ).trim();
+    }
+
+    if (!filePath || !existsSync(filePath)) {
+      res.json({ error: "cancelled" });
+      return;
+    }
+
+    const stat = statSync(filePath);
+    res.json({
+      file_path: filePath,
+      filename: basename(filePath),
+      size_mb: Math.round((stat.size / (1024 * 1024)) * 100) / 100,
+    });
+  } catch {
+    // User cancelled the dialog (non-zero exit) or command not found
+    res.json({ error: "cancelled" });
+  }
 });
 
 /**
@@ -328,6 +407,7 @@ app.post("/api/create-clip", async (req, res) => {
       job.progress = 100;
       job.message = "Clip created!";
       job.result = result.data;
+      broadcastSSE("job-complete", { jobId, result: result.data });
       // Record to history
       try {
         const d = result.data as any;
@@ -346,6 +426,7 @@ app.post("/api/create-clip", async (req, res) => {
       job.status = "error";
       job.error = err.message;
       job.message = `Error: ${err.message}`;
+      broadcastSSE("job-error", { jobId, error: err.message });
     });
 });
 
@@ -389,6 +470,7 @@ app.post("/api/batch-clips", async (req, res) => {
       job.progress = 100;
       job.message = "Batch complete!";
       job.result = result.data;
+      broadcastSSE("job-complete", { jobId, result: result.data });
       // Record successful clips to history
       try {
         const d = result.data as any;
@@ -415,6 +497,7 @@ app.post("/api/batch-clips", async (req, res) => {
       job.status = "error";
       job.error = err.message;
       job.message = `Error: ${err.message}`;
+      broadcastSSE("job-error", { jobId, error: err.message });
     });
 });
 
@@ -781,6 +864,199 @@ app.delete("/api/knowledge/:filename", async (req, res) => {
   } catch (err: any) {
     res.json({ error: err.message });
   }
+});
+
+// --- MCP ↔ UI Bridge Endpoints ---
+
+/**
+ * GET /api/events — Global SSE channel for real-time MCP→UI events
+ */
+app.get("/api/events", (_req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+
+  // Send current state on connect
+  res.write(`event: state\ndata: ${JSON.stringify(uiState)}\n\n`);
+
+  sseClients.push(res);
+
+  // Heartbeat every 15s
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(`: heartbeat\n\n`);
+    } catch {
+      clearInterval(heartbeat);
+    }
+  }, 15_000);
+
+  _req.on("close", () => {
+    clearInterval(heartbeat);
+    const idx = sseClients.indexOf(res);
+    if (idx !== -1) sseClients.splice(idx, 1);
+  });
+});
+
+/**
+ * GET /api/ui-state — MCP reads current UI state
+ */
+app.get("/api/ui-state", (_req, res) => {
+  const selected = uiState.suggestions.filter(
+    (_: unknown, i: number) => !uiState.deselectedIndices.includes(i)
+  );
+  res.json({
+    videoPath: uiState.videoPath,
+    filePath: uiState.filePath,
+    phase: uiState.phase,
+    settings: uiState.settings,
+    selectedClips: selected,
+    totalSuggestions: uiState.suggestions.length,
+    deselectedCount: uiState.deselectedIndices.length,
+    transcriptWordCount: Array.isArray((uiState.transcript as any)?.words)
+      ? (uiState.transcript as any).words.length
+      : 0,
+    transcript: uiState.transcript,
+    rawTranscriptText: uiState.rawTranscriptText,
+    lastUpdated: uiState.lastUpdated,
+  });
+});
+
+/**
+ * POST /api/ui-state — UI syncs state changes to server
+ */
+app.post("/api/ui-state", (req, res) => {
+  const body = req.body;
+  // Track which fields changed for targeted SSE broadcasts
+  const source = body._source || "mcp"; // UI sends _source:'ui'
+
+  if (body.videoPath !== undefined) uiState.videoPath = body.videoPath;
+  if (body.filePath !== undefined) uiState.filePath = body.filePath;
+  if (body.transcript !== undefined) uiState.transcript = body.transcript;
+  if (body.rawTranscriptText !== undefined) uiState.rawTranscriptText = body.rawTranscriptText;
+  if (body.suggestions !== undefined) uiState.suggestions = body.suggestions;
+  if (body.deselectedIndices !== undefined) uiState.deselectedIndices = body.deselectedIndices;
+  if (body.phase !== undefined) uiState.phase = body.phase;
+  if (body.settings) {
+    if (body.settings.captionStyle !== undefined) uiState.settings.captionStyle = body.settings.captionStyle;
+    if (body.settings.cropStrategy !== undefined) uiState.settings.cropStrategy = body.settings.cropStrategy;
+    if (body.settings.logoPath !== undefined) uiState.settings.logoPath = body.settings.logoPath;
+  }
+  uiState.lastUpdated = Date.now();
+
+  // Broadcast to UI when changes come from MCP (not from UI itself)
+  if (source !== "ui") {
+    broadcastSSE("state-sync", {
+      ...(body.videoPath !== undefined && { videoPath: body.videoPath }),
+      ...(body.filePath !== undefined && { filePath: body.filePath }),
+      ...(body.suggestions !== undefined && { suggestions: body.suggestions }),
+      ...(body.phase !== undefined && { phase: body.phase }),
+      ...(body.transcript !== undefined && { transcript: body.transcript }),
+      ...(body.settings && { settings: body.settings }),
+    });
+  }
+
+  res.json({ ok: true });
+});
+
+/**
+ * POST /api/mcp/export — MCP triggers export using current UI state
+ */
+app.post("/api/mcp/export", async (req, res) => {
+  // Use UI state if no explicit params provided
+  const videoPath = req.body.video_path || uiState.filePath || uiState.videoPath;
+  const clips = req.body.clips || uiState.suggestions.filter(
+    (_: unknown, i: number) => !uiState.deselectedIndices.includes(i)
+  );
+  const transcriptWords = req.body.transcript_words ||
+    (Array.isArray((uiState.transcript as any)?.words) ? (uiState.transcript as any).words : []);
+  const logoPath = req.body.logo_path || uiState.settings.logoPath || null;
+  const captionStyle = req.body.caption_style || uiState.settings.captionStyle || "branded";
+  const cropStrategy = req.body.crop_strategy || uiState.settings.cropStrategy || "center";
+
+  if (!videoPath || !existsSync(videoPath)) {
+    res.status(400).json({ error: "Video file not found" });
+    return;
+  }
+  if (!clips.length) {
+    res.status(400).json({ error: "No clips to export" });
+    return;
+  }
+
+  await fileManager.ensureDirectories();
+
+  // Apply style settings to clips that don't have their own
+  const styledClips = clips.map((c: any) => ({
+    start_second: c.start_second,
+    end_second: c.end_second,
+    title: (c.title || "clip").slice(0, 40),
+    caption_style: c.caption_style || captionStyle,
+    crop_strategy: c.crop_strategy || cropStrategy,
+  }));
+
+  const jobId = uuidv4();
+  const job: JobState = {
+    id: jobId,
+    type: "batch_clips",
+    status: "running",
+    progress: 0,
+    message: "Starting MCP export...",
+    createdAt: Date.now(),
+  };
+  jobs.set(jobId, job);
+
+  // Broadcast to UI so it can track progress
+  broadcastSSE("export-started", { jobId, clipCount: styledClips.length });
+  uiState.phase = "exporting";
+  uiState.lastUpdated = Date.now();
+
+  res.json({ job_id: jobId, status: "running", clipCount: styledClips.length });
+
+  executor
+    .execute(
+      "batch_clips",
+      { video_path: videoPath, clips: styledClips, transcript_words: transcriptWords, output_dir: paths.output, logo_path: logoPath },
+      (event) => {
+        job.progress = event.percent;
+        job.message = event.message;
+        broadcastSSE("job-update", { jobId, progress: event.percent, message: event.message });
+      }
+    )
+    .then(async (result) => {
+      job.status = "done";
+      job.progress = 100;
+      job.message = "Export complete!";
+      job.result = result.data;
+      // Record clips to history
+      try {
+        const d = result.data as any;
+        if (d?.results) {
+          for (const r of d.results) {
+            if (r.status === "success" && r.output_path) {
+              await clipsHistory.record({
+                source_video: videoPath,
+                start_second: r.start_second || 0,
+                end_second: r.end_second || 0,
+                caption_style: r.caption_style || captionStyle,
+                crop_strategy: r.crop_strategy || cropStrategy,
+                title: r.title || "clip",
+                output_path: r.output_path,
+                file_size_mb: r.file_size_mb || 0,
+                duration: r.duration || 0,
+              });
+            }
+          }
+        }
+      } catch {}
+      broadcastSSE("job-complete", { jobId, result: result.data });
+    })
+    .catch((err) => {
+      job.status = "error";
+      job.error = err.message;
+      job.message = `Error: ${err.message}`;
+      broadcastSSE("job-error", { jobId, error: err.message });
+    });
 });
 
 // --- Start ---

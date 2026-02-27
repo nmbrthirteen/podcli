@@ -15,12 +15,13 @@ const kb = new KnowledgeBase();
 const assets = new AssetManager();
 const history = new ClipsHistory();
 
-/** Prepend knowledge base context to a tool result if available. */
+/** Prepend knowledge base file listing to a tool result. */
 async function withKnowledge(result: string): Promise<string> {
   try {
-    const context = await kb.readAll();
-    if (!context) return result;
-    return `[Knowledge Base]\n${context}\n\n---\n\n${result}`;
+    const files = await kb.listFiles();
+    if (!files.length) return result;
+    const listing = files.map((f) => f.filename).join(", ");
+    return `[Knowledge Base: ${listing} — use knowledge_base tool to read specific files]\n\n${result}`;
   } catch {
     return result;
   }
@@ -95,6 +96,16 @@ export function createServer(): McpServer {
     async ({ suggestions }) => {
       try {
         const result = await handleSuggestClips({ suggestions });
+
+        // Push suggestions to Web UI (silent fail if UI isn't running)
+        try {
+          await fetch("http://localhost:3847/api/ui-state", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ suggestions, phase: "review" }),
+          });
+        } catch {}
+
         // Include clip history so Claude avoids duplicates
         const existing = await history.list(20);
         let text = await withKnowledge(result);
@@ -245,29 +256,78 @@ export function createServer(): McpServer {
     },
     async (params) => {
       try {
-        const result = await handleBatchClips(params);
-        const parsed = JSON.parse(result);
+        // Try routing through web server for real-time UI progress
+        let usedWebServer = false;
+        try {
+          const webRes = await fetch("http://localhost:3847/api/mcp/export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              video_path: params.video_path,
+              clips: params.clips,
+              transcript_words: params.transcript_words,
+            }),
+          });
+          if (webRes.ok) {
+            const webData = await webRes.json() as any;
+            const jobId = webData.job_id;
 
-        // Record each successful clip
-        if (parsed.results) {
-          for (const r of parsed.results as any[]) {
-            if (r.status === "success" && r.output_path) {
-              await history.record({
-                source_video: params.video_path,
-                start_second: r.start_second || 0,
-                end_second: r.end_second || 0,
-                caption_style: r.caption_style || "hormozi",
-                crop_strategy: r.crop_strategy || "center",
-                title: r.title || "clip",
-                output_path: r.output_path,
-                file_size_mb: r.file_size_mb || 0,
-                duration: r.duration || 0,
-              });
+            // Poll the job until completion
+            let jobResult: any = null;
+            while (true) {
+              await new Promise((r) => setTimeout(r, 2000));
+              const pollRes = await fetch(`http://localhost:3847/api/job/${jobId}`);
+              if (!pollRes.ok) break;
+              const job = await pollRes.json() as any;
+              if (job.status === "done") {
+                jobResult = job.result;
+                break;
+              }
+              if (job.status === "error") {
+                throw new Error(job.error || "Job failed");
+              }
             }
+
+            if (jobResult) {
+              usedWebServer = true;
+              return { content: [{ type: "text" as const, text: JSON.stringify(jobResult, null, 2) }] };
+            }
+          }
+        } catch (webErr: unknown) {
+          // Web server not running or errored — fall back to direct execution
+          const webMsg = webErr instanceof Error ? webErr.message : String(webErr);
+          if (!webMsg.includes("ECONNREFUSED") && !webMsg.includes("fetch failed")) {
+            // Unexpected error from web server, still try fallback
           }
         }
 
-        return { content: [{ type: "text" as const, text: result }] };
+        if (!usedWebServer) {
+          const result = await handleBatchClips(params);
+          const parsed = JSON.parse(result);
+
+          // Record each successful clip
+          if (parsed.results) {
+            for (const r of parsed.results as any[]) {
+              if (r.status === "success" && r.output_path) {
+                await history.record({
+                  source_video: params.video_path,
+                  start_second: r.start_second || 0,
+                  end_second: r.end_second || 0,
+                  caption_style: r.caption_style || "hormozi",
+                  crop_strategy: r.crop_strategy || "center",
+                  title: r.title || "clip",
+                  output_path: r.output_path,
+                  file_size_mb: r.file_size_mb || 0,
+                  duration: r.duration || 0,
+                });
+              }
+            }
+          }
+
+          return { content: [{ type: "text" as const, text: result }] };
+        }
+
+        return { content: [{ type: "text" as const, text: "Export completed via web server." }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
@@ -291,14 +351,23 @@ export function createServer(): McpServer {
     },
     async ({ action, filename, content }) => {
       try {
-        if (action === "read_all") {
-          const text = await kb.readAll();
-          return { content: [{ type: "text" as const, text: text || "Knowledge base is empty. Add .md files to .podcli/knowledge/ in the project directory." }] };
-        }
-        if (action === "list") {
+        if (action === "read_all" || action === "list") {
           const files = await kb.listFiles();
-          const text = files.map((f) => `- ${f.filename} (updated ${f.updatedAt})`).join("\n");
-          return { content: [{ type: "text" as const, text: text || "No knowledge files found." }] };
+          if (files.length === 0) {
+            return { content: [{ type: "text" as const, text: "Knowledge base is empty. Add .md files to .podcli/knowledge/ in the project directory." }] };
+          }
+          const summaries: string[] = [];
+          for (const f of files) {
+            let preview = "";
+            try {
+              const content = await kb.readFile(f.filename);
+              // First non-empty, non-heading line as preview
+              const lines = content.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
+              preview = lines[0]?.trim().slice(0, 100) || "";
+            } catch {}
+            summaries.push(`- ${f.filename} (updated ${f.updatedAt})${preview ? `\n  ${preview}` : ""}`);
+          }
+          return { content: [{ type: "text" as const, text: `Knowledge base (${files.length} files) — use read action with filename to get full content:\n${summaries.join("\n")}` }] };
         }
         if (action === "read" && filename) {
           const text = await kb.readFile(filename);
@@ -401,6 +470,72 @@ export function createServer(): McpServer {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+      }
+    }
+  );
+
+  // =============================================
+  // Tool: get_ui_state
+  // =============================================
+  server.tool(
+    "get_ui_state",
+    "Read the current state of the podcli Web UI — selected clips, video path, settings, transcript, and phase. Always returns the full transcript segments for clip analysis.",
+    {},
+    async () => {
+      try {
+        const res = await fetch("http://localhost:3847/api/ui-state");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const state = await res.json() as any;
+
+        const lines: string[] = [];
+        lines.push(`Phase: ${state.phase}`);
+        lines.push(`Video: ${state.videoPath || state.filePath || "(none)"}`);
+        lines.push(`Settings: caption=${state.settings?.captionStyle}, crop=${state.settings?.cropStrategy}, logo=${state.settings?.logoPath || "none"}`);
+        lines.push(`Transcript: ${state.transcriptWordCount} words`);
+        lines.push(`Clips: ${state.selectedClips?.length || 0} selected (${state.totalSuggestions || 0} total, ${state.deselectedCount || 0} deselected)`);
+
+        if (state.selectedClips?.length) {
+          lines.push("");
+          lines.push("Selected clips:");
+          for (const clip of state.selectedClips) {
+            const title = (clip as any).title || "untitled";
+            const start = (clip as any).start_second ?? "?";
+            const end = (clip as any).end_second ?? "?";
+            lines.push(`  - "${title}" (${start}s – ${end}s)`);
+          }
+        }
+
+        if (state.transcript) {
+          const segments = state.transcript.segments || [];
+          if (segments.length) {
+            lines.push("");
+            lines.push("=== TRANSCRIPT ===");
+            for (const seg of segments) {
+              const speaker = seg.speaker || "?";
+              const start = Math.floor(seg.start || 0);
+              const end = Math.floor(seg.end || 0);
+              const text = seg.text || "";
+              lines.push(`[${start}s-${end}s] ${speaker}: ${text}`);
+            }
+          }
+        } else if (state.rawTranscriptText) {
+          lines.push("");
+          lines.push("=== RAW TRANSCRIPT (not yet parsed — use this to analyze and suggest clips) ===");
+          lines.push(state.rawTranscriptText);
+        }
+
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
+          return {
+            content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `Error reading UI state: ${msg}` }],
+          isError: true,
+        };
       }
     }
   );

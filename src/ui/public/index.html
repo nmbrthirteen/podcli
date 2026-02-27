@@ -373,6 +373,27 @@
       return selected;
     }
 
+    // --- MCP ↔ UI Bridge: SSE hook ---
+    function useSSE() {
+      const [lastEvent, setLastEvent] = useState(null);
+      const [connected, setConnected] = useState(false);
+      useEffect(() => {
+        const es = new EventSource('/api/events');
+        const handle = (type) => (e) => {
+          try { setLastEvent({ type, data: JSON.parse(e.data), ts: Date.now() }); } catch {}
+        };
+        es.addEventListener('state', (e) => { setConnected(true); handle('state')(e); });
+        es.addEventListener('state-sync', handle('state-sync'));
+        es.addEventListener('export-started', handle('export-started'));
+        es.addEventListener('job-update', handle('job-update'));
+        es.addEventListener('job-complete', handle('job-complete'));
+        es.addEventListener('job-error', handle('job-error'));
+        es.onerror = () => {};
+        return () => es.close();
+      }, []);
+      return { lastEvent, connected };
+    }
+
     const CheckIcon = () => (<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>);
     const CheckSmall = ({ color = 'var(--green)' }) => (<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>);
 
@@ -457,7 +478,6 @@
       const [cropStrategy, setCropStrategy] = useState('center');
       const [logoPath, setLogoPath] = useState('');
       const logoRef = useRef();
-      const [videoDragOver, setVideoDragOver] = useState(false);
       const [transcriptDragOver, setTranscriptDragOver] = useState(false);
       const [transcriptFileName, setTranscriptFileName] = useState('');
 
@@ -478,13 +498,76 @@
       const [retryJobId, setRetryJobId] = useState(null);
       const retryStream = useJob(retryJobId);
 
-      const [videoUploading, setVideoUploading] = useState(false);
-      const [uploadProgress, setUploadProgress] = useState(0);
       const [logoUploading, setLogoUploading] = useState(false);
-      const [uploadingFileName, setUploadingFileName] = useState('');
+      const [browsing, setBrowsing] = useState(false);
 
       const [encoderInfo, setEncoderInfo] = useState(null);
       useEffect(() => { api('/encoder-info').then(d => { if(d.best) setEncoderInfo(d); }).catch(()=>{}); }, []);
+
+      // --- MCP ↔ UI Bridge: connect SSE + sync state ---
+      const { lastEvent: sseEvent, connected: mcpConnected } = useSSE();
+
+      // Sync UI state to server on changes (fire-and-forget)
+      const prevSyncRef = useRef('');
+      useEffect(() => {
+        const state = {
+          _source: 'ui',
+          videoPath,
+          filePath: file?.file_path || '',
+          suggestions,
+          deselectedIndices: Array.from(deselected),
+          settings: { captionStyle, cropStrategy, logoPath },
+          phase,
+        };
+        const key = JSON.stringify(state);
+        if (key === prevSyncRef.current) return;
+        prevSyncRef.current = key;
+        fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => {});
+      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, logoPath, phase]);
+
+      // Sync transcript separately (large payload)
+      const prevTranscriptRef = useRef(null);
+      useEffect(() => {
+        if (!transcript || transcript === prevTranscriptRef.current) return;
+        prevTranscriptRef.current = transcript;
+        fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', transcript }) }).catch(() => {});
+      }, [transcript]);
+
+      // Sync raw transcript text so MCP can read it before pipeline runs
+      const prevRawRef = useRef('');
+      useEffect(() => {
+        if (transcriptText === prevRawRef.current) return;
+        prevRawRef.current = transcriptText;
+        if (transcriptText.trim()) {
+          fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', rawTranscriptText: transcriptText }) }).catch(() => {});
+        }
+      }, [transcriptText]);
+
+      // React to SSE events from MCP
+      const lastHandledTsRef = useRef(0);
+      useEffect(() => {
+        if (!sseEvent || sseEvent.ts === lastHandledTsRef.current) return;
+        lastHandledTsRef.current = sseEvent.ts;
+
+        if (sseEvent.type === 'state-sync') {
+          const d = sseEvent.data;
+          if (d.suggestions) { setSuggestions(d.suggestions); setDeselected(new Set()); }
+          if (d.phase) setPhase(d.phase);
+          if (d.videoPath !== undefined) setVideoPath(d.videoPath);
+          if (d.transcript) setTranscript(d.transcript);
+          if (d.settings) {
+            if (d.settings.captionStyle) setCaptionStyle(d.settings.captionStyle);
+            if (d.settings.cropStrategy) setCropStrategy(d.settings.cropStrategy);
+            if (d.settings.logoPath !== undefined) setLogoPath(d.settings.logoPath);
+          }
+        } else if (sseEvent.type === 'export-started') {
+          setBatchJobId(sseEvent.data.jobId);
+          setPhase('exporting');
+        } else if (sseEvent.type === 'job-complete' && phase === 'exporting') {
+          setPhase('done');
+          setResults(sseEvent.data.result?.results || []);
+        }
+      }, [sseEvent]);
 
       // Preview panel state
       const videoRef = useRef();
@@ -533,14 +616,14 @@
         setActiveClipIdx(null);
       };
 
-      // Upload
-      const doVideoUpload = useCallback(async (f) => {
-        setVideoUploading(true); setUploadProgress(0); setUploadingFileName(f.name);
+      // Native file browse
+      const doBrowse = useCallback(async () => {
+        setBrowsing(true);
         try {
-          const d = await uploadFile(f, (pct) => setUploadProgress(pct));
+          const d = await api('/browse-file');
           if (d.file_path) setVideoPath(d.file_path);
-        } catch(e) { setError('Upload failed: ' + e.message); }
-        finally { setVideoUploading(false); setUploadProgress(0); setUploadingFileName(''); }
+        } catch(e) { setError('Browse failed: ' + e.message); }
+        finally { setBrowsing(false); }
       }, []);
 
       // Pipeline
@@ -655,8 +738,7 @@
         return 'pending';
       };
 
-      const handleVideoDrop = async (e) => { e.preventDefault(); setVideoDragOver(false); const files = e.dataTransfer?.files; if(files?.length) doVideoUpload(files[0]); };
-      const handleVideoFileSelect = async (e) => { const f = e.target.files?.[0]; if(f) doVideoUpload(f); };
+      const handleVideoDrop = (e) => { e.preventDefault(); };
       const handleTranscriptDrop = (e) => { e.preventDefault(); setTranscriptDragOver(false); const files = e.dataTransfer?.files; if(!files?.length) return; const f=files[0]; setTranscriptFileName(f.name); const reader=new FileReader(); reader.onload=(ev)=>setTranscriptText(ev.target.result); reader.readAsText(f); };
       const handleTranscriptFileSelect = (e) => { const f=e.target.files?.[0]; if(!f) return; setTranscriptFileName(f.name); const reader=new FileReader(); reader.onload=(ev)=>setTranscriptText(ev.target.result); reader.readAsText(f); };
       const preventDef = (e) => e.preventDefault();
@@ -669,6 +751,11 @@
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <div className="logo">pod<span>cli</span></div>
               <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
+                {mcpConnected && (
+                  <span className="pill" style={{ fontSize:10, letterSpacing:'0.5px', background:'var(--green-subtle)', color:'var(--green)', border:'1px solid var(--green-border)' }}>
+                    MCP linked
+                  </span>
+                )}
                 {encoderInfo && (
                   <span className="pill pill-blue" style={{ fontSize:10, letterSpacing:'0.5px' }}>
                     {encoderInfo.best === 'libx264' ? 'CPU' : encoderInfo.best.replace('h264_','').toUpperCase()}
@@ -688,27 +775,23 @@
               {/* Video */}
               <div className="section">
                 <div className="section-label">Video</div>
-                {videoUploading && (
-                  <div className="drop-zone uploading fade-in">
-                    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap: 10 }}>
-                      <div className="spinner sm" />
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>Uploading{'\u2026'} {uploadProgress}%</div>
-                        <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{uploadingFileName}</div>
+                {!videoPath && (
+                  <div className="drop-zone" style={{cursor:'pointer'}} onClick={browsing||isProcessing ? undefined : doBrowse}
+                    onDragOver={preventDef} onDrop={handleVideoDrop}>
+                    {browsing ? (
+                      <div style={{display:'flex',alignItems:'center',gap:10}}>
+                        <div className="spinner sm" />
+                        <div style={{fontSize:13,fontWeight:600}}>Waiting for file selection{'\u2026'}</div>
                       </div>
-                    </div>
-                    <div className="upload-bar" style={{ width: `${uploadProgress}%` }} />
+                    ) : (
+                      <>
+                        <div className="icon">{'\uD83C\uDFAC'}</div>
+                        <div className="label"><strong>Browse</strong> to select a video file</div>
+                      </>
+                    )}
                   </div>
                 )}
-                {!videoUploading && !videoPath && (
-                  <div className={`drop-zone ${videoDragOver?'drag-over':''}`}
-                    onDragOver={e=>{preventDef(e);setVideoDragOver(true);}} onDragLeave={()=>setVideoDragOver(false)} onDrop={handleVideoDrop}>
-                    <div className="icon">{'\uD83C\uDFAC'}</div>
-                    <div className="label">Drop your video here or <strong>browse</strong></div>
-                    <input type="file" accept="video/*" onChange={handleVideoFileSelect} disabled={isProcessing} />
-                  </div>
-                )}
-                {!videoUploading && videoPath && (
+                {videoPath && (
                   <div className="file-badge fade-in">
                     <div className="dot" />
                     <div className="name">{videoPath.split('/').pop()}</div>
@@ -717,7 +800,7 @@
                 )}
                 <input type="text" placeholder="Or paste a local path: /Users/you/episode.mp4"
                   value={videoPath} onChange={e=>setVideoPath(e.target.value)}
-                  disabled={isProcessing||videoUploading}
+                  disabled={isProcessing||browsing}
                   style={{ marginTop:8, fontSize:12, padding:'9px 13px', background:'var(--bg)', borderColor: videoPath?'var(--green-border)':'var(--border)' }} />
               </div>
 
@@ -811,9 +894,16 @@
 
               {/* Generate */}
               {phase === 'idle' && (
-                <button className="btn btn-go" disabled={!videoPath.trim()||(transcriptMode==='import'&&!transcriptText.trim())||videoUploading} onClick={startPipeline}>
-                  Generate Clips
-                </button>
+                <div>
+                  <button className="btn btn-go" disabled={!videoPath.trim()||(transcriptMode==='import'&&!transcriptText.trim())||browsing} onClick={startPipeline}>
+                    Generate Clips
+                  </button>
+                  {mcpConnected && videoPath && transcriptText.trim() && (
+                    <div className="fade-in" style={{ textAlign:'center', marginTop:10, fontSize:12, color:'var(--text3)' }}>
+                      or ask Claude to find the best moments — your video and transcript are synced
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Whisper progress */}
