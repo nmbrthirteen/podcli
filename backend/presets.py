@@ -18,7 +18,7 @@ PRESETS_DIR = os.path.join(
 
 DEFAULT_PRESET = {
     "caption_style": "branded",
-    "crop_strategy": "center",
+    "crop_strategy": "face",
     "time_adjust": -1.0,
     "logo_path": "",
     "whisper_model": "base",

@@ -11,7 +11,7 @@
 
 import express from "express";
 import multer from "multer";
-import { createReadStream, existsSync, statSync } from "fs";
+import { createReadStream, existsSync, statSync, readFileSync, writeFileSync } from "fs";
 import { mkdir, readdir, unlink } from "fs/promises";
 import { join, dirname, basename, extname } from "path";
 import { execSync } from "child_process";
@@ -67,22 +67,68 @@ interface UIState {
     captionStyle: string;
     cropStrategy: string;
     logoPath: string;
+    outroPath: string;
   };
   phase: string;
   lastUpdated: number;
 }
 
-const uiState: UIState = {
-  videoPath: "",
-  filePath: "",
-  transcript: null,
-  rawTranscriptText: "",
-  suggestions: [],
-  deselectedIndices: [],
-  settings: { captionStyle: "branded", cropStrategy: "center", logoPath: "" },
-  phase: "idle",
-  lastUpdated: 0,
-};
+// Load persisted state or use defaults
+function loadPersistedState(): UIState {
+  try {
+    if (existsSync(paths.uiState)) {
+      const raw = readFileSync(paths.uiState, "utf-8");
+      const saved = JSON.parse(raw);
+      // Validate video still exists
+      if (saved.videoPath && !existsSync(saved.videoPath)) {
+        saved.videoPath = "";
+        saved.filePath = "";
+        saved.phase = "idle";
+      }
+      return {
+        videoPath: saved.videoPath || "",
+        filePath: saved.filePath || "",
+        transcript: saved.transcript || null,
+        rawTranscriptText: saved.rawTranscriptText || "",
+        suggestions: saved.suggestions || [],
+        deselectedIndices: saved.deselectedIndices || [],
+        settings: {
+          captionStyle: saved.settings?.captionStyle || "branded",
+          cropStrategy: saved.settings?.cropStrategy || "face",
+          logoPath: saved.settings?.logoPath || "",
+          outroPath: saved.settings?.outroPath || "",
+        },
+        // Never restore mid-export phases
+        phase: ["exporting", "parsing", "suggesting"].includes(saved.phase) ? "idle" : (saved.phase || "idle"),
+        lastUpdated: saved.lastUpdated || 0,
+      };
+    }
+  } catch {}
+  return {
+    videoPath: "",
+    filePath: "",
+    transcript: null,
+    rawTranscriptText: "",
+    suggestions: [],
+    deselectedIndices: [],
+    settings: { captionStyle: "branded", cropStrategy: "face", logoPath: "", outroPath: "" },
+    phase: "idle",
+    lastUpdated: 0,
+  };
+}
+
+const uiState: UIState = loadPersistedState();
+
+// Debounced save to disk
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function persistState() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      writeFileSync(paths.uiState, JSON.stringify(uiState, null, 2));
+    } catch {}
+  }, 500);
+}
 
 // SSE clients for the global event bus
 import type { Response } from "express";
@@ -357,14 +403,48 @@ app.post("/api/create-clip", async (req, res) => {
     start_second,
     end_second,
     caption_style = "hormozi",
-    crop_strategy = "center",
+    crop_strategy = "face",
     transcript_words = [],
     title = "clip",
     logo_path = null,
+    outro_path = null,
   } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
     res.status(400).json({ error: "Video file not found" });
+    return;
+  }
+
+  // Validate clip params before spawning Python
+  if (typeof start_second !== "number" || typeof end_second !== "number") {
+    res.status(400).json({ error: "start_second and end_second must be numbers" });
+    return;
+  }
+  if (end_second <= start_second) {
+    res.status(400).json({ error: "end_second must be greater than start_second" });
+    return;
+  }
+  const duration = end_second - start_second;
+  if (duration > 180) {
+    res.status(400).json({ error: `Clip too long (${Math.round(duration)}s). Max 180 seconds.` });
+    return;
+  }
+  if (logo_path && !existsSync(logo_path)) {
+    res.status(400).json({ error: `Logo file not found: ${logo_path}` });
+    return;
+  }
+  if (outro_path && !existsSync(outro_path)) {
+    res.status(400).json({ error: `Outro file not found: ${outro_path}` });
+    return;
+  }
+  const validStyles = ["hormozi", "karaoke", "subtle", "branded"];
+  if (!validStyles.includes(caption_style)) {
+    res.status(400).json({ error: `Invalid caption style. Use: ${validStyles.join(", ")}` });
+    return;
+  }
+  const validCrops = ["center", "face"];
+  if (!validCrops.includes(crop_strategy)) {
+    res.status(400).json({ error: `Invalid crop strategy. Use: ${validCrops.join(", ")}` });
     return;
   }
 
@@ -396,6 +476,7 @@ app.post("/api/create-clip", async (req, res) => {
         title,
         output_dir: paths.output,
         logo_path,
+        outro_path,
       },
       (event) => {
         job.progress = event.percent;
@@ -434,10 +515,35 @@ app.post("/api/create-clip", async (req, res) => {
  * POST /api/batch-clips — Create multiple clips
  */
 app.post("/api/batch-clips", async (req, res) => {
-  const { video_path, clips, transcript_words = [], logo_path = null } = req.body;
+  const { video_path, clips, transcript_words = [], logo_path = null, outro_path = null } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
     res.status(400).json({ error: "Video file not found" });
+    return;
+  }
+  if (!clips || !Array.isArray(clips) || clips.length === 0) {
+    res.status(400).json({ error: "No clips provided" });
+    return;
+  }
+  // Validate each clip's timing
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    const dur = (c.end_second || 0) - (c.start_second || 0);
+    if (dur <= 0) {
+      res.status(400).json({ error: `Clip ${i + 1}: end must be after start` });
+      return;
+    }
+    if (dur > 180) {
+      res.status(400).json({ error: `Clip ${i + 1}: too long (${Math.round(dur)}s). Max 180s.` });
+      return;
+    }
+  }
+  if (logo_path && !existsSync(logo_path)) {
+    res.status(400).json({ error: `Logo file not found: ${logo_path}` });
+    return;
+  }
+  if (outro_path && !existsSync(outro_path)) {
+    res.status(400).json({ error: `Outro file not found: ${outro_path}` });
     return;
   }
 
@@ -459,7 +565,7 @@ app.post("/api/batch-clips", async (req, res) => {
   executor
     .execute(
       "batch_clips",
-      { video_path, clips, transcript_words, output_dir: paths.output, logo_path },
+      { video_path, clips, transcript_words, output_dir: paths.output, logo_path, outro_path },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
@@ -482,7 +588,7 @@ app.post("/api/batch-clips", async (req, res) => {
                 start_second: r.start_second || 0,
                 end_second: r.end_second || 0,
                 caption_style: r.caption_style || "hormozi",
-                crop_strategy: r.crop_strategy || "center",
+                crop_strategy: r.crop_strategy || "face",
                 title: r.title || "clip",
                 output_path: r.output_path,
                 file_size_mb: r.file_size_mb || 0,
@@ -693,6 +799,63 @@ app.get("/api/integration-info", (_req, res) => {
   });
 });
 
+// --- Transcript export (SRT/VTT) ---
+app.get("/api/export-transcript", (_req, res) => {
+  const format = (_req.query.format as string) || "srt";
+  const transcript = uiState.transcript as any;
+
+  if (!transcript?.words?.length) {
+    res.status(400).json({ error: "No transcript available" });
+    return;
+  }
+
+  const words = transcript.words;
+
+  // Group words into subtitle lines (~8 words each)
+  const lineSize = 8;
+  const lines: Array<{ text: string; start: number; end: number }> = [];
+  for (let i = 0; i < words.length; i += lineSize) {
+    const chunk = words.slice(i, i + lineSize);
+    lines.push({
+      text: chunk.map((w: any) => w.word).join(" "),
+      start: chunk[0].start,
+      end: chunk[chunk.length - 1].end,
+    });
+  }
+
+  const fmtSrt = (s: number) => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = Math.floor(s % 60);
+    const ms = Math.round((s % 1) * 1000);
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
+  };
+
+  const fmtVtt = (s: number) => fmtSrt(s).replace(",", ".");
+
+  if (format === "vtt") {
+    let vtt = "WEBVTT\n\n";
+    lines.forEach((line, i) => {
+      vtt += `${i + 1}\n${fmtVtt(line.start)} --> ${fmtVtt(line.end)}\n${line.text}\n\n`;
+    });
+    res.setHeader("Content-Type", "text/vtt");
+    res.setHeader("Content-Disposition", "attachment; filename=transcript.vtt");
+    res.send(vtt);
+  } else if (format === "json") {
+    res.setHeader("Content-Disposition", "attachment; filename=transcript.json");
+    res.json(transcript);
+  } else {
+    // SRT
+    let srt = "";
+    lines.forEach((line, i) => {
+      srt += `${i + 1}\n${fmtSrt(line.start)} --> ${fmtSrt(line.end)}\n${line.text}\n\n`;
+    });
+    res.setHeader("Content-Type", "application/x-subrip");
+    res.setHeader("Content-Disposition", "attachment; filename=transcript.srt");
+    res.send(srt);
+  }
+});
+
 // --- Analyze audio energy ---
 app.post("/api/analyze-energy", async (req, res) => {
   const { video_path, segments } = req.body;
@@ -780,7 +943,7 @@ app.get("/api/history", async (req, res) => {
 
 app.get("/api/history/check", async (req, res) => {
   try {
-    const { source, start, end, style = "hormozi", crop = "center" } = req.query;
+    const { source, start, end, style = "hormozi", crop = "face" } = req.query;
     if (!source || !start || !end) {
       res.json({ duplicate: null });
       return;
@@ -912,6 +1075,8 @@ app.get("/api/ui-state", (_req, res) => {
     phase: uiState.phase,
     settings: uiState.settings,
     selectedClips: selected,
+    suggestions: uiState.suggestions,
+    deselectedIndices: uiState.deselectedIndices,
     totalSuggestions: uiState.suggestions.length,
     deselectedCount: uiState.deselectedIndices.length,
     transcriptWordCount: Array.isArray((uiState.transcript as any)?.words)
@@ -942,8 +1107,10 @@ app.post("/api/ui-state", (req, res) => {
     if (body.settings.captionStyle !== undefined) uiState.settings.captionStyle = body.settings.captionStyle;
     if (body.settings.cropStrategy !== undefined) uiState.settings.cropStrategy = body.settings.cropStrategy;
     if (body.settings.logoPath !== undefined) uiState.settings.logoPath = body.settings.logoPath;
+    if (body.settings.outroPath !== undefined) uiState.settings.outroPath = body.settings.outroPath;
   }
   uiState.lastUpdated = Date.now();
+  persistState();
 
   // Broadcast to UI when changes come from MCP (not from UI itself)
   if (source !== "ui") {
@@ -951,6 +1118,7 @@ app.post("/api/ui-state", (req, res) => {
       ...(body.videoPath !== undefined && { videoPath: body.videoPath }),
       ...(body.filePath !== undefined && { filePath: body.filePath }),
       ...(body.suggestions !== undefined && { suggestions: body.suggestions }),
+      ...(body.deselectedIndices !== undefined && { deselectedIndices: body.deselectedIndices }),
       ...(body.phase !== undefined && { phase: body.phase }),
       ...(body.transcript !== undefined && { transcript: body.transcript }),
       ...(body.settings && { settings: body.settings }),
@@ -972,8 +1140,9 @@ app.post("/api/mcp/export", async (req, res) => {
   const transcriptWords = req.body.transcript_words ||
     (Array.isArray((uiState.transcript as any)?.words) ? (uiState.transcript as any).words : []);
   const logoPath = req.body.logo_path || uiState.settings.logoPath || null;
+  const outroPath = req.body.outro_path || (uiState.settings as any).outroPath || null;
   const captionStyle = req.body.caption_style || uiState.settings.captionStyle || "branded";
-  const cropStrategy = req.body.crop_strategy || uiState.settings.cropStrategy || "center";
+  const cropStrategy = req.body.crop_strategy || uiState.settings.cropStrategy || "face";
 
   if (!videoPath || !existsSync(videoPath)) {
     res.status(400).json({ error: "Video file not found" });
@@ -1010,13 +1179,14 @@ app.post("/api/mcp/export", async (req, res) => {
   broadcastSSE("export-started", { jobId, clipCount: styledClips.length });
   uiState.phase = "exporting";
   uiState.lastUpdated = Date.now();
+  persistState();
 
   res.json({ job_id: jobId, status: "running", clipCount: styledClips.length });
 
   executor
     .execute(
       "batch_clips",
-      { video_path: videoPath, clips: styledClips, transcript_words: transcriptWords, output_dir: paths.output, logo_path: logoPath },
+      { video_path: videoPath, clips: styledClips, transcript_words: transcriptWords, output_dir: paths.output, logo_path: logoPath, outro_path: outroPath },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
@@ -1064,6 +1234,12 @@ async function main() {
   await fileManager.ensureDirectories();
   await knowledgeBase.ensureDir();
   await mkdir(uploadDir, { recursive: true });
+
+  // Cleanup old temp files on startup (>48h)
+  try {
+    const cleaned = await fileManager.cleanupOldTasks(48);
+    if (cleaned > 0) console.log(`  Cleaned up ${cleaned} old temp files`);
+  } catch {}
 
   app.listen(PORT, () => {
     console.log(`\n  🎬 podcli running at:`);

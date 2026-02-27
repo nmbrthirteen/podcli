@@ -232,6 +232,51 @@
     .row { display: flex; gap: 10px; align-items: flex-end; }
     .row > * { flex: 1; }
 
+    /* ─── Asset pills ─── */
+    .asset-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 8px 5px 10px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 20px;
+      font-size: 12px; color: var(--text); max-width: 200px;
+    }
+    .asset-pill-icon { display: flex; align-items: center; flex-shrink: 0; color: var(--text2); }
+    .asset-pill-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+    .asset-pill-x {
+      display: flex; align-items: center; justify-content: center;
+      width: 18px; height: 18px; border-radius: 50%; border: none;
+      background: transparent; color: var(--text3); font-size: 14px;
+      cursor: pointer; flex-shrink: 0; padding: 0; line-height: 1;
+      transition: all 0.15s var(--ease);
+    }
+    .asset-pill-x:hover { background: var(--surface); color: var(--red); }
+    .asset-add {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 5px 12px; background: transparent;
+      border: 1px dashed var(--border); border-radius: 20px;
+      font-size: 12px; color: var(--text3); cursor: pointer;
+      font-family: inherit; font-weight: 500;
+      transition: all 0.15s var(--ease);
+    }
+    .asset-add:hover:not(:disabled) { border-color: var(--border-hover); color: var(--text2); }
+
+    /* ─── Overflow menu ─── */
+    .overflow-menu {
+      position: absolute; right: 0; top: calc(100% + 4px); z-index: 50;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+      padding: 4px; min-width: 120px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .overflow-menu-label {
+      padding: 6px 10px 4px; font-size: 10px; font-weight: 600;
+      color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .overflow-menu-item {
+      display: block; width: 100%; text-align: left; padding: 6px 10px;
+      background: none; border: none; color: var(--text2); font-size: 12px;
+      font-family: inherit; cursor: pointer; border-radius: 6px;
+      transition: all 0.1s var(--ease);
+    }
+    .overflow-menu-item:hover { background: var(--surface2); color: var(--text); }
+
     /* ─── Progress ─── */
     .progress-track { background: var(--surface2); border-radius: 4px; height: 4px; overflow: hidden; margin: 8px 0; }
     .progress-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.5s var(--ease); }
@@ -475,9 +520,13 @@
       const [timeAdjust, setTimeAdjust] = useState(-1);
       const [whisperModel, setWhisperModel] = useState('base');
       const [captionStyle, setCaptionStyle] = useState('branded');
-      const [cropStrategy, setCropStrategy] = useState('center');
+      const [cropStrategy, setCropStrategy] = useState('face');
       const [logoPath, setLogoPath] = useState('');
       const logoRef = useRef();
+      const [outroPath, setOutroPath] = useState('');
+      const initializedRef = useRef(false);
+      const outroRef = useRef();
+      const [outroUploading, setOutroUploading] = useState(false);
       const [transcriptDragOver, setTranscriptDragOver] = useState(false);
       const [transcriptFileName, setTranscriptFileName] = useState('');
 
@@ -500,34 +549,44 @@
 
       const [logoUploading, setLogoUploading] = useState(false);
       const [browsing, setBrowsing] = useState(false);
+      const [clipHistory, setClipHistory] = useState([]);
+      const [historyOpen, setHistoryOpen] = useState(false);
 
       const [encoderInfo, setEncoderInfo] = useState(null);
       useEffect(() => { api('/encoder-info').then(d => { if(d.best) setEncoderInfo(d); }).catch(()=>{}); }, []);
+
+      // Fetch clip history on mount and after exports
+      const fetchHistory = () => { fetch('/api/history?limit=50').then(r=>r.json()).then(d=>{ if(Array.isArray(d)) setClipHistory(d); }).catch(()=>{}); };
+      useEffect(fetchHistory, []);
+      useEffect(() => { if (phase === 'done') fetchHistory(); }, [phase]);
 
       // --- MCP ↔ UI Bridge: connect SSE + sync state ---
       const { lastEvent: sseEvent, connected: mcpConnected } = useSSE();
 
       // Sync UI state to server on changes (fire-and-forget)
+      // Guard: don't sync until initial SSE state has been received to avoid overwriting persisted state with defaults
       const prevSyncRef = useRef('');
       useEffect(() => {
+        if (!initializedRef.current) return;
         const state = {
           _source: 'ui',
           videoPath,
           filePath: file?.file_path || '',
           suggestions,
           deselectedIndices: Array.from(deselected),
-          settings: { captionStyle, cropStrategy, logoPath },
+          settings: { captionStyle, cropStrategy, logoPath, outroPath },
           phase,
         };
         const key = JSON.stringify(state);
         if (key === prevSyncRef.current) return;
         prevSyncRef.current = key;
         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => {});
-      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, logoPath, phase]);
+      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, logoPath, outroPath, phase]);
 
       // Sync transcript separately (large payload)
       const prevTranscriptRef = useRef(null);
       useEffect(() => {
+        if (!initializedRef.current) return;
         if (!transcript || transcript === prevTranscriptRef.current) return;
         prevTranscriptRef.current = transcript;
         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', transcript }) }).catch(() => {});
@@ -536,6 +595,7 @@
       // Sync raw transcript text so MCP can read it before pipeline runs
       const prevRawRef = useRef('');
       useEffect(() => {
+        if (!initializedRef.current) return;
         if (transcriptText === prevRawRef.current) return;
         prevRawRef.current = transcriptText;
         if (transcriptText.trim()) {
@@ -549,16 +609,24 @@
         if (!sseEvent || sseEvent.ts === lastHandledTsRef.current) return;
         lastHandledTsRef.current = sseEvent.ts;
 
-        if (sseEvent.type === 'state-sync') {
+        if (sseEvent.type === 'state-sync' || sseEvent.type === 'state') {
           const d = sseEvent.data;
-          if (d.suggestions) { setSuggestions(d.suggestions); setDeselected(new Set()); }
+          if (d.suggestions) setSuggestions(d.suggestions);
+          if (d.deselectedIndices !== undefined) setDeselected(new Set(d.deselectedIndices));
+          else if (d.suggestions && !d.deselectedIndices) setDeselected(new Set());
           if (d.phase) setPhase(d.phase);
           if (d.videoPath !== undefined) setVideoPath(d.videoPath);
           if (d.transcript) setTranscript(d.transcript);
+          if (d.rawTranscriptText && !transcript) setTranscriptText(d.rawTranscriptText);
           if (d.settings) {
             if (d.settings.captionStyle) setCaptionStyle(d.settings.captionStyle);
             if (d.settings.cropStrategy) setCropStrategy(d.settings.cropStrategy);
             if (d.settings.logoPath !== undefined) setLogoPath(d.settings.logoPath);
+            if (d.settings.outroPath !== undefined) setOutroPath(d.settings.outroPath);
+          }
+          // Mark initialized after first state restoration so sync useEffects don't overwrite with defaults
+          if (sseEvent.type === 'state') {
+            initializedRef.current = true;
           }
         } else if (sseEvent.type === 'export-started') {
           setBatchJobId(sseEvent.data.jobId);
@@ -689,7 +757,7 @@
         const data = await api('/batch-clips', { method:'POST', body: JSON.stringify({
           video_path: file.file_path,
           clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title.slice(0,40), caption_style: captionStyle, crop_strategy: cropStrategy })),
-          transcript_words: transcript?.words || [], logo_path: logoPath || undefined,
+          transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined,
         })});
         setBatchJobId(data.job_id);
       };
@@ -705,7 +773,7 @@
         const data = await api('/create-clip', { method:'POST', body: JSON.stringify({
           video_path: file.file_path, start_second: c.start_second, end_second: c.end_second,
           title: c.title.slice(0,40), caption_style: captionStyle, crop_strategy: cropStrategy,
-          transcript_words: transcript?.words || [], logo_path: logoPath || undefined,
+          transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined,
         })});
         setRetryJobId(data.job_id);
       };
@@ -724,6 +792,12 @@
         try { const d = await uploadFile(f, ()=>{}); if(d.file_path) setLogoPath(d.file_path); }
         catch(e) { setError('Logo upload failed'); }
         finally { setLogoUploading(false); }
+      };
+      const handleOutroUpload = async (f) => {
+        setOutroUploading(true);
+        try { const d = await uploadFile(f, ()=>{}); if(d.file_path) setOutroPath(d.file_path); }
+        catch(e) { setError('Outro upload failed'); }
+        finally { setOutroUploading(false); }
       };
       const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || whisperJobId;
       const selectedClips = suggestions.filter((_,i) => !deselected.has(i));
@@ -871,17 +945,39 @@
                     </select>
                   </div>
                 </div>
-                {captionStyle === 'branded' && (
-                  <div className="fade-in" style={{display:'flex',gap:8,alignItems:'center'}}>
-                    <input type="text" placeholder="Logo image path (optional)" value={logoPath} onChange={e=>setLogoPath(e.target.value)}
-                      style={{flex:1}} disabled={isProcessing||logoUploading} />
-                    <button className="btn btn-ghost btn-sm" onClick={()=>logoRef.current?.click()} disabled={isProcessing||logoUploading} style={{minWidth:72}}>
-                      {logoUploading ? <><div className="spinner sm"/><span style={{fontSize:11}}>wait</span></> : 'Upload'}
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  {captionStyle === 'branded' && (
+                    logoPath ? (
+                      <div className="asset-pill fade-in">
+                        <span className="asset-pill-icon">
+                          <img src={`/api/stream-source?path=${encodeURIComponent(logoPath)}`}
+                            style={{width:16,height:16,objectFit:'contain',borderRadius:3}} onError={e=>{e.target.style.display='none'}} />
+                        </span>
+                        <span className="asset-pill-name">{logoPath.split('/').pop()}</span>
+                        <button className="asset-pill-x" onClick={()=>setLogoPath('')} disabled={isProcessing}>{'\u00D7'}</button>
+                      </div>
+                    ) : (
+                      <button className="asset-add fade-in" onClick={()=>logoRef.current?.click()} disabled={isProcessing||logoUploading}>
+                        {logoUploading ? <div className="spinner sm"/> : '+'} Logo
+                      </button>
+                    )
+                  )}
+                  {outroPath ? (
+                    <div className="asset-pill">
+                      <span className="asset-pill-icon" style={{fontSize:11}}>{'▶'}</span>
+                      <span className="asset-pill-name">{outroPath.split('/').pop()}</span>
+                      <button className="asset-pill-x" onClick={()=>setOutroPath('')} disabled={isProcessing}>{'\u00D7'}</button>
+                    </div>
+                  ) : (
+                    <button className="asset-add" onClick={()=>outroRef.current?.click()} disabled={isProcessing||outroUploading}>
+                      {outroUploading ? <div className="spinner sm"/> : '+'} Outro
                     </button>
-                    <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg,.svg" style={{display:'none'}}
-                      onChange={e=>e.target.files[0]&&handleLogoUpload(e.target.files[0])} />
-                  </div>
-                )}
+                  )}
+                  <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg,.svg" style={{display:'none'}}
+                    onChange={e=>e.target.files[0]&&handleLogoUpload(e.target.files[0])} />
+                  <input ref={outroRef} type="file" accept=".mp4,.mov,.mkv,.webm" style={{display:'none'}}
+                    onChange={e=>e.target.files[0]&&handleOutroUpload(e.target.files[0])} />
+                </div>
               </div>
 
               {/* Error */}
@@ -944,11 +1040,28 @@
                       {phase==='suggesting' ? `Found ${suggestions.length} clip${suggestions.length!==1?'s':''}`
                         : phase==='review' ? `Clips \u00B7 ${selectedCount} selected` : 'Clips'}
                     </div>
-                    {phase === 'review' && (
-                      <button className="btn btn-primary btn-sm" disabled={selectedCount===0} onClick={startExport}>
-                        Export {selectedCount} clip{selectedCount!==1?'s':''}
-                      </button>
-                    )}
+                    <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                      {phase === 'review' && (
+                        <button className="btn btn-primary btn-sm" disabled={selectedCount===0} onClick={startExport}>
+                          Export {selectedCount} clip{selectedCount!==1?'s':''}
+                        </button>
+                      )}
+                      {transcript && (phase === 'review' || phase === 'done') && (
+                        <div style={{position:'relative'}}>
+                          <button className="btn btn-ghost btn-sm overflow-menu-btn" onClick={e=>{const m=e.currentTarget.nextElementSibling;m.style.display=m.style.display==='block'?'none':'block';}} style={{padding:'4px 8px',fontSize:14,color:'var(--text3)',lineHeight:1}}>
+                            {'\u22EF'}
+                          </button>
+                          <div className="overflow-menu" style={{display:'none'}}>
+                            <div className="overflow-menu-label">Export transcript</div>
+                            {['SRT','VTT','JSON'].map(fmt => (
+                              <button key={fmt} className="overflow-menu-item" onClick={e=>{window.open(`/api/export-transcript?format=${fmt.toLowerCase()}`,'_blank');e.currentTarget.closest('.overflow-menu').style.display='none';}}>
+                                {fmt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {suggestions.map((clip, i) => {
@@ -1034,6 +1147,38 @@
                   )}
                 </div>
               )}
+              {/* ═══════════ CLIP HISTORY ═══════════ */}
+              {clipHistory.length > 0 && (
+                <div className="section" style={{marginTop:16}}>
+                  <div className="section-label" style={{cursor:'pointer',userSelect:'none',display:'flex',justifyContent:'space-between',alignItems:'center'}}
+                    onClick={()=>setHistoryOpen(!historyOpen)}>
+                    <span>History ({clipHistory.length})</span>
+                    <span style={{fontSize:10,color:'var(--text3)',transition:'transform 0.2s',transform:historyOpen?'rotate(180deg)':'rotate(0)'}}>{'\u25BC'}</span>
+                  </div>
+                  {historyOpen && (
+                    <div className="fade-in" style={{display:'flex',flexDirection:'column',gap:4,maxHeight:300,overflowY:'auto',marginTop:8}}>
+                      {clipHistory.map((c,i) => {
+                        const date = new Date(c.created_at);
+                        const ago = ((Date.now() - date.getTime()) / 3600000);
+                        const timeStr = ago < 1 ? `${Math.round(ago*60)}m ago` : ago < 24 ? `${Math.round(ago)}h ago` : date.toLocaleDateString();
+                        const fname = c.output_path?.split('/').pop() || c.title;
+                        return (
+                          <div key={c.id||i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',background:'var(--surface)',borderRadius:'var(--radius-sm)',fontSize:12,cursor:'pointer'}}
+                            onClick={()=>{ const f=c.output_path?.split('/').pop(); if(f) setPreviewSrc(f); }}>
+                            <div style={{width:6,height:6,borderRadius:3,background:'var(--green)',flexShrink:0}}/>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title || fname}</div>
+                              <div style={{color:'var(--text3)',fontSize:11,marginTop:2}}>
+                                {c.duration}s {'\u00B7'} {c.file_size_mb?.toFixed(1)}MB {'\u00B7'} {c.caption_style} {'\u00B7'} {timeStr}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* ═══════════ RIGHT COLUMN — PREVIEW ═══════════ */}
@@ -1066,8 +1211,8 @@
                   </div>
                 )}
 
-                {/* Style preview mockup — always visible */}
-                <StylePreview style={captionStyle} logoPath={logoPath} />
+                {/* Style preview mockup — hidden when rendered clip is playing */}
+                {!previewSrc && <StylePreview style={captionStyle} logoPath={logoPath} />}
 
                 {/* Settings tags */}
                 <div className="preview-settings">
@@ -1082,6 +1227,11 @@
                   {logoPath && (
                     <div className="preview-tag">
                       Logo {'\u00B7'} <strong>{logoPath.split('/').pop()}</strong>
+                    </div>
+                  )}
+                  {outroPath && (
+                    <div className="preview-tag">
+                      Outro {'\u00B7'} <strong>{outroPath.split('/').pop()}</strong>
                     </div>
                   )}
                 </div>

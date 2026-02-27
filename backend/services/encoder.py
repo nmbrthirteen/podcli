@@ -103,34 +103,36 @@ def _get_encoder_flags(encoder: str) -> list[str]:
     flags = {
         "h264_videotoolbox": [
             "-c:v", "h264_videotoolbox",
-            "-b:v", "6M",              # Bitrate mode (more reliable than -q:v)
+            "-b:v", "12M",             # High bitrate for crisp 1080x1920
+            "-profile:v", "high",
             "-allow_sw", "1",          # Allow software fallback
         ],
         "h264_nvenc": [
             "-c:v", "h264_nvenc",
-            "-preset", "p4",
-            "-cq", "23",
+            "-preset", "p6",           # Slower = higher quality
+            "-cq", "18",               # High quality
             "-profile:v", "high",
         ],
         "h264_amf": [
             "-c:v", "h264_amf",
-            "-quality", "balanced",
+            "-quality", "quality",     # Prioritize quality over speed
             "-rc", "cqp",
-            "-qp_i", "23", "-qp_p", "23",
+            "-qp_i", "18", "-qp_p", "18",
         ],
         "h264_vaapi": [
             "-c:v", "h264_vaapi",
-            "-qp", "23",
+            "-qp", "18",
         ],
         "h264_qsv": [
             "-c:v", "h264_qsv",
-            "-preset", "medium",
-            "-global_quality", "23",
+            "-preset", "slow",
+            "-global_quality", "18",
         ],
         "libx264": [
             "-c:v", "libx264",
-            "-crf", "23",
-            "-preset", "medium",
+            "-crf", "18",              # Near-lossless quality
+            "-preset", "slow",         # Better compression at same quality
+            "-profile:v", "high",
         ],
     }
     return flags.get(encoder, flags["libx264"])
@@ -144,7 +146,7 @@ def get_video_encode_flags() -> list[str]:
     except Exception:
         # Absolute fallback — never let encoder detection break the pipeline
         print("Warning: encoder detection failed, using libx264", file=sys.stderr)
-        return ["-c:v", "libx264", "-crf", "23", "-preset", "medium"]
+        return ["-c:v", "libx264", "-crf", "18", "-preset", "slow", "-profile:v", "high"]
 
 
 def get_encoder_info() -> dict:
@@ -153,5 +155,5 @@ def get_encoder_info() -> dict:
         return detect_encoders()
     except Exception:
         return {"available": ["libx264"], "best": "libx264",
-                "best_flags": ["-c:v", "libx264", "-crf", "23", "-preset", "medium"],
+                "best_flags": ["-c:v", "libx264", "-crf", "18", "-preset", "slow", "-profile:v", "high"],
                 "system": platform.system()}

@@ -5,6 +5,8 @@
  * in conversation, then calls this tool to store/format the suggestions.
  */
 
+import { randomUUID } from "crypto";
+
 export const suggestClipsToolDef = {
   name: "suggest_clips",
   description:
@@ -69,7 +71,8 @@ export async function handleSuggestClips(
 
   // Validate and enrich suggestions
   const enriched = suggestions.map((s, i) => ({
-    clip_id: `clip_${i + 1}`,
+    clip_number: i + 1,
+    clip_id: randomUUID(),
     title: s.title,
     start_second: s.start_second,
     end_second: s.end_second,

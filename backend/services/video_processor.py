@@ -13,7 +13,7 @@ from typing import Optional
 from services.encoder import get_video_encode_flags
 import sys
 
-CPU_FLAGS = ["-c:v", "libx264", "-crf", "23", "-preset", "medium"]
+CPU_FLAGS = ["-c:v", "libx264", "-crf", "18", "-preset", "slow", "-profile:v", "high"]
 
 
 def _run_ffmpeg_with_fallback(cmd_parts_before_enc: list, cmd_parts_after_enc: list, output_path: str, label: str = "encode") -> str:
@@ -95,7 +95,7 @@ def cut_segment(
 def crop_to_vertical(
     input_path: str,
     output_path: str,
-    strategy: str = "center",
+    strategy: str = "face",
 ) -> str:
     """
     Crop/scale video to 1080x1920 (9:16 vertical).
@@ -288,6 +288,75 @@ def burn_captions(
     return output_path
 
 
+def concat_outro(
+    input_path: str,
+    outro_path: str,
+    output_path: str,
+) -> str:
+    """
+    Append an outro video to the end of the main clip.
+    Re-encodes the outro to match the main clip's resolution and codec.
+    """
+    width, height = get_dimensions(input_path)
+
+    concat_list = os.path.join(os.path.dirname(output_path), "concat_list.txt")
+
+    # Re-encode outro to match main clip's dimensions
+    outro_scaled = output_path + ".outro_scaled.mp4"
+    _run_ffmpeg_with_fallback(
+        cmd_parts_before_enc=[
+            "ffmpeg", "-y",
+            "-i", outro_path,
+            "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                   f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
+        ],
+        cmd_parts_after_enc=[
+            "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+            "-movflags", "+faststart",
+        ],
+        output_path=outro_scaled,
+        label="outro_scale",
+    )
+
+    # Re-encode main clip to ensure compatible streams for concat
+    main_reenc = output_path + ".main_reenc.mp4"
+    _run_ffmpeg_with_fallback(
+        cmd_parts_before_enc=[
+            "ffmpeg", "-y",
+            "-i", input_path,
+            "-vf", f"scale={width}:{height}",
+        ],
+        cmd_parts_after_enc=[
+            "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+            "-movflags", "+faststart",
+        ],
+        output_path=main_reenc,
+        label="main_reenc",
+    )
+
+    try:
+        with open(concat_list, "w") as f:
+            f.write(f"file '{main_reenc}'\n")
+            f.write(f"file '{outro_scaled}'\n")
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0",
+            "-i", concat_list,
+            "-c", "copy",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg concat failed: {result.stderr[-500:]}")
+        return output_path
+    finally:
+        for tmp in [concat_list, outro_scaled, main_reenc]:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+
 def normalize_audio(
     input_path: str,
     output_path: str,
@@ -359,45 +428,144 @@ def _detect_face_offset(
     target_ratio: float,
 ) -> Optional[int]:
     """
-    Detect face position in first few seconds and return crop x-offset.
+    Detect face position across the video and return crop x-offset.
+    Uses DNN-based face detector (more robust than Haar cascades).
+    Strongly favors the largest/closest face and clusters positions
+    to lock onto the dominant speaker when multiple faces are visible.
     Returns None if no face detected (caller should fall back to center).
     """
     try:
         import cv2
         import numpy as np
 
-        face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
-
         cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return None
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        duration = total_frames / fps
+
+        # Sample more frames across the full clip for better coverage
+        sample_count = 60
+        sample_times = [i * duration / sample_count for i in range(sample_count)]
+
         face_positions = []
 
-        # Sample ~30 frames from first 5 seconds
-        for _ in range(30):
+        # Try DNN detector first (much more robust than Haar cascades)
+        dnn_detector = None
+        proto_path = os.path.join(os.path.dirname(cv2.__file__), "data",
+                                  "deploy.prototxt")
+        model_path = os.path.join(os.path.dirname(cv2.__file__), "data",
+                                  "res10_300x300_ssd_iter_140000.caffemodel")
+        if os.path.exists(proto_path) and os.path.exists(model_path):
+            dnn_detector = cv2.dnn.readNetFromCaffe(proto_path, model_path)
+
+        # Fallback: load multiple Haar cascades for better coverage
+        cascades = []
+        if dnn_detector is None:
+            for cascade_name in [
+                "haarcascade_frontalface_default.xml",
+                "haarcascade_frontalface_alt2.xml",
+                "haarcascade_profileface.xml",
+            ]:
+                cascade_path = cv2.data.haarcascades + cascade_name
+                if os.path.exists(cascade_path):
+                    cascades.append(cv2.CascadeClassifier(cascade_path))
+
+        for t in sample_times:
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
             ret, frame = cap.read()
             if not ret:
-                break
+                continue
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, 1.3, 5, minSize=(50, 50))
+            h, w = frame.shape[:2]
 
-            if len(faces) > 0:
-                # Get largest face
-                largest = max(faces, key=lambda f: f[2] * f[3])
-                face_center_x = largest[0] + largest[2] // 2
-                face_positions.append(face_center_x)
+            if dnn_detector is not None:
+                # DNN-based detection: handles frontal, profile, angled faces
+                blob = cv2.dnn.blobFromImage(
+                    cv2.resize(frame, (300, 300)), 1.0, (300, 300),
+                    (104.0, 177.0, 123.0)
+                )
+                dnn_detector.setInput(blob)
+                detections = dnn_detector.forward()
+
+                best_score = 0
+                best_cx = None
+                for i in range(detections.shape[2]):
+                    confidence = detections[0, 0, i, 2]
+                    if confidence > 0.3:
+                        x1 = int(detections[0, 0, i, 3] * w)
+                        x2 = int(detections[0, 0, i, 5] * w)
+                        face_w = x2 - x1
+                        # Quadratic face-size weighting: strongly favor larger/closer faces
+                        score = confidence * (face_w ** 2)
+                        if score > best_score:
+                            best_score = score
+                            best_cx = (x1 + x2) // 2
+
+                if best_cx is not None:
+                    face_positions.append(best_cx)
+            else:
+                # Haar cascade fallback: try all loaded cascades
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                for cascade in cascades:
+                    faces = cascade.detectMultiScale(
+                        gray, 1.1, 5, minSize=(60, 60)
+                    )
+                    if len(faces) > 0:
+                        largest = max(faces, key=lambda f: f[2] * f[3])
+                        face_center_x = largest[0] + largest[2] // 2
+                        face_positions.append(face_center_x)
+                        break  # found face with this cascade, move to next frame
 
         cap.release()
 
         if not face_positions:
             return None
 
-        # Average face center x position
-        avg_face_x = int(np.mean(face_positions))
+        # Cluster face positions to find the dominant speaker.
+        # When two speakers are visible, positions will form two groups.
+        # Pick the largest cluster (most frequently detected face).
+        crop_w = int(height * target_ratio)
+        cluster_radius = crop_w * 0.25  # positions within 25% of crop width = same face
+
+        positions = np.array(face_positions)
+
+        # Find all distinct clusters
+        clusters = []
+        used = np.zeros(len(positions), dtype=bool)
+        sorted_idx = np.argsort(positions)
+
+        for idx in sorted_idx:
+            if used[idx]:
+                continue
+            mask = np.abs(positions - positions[idx]) < cluster_radius
+            mask &= ~used
+            cluster = positions[mask]
+            if len(cluster) > 0:
+                clusters.append(cluster)
+                used |= mask
+
+        if not clusters:
+            clusters = [positions]
+
+        # Sort clusters by size (largest first)
+        clusters.sort(key=lambda c: len(c), reverse=True)
+
+        # If top cluster is clearly dominant (>50% more detections), use it
+        # Otherwise pick the cluster whose center is closest to frame center
+        if len(clusters) == 1 or len(clusters[0]) > len(clusters[1]) * 1.5:
+            best_cluster = clusters[0]
+        else:
+            # Two roughly equal clusters = two speakers.
+            # Pick the one closer to frame center for a safer crop.
+            frame_center = width / 2
+            best_cluster = min(clusters[:2], key=lambda c: abs(np.median(c) - frame_center))
+
+        avg_face_x = int(np.median(best_cluster))
 
         # Calculate crop window centered on face
-        crop_w = int(height * target_ratio)
         crop_x = avg_face_x - crop_w // 2
 
         # Clamp to valid range

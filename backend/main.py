@@ -65,11 +65,13 @@ def handle_create_clip(task_id: str, params: dict):
         start_second=params["start_second"],
         end_second=params["end_second"],
         caption_style=params.get("caption_style", "hormozi"),
-        crop_strategy=params.get("crop_strategy", "center"),
+        crop_strategy=params.get("crop_strategy", "face"),
         transcript_words=params.get("transcript_words", []),
         title=params.get("title", "clip"),
         output_dir=params.get("output_dir"),
         logo_path=params.get("logo_path"),
+        outro_path=params.get("outro_path"),
+        clean_fillers=params.get("clean_fillers", True),
         progress_callback=lambda pct, msg: emit_progress(task_id, "processing", pct, msg),
     )
     emit_result(task_id, "success", data=result)
@@ -96,11 +98,13 @@ def handle_batch_clips(task_id: str, params: dict):
                 start_second=clip["start_second"],
                 end_second=clip["end_second"],
                 caption_style=clip.get("caption_style", "hormozi"),
-                crop_strategy=clip.get("crop_strategy", "center"),
+                crop_strategy=clip.get("crop_strategy", "face"),
                 transcript_words=params.get("transcript_words", []),
                 title=clip.get("title", f"clip_{i + 1}"),
                 output_dir=params.get("output_dir"),
                 logo_path=clip.get("logo_path") or params.get("logo_path"),
+                outro_path=params.get("outro_path"),
+                clean_fillers=params.get("clean_fillers", True),
                 progress_callback=lambda pct, msg: emit_progress(
                     task_id, "batch", int((i / total) * 100 + pct / total), msg
                 ),

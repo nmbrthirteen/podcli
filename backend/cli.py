@@ -160,7 +160,7 @@ def cmd_process(args):
                 start_second=clip["start_second"],
                 end_second=clip["end_second"],
                 caption_style=config.get("caption_style", "branded"),
-                crop_strategy=config.get("crop_strategy", "center"),
+                crop_strategy=config.get("crop_strategy", "face"),
                 transcript_words=words,
                 title=clip.get("title", f"clip_{i+1}"),
                 output_dir=output_dir,

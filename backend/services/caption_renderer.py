@@ -17,6 +17,7 @@ from utils.timing_utils import seconds_to_ass
 def generate_ass_header(style: dict, play_res_x: int = 1080, play_res_y: int = 1920) -> str:
     """Generate the ASS file header with style definitions."""
     bold_val = -1 if style["bold"] else 0
+    border_style = style.get("border_style", 1)
 
     return f"""[Script Info]
 Title: Podcast Clip Captions
@@ -28,7 +29,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style["font_name"]},{style["font_size"]},{style["primary_color"]},{style["primary_color"]},{style["outline_color"]},{style["back_color"]},{bold_val},0,0,0,100,100,0,0,1,{style["outline_width"]},{style["shadow_depth"]},{style["alignment"]},40,40,{style["margin_v"]},1
+Style: Default,{style["font_name"]},{style["font_size"]},{style["primary_color"]},{style["primary_color"]},{style["outline_color"]},{style["back_color"]},{bold_val},0,0,0,100,100,0,0,{border_style},{style["outline_width"]},{style["shadow_depth"]},{style["alignment"]},40,40,{style["margin_v"]},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -50,11 +51,41 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: BrandedNormal,{style["font_name"]},{style["font_size"]},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,{style["alignment"]},80,80,{style["margin_v"]},1
+Style: BrandedNormal,{style["font_name"]},{style["font_size"]},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,0,0,{style["alignment"]},80,80,{style["margin_v"]},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+
+MIN_WORD_DURATION = 0.05  # 50ms minimum per word
+
+
+def _sanitize_words(words: list[dict]) -> list[dict]:
+    """
+    Fix timing edge cases before rendering:
+    - Enforce minimum word duration (50ms)
+    - Remove words with empty text
+    - Ensure end > start
+    """
+    cleaned = []
+    for w in words:
+        text = (w.get("word") or "").strip()
+        if not text:
+            continue
+
+        start = float(w.get("start", 0))
+        end = float(w.get("end", 0))
+
+        # Ensure end > start with minimum duration
+        if end <= start:
+            end = start + MIN_WORD_DURATION
+        elif (end - start) < MIN_WORD_DURATION:
+            end = start + MIN_WORD_DURATION
+
+        cleaned.append({**w, "word": text, "start": start, "end": end})
+
+    return cleaned
 
 
 def render_captions(
@@ -75,6 +106,13 @@ def render_captions(
     Returns:
         Path to the generated .ass file
     """
+    words = _sanitize_words(words)
+    if not words:
+        # Write empty subtitle file rather than crashing
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(generate_ass_header(get_style(caption_style)))
+        return output_path
+
     style = get_style(caption_style)
 
     if caption_style == "hormozi":
@@ -96,7 +134,8 @@ def render_captions(
 
 def _render_hormozi(words: list[dict], style: dict, offset: float) -> str:
     """
-    Hormozi style: Show 2-3 words at a time, highlight active word.
+    Hormozi style: Show 2-3 words at a time, smooth karaoke-fill highlight.
+    Uses \\kf tags for progressive word fill — 1 Dialogue per chunk, no flashing.
     """
     header = generate_ass_header(style)
     events = []
@@ -112,26 +151,28 @@ def _render_hormozi(words: list[dict], style: dict, offset: float) -> str:
         if not chunk:
             continue
 
-        for word_idx, active_word in enumerate(chunk):
-            w_start = max(0, active_word["start"] - offset)
-            w_end = max(0, active_word["end"] - offset)
+        chunk_start = max(0, chunk[0]["start"] - offset)
+        chunk_end = max(0, chunk[-1]["end"] - offset)
 
-            parts = []
-            for j, w in enumerate(chunk):
-                text = w["word"].upper() if uppercase else w["word"]
-                if j == word_idx:
-                    active_c = style["active_color"]
-                    parts.append(f"{{\\c{active_c}}}{text}{{\\c{style['primary_color']}}}")
-                else:
-                    parts.append(text)
+        # Build \kf karaoke-fill parts: each word fills progressively
+        parts = []
+        for w in chunk:
+            duration_cs = int((w["end"] - w["start"]) * 100)
+            text = w["word"].upper() if uppercase else w["word"]
+            parts.append(f"{{\\kf{duration_cs}}}{text}")
 
-            line_text = " ".join(parts)
-            start_ts = seconds_to_ass(w_start)
-            end_ts = seconds_to_ass(w_end)
+        # \c = active (filled) color, \2c = inactive (unfilled) color
+        line_text = (
+            f"{{\\c{style['active_color']}\\2c{style['primary_color']}}}"
+            + " ".join(parts)
+        )
 
-            events.append(
-                f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{line_text}"
-            )
+        start_ts = seconds_to_ass(chunk_start)
+        end_ts = seconds_to_ass(chunk_end)
+
+        events.append(
+            f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{line_text}"
+        )
 
     return header + "\n".join(events) + "\n"
 
@@ -143,7 +184,7 @@ def _render_karaoke(words: list[dict], style: dict, offset: float) -> str:
     header = generate_ass_header(style)
     events = []
 
-    sentence_size = 10
+    sentence_size = style.get("words_per_chunk", 5)
     sentences = []
     for i in range(0, len(words), sentence_size):
         sentences.append(words[i : i + sentence_size])
@@ -181,7 +222,7 @@ def _render_subtle(words: list[dict], style: dict, offset: float) -> str:
     header = generate_ass_header(style)
     events = []
 
-    line_size = 7
+    line_size = style.get("words_per_chunk", 5)
     lines = []
     for i in range(0, len(words), line_size):
         lines.append(words[i : i + line_size])
@@ -203,19 +244,28 @@ def _render_subtle(words: list[dict], style: dict, offset: float) -> str:
     return header + "\n".join(events) + "\n"
 
 
+def _normalize_case(text: str) -> str:
+    """Lowercase a word unless it's an acronym or proper 'I'."""
+    stripped = text.strip(".,!?;:-–—'\"")
+    if stripped.isupper() and len(stripped) >= 2:
+        return text  # Likely acronym (e.g. "AI", "CEO")
+    if stripped == "I" or stripped == "I'm" or stripped.startswith("I'"):
+        return text
+    return text.lower()
+
+
 def _render_branded(words: list[dict], style: dict, offset: float) -> str:
     """
-    Branded style — large bold text wrapping across 2-3 lines.
-    Active word gets a dark rounded-box background.
-    All text stays white. Designed for TikTok/Reels vertical video.
-
-    Shows ~7 words at a time (wrapping naturally via ASS WrapStyle: 0),
-    cycling through each word as active with a dark box highlight.
+    Branded style — large bold text, dark rounded box on the active word.
+    Each chunk shows ~4 words. For each word's duration, that word gets a
+    dark background box (BorderStyle=3) while the others stay plain white.
     """
     header = generate_branded_header(style)
     events = []
-    chunk_size = style.get("words_per_chunk", 7)
-    box_color = style.get("active_box_color", "&H00181818")
+    chunk_size = style.get("words_per_chunk", 4)
+    raw_box = style.get("active_box_color", "&H00181818")
+    # Ensure color has trailing & for inline ASS overrides
+    box_color = raw_box if raw_box.endswith("&") else raw_box + "&"
 
     # Group words into chunks
     chunks = []
@@ -227,20 +277,34 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
         if not chunk:
             continue
 
-        for word_idx, active_word in enumerate(chunk):
-            w_start = max(0, active_word["start"] - offset)
-            w_end = max(0, active_word["end"] - offset)
+        chunk_start = max(0, chunk[0]["start"] - offset)
+        chunk_end = max(0, chunk[-1]["end"] - offset)
 
+        # Normalize casing: lowercase except acronyms, capitalize first word
+        normalized = []
+        for j, w in enumerate(chunk):
+            text = _normalize_case(w["word"])
+            if j == 0:
+                text = text[0].upper() + text[1:] if len(text) > 1 else text.upper()
+            normalized.append(text)
+
+        # For each word in the chunk, emit a dialogue line for its active window
+        # where THAT word has a dark box and the rest are plain
+        for wi, w in enumerate(chunk):
+            w_start = max(0, w["start"] - offset)
+            w_end = max(0, w["end"] - offset)
+            if w_end <= w_start:
+                continue
+
+            # Build line: all words visible, active one gets box override
             parts = []
-            for j, w in enumerate(chunk):
-                text = w["word"]
-                if j == word_idx:
-                    # Dark box via thick border: \3c sets border color as box fill
-                    # \xbord\ybord control horizontal/vertical padding
+            for wj, text in enumerate(normalized):
+                if wj == wi:
+                    # Active word: dark rounded box background, white text
+                    # BorderStyle=3: \4c = box fill color, \3c = box border
+                    # \xbord/\ybord = horizontal/vertical padding around text
                     parts.append(
-                        f"{{\\bord10\\xbord14\\ybord8\\3c{box_color}\\shad0}}"
-                        f"{text}"
-                        f"{{\\bord0\\3c&H00000000&}}"
+                        f"{{\\4c{box_color}\\3c{box_color}\\xbord14\\ybord8\\bord1\\shad0}}{text}{{\\4c&H00000000&\\3c&H00000000&\\xbord0\\ybord0\\bord0}}"
                     )
                 else:
                     parts.append(text)
@@ -253,5 +317,8 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
             events.append(
                 f"Dialogue: 0,{start_ts},{end_ts},BrandedNormal,,0,0,0,,{line_text}"
             )
+
+        # Also show the chunk text in the gap between chunks (if any)
+        # This ensures words stay visible for the full chunk duration
 
     return header + "\n".join(events) + "\n"

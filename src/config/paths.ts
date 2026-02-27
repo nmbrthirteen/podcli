@@ -20,6 +20,7 @@ export const paths = {
   history: join(home, "history"),
   clipsHistory: join(home, "history", "clips.json"),
   knowledge: join(home, "knowledge"),
+  uiState: join(home, "ui-state.json"),
   pythonBackend: join(__dirname, "..", "..", "backend", "main.py"),
   pythonPath: process.env.PYTHON_PATH || "python3",
   ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",

@@ -19,8 +19,63 @@ from services.video_processor import (
     crop_to_vertical,
     burn_captions,
     normalize_audio,
+    concat_outro,
 )
 from config.caption_styles import get_style
+
+# Filler words to strip from captions (not aggressive — just obvious fillers)
+_FILLER_WORDS = frozenset([
+    "um", "uh", "uhh", "uhm", "umm", "hmm", "hm", "mhm",
+    "ah", "er", "erm", "eh",
+])
+
+
+def _clean_transcript_words(words: list[dict]) -> list[dict]:
+    """
+    Remove filler words and trim large gaps from transcript.
+
+    - Strips obvious filler words (um, uh, hmm, etc.) so they don't appear in captions.
+    - Caps gaps between consecutive words: if a gap exceeds MAX_GAP, the next word's
+      start is pulled forward so captions don't hang on empty silence.
+    - Not aggressive — only removes standalone fillers, preserves natural pacing.
+    """
+    MAX_GAP = 1.5  # seconds — gaps larger than this get compressed
+    COMPRESSED_GAP = 0.3  # seconds — what large gaps shrink to
+
+    # Step 1: Remove filler words
+    cleaned = []
+    for w in words:
+        text = w.get("word", "").strip()
+        # Strip punctuation for matching, but keep original text
+        bare = text.lower().strip(".,!?;:-–—'\"")
+        if bare in _FILLER_WORDS:
+            continue
+        cleaned.append(w)
+
+    if not cleaned:
+        return cleaned
+
+    # Step 2: Compress large gaps by shifting timestamps forward
+    # This tightens the caption timing without affecting the video itself
+    result = [cleaned[0]]
+    time_shift = 0.0
+
+    for i in range(1, len(cleaned)):
+        prev_end = cleaned[i - 1]["end"]
+        curr_start = cleaned[i]["start"]
+        gap = curr_start - prev_end
+
+        if gap > MAX_GAP:
+            # Compress this gap — shift everything after it forward
+            time_shift += gap - COMPRESSED_GAP
+
+        result.append({
+            **cleaned[i],
+            "start": cleaned[i]["start"] - time_shift,
+            "end": cleaned[i]["end"] - time_shift,
+        })
+
+    return result
 
 
 def generate_clip(
@@ -28,11 +83,13 @@ def generate_clip(
     start_second: float,
     end_second: float,
     caption_style: str = "hormozi",
-    crop_strategy: str = "center",
+    crop_strategy: str = "face",
     transcript_words: list[dict] = None,
     title: str = "clip",
     output_dir: Optional[str] = None,
     logo_path: Optional[str] = None,
+    outro_path: Optional[str] = None,
+    clean_fillers: bool = True,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """
@@ -75,16 +132,18 @@ def generate_clip(
     work_dir = tempfile.mkdtemp(prefix="podcast_clip_")
 
     try:
+        total_steps = 4 + (1 if outro_path and os.path.exists(str(outro_path)) else 0)
+
         # Step 1: Cut the segment from the source video
         if progress_callback:
-            progress_callback(10, "Cutting video segment...")
+            progress_callback(10, f"Trimming to selected time range (1/{total_steps})")
 
         segment_path = os.path.join(work_dir, "segment.mp4")
         cut_segment(video_path, segment_path, start_second, end_second)
 
         # Step 2: Crop to vertical 9:16
         if progress_callback:
-            progress_callback(30, "Cropping to 9:16 vertical...")
+            progress_callback(30, f"Resizing for vertical format (2/{total_steps})")
 
         cropped_path = os.path.join(work_dir, "cropped.mp4")
         crop_to_vertical(segment_path, cropped_path, strategy=crop_strategy)
@@ -92,13 +151,19 @@ def generate_clip(
         # Step 3: Generate captions + burn (with optional gradient & logo)
         if transcript_words:
             if progress_callback:
-                progress_callback(50, f"Rendering {caption_style} captions...")
+                progress_callback(50, f"Adding {caption_style} captions (3/{total_steps})")
 
-            # Filter words that fall within our clip's time range
+            # Filter words that overlap with our clip's time range
+            # Use overlap check instead of strict containment to avoid
+            # dropping words at boundaries
             clip_words = [
                 w for w in transcript_words
-                if w["start"] >= start_second and w["end"] <= end_second
+                if w["end"] > start_second and w["start"] < end_second
             ]
+
+            # Clean filler words and compress large gaps (opt-out via clean_fillers=false)
+            if clean_fillers:
+                clip_words = _clean_transcript_words(clip_words)
 
             if clip_words:
                 # Generate ASS subtitle file
@@ -112,7 +177,7 @@ def generate_clip(
 
                 # Burn captions into video
                 if progress_callback:
-                    progress_callback(65, "Burning captions into video...")
+                    progress_callback(65, f"Rendering captions into video (3/{total_steps})")
 
                 captioned_path = os.path.join(work_dir, "captioned.mp4")
 
@@ -139,14 +204,25 @@ def generate_clip(
 
         # Step 4: Normalize audio
         if progress_callback:
-            progress_callback(80, "Normalizing audio to -14 LUFS...")
+            progress_callback(70, f"Balancing audio levels (4/{total_steps})")
 
         normalized_path = os.path.join(work_dir, "normalized.mp4")
         normalize_audio(captioned_path, normalized_path)
 
-        # Step 5: Move to output
+        # Step 5: Append outro (if provided)
+        if outro_path and os.path.exists(outro_path):
+            if progress_callback:
+                progress_callback(85, f"Adding outro ({total_steps}/{total_steps})")
+
+            with_outro_path = os.path.join(work_dir, "with_outro.mp4")
+            concat_outro(normalized_path, outro_path, with_outro_path)
+            final_video_path = with_outro_path
+        else:
+            final_video_path = normalized_path
+
+        # Step 6: Move to output
         if progress_callback:
-            progress_callback(95, "Finalizing output...")
+            progress_callback(95, "Saving final clip...")
 
         # Clean filename
         safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in title)
@@ -159,7 +235,7 @@ def generate_clip(
         else:
             final_path = os.path.join(work_dir, output_filename)
 
-        shutil.copy2(normalized_path, final_path)
+        shutil.copy2(final_video_path, final_path)
 
         # Get file size
         file_size = os.path.getsize(final_path)
