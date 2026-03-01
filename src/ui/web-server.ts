@@ -1029,6 +1029,122 @@ app.delete("/api/knowledge/:filename", async (req, res) => {
   }
 });
 
+// --- Prompt Builder (shared by /api/generate-prompt and /api/mcp-hints) ---
+
+function getStateContext() {
+  const hasVideo = !!uiState.videoPath;
+  const hasTranscript = Array.isArray((uiState.transcript as any)?.words) && (uiState.transcript as any).words.length > 0;
+  const hasRawTranscript = !!uiState.rawTranscriptText?.trim();
+  const hasSuggestions = uiState.suggestions.length > 0;
+  const selectedCount = uiState.suggestions.length - uiState.deselectedIndices.length;
+  return { hasVideo, hasTranscript, hasRawTranscript, hasSuggestions, selectedCount, phase: uiState.phase };
+}
+
+function buildPromptForAction(action: "suggest" | "export" | "restyle"): string {
+  const ctx = getStateContext();
+  const parts: string[] = [];
+
+  const settingsSummary = [
+    uiState.videoPath ? `Video: ${uiState.videoPath.split("/").pop()}` : null,
+    `Style: ${uiState.settings.captionStyle}`,
+    `Crop: ${uiState.settings.cropStrategy}`,
+    uiState.settings.logoPath ? `Logo: set` : null,
+    uiState.settings.outroPath ? `Outro: set` : null,
+  ].filter(Boolean).join(", ");
+
+  if (action === "suggest") {
+    if (!ctx.hasTranscript && !ctx.hasRawTranscript) {
+      // No transcript yet — prompt includes transcribe step
+      if (uiState.videoPath) {
+        parts.push(`Transcribe the podcast at ${uiState.videoPath} using transcribe_podcast.`);
+      } else {
+        parts.push("Set a video path first, then transcribe it using transcribe_podcast.");
+      }
+      parts.push("Then find the 5-8 best viral-worthy moments and call suggest_clips.");
+    } else {
+      parts.push("Use get_ui_state with include_transcript=true to read the full transcript.");
+      parts.push("Find the 5-8 best viral-worthy moments — hot takes, strong opinions, funny moments, actionable advice, and emotional stories.");
+      parts.push("Then call suggest_clips with your suggestions.");
+    }
+    parts.push(`Current settings: ${settingsSummary}`);
+  } else if (action === "export") {
+    parts.push("Use get_ui_state to read the selected clips.");
+    parts.push(`Export all ${ctx.selectedCount} selected clip${ctx.selectedCount !== 1 ? "s" : ""} using batch_create_clips.`);
+    parts.push(`Current settings: ${settingsSummary}`);
+  } else if (action === "restyle") {
+    parts.push("Use get_ui_state to read the current clips.");
+    parts.push("Re-export all clips with the updated style settings.");
+    parts.push(`Current settings: ${settingsSummary}`);
+  }
+
+  return parts.join("\n");
+}
+
+// --- MCP Prompt Hints ---
+
+/**
+ * GET /api/mcp-hints — Returns contextual MCP prompt suggestions based on current state.
+ * Prompts are practical clip-generation actions, not generic help.
+ * Phrased generically (not Claude-specific) since any MCP client can use them.
+ */
+app.get("/api/mcp-hints", (_req, res) => {
+  const ctx = getStateContext();
+
+  interface Hint {
+    prompt: string;
+    description: string;
+    category: "analyze" | "create" | "refine" | "export";
+  }
+
+  const hints: Hint[] = [];
+
+  // The UI handles video upload and transcript input directly.
+  // MCP hints only appear once there's something to work with.
+
+  if ((ctx.hasRawTranscript || ctx.hasTranscript) && !ctx.hasSuggestions) {
+    // Transcript is ready — suggest clip-finding prompts
+    hints.push(
+      { prompt: "Find the 5 best viral moments from this podcast", description: "Clips optimized for TikTok/Shorts", category: "analyze" },
+      { prompt: "Find moments with hot takes and strong opinions", description: "Controversial, high-engagement clips", category: "analyze" },
+      { prompt: "Find funny moments and quotable one-liners", description: "Entertainment-focused clips", category: "analyze" },
+      { prompt: "Find actionable advice and key insights", description: "Value-driven educational clips", category: "analyze" },
+    );
+  } else if (ctx.phase === "review" && ctx.hasSuggestions && ctx.selectedCount > 0) {
+    // Clips suggested, ready for action
+    hints.push(
+      { prompt: "Export all selected clips", description: `Render ${ctx.selectedCount} clip${ctx.selectedCount !== 1 ? "s" : ""} as vertical shorts`, category: "export" },
+      { prompt: "Export clip #1", description: "Render just the first clip", category: "export" },
+      { prompt: "Change all clips to hormozi style", description: "Bold uppercase, yellow highlight", category: "refine" },
+      { prompt: "Extend clip #1 by 10 seconds", description: "Adjust timing before export", category: "refine" },
+      { prompt: "Find 5 more moments", description: "Additional clips from the transcript", category: "analyze" },
+    );
+  } else if (ctx.phase === "done") {
+    hints.push(
+      { prompt: "Find more viral moments from the transcript", description: "Get another batch of clips", category: "analyze" },
+      { prompt: "Re-export all clips with karaoke style", description: "Try a different caption look", category: "refine" },
+      { prompt: "Save these settings as a preset called 'myshow'", description: "Reuse this config next time", category: "refine" },
+    );
+  }
+
+  res.json({ hints, phase: ctx.phase, hasVideo: ctx.hasVideo, hasTranscript: ctx.hasTranscript, hasSuggestions: ctx.hasSuggestions, selectedCount: ctx.selectedCount });
+});
+
+/**
+ * POST /api/generate-prompt — Build an MCP prompt for the given action using authoritative server state.
+ * Body: { action: "suggest" | "export" | "restyle" }
+ * Returns: { prompt, action, context }
+ */
+app.post("/api/generate-prompt", (req, res) => {
+  const action = req.body.action || "suggest";
+  if (!["suggest", "export", "restyle"].includes(action)) {
+    res.status(400).json({ error: "action must be 'suggest', 'export', or 'restyle'" });
+    return;
+  }
+  const prompt = buildPromptForAction(action);
+  const ctx = getStateContext();
+  res.json({ prompt, action, context: ctx });
+});
+
 // --- MCP ↔ UI Bridge Endpoints ---
 
 /**

@@ -19,11 +19,12 @@ function loadState(): Record<string, unknown> | null {
 export const createClipToolDef = {
   name: "create_clip",
   description:
-    "Create a finished short-form video clip ready for TikTok/YouTube Shorts. " +
-    "Crops to 9:16 vertical (1080x1920), burns styled captions, normalizes audio to -14 LUFS, exports H.264 MP4.\n\n" +
-    "EASIEST: just pass clip_number (e.g. 3) to export a suggested clip — " +
-    "video_path, timestamps, transcript_words, and title are all loaded from session state automatically.\n\n" +
-    "You can also pass explicit start_second/end_second/video_path/transcript_words to override.",
+    "STEP 3 — Export a single clip as a finished vertical short (1080x1920, 9:16).\n\n" +
+    "EASIEST: just pass clip_number (e.g. 3) — everything else auto-loads from session state.\n" +
+    "Output: H.264 MP4 with burned-in captions, normalized audio (-14 LUFS).\n\n" +
+    "For batch export, use batch_create_clips instead.\n" +
+    "Caption styles: branded (professional), hormozi (bold/yellow), karaoke (progressive highlight), subtle (minimal).\n" +
+    "Crop modes: face (follows the speaker), center (fixed center crop).",
   inputSchema: {
     type: "object" as const,
     properties: {

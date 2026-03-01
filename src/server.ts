@@ -27,6 +27,95 @@ async function withKnowledge(result: string): Promise<string> {
   }
 }
 
+/** Append a workflow next-step hint to a tool result. */
+function withNextStep(result: string, nextStep: string): string {
+  return `${result}\n\n---\n[Next Step] ${nextStep}`;
+}
+
+/** Read UI state from the web server, returns null if unavailable. */
+async function readUIState(): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch("http://localhost:3847/api/ui-state");
+    if (!res.ok) return null;
+    return await res.json() as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** Generate workflow guidance based on current state. */
+async function getWorkflowGuidance(): Promise<string> {
+  const state = await readUIState();
+  if (!state) {
+    return (
+      "WORKFLOW — Start from scratch:\n" +
+      "1. Set the video: use set_video or transcribe_podcast with a file path\n" +
+      "2. Get a transcript: use transcribe_podcast (auto) or import_transcript / parse_transcript\n" +
+      "3. Read the transcript: use get_ui_state(include_transcript: true)\n" +
+      "4. Suggest clips: analyze the transcript yourself, then call suggest_clips with your picks\n" +
+      "5. Export: use batch_create_clips(export_selected: true) or create_clip(clip_number: N)\n\n" +
+      "Note: The Web UI is not running. Start it with: npm run ui"
+    );
+  }
+
+  const phase = state.phase as string || "idle";
+  const hasVideo = !!(state.videoPath || state.filePath);
+  const wordCount = state.transcriptWordCount as number || 0;
+  const hasTranscript = wordCount > 0;
+  const rawText = state.rawTranscriptText as string || "";
+  const hasRawTranscript = rawText.length > 0;
+  const suggestions = (state.suggestions as unknown[]) || [];
+  const deselected = (state.deselectedIndices as number[]) || [];
+  const selectedCount = suggestions.length - deselected.length;
+
+  const lines: string[] = [];
+
+  if (!hasVideo) {
+    lines.push(
+      "NEXT: No video loaded yet. To begin:\n" +
+      "  → Use transcribe_podcast(file_path: \"/path/to/episode.mp4\") to transcribe and set the video in one step\n" +
+      "  → Or use set_video(file_path: ...) if you'll import a transcript separately"
+    );
+  } else if (!hasTranscript && !hasRawTranscript) {
+    lines.push(
+      `NEXT: Video is loaded but no transcript yet.\n` +
+      `  → Use transcribe_podcast(file_path: \"${state.videoPath}\") to auto-transcribe with Whisper\n` +
+      `  → Or the user can paste a transcript in the Web UI and you can read it with get_ui_state(include_transcript: true)`
+    );
+  } else if (hasRawTranscript && !hasTranscript) {
+    lines.push(
+      "NEXT: Raw transcript text is available but not yet parsed.\n" +
+      "  → Use get_ui_state(include_transcript: true) to read the raw text\n" +
+      "  → Then use parse_transcript to get word-level timestamps\n" +
+      "  → Or analyze the text directly and call suggest_clips with your findings"
+    );
+  } else if (hasTranscript && suggestions.length === 0) {
+    lines.push(
+      `NEXT: Transcript is ready (${wordCount} words). Time to find viral moments!\n` +
+      "  → Use get_ui_state(include_transcript: true) to read the full transcript\n" +
+      "  → Analyze it for the most engaging, viral-worthy moments\n" +
+      "  → Then call suggest_clips with your suggestions (title, start_second, end_second, reasoning)"
+    );
+  } else if (phase === "review" && selectedCount > 0) {
+    lines.push(
+      `NEXT: ${selectedCount} clips are ready for export!\n` +
+      "  → Use batch_create_clips(export_selected: true) to export all selected clips at once\n" +
+      "  → Or use create_clip(clip_number: N) to export a specific one\n" +
+      "  → Use modify_clip to adjust timing or titles before export\n" +
+      "  → Use toggle_clip to select/deselect clips"
+    );
+  } else if (phase === "done" || phase === "idle" && suggestions.length > 0) {
+    lines.push(
+      "DONE: Clips have been exported!\n" +
+      "  → Use list_outputs to see all rendered clips\n" +
+      "  → Use get_ui_state(include_transcript: true) to find more moments\n" +
+      "  → Try different caption styles (hormozi, karaoke, subtle, branded) for variety"
+    );
+  }
+
+  return lines.join("\n");
+}
+
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "podcli",
@@ -60,7 +149,28 @@ export function createServer(): McpServer {
     async ({ file_path, model_size, language, enable_diarization, num_speakers }) => {
       try {
         const result = await handleTranscribe({ file_path, model_size, language, enable_diarization, num_speakers });
-        return { content: [{ type: "text" as const, text: await withKnowledge(result) }] };
+
+        // Push transcript to Web UI state
+        try {
+          const parsed = JSON.parse(result);
+          await fetch("http://localhost:3847/api/ui-state", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              videoPath: file_path,
+              filePath: file_path,
+              transcript: parsed,
+              phase: "idle",
+            }),
+          });
+        } catch {}
+
+        const text = withNextStep(
+          await withKnowledge(result),
+          "Transcript is ready! Now read it with get_ui_state(include_transcript: true), " +
+          "analyze it for viral moments, then call suggest_clips with your findings."
+        );
+        return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
@@ -116,6 +226,17 @@ export function createServer(): McpServer {
           ).join("\n");
           text += `\n\n[Previously Created Clips — avoid duplicates]\n${summary}`;
         }
+
+        const parsed2 = JSON.parse(result);
+        const clipCount = parsed2.clip_count || 0;
+        text = withNextStep(
+          text,
+          `${clipCount} clips suggested and sent to the UI! The user can review them in the Web UI.\n` +
+          "  → To export all at once: batch_create_clips(export_selected: true)\n" +
+          "  → To export specific ones: create_clip(clip_number: 1) or batch_create_clips(clip_numbers: [1, 3, 5])\n" +
+          "  → To adjust: modify_clip(clip_number: N, updates: {start_second: ..., end_second: ...})\n" +
+          "  → To remove one: toggle_clip(clip_number: N, selected: false)"
+        );
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -197,24 +318,99 @@ export function createServer(): McpServer {
           };
         }
 
-        const result = await handleCreateClip(params);
-        const parsed = JSON.parse(result);
+        // Route through web server for real-time UI progress tracking
+        let usedWebServer = false;
+        let finalResult = "";
+        try {
+          const webRes = await fetch("http://localhost:3847/api/mcp/export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              video_path: params.video_path,
+              clips: [{
+                start_second: params.start_second,
+                end_second: params.end_second,
+                title: (params.title || "clip") as string,
+                caption_style: params.caption_style || "hormozi",
+                crop_strategy: params.crop_strategy || "face",
+              }],
+              transcript_words: params.transcript_words,
+              logo_path: params.logo_path || null,
+              outro_path: params.outro_path || null,
+            }),
+          });
+          if (webRes.ok) {
+            const webData = await webRes.json() as any;
+            const jobId = webData.job_id;
 
-        // Record to history
-        await history.record({
-          source_video: params.video_path as string,
-          start_second: params.start_second as number,
-          end_second: params.end_second as number,
-          caption_style: (params.caption_style || "hormozi") as string,
-          crop_strategy: (params.crop_strategy || "face") as string,
-          logo_path: params.logo_path as string | undefined,
-          title: (params.title || "clip") as string,
-          output_path: parsed.output_path,
-          file_size_mb: parsed.file_size_mb,
-          duration: parsed.duration,
-        });
+            // Poll the job until completion
+            while (true) {
+              await new Promise((r) => setTimeout(r, 2000));
+              const pollRes = await fetch(`http://localhost:3847/api/job/${jobId}`);
+              if (!pollRes.ok) break;
+              const job = await pollRes.json() as any;
+              if (job.status === "done") {
+                usedWebServer = true;
+                finalResult = JSON.stringify(job.result, null, 2);
+                break;
+              }
+              if (job.status === "error") {
+                throw new Error(job.error || "Job failed");
+              }
+            }
+          }
+        } catch (webErr: unknown) {
+          const webMsg = webErr instanceof Error ? webErr.message : String(webErr);
+          if (!webMsg.includes("ECONNREFUSED") && !webMsg.includes("fetch failed")) {
+            // Unexpected error — still try direct fallback
+          }
+        }
 
-        return { content: [{ type: "text" as const, text: result }] };
+        if (!usedWebServer) {
+          // Notify UI that export is starting
+          try {
+            await fetch("http://localhost:3847/api/ui-state", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ phase: "exporting" }),
+            });
+          } catch {}
+
+          finalResult = await handleCreateClip(params);
+          const parsed = JSON.parse(finalResult);
+
+          // Record to history
+          await history.record({
+            source_video: params.video_path as string,
+            start_second: params.start_second as number,
+            end_second: params.end_second as number,
+            caption_style: (params.caption_style || "hormozi") as string,
+            crop_strategy: (params.crop_strategy || "face") as string,
+            logo_path: params.logo_path as string | undefined,
+            title: (params.title || "clip") as string,
+            output_path: parsed.output_path,
+            file_size_mb: parsed.file_size_mb,
+            duration: parsed.duration,
+          });
+
+          // Notify UI that export is done
+          try {
+            await fetch("http://localhost:3847/api/ui-state", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ phase: "done" }),
+            });
+          } catch {}
+        }
+
+        const clipText = withNextStep(
+          finalResult,
+          "Clip exported to data/output/! You can:\n" +
+          "  → Export more: create_clip(clip_number: N) or batch_create_clips(export_selected: true)\n" +
+          "  → List all outputs: list_outputs\n" +
+          "  → Try a different style: create_clip(clip_number: N, caption_style: \"karaoke\")"
+        );
+        return { content: [{ type: "text" as const, text: clipText }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
@@ -258,7 +454,9 @@ export function createServer(): McpServer {
     async (params) => {
       try {
         // Try routing through web server for real-time UI progress
+        // The web server handles SSE broadcasts (export-started, job-update, job-complete)
         let usedWebServer = false;
+        let finalResult: string = "";
         try {
           const webRes = await fetch("http://localhost:3847/api/mcp/export", {
             method: "POST",
@@ -274,37 +472,40 @@ export function createServer(): McpServer {
             const jobId = webData.job_id;
 
             // Poll the job until completion
-            let jobResult: any = null;
             while (true) {
               await new Promise((r) => setTimeout(r, 2000));
               const pollRes = await fetch(`http://localhost:3847/api/job/${jobId}`);
               if (!pollRes.ok) break;
               const job = await pollRes.json() as any;
               if (job.status === "done") {
-                jobResult = job.result;
+                usedWebServer = true;
+                finalResult = JSON.stringify(job.result, null, 2);
                 break;
               }
               if (job.status === "error") {
                 throw new Error(job.error || "Job failed");
               }
             }
-
-            if (jobResult) {
-              usedWebServer = true;
-              return { content: [{ type: "text" as const, text: JSON.stringify(jobResult, null, 2) }] };
-            }
           }
         } catch (webErr: unknown) {
-          // Web server not running or errored — fall back to direct execution
           const webMsg = webErr instanceof Error ? webErr.message : String(webErr);
           if (!webMsg.includes("ECONNREFUSED") && !webMsg.includes("fetch failed")) {
-            // Unexpected error from web server, still try fallback
+            // Unexpected error — still try fallback
           }
         }
 
         if (!usedWebServer) {
-          const result = await handleBatchClips(params);
-          const parsed = JSON.parse(result);
+          // Fallback: run directly without web server (no UI progress)
+          try {
+            await fetch("http://localhost:3847/api/ui-state", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ phase: "exporting" }),
+            });
+          } catch {}
+
+          finalResult = await handleBatchClips(params);
+          const parsed = JSON.parse(finalResult);
 
           // Record each successful clip
           if (parsed.results) {
@@ -325,11 +526,32 @@ export function createServer(): McpServer {
             }
           }
 
-          return { content: [{ type: "text" as const, text: result }] };
+          try {
+            await fetch("http://localhost:3847/api/ui-state", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ phase: "done" }),
+            });
+          } catch {}
         }
 
-        return { content: [{ type: "text" as const, text: "Export completed via web server." }] };
+        const batchText = withNextStep(
+          finalResult,
+          "Batch export complete! Clips are in data/output/. You can:\n" +
+          "  → Use list_outputs to see all rendered clips with file sizes\n" +
+          "  → Find more moments: get_ui_state(include_transcript: true) and suggest_clips again\n" +
+          "  → Re-export with different styles: update_settings then batch_create_clips(export_selected: true)"
+        );
+        return { content: [{ type: "text" as const, text: batchText }] };
       } catch (err: unknown) {
+        // Notify UI of error
+        try {
+          await fetch("http://localhost:3847/api/ui-state", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phase: "review" }),
+          });
+        } catch {}
         const msg = err instanceof Error ? err.message : String(err);
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
@@ -484,13 +706,15 @@ export function createServer(): McpServer {
   // =============================================
   server.tool(
     "get_ui_state",
-    "Read the current podcli session state — clips, video path, settings, phase. " +
+    "Read the current podcli session state and get guidance on what to do next. " +
+    "Returns: video path, transcript status, clip suggestions, settings, and workflow next steps.\n\n" +
+    "IMPORTANT: Call this FIRST when starting a new conversation to understand the current state.\n" +
     "Clips are numbered #1, #2, etc. Use these numbers with create_clip(clip_number), " +
     "batch_create_clips(clip_numbers), modify_clip, and toggle_clip.\n\n" +
-    "Set include_transcript=true only when you need to analyze transcript content (e.g. for suggesting clips).",
+    "Set include_transcript=true when you need to analyze transcript content (e.g. for suggesting clips).",
     {
       include_transcript: z.boolean().optional().default(false).describe(
-        "Include full transcript segments in the response. Only set true when analyzing content for clip suggestions."
+        "Include full transcript segments in the response. Set true when analyzing content for clip suggestions."
       ),
     },
     async ({ include_transcript }) => {
@@ -526,11 +750,6 @@ export function createServer(): McpServer {
             const tag = deselected.includes(i) ? " [DESELECTED]" : "";
             lines.push(`  #${num}: "${title}" (${start}s–${end}s, ${duration}) [${style}]${tag}`);
           }
-          lines.push("");
-          lines.push(`To export: create_clip(clip_number: N) or batch_create_clips(clip_numbers: [1, 3, 5])`);
-          if (selectedCount > 0 && selectedCount < allSuggestions.length) {
-            lines.push(`To export all selected: batch_create_clips(export_selected: true)`);
-          }
         }
 
         if (include_transcript) {
@@ -554,12 +773,19 @@ export function createServer(): McpServer {
           }
         }
 
+        // Append workflow guidance
+        const guidance = await getWorkflowGuidance();
+        lines.push("");
+        lines.push("---");
+        lines.push(guidance);
+
         return { content: [{ type: "text" as const, text: lines.join("\n") }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
+          const guidance = await getWorkflowGuidance();
           return {
-            content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }],
+            content: [{ type: "text" as const, text: `Web UI is not running. Start with: npm run ui\n\n${guidance}` }],
           };
         }
         return {
@@ -575,7 +801,8 @@ export function createServer(): McpServer {
   // =============================================
   server.tool(
     "modify_clip",
-    "Modify or delete a suggested clip by clip_number. Use action='delete' to remove a clip entirely.",
+    "Adjust a suggested clip before exporting. Change timing, title, or caption style. " +
+    "Use action='delete' to remove a clip entirely. Reference clips by clip_number (from get_ui_state).",
     {
       clip_number: z.number().optional().describe("Clip number (1-based, from get_ui_state)"),
       clip_id: z.string().optional().describe("UUID of the clip (alternative to clip_number)"),
@@ -971,7 +1198,8 @@ export function createServer(): McpServer {
   // =============================================
   server.tool(
     "set_video",
-    "Set the working video file in the UI without transcribing it. Validates the file exists and updates the UI state.",
+    "Set the working video file without transcribing. Use this when you'll import a transcript separately. " +
+    "After this, either transcribe_podcast or import a transcript via import_transcript / parse_transcript.",
     {
       file_path: z.string().describe("Absolute path to the video file"),
     },
@@ -996,12 +1224,12 @@ export function createServer(): McpServer {
           body: JSON.stringify({ videoPath: file_path, filePath: file_path }),
         });
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Video set: ${fileInfo.filename} (${fileInfo.size_mb} MB). Use transcribe_podcast to transcribe it.`,
-          }],
-        };
+        const setText = withNextStep(
+          `Video set: ${fileInfo.filename} (${fileInfo.size_mb} MB)`,
+          `Now transcribe it: transcribe_podcast(file_path: "${file_path}")\n` +
+          "  Or if the user pastes a transcript in the UI, read it with get_ui_state(include_transcript: true)"
+        );
+        return { content: [{ type: "text" as const, text: setText }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
@@ -1066,12 +1294,12 @@ export function createServer(): McpServer {
 
         const wordCount = result.data?.words?.length || 0;
         const duration = result.data?.duration || 0;
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Transcript imported: ${wordCount} words, ${Math.round(duration)}s duration. UI updated to review phase.`,
-          }],
-        };
+        const importText = withNextStep(
+          `Transcript imported: ${wordCount} words, ${Math.round(duration)}s duration.`,
+          "Now read the transcript with get_ui_state(include_transcript: true), " +
+          "analyze it for viral moments, then call suggest_clips with your picks."
+        );
+        return { content: [{ type: "text" as const, text: importText }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
@@ -1122,12 +1350,12 @@ export function createServer(): McpServer {
 
         const wordCount = result.data?.words?.length || 0;
         const segCount = result.data?.segments?.length || 0;
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Transcript parsed: ${wordCount} words, ${segCount} segments. UI updated to review phase.`,
-          }],
-        };
+        const parseText = withNextStep(
+          `Transcript parsed: ${wordCount} words, ${segCount} segments.`,
+          "Now read the transcript with get_ui_state(include_transcript: true), " +
+          "analyze it for viral moments, then call suggest_clips with your picks."
+        );
+        return { content: [{ type: "text" as const, text: parseText }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
@@ -1136,6 +1364,66 @@ export function createServer(): McpServer {
         return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
       }
     }
+  );
+
+  // =============================================
+  // MCP Prompt: workflow guide
+  // =============================================
+  server.prompt(
+    "workflow",
+    "Complete podcli workflow guide — from podcast file to finished clips",
+    async () => ({
+      messages: [{
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: [
+            "You are a podcast clip extraction assistant using podcli MCP tools.",
+            "Follow this workflow to create viral short-form clips from podcasts:",
+            "",
+            "## Step 1: Check current state",
+            "Call get_ui_state() to see what's already loaded (video, transcript, clips).",
+            "",
+            "## Step 2: Load the podcast",
+            "If no video is set, use transcribe_podcast(file_path: \"/path/to/file.mp4\") to transcribe.",
+            "This both sets the video AND generates a transcript with word-level timestamps.",
+            "If the user already pasted a transcript in the UI, you can skip to Step 3.",
+            "",
+            "## Step 3: Read the transcript",
+            "Call get_ui_state(include_transcript: true) to read the full transcript.",
+            "Also check if there's a knowledge base with podcast context (host names, show style, etc).",
+            "",
+            "## Step 4: Analyze and suggest clips",
+            "Read through the transcript carefully. Look for:",
+            "- Controversial or surprising statements",
+            "- Strong emotional moments (laughter, passion, anger)",
+            "- Clear actionable advice or insights",
+            "- Story hooks and cliffhangers",
+            "- Quotable one-liners",
+            "- Questions that hook the viewer",
+            "",
+            "For each moment, note the start/end timestamps and craft a catchy title.",
+            "Aim for 30-90 second clips. Then call suggest_clips with your picks.",
+            "",
+            "## Step 5: Export",
+            "Call batch_create_clips(export_selected: true) to render all clips.",
+            "Or use create_clip(clip_number: N) for individual clips.",
+            "",
+            "## Available caption styles:",
+            "- branded: Professional look with dark highlight box, gradient, optional logo",
+            "- hormozi: Bold uppercase, yellow highlight, high energy pop-on reveal",
+            "- karaoke: Full sentence visible, words progressively highlight",
+            "- subtle: Clean minimal white text, no effects",
+            "",
+            "## Tips:",
+            "- Use modify_clip to adjust timing before export",
+            "- Use toggle_clip to select/deselect clips",
+            "- Use update_settings to change the default caption style or crop strategy",
+            "- The user can review and adjust clips in the Web UI at http://localhost:3847",
+          ].join("\n"),
+        },
+      }],
+    })
   );
 
   return server;

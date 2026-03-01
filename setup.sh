@@ -60,8 +60,25 @@ install() {
   echo ""
   echo "━━━ [2/6] Creating directories ━━━"
   CLIPPER_HOME="${PODCLI_HOME:-$SCRIPT_DIR/.podcli}"
-  mkdir -p "$CLIPPER_HOME"/{cache/transcripts,working,working/uploads,output,logs,assets,history,knowledge}
-  echo "  ✓ $CLIPPER_HOME"
+  DATA_DIR="${PODCLI_DATA:-$SCRIPT_DIR/data}"
+  mkdir -p "$CLIPPER_HOME"/{assets,history,knowledge}
+  mkdir -p "$DATA_DIR"/{cache/transcripts,working,working/uploads,output,logs}
+  echo "  ✓ $CLIPPER_HOME (internal)"
+  echo "  ✓ $DATA_DIR (output & cache)"
+
+  # Download DNN face detection model if missing
+  MODEL_DIR="$SCRIPT_DIR/backend/models"
+  mkdir -p "$MODEL_DIR"
+  if [ ! -f "$MODEL_DIR/res10_300x300_ssd_iter_140000.caffemodel" ]; then
+    echo "  ↓ Downloading face detection model..."
+    curl -sL -o "$MODEL_DIR/deploy.prototxt" \
+      "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
+    curl -sL -o "$MODEL_DIR/res10_300x300_ssd_iter_140000.caffemodel" \
+      "https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
+    echo "  ✓ Face detection model ready"
+  else
+    echo "  ✓ Face detection model exists"
+  fi
 
   echo ""
   echo "━━━ [3/6] Python virtual environment ━━━"

@@ -32,17 +32,11 @@ _FILLER_WORDS = frozenset([
 
 def _clean_transcript_words(words: list[dict]) -> list[dict]:
     """
-    Remove filler words and trim large gaps from transcript.
+    Remove filler words from transcript captions.
 
     - Strips obvious filler words (um, uh, hmm, etc.) so they don't appear in captions.
-    - Caps gaps between consecutive words: if a gap exceeds MAX_GAP, the next word's
-      start is pulled forward so captions don't hang on empty silence.
-    - Not aggressive — only removes standalone fillers, preserves natural pacing.
+    - Does NOT shift timestamps — word timing must match the actual audio exactly.
     """
-    MAX_GAP = 1.5  # seconds — gaps larger than this get compressed
-    COMPRESSED_GAP = 0.3  # seconds — what large gaps shrink to
-
-    # Step 1: Remove filler words
     cleaned = []
     for w in words:
         text = w.get("word", "").strip()
@@ -52,30 +46,7 @@ def _clean_transcript_words(words: list[dict]) -> list[dict]:
             continue
         cleaned.append(w)
 
-    if not cleaned:
-        return cleaned
-
-    # Step 2: Compress large gaps by shifting timestamps forward
-    # This tightens the caption timing without affecting the video itself
-    result = [cleaned[0]]
-    time_shift = 0.0
-
-    for i in range(1, len(cleaned)):
-        prev_end = cleaned[i - 1]["end"]
-        curr_start = cleaned[i]["start"]
-        gap = curr_start - prev_end
-
-        if gap > MAX_GAP:
-            # Compress this gap — shift everything after it forward
-            time_shift += gap - COMPRESSED_GAP
-
-        result.append({
-            **cleaned[i],
-            "start": cleaned[i]["start"] - time_shift,
-            "end": cleaned[i]["end"] - time_shift,
-        })
-
-    return result
+    return cleaned
 
 
 def generate_clip(

@@ -18,10 +18,11 @@ function loadState(): Record<string, unknown> | null {
 export const batchClipsToolDef = {
   name: "batch_create_clips",
   description:
-    "Create multiple short-form clips in one batch.\n\n" +
-    "EASIEST: pass export_selected=true to export all selected clips, " +
-    "or clip_numbers=[1, 3, 5] for specific clips — " +
-    "everything is loaded from session state automatically.",
+    "STEP 3 — Export multiple clips at once as finished vertical shorts.\n\n" +
+    "EASIEST: pass export_selected=true to export all selected clips in one go.\n" +
+    "Alternative: pass clip_numbers=[1, 3, 5] for specific ones.\n" +
+    "Everything (video, timestamps, settings) auto-loads from session state.\n\n" +
+    "Each clip gets: 9:16 vertical crop, burned-in captions, normalized audio, H.264 MP4.",
   inputSchema: {
     type: "object" as const,
     properties: {

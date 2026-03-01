@@ -73,7 +73,10 @@ def cut_segment(
 ) -> str:
     """
     Extract a time segment from a video file.
-    Uses -ss before -i for fast seeking.
+    Uses -ss before -i with re-encoding for frame-accurate timestamps.
+    Stream-copy (-c copy) snaps to keyframes which can be seconds off,
+    causing caption-audio desync. Re-encoding with ultrafast is still
+    fast and guarantees the output starts at exactly the requested time.
     """
     duration = end_second - start_second
 
@@ -82,7 +85,8 @@ def cut_segment(
         "-ss", str(start_second),
         "-i", input_path,
         "-t", str(duration),
-        "-c", "copy",  # No re-encoding for speed
+        "-c:v", "libx264", "-crf", "18", "-preset", "ultrafast",
+        "-c:a", "aac", "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",
         output_path,
     ]
@@ -454,10 +458,20 @@ def _detect_face_offset(
 
         # Try DNN detector first (much more robust than Haar cascades)
         dnn_detector = None
-        proto_path = os.path.join(os.path.dirname(cv2.__file__), "data",
-                                  "deploy.prototxt")
-        model_path = os.path.join(os.path.dirname(cv2.__file__), "data",
-                                  "res10_300x300_ssd_iter_140000.caffemodel")
+
+        # Look for bundled DNN model first, then fall back to OpenCV's data dir
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        bundled_proto = os.path.join(backend_dir, "models", "deploy.prototxt")
+        bundled_model = os.path.join(backend_dir, "models",
+                                     "res10_300x300_ssd_iter_140000.caffemodel")
+        cv2_proto = os.path.join(os.path.dirname(cv2.__file__), "data",
+                                 "deploy.prototxt")
+        cv2_model = os.path.join(os.path.dirname(cv2.__file__), "data",
+                                 "res10_300x300_ssd_iter_140000.caffemodel")
+
+        proto_path = bundled_proto if os.path.exists(bundled_proto) else cv2_proto
+        model_path = bundled_model if os.path.exists(bundled_model) else cv2_model
+
         if os.path.exists(proto_path) and os.path.exists(model_path):
             dnn_detector = cv2.dnn.readNetFromCaffe(proto_path, model_path)
 
@@ -494,10 +508,16 @@ def _detect_face_offset(
                 best_cx = None
                 for i in range(detections.shape[2]):
                     confidence = detections[0, 0, i, 2]
-                    if confidence > 0.3:
+                    if confidence > 0.5:  # Higher threshold to reduce false positives
                         x1 = int(detections[0, 0, i, 3] * w)
+                        y1 = int(detections[0, 0, i, 4] * h)
                         x2 = int(detections[0, 0, i, 5] * w)
+                        y2 = int(detections[0, 0, i, 6] * h)
                         face_w = x2 - x1
+                        face_h = y2 - y1
+                        # Skip tiny detections (likely false positives)
+                        if face_w < w * 0.05 or face_h < h * 0.05:
+                            continue
                         # Quadratic face-size weighting: strongly favor larger/closer faces
                         score = confidence * (face_w ** 2)
                         if score > best_score:
@@ -553,15 +573,10 @@ def _detect_face_offset(
         # Sort clusters by size (largest first)
         clusters.sort(key=lambda c: len(c), reverse=True)
 
-        # If top cluster is clearly dominant (>50% more detections), use it
-        # Otherwise pick the cluster whose center is closest to frame center
-        if len(clusters) == 1 or len(clusters[0]) > len(clusters[1]) * 1.5:
-            best_cluster = clusters[0]
-        else:
-            # Two roughly equal clusters = two speakers.
-            # Pick the one closer to frame center for a safer crop.
-            frame_center = width / 2
-            best_cluster = min(clusters[:2], key=lambda c: abs(np.median(c) - frame_center))
+        # Always pick the largest cluster (most frequently detected face).
+        # This ensures we lock onto the dominant speaker rather than
+        # splitting the crop between two equally-visible speakers.
+        best_cluster = clusters[0]
 
         avg_face_x = int(np.median(best_cluster))
 

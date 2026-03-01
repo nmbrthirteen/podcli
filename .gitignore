@@ -23,6 +23,9 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
+# DNN models (large binaries, downloaded by setup.sh)
+backend/models/*.caffemodel
+
 # Media & temp files
 *.mp4
 *.mp3

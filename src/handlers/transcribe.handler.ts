@@ -8,10 +8,13 @@ const cache = new TranscriptCache();
 export const transcribeToolDef = {
   name: "transcribe_podcast",
   description:
-    "Transcribe a podcast video/audio file with word-level timestamps and automatic " +
-    "speaker detection. Identifies who is speaking when (supports 2-5 speakers). " +
-    "Returns structured transcript with word timing and speaker labels. " +
-    "Supports MP4, MOV, WebM, MKV, MP3, WAV.",
+    "STEP 1 — Transcribe a podcast video/audio file. This is typically the first tool you call.\n\n" +
+    "What it does: Uses Whisper AI for word-level timestamps + pyannote for speaker detection (who said what).\n" +
+    "Returns: Full transcript with word timing, speaker labels, and segments.\n" +
+    "Caching: Results are cached by file hash — same file won't be re-transcribed.\n" +
+    "Supported formats: MP4, MOV, WebM, MKV, MP3, WAV.\n\n" +
+    "After transcription: call get_ui_state(include_transcript: true) to read the transcript, " +
+    "then analyze it for viral moments and call suggest_clips.",
   inputSchema: {
     type: "object" as const,
     properties: {

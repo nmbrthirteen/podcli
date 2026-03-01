@@ -4,347 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>podcli</title>
+  <link rel="icon" type="image/png" href="/podcli-icon-transparent.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-  <style>
-    :root {
-      --bg: #0b0b0d;
-      --surface: #131316;
-      --surface2: #1b1b20;
-      --border: #252530;
-      --border-hover: #35354a;
-      --text: #e8e8e2;
-      --text2: #77776f;
-      --text3: #4e4e48;
-      --accent: #d4874a;
-      --accent-hover: #e09860;
-      --accent-subtle: rgba(212, 135, 74, 0.10);
-      --accent-glow: rgba(212, 135, 74, 0.25);
-      --green: #4ade80;
-      --green-subtle: rgba(74, 222, 128, 0.07);
-      --green-border: rgba(74, 222, 128, 0.18);
-      --red: #f87171;
-      --red-subtle: rgba(248, 113, 113, 0.07);
-      --red-border: rgba(248, 113, 113, 0.18);
-      --radius: 12px;
-      --radius-sm: 8px;
-      --ease: cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    body {
-      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: var(--bg); color: var(--text); min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* ─── Layout ─── */
-    .app { max-width: 1080px; margin: 0 auto; padding: 48px 32px 96px; }
-    .header { margin-bottom: 36px; }
-    .logo { font-size: 13px; font-weight: 700; letter-spacing: 1.2px; color: var(--text3); margin-bottom: 10px; text-transform: uppercase; }
-    .logo span { color: var(--accent); }
-    h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.15; }
-    .layout { display: grid; grid-template-columns: 1fr 340px; gap: 40px; align-items: start; }
-    .main-col { min-width: 0; }
-    .preview-col { position: relative; }
-
-    /* ─── Preview Panel ─── */
-    .preview-panel { position: sticky; top: 32px; }
-    .preview-player {
-      background: #000; border: 1px solid var(--border);
-      border-radius: var(--radius); overflow: hidden; position: relative;
-    }
-    .preview-player video {
-      width: 100%; display: block; background: #000;
-    }
-    .preview-player video.vertical {
-      max-height: 480px; width: auto; margin: 0 auto;
-    }
-    .preview-empty {
-      aspect-ratio: 16/9; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 8px;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); color: var(--text3); font-size: 13px;
-    }
-    .preview-empty .pe-icon { font-size: 28px; opacity: 0.3; }
-
-    /* ─── Style Preview (vertical phone mockup) ─── */
-    .style-preview {
-      aspect-ratio: 9/16; width: 100%;
-      background: #111114; border: 1px solid var(--border);
-      border-radius: var(--radius); overflow: hidden;
-      position: relative; user-select: none;
-    }
-    .style-preview .sp-bg {
-      position: absolute; inset: 0;
-      background:
-        radial-gradient(ellipse at 35% 30%, rgba(80,60,40,0.18) 0%, transparent 60%),
-        radial-gradient(ellipse at 65% 55%, rgba(50,50,70,0.12) 0%, transparent 50%),
-        linear-gradient(180deg, #16161a 0%, #111114 100%);
-    }
-    .style-preview .sp-person {
-      position: absolute; top: 18%; left: 50%; transform: translateX(-50%);
-      width: 55%; aspect-ratio: 3/4;
-      background: radial-gradient(ellipse at 50% 35%, rgba(140,120,100,0.15) 0%, rgba(80,70,60,0.06) 60%, transparent 80%);
-      border-radius: 50% 50% 44% 44%;
-    }
-    .style-preview .sp-gradient {
-      position: absolute; bottom: 0; left: 0; right: 0; height: 55%;
-      background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 40%, transparent 100%);
-      pointer-events: none;
-    }
-    .style-preview .sp-captions {
-      position: absolute; left: 0; right: 0;
-      display: flex; flex-direction: column; align-items: center;
-      padding: 0 20px; text-align: center;
-      font-family: Arial, Helvetica, sans-serif;
-      line-height: 1.35; transition: all 0.3s var(--ease);
-    }
-    .style-preview .sp-word {
-      display: inline; transition: all 0.25s var(--ease);
-    }
-    .style-preview .sp-logo {
-      position: absolute; top: 14px; left: 14px;
-      width: 32px; height: 32px; border-radius: 7px;
-      overflow: hidden;
-    }
-    .preview-clip-range {
-      padding: 8px 12px; background: var(--surface);
-      border-top: 1px solid var(--border);
-      font-size: 12px; color: var(--text2);
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .preview-clip-range .clip-name {
-      font-weight: 600; color: var(--text);
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      max-width: 200px;
-    }
-    .preview-back {
-      padding: 0; background: none; border: none; color: var(--accent);
-      font-family: inherit; font-size: 12px; font-weight: 600;
-      cursor: pointer; transition: opacity 0.15s;
-    }
-    .preview-back:hover { opacity: 0.7; }
-    .preview-settings {
-      margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px;
-    }
-    .preview-tag {
-      display: inline-flex; align-items: center; gap: 5px;
-      padding: 5px 10px; background: var(--surface);
-      border: 1px solid var(--border); border-radius: 8px;
-      font-size: 11px; color: var(--text2); font-weight: 500;
-      transition: all 0.2s var(--ease);
-    }
-    .preview-tag strong { color: var(--text); font-weight: 600; text-transform: capitalize; }
-    .preview-tag.changed { border-color: var(--accent); background: var(--accent-subtle); }
-
-    /* ─── Sections ─── */
-    .section { margin-bottom: 24px; }
-    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.8px; color: var(--text2); margin-bottom: 10px; text-transform: uppercase; }
-
-    /* ─── Form Elements ─── */
-    input[type="text"], input[type="number"], select, textarea {
-      width: 100%; background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 11px 14px;
-      color: var(--text); font-family: inherit; font-size: 14px;
-      outline: none; transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
-    }
-    input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
-      border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle);
-    }
-    textarea {
-      font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
-      font-size: 12px; resize: vertical; min-height: 120px; line-height: 1.7;
-    }
-    select {
-      appearance: none; cursor: pointer; padding-right: 34px;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%2377776f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-      background-repeat: no-repeat; background-position: right 14px center;
-    }
-
-    /* ─── Buttons ─── */
-    .btn {
-      padding: 10px 18px; border-radius: var(--radius); font-family: inherit;
-      font-size: 13px; font-weight: 600; cursor: pointer; border: none;
-      transition: all 0.15s var(--ease); display: inline-flex;
-      align-items: center; justify-content: center; gap: 6px; text-decoration: none;
-    }
-    .btn:active:not(:disabled) { transform: scale(0.97); }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-    .btn-primary:disabled { opacity: 0.25; cursor: not-allowed; }
-    .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
-    .btn-ghost:hover { border-color: var(--border-hover); color: var(--text); }
-    .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: var(--radius-sm); }
-    .btn-go {
-      width: 100%; padding: 14px; font-size: 15px; justify-content: center;
-      background: var(--accent); color: #fff; border-radius: var(--radius);
-    }
-    .btn-go:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 4px 24px var(--accent-glow); }
-    .btn-go:disabled { opacity: 0.25; cursor: not-allowed; }
-    .pill { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-    .pill-blue { background: var(--accent-subtle); color: var(--accent); }
-
-    /* ─── Drop Zone ─── */
-    .drop-zone {
-      border: 1.5px dashed var(--border); border-radius: var(--radius);
-      padding: 32px 20px; text-align: center; cursor: pointer;
-      transition: all 0.2s var(--ease); position: relative; overflow: hidden;
-    }
-    .drop-zone:hover { border-color: var(--border-hover); background: rgba(255,255,255,0.012); }
-    .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-subtle); box-shadow: 0 0 0 4px var(--accent-subtle); }
-    .drop-zone.uploading { border-color: var(--accent); border-style: solid; pointer-events: none; }
-    .drop-zone .icon { font-size: 28px; margin-bottom: 8px; opacity: 0.35; line-height: 1; }
-    .drop-zone .label { font-size: 13px; color: var(--text2); line-height: 1.5; }
-    .drop-zone .label strong { color: var(--accent); font-weight: 600; }
-    .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-    .upload-bar { position: absolute; bottom: 0; left: 0; height: 3px; background: var(--accent); border-radius: 0 2px 2px 0; transition: width 0.25s var(--ease); }
-
-    /* ─── File Badge ─── */
-    .file-badge {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 14px; background: var(--green-subtle);
-      border: 1px solid var(--green-border); border-radius: var(--radius);
-    }
-    .file-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
-    .file-badge .name { font-size: 13px; color: var(--green); font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .file-badge .meta { font-size: 11px; color: var(--text2); flex-shrink: 0; }
-
-    /* ─── Tabs ─── */
-    .tabs { display: flex; gap: 2px; background: var(--surface); border-radius: var(--radius); padding: 3px; margin-bottom: 14px; }
-    .tab {
-      flex: 1; text-align: center; padding: 8px 12px;
-      border-radius: calc(var(--radius) - 3px); font-size: 13px;
-      font-weight: 600; color: var(--text2); cursor: pointer;
-      transition: all 0.2s var(--ease); user-select: none;
-    }
-    .tab:hover:not(.active) { color: var(--text); }
-    .tab.active { background: var(--accent); color: #fff; }
-
-    /* ─── Settings ─── */
-    .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
-    .field-label { font-size: 11px; color: var(--text2); font-weight: 600; display: block; margin-bottom: 6px; }
-    .row { display: flex; gap: 10px; align-items: flex-end; }
-    .row > * { flex: 1; }
-
-    /* ─── Asset pills ─── */
-    .asset-pill {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 5px 8px 5px 10px; background: var(--surface2);
-      border: 1px solid var(--border); border-radius: 20px;
-      font-size: 12px; color: var(--text); max-width: 200px;
-    }
-    .asset-pill-icon { display: flex; align-items: center; flex-shrink: 0; color: var(--text2); }
-    .asset-pill-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-    .asset-pill-x {
-      display: flex; align-items: center; justify-content: center;
-      width: 18px; height: 18px; border-radius: 50%; border: none;
-      background: transparent; color: var(--text3); font-size: 14px;
-      cursor: pointer; flex-shrink: 0; padding: 0; line-height: 1;
-      transition: all 0.15s var(--ease);
-    }
-    .asset-pill-x:hover { background: var(--surface); color: var(--red); }
-    .asset-add {
-      display: inline-flex; align-items: center; gap: 4px;
-      padding: 5px 12px; background: transparent;
-      border: 1px dashed var(--border); border-radius: 20px;
-      font-size: 12px; color: var(--text3); cursor: pointer;
-      font-family: inherit; font-weight: 500;
-      transition: all 0.15s var(--ease);
-    }
-    .asset-add:hover:not(:disabled) { border-color: var(--border-hover); color: var(--text2); }
-
-    /* ─── Overflow menu ─── */
-    .overflow-menu {
-      position: absolute; right: 0; top: calc(100% + 4px); z-index: 50;
-      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
-      padding: 4px; min-width: 120px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-    }
-    .overflow-menu-label {
-      padding: 6px 10px 4px; font-size: 10px; font-weight: 600;
-      color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px;
-    }
-    .overflow-menu-item {
-      display: block; width: 100%; text-align: left; padding: 6px 10px;
-      background: none; border: none; color: var(--text2); font-size: 12px;
-      font-family: inherit; cursor: pointer; border-radius: 6px;
-      transition: all 0.1s var(--ease);
-    }
-    .overflow-menu-item:hover { background: var(--surface2); color: var(--text); }
-
-    /* ─── Progress ─── */
-    .progress-track { background: var(--surface2); border-radius: 4px; height: 4px; overflow: hidden; margin: 8px 0; }
-    .progress-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.5s var(--ease); }
-    .progress-fill.indeterminate { width: 35% !important; animation: shimmer 1.4s ease-in-out infinite; }
-    .status-line { font-size: 13px; color: var(--text2); display: flex; justify-content: space-between; }
-    .spinner { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; flex-shrink: 0; }
-    .spinner.sm { width: 14px; height: 14px; border-width: 1.5px; }
-
-    /* ─── Clip List ─── */
-    .clip-item {
-      display: flex; align-items: center; gap: 12px;
-      padding: 12px 14px; margin-bottom: 4px;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); transition: all 0.15s var(--ease);
-      cursor: pointer;
-    }
-    .clip-item:hover { border-color: var(--border-hover); }
-    .clip-item.dimmed { opacity: 0.35; }
-    .clip-item.active-clip { border-color: rgba(212, 135, 74, 0.3); background: rgba(212, 135, 74, 0.03); }
-    .clip-item.selected { border-color: var(--accent); background: rgba(212, 135, 74, 0.04); }
-    .checkbox {
-      width: 20px; height: 20px; border-radius: 6px;
-      border: 1.5px solid var(--border); display: flex;
-      align-items: center; justify-content: center;
-      cursor: pointer; transition: all 0.15s var(--ease); flex-shrink: 0;
-    }
-    .checkbox:hover { border-color: var(--accent); }
-    .checkbox.checked { background: var(--accent); border-color: var(--accent); }
-    .clip-info { flex: 1; min-width: 0; }
-    .clip-title { font-size: 13px; font-weight: 600; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .clip-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
-    .clip-meta .err { color: var(--red); }
-    .clip-actions { display: flex; gap: 4px; flex-shrink: 0; }
-    .clip-status { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 700; }
-    .clip-status.pending { border: 1.5px dashed var(--border); }
-    .clip-status.rendering { border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.6s linear infinite; }
-    .clip-status.exported { background: var(--green-subtle); color: var(--green); }
-    .status-dot { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 12px; }
-    .status-dot.ok { background: var(--green-subtle); color: var(--green); }
-    .status-dot.fail { background: var(--red-subtle); color: var(--red); }
-
-    /* ─── Error ─── */
-    .error-bar { padding: 12px 16px; background: var(--red-subtle); border: 1px solid var(--red-border); border-radius: var(--radius); margin-bottom: 20px; font-size: 13px; color: var(--red); display: flex; align-items: center; gap: 10px; }
-    .error-bar span { flex: 1; }
-    .spacer { height: 1px; background: var(--border); margin: 28px 0; opacity: 0.4; }
-
-    /* ─── Modal ─── */
-    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 1000; display: flex; align-items: center; justify-content: center; cursor: pointer; animation: fadeIn 0.15s var(--ease); }
-    .modal-body { max-width: 380px; width: 92%; cursor: default; animation: scaleIn 0.2s var(--ease); }
-    .modal-body video { width: 100%; border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
-
-    /* ─── Animations ─── */
-    .fade-in { animation: fadeIn 0.3s var(--ease); }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-    @keyframes scaleIn { from { opacity: 0; transform: scale(0.96) translateY(4px); } to { opacity: 1; transform: none; } }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @keyframes shimmer { 0% { transform: translateX(-120%); } 100% { transform: translateX(350%); } }
-    @keyframes clipReveal { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
-    .clip-reveal { animation: clipReveal 0.35s var(--ease) both; }
-    @keyframes tagFlash { 0% { border-color: var(--accent); background: var(--accent-subtle); } 100% { border-color: var(--border); background: var(--surface); } }
-
-    /* ─── Responsive ─── */
-    @media (max-width: 920px) {
-      .app { padding: 36px 20px 80px; }
-      .layout { grid-template-columns: 1fr; gap: 0; }
-      .preview-col { display: none; }
-    }
-  </style>
+  <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
   <div id="root"></div>
@@ -378,44 +45,6 @@
         return () => es.close();
       }, [jobId]);
       return state;
-    }
-
-    function suggestClips(segments, energyScores) {
-      if (!segments?.length) return [];
-      const clips = [];
-      const kw = ['secret','mistake','important','never','always','best','how to','why','story','amazing','changed','money','learn','truth','actually','problem','solution','believe','crazy','number one','biggest','first thing','listen','here\'s the thing','let me tell you','the key','game changer','nobody talks about','most people','don\'t realize'];
-      const winSizes = [6, 8, 10, 12];
-      for (const winSize of winSizes) {
-        const step = Math.max(1, Math.floor(winSize * 0.6));
-        for (let i = 0; i < segments.length - winSize; i += step) {
-          const win = segments.slice(i, i+winSize);
-          const text = win.map(s=>s.text).join(' ');
-          const start = win[0].start, end = win[win.length-1].end, dur = end-start;
-          if (dur < 20 || dur > 90) continue;
-          let score = 0;
-          const lower = text.toLowerCase();
-          if (text.includes('?')) score+=3;
-          if (text.includes('!')) score+=2;
-          if (text.length>200) score+=1;
-          const firstText = (win[0].text||'').trim();
-          if (firstText && firstText[0] === firstText[0].toUpperCase()) score+=1;
-          kw.forEach(k=>{ if(lower.includes(k)) score+=2; });
-          if (energyScores?.length) {
-            const segE = energyScores.slice(i, i+winSize).filter(e => e > 0);
-            if (segE.length) { const avg = segE.reduce((a,b)=>a+b,0)/segE.length; const peak = Math.max(...segE); score += avg*0.5 + peak*0.3; }
-          }
-          if (score >= 3) clips.push({ title: text.slice(0,55).trim()+'...', start_second: Math.floor(start), end_second: Math.ceil(end), duration: Math.round(dur), preview: text.slice(0,100).trim(), score });
-        }
-      }
-      clips.sort((a,b)=>b.score-a.score);
-      const selected = [];
-      for (const clip of clips) {
-        const overlap = selected.some(sel => { const o = Math.min(clip.end_second, sel.end_second) - Math.max(clip.start_second, sel.start_second); return o > clip.duration * 0.5; });
-        if (!overlap) selected.push(clip);
-        if (selected.length >= 8) break;
-      }
-      selected.sort((a,b)=>a.start_second-b.start_second);
-      return selected;
     }
 
     // --- MCP ↔ UI Bridge: SSE hook ---
@@ -513,6 +142,62 @@
       );
     }
 
+    /* ── MCP Hints Component ── */
+    function McpHints({ phase, videoPath, transcript, transcriptText, suggestions, mcpConnected }) {
+      const [hints, setHints] = useState([]);
+      const [copied, setCopied] = useState(null);
+      const [collapsed, setCollapsed] = useState(false);
+
+      // Fetch hints whenever state changes
+      useEffect(() => {
+        if (!mcpConnected) return;
+        fetch('/api/mcp-hints').then(r => r.json()).then(d => {
+          if (d.hints) setHints(d.hints);
+        }).catch(() => {});
+      }, [phase, videoPath, !!transcript, !!transcriptText, suggestions?.length, mcpConnected]);
+
+      const copyPrompt = (prompt, idx) => {
+        navigator.clipboard.writeText(prompt).then(() => {
+          setCopied(idx);
+          setTimeout(() => setCopied(null), 1500);
+        }).catch(() => {});
+      };
+
+      // Only show when MCP is connected AND there are actionable hints
+      if (!mcpConnected || hints.length === 0) return null;
+
+      return (
+        <div className="mcp-hints">
+          <div className="mcp-hints-header" style={{cursor:'pointer'}} onClick={() => setCollapsed(!collapsed)}>
+            <div className="mcp-hints-icon">AI</div>
+            <div className="mcp-hints-title">MCP Prompts</div>
+            <div className="mcp-hints-subtitle">
+              {collapsed ? `${hints.length} prompts` : 'click to copy'}
+            </div>
+            <span style={{fontSize:10,color:'var(--text3)',transition:'transform 0.2s',transform:collapsed?'rotate(-90deg)':'rotate(0)',marginLeft:4}}>{'\u25BC'}</span>
+          </div>
+          {!collapsed && (
+            <div className="mcp-hint-list">
+              {hints.slice(0, 5).map((hint, i) => (
+                <div key={i}
+                  className={`mcp-hint ${copied === i ? 'copied' : ''}`}
+                  onClick={() => copyPrompt(hint.prompt, i)}>
+                  <span className={`mcp-hint-category ${hint.category}`}>{hint.category}</span>
+                  <span className="mcp-hint-prompt">
+                    {copied === i ? 'Copied!' : hint.prompt}
+                  </span>
+                  <span className="mcp-hint-desc">{hint.description}</span>
+                  <button className="mcp-hint-copy" onClick={e => { e.stopPropagation(); copyPrompt(hint.prompt, i); }} title="Copy prompt">
+                    {copied === i ? '\u2713' : '\u2398'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function App() {
       const [videoPath, setVideoPath] = useState('');
       const [transcriptMode, setTranscriptMode] = useState('import');
@@ -541,8 +226,6 @@
       const [error, setError] = useState(null);
       const [previewFile, setPreviewFile] = useState(null);
 
-      const [whisperJobId, setWhisperJobId] = useState(null);
-      const whisperStream = useJob(whisperJobId);
       const [retryIdx, setRetryIdx] = useState(null);
       const [retryJobId, setRetryJobId] = useState(null);
       const retryStream = useJob(retryJobId);
@@ -553,6 +236,7 @@
       const [historyOpen, setHistoryOpen] = useState(false);
 
       const [encoderInfo, setEncoderInfo] = useState(null);
+      const [generateCopied, setGenerateCopied] = useState(false);
       useEffect(() => { api('/encoder-info').then(d => { if(d.best) setEncoderInfo(d); }).catch(()=>{}); }, []);
 
       // Fetch clip history on mount and after exports
@@ -631,9 +315,16 @@
         } else if (sseEvent.type === 'export-started') {
           setBatchJobId(sseEvent.data.jobId);
           setPhase('exporting');
-        } else if (sseEvent.type === 'job-complete' && phase === 'exporting') {
-          setPhase('done');
-          setResults(sseEvent.data.result?.results || []);
+        } else if (sseEvent.type === 'job-complete') {
+          if (phase === 'exporting' || sseEvent.data.result?.results) {
+            setPhase('done');
+            setResults(sseEvent.data.result?.results || []);
+          }
+        } else if (sseEvent.type === 'job-error') {
+          if (phase === 'exporting') {
+            setError('Export failed: ' + (sseEvent.data.error || 'Unknown error'));
+            setPhase('review');
+          }
         }
       }, [sseEvent]);
 
@@ -694,68 +385,12 @@
         finally { setBrowsing(false); }
       }, []);
 
-      // Pipeline
-      const startPipeline = async () => {
-        setError(null); setResults([]); setSuggestions([]); setDeselected(new Set());
-        setBatchJobId(null); setActiveClipIdx(null); setPreviewSrc(null);
-        setPhase('parsing');
-        const fileData = await api('/select-file', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim() }) });
-        if (fileData.error) { setError(fileData.error); setPhase('idle'); return; }
-        setFile(fileData);
-        let t = null;
-        if (transcriptMode === 'import') {
-          const text = transcriptText.trim();
-          if (!text) { setError('Paste your transcript'); setPhase('idle'); return; }
-          const isJson = text.startsWith('{') || text.startsWith('[');
-          if (isJson) {
-            const parsed = JSON.parse(text);
-            const tr = Array.isArray(parsed) ? { words: parsed } : parsed;
-            const data = await api('/import-transcript', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim(), transcript: tr }) });
-            if (data.error) { setError(data.error); setPhase('idle'); return; }
-            t = data.data;
-          } else {
-            const data = await api('/parse-transcript', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim(), raw_text: text, time_adjust: timeAdjust }) });
-            if (data.error) { setError(data.error); setPhase('idle'); return; }
-            t = data.data;
-          }
-        } else {
-          const data = await api('/transcribe', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim(), model_size: whisperModel }) });
-          if (data.cached) { t = data.data; }
-          else { setWhisperJobId(data.job_id); return; }
-        }
-        continueWithTranscript(t, fileData);
-      };
-
-      const continueWithTranscript = async (t, f) => {
-        setTranscript(t); setPhase('suggesting'); setSuggestions([]);
-        let energyScores = null;
-        const vp = f?.file_path || videoPath.trim();
-        if (vp && t?.segments?.length) {
-          try {
-            const eData = await api('/analyze-energy', { method:'POST', body: JSON.stringify({ video_path: vp, segments: t.segments }) });
-            if (eData.segment_scores) energyScores = eData.segment_scores;
-          } catch(e) {}
-        }
-        const allClips = suggestClips(t?.segments || [], energyScores);
-        if (allClips.length === 0) { setError('No clip suggestions found.'); setPhase('idle'); return; }
-        for (let i = 0; i < allClips.length; i++) {
-          await new Promise(r => setTimeout(r, i === 0 ? 150 : 250));
-          setSuggestions(prev => [...prev, allClips[i]]);
-        }
-        await new Promise(r => setTimeout(r, 300));
-        setPhase('review');
-      };
-
-      useEffect(() => {
-        if (whisperStream?.status === 'done' && whisperStream.result) { setWhisperJobId(null); continueWithTranscript(whisperStream.result, file); }
-        if (whisperStream?.status === 'error') { setError('Transcription failed: ' + whisperStream.error); setPhase('idle'); }
-      }, [whisperStream?.status]);
-
       const startExport = async () => {
         setPhase('exporting'); setResults([]);
         const sc = suggestions.filter((_,i) => !deselected.has(i));
+        const vp = file?.file_path || videoPath.trim();
         const data = await api('/batch-clips', { method:'POST', body: JSON.stringify({
-          video_path: file.file_path,
+          video_path: vp,
           clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title.slice(0,40), caption_style: captionStyle, crop_strategy: cropStrategy })),
           transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined,
         })});
@@ -770,8 +405,9 @@
       const retryClip = async (idx) => {
         const sc = suggestions.filter((_,i) => !deselected.has(i));
         const c = sc[idx]; setRetryIdx(idx); setRetryJobId(null);
+        const vp = file?.file_path || videoPath.trim();
         const data = await api('/create-clip', { method:'POST', body: JSON.stringify({
-          video_path: file.file_path, start_second: c.start_second, end_second: c.end_second,
+          video_path: vp, start_second: c.start_second, end_second: c.end_second,
           title: c.title.slice(0,40), caption_style: captionStyle, crop_strategy: cropStrategy,
           transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined,
         })});
@@ -799,7 +435,92 @@
         catch(e) { setError('Outro upload failed'); }
         finally { setOutroUploading(false); }
       };
-      const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || whisperJobId;
+      const buildLocalPrompt = () => {
+        const parts = [];
+        const hasTranscriptReady = transcript || transcriptText.trim();
+        if (transcriptMode === 'whisper' && !hasTranscriptReady) {
+          parts.push(`Transcribe the podcast at ${videoPath} using transcribe_podcast with model_size="${whisperModel}".`);
+          parts.push('Then find the 5-8 best viral-worthy moments and call suggest_clips.');
+        } else {
+          parts.push('Use get_ui_state with include_transcript=true to read the full transcript.');
+          parts.push('Find the 5-8 best viral-worthy moments — hot takes, strong opinions, funny moments, actionable advice, and emotional stories.');
+          parts.push('Then call suggest_clips with your suggestions.');
+        }
+        const settings = [];
+        if (videoPath) settings.push(`Video: ${videoPath.split('/').pop()}`);
+        settings.push(`Style: ${captionStyle}`);
+        settings.push(`Crop: ${cropStrategy}`);
+        if (logoPath) settings.push(`Logo: set`);
+        if (outroPath) settings.push(`Outro: set`);
+        parts.push(`Current settings: ${settings.join(', ')}`);
+        return parts.join('\n');
+      };
+
+      const copyGeneratePrompt = async () => {
+        // If user has pasted a transcript but it hasn't been parsed yet, parse it first
+        if (transcriptMode === 'import' && transcriptText.trim() && !transcript) {
+          setError(null);
+          setPhase('parsing');
+          const fileData = await api('/select-file', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim() }) });
+          if (fileData.error) { setError(fileData.error); setPhase('idle'); return; }
+          setFile(fileData);
+          const text = transcriptText.trim();
+          const isJson = text.startsWith('{') || text.startsWith('[');
+          let t = null;
+          if (isJson) {
+            const parsed = JSON.parse(text);
+            const tr = Array.isArray(parsed) ? { words: parsed } : parsed;
+            const data = await api('/import-transcript', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim(), transcript: tr }) });
+            if (data.error) { setError(data.error); setPhase('idle'); return; }
+            t = data.data;
+          } else {
+            const data = await api('/parse-transcript', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim(), raw_text: text, time_adjust: timeAdjust }) });
+            if (data.error) { setError(data.error); setPhase('idle'); return; }
+            t = data.data;
+          }
+          setTranscript(t);
+          // Sync transcript + video to server immediately (don't wait for React useEffect)
+          await fetch('/api/ui-state', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ _source: 'ui', transcript: t, videoPath: videoPath.trim(), filePath: fileData.file_path }),
+          }).catch(() => {});
+          setPhase('idle');
+        }
+
+        // Ensure video path is synced even without transcript parsing
+        if (videoPath.trim()) {
+          await fetch('/api/ui-state', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              _source: 'ui',
+              videoPath: videoPath.trim(),
+              rawTranscriptText: transcriptText.trim() || undefined,
+              settings: { captionStyle, cropStrategy, logoPath, outroPath },
+            }),
+          }).catch(() => {});
+        }
+
+        let prompt;
+        try {
+          const res = await fetch('/api/generate-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'suggest' }),
+          });
+          const data = await res.json();
+          prompt = data.prompt || buildLocalPrompt();
+        } catch {
+          prompt = buildLocalPrompt();
+        }
+        navigator.clipboard.writeText(prompt).then(() => {
+          setGenerateCopied(true);
+          setTimeout(() => setGenerateCopied(false), 2000);
+        }).catch(() => {});
+      };
+
+      const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting';
       const selectedClips = suggestions.filter((_,i) => !deselected.has(i));
 
       const getExportStatus = (resultIdx) => {
@@ -823,7 +544,7 @@
         <div className="app">
           <div className="header">
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <div className="logo">pod<span>cli</span></div>
+              <img src="/podcli-logo-transparent.png" alt="podcli" style={{ height: 22 }} />
               <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
                 {mcpConnected && (
                   <span className="pill" style={{ fontSize:10, letterSpacing:'0.5px', background:'var(--green-subtle)', color:'var(--green)', border:'1px solid var(--green-border)' }}>
@@ -991,31 +712,20 @@
               {/* Generate */}
               {phase === 'idle' && (
                 <div>
-                  <button className="btn btn-go" disabled={!videoPath.trim()||(transcriptMode==='import'&&!transcriptText.trim())||browsing} onClick={startPipeline}>
-                    Generate Clips
+                  <button className="btn btn-go"
+                    disabled={!videoPath.trim()||(transcriptMode==='import'&&!transcriptText.trim())||browsing}
+                    onClick={copyGeneratePrompt}
+                    style={generateCopied ? {background:'var(--green)',transition:'background 0.2s'} : {}}>
+                    {generateCopied ? 'Copied — paste in Claude' : 'Generate Clips'}
                   </button>
-                  {mcpConnected && videoPath && transcriptText.trim() && (
-                    <div className="fade-in" style={{ textAlign:'center', marginTop:10, fontSize:12, color:'var(--text3)' }}>
-                      or ask Claude to find the best moments — your video and transcript are synced
-                    </div>
+                  {videoPath.trim() && (transcriptText.trim() || transcript) && (
+                    <McpHints phase={phase} videoPath={videoPath} transcript={transcript} transcriptText={transcriptText} suggestions={suggestions} mcpConnected={mcpConnected} />
                   )}
                 </div>
               )}
 
-              {/* Whisper progress */}
-              {whisperJobId && whisperStream && (
-                <div className="fade-in" style={{marginTop:20}}>
-                  <div className="status-line">
-                    <span style={{display:'flex',alignItems:'center',gap:8}}><div className="spinner sm"/>Transcribing{'\u2026'}</span>
-                    <span style={{fontWeight:600,fontVariantNumeric:'tabular-nums'}}>{whisperStream.progress||0}%</span>
-                  </div>
-                  <div className="progress-track"><div className="progress-fill" style={{width:`${whisperStream.progress||0}%`}}/></div>
-                  <div style={{fontSize:12,color:'var(--text3)',marginTop:4}}>{whisperStream.message}</div>
-                </div>
-              )}
-
               {/* Parsing */}
-              {phase === 'parsing' && !whisperJobId && (
+              {phase === 'parsing' && (
                 <div className="fade-in" style={{marginTop:20}}>
                   <div className="status-line"><span style={{display:'flex',alignItems:'center',gap:8}}><div className="spinner sm"/>Processing transcript{'\u2026'}</span></div>
                   <div className="progress-track"><div className="progress-fill indeterminate"/></div>
@@ -1139,11 +849,16 @@
                     </div>
                   )}
 
-                  {phase === 'done' && (
+                  {(phase === 'done' || phase === 'review' || phase === 'exporting') && (
                     <div style={{display:'flex',gap:10,justifyContent:'center',marginTop:24}}>
-                      <button className="btn btn-ghost" onClick={()=>{setPhase('idle');setResults([]);setSuggestions([]);setBatchJobId(null);setFile(null);setTranscript(null);setActiveClipIdx(null);setPreviewSrc(null);}}>Start Over</button>
-                      <button className="btn btn-ghost" onClick={()=>{setPhase('review');setResults([]);setBatchJobId(null);}}>Re-export</button>
+                      <button className="btn btn-ghost" onClick={()=>{setPhase('idle');setResults([]);setSuggestions([]);setBatchJobId(null);setFile(null);setTranscript(null);setActiveClipIdx(null);setPreviewSrc(null);
+                        fetch('/api/ui-state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_source:'ui',phase:'idle',suggestions:[],deselectedIndices:[]})}).catch(()=>{});
+                      }}>Start Over</button>
+                      {phase === 'done' && <button className="btn btn-ghost" onClick={()=>{setPhase('review');setResults([]);setBatchJobId(null);}}>Re-export</button>}
                     </div>
+                  )}
+                  {(phase === 'review' || phase === 'done') && (
+                    <McpHints phase={phase} videoPath={videoPath} transcript={transcript} transcriptText={transcriptText} suggestions={suggestions} mcpConnected={mcpConnected} />
                   )}
                 </div>
               )}

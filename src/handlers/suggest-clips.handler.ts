@@ -10,10 +10,13 @@ import { randomUUID } from "crypto";
 export const suggestClipsToolDef = {
   name: "suggest_clips",
   description:
-    "Store and structure clip suggestions from transcript analysis. " +
-    "Use after analyzing a transcript to format suggested viral moments " +
-    "with timestamps, titles, and reasoning. Claude should analyze the " +
-    "transcript first, then call this tool to present suggestions to the user.",
+    "STEP 2 — Submit your clip suggestions after analyzing the transcript.\n\n" +
+    "Before calling this: read the transcript via get_ui_state(include_transcript: true) " +
+    "and identify the best viral moments.\n\n" +
+    "What it does: Stores your suggestions, assigns clip numbers (#1, #2, etc.), " +
+    "and pushes them to the Web UI for the user to review.\n\n" +
+    "After this: the user reviews in the UI. Then export with " +
+    "batch_create_clips(export_selected: true) or create_clip(clip_number: N).",
   inputSchema: {
     type: "object" as const,
     properties: {

@@ -1,6 +1,14 @@
-# podcli
+<p align="center">
+  <img src="public/podcli-icon.png" width="80" alt="podcli icon" />
+</p>
+<p align="center">
+  <img src="public/podcli-logo-transparent.png" height="36" alt="podcli" />
+</p>
+<p align="center">
+  AI-powered podcast clip generator. Takes a long-form podcast video, identifies viral moments, and exports upload-ready TikTok / YouTube Shorts (1080x1920, 9:16, burned captions, normalized audio).
+</p>
 
-AI-powered podcast clip generator. Takes a long-form podcast video, identifies viral moments, and exports upload-ready TikTok / YouTube Shorts (1080x1920, 9:16, burned captions, normalized audio).
+---
 
 ## Features
 

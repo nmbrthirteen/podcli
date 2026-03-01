@@ -259,6 +259,10 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
     Branded style — large bold text, dark rounded box on the active word.
     Each chunk shows ~4 words. For each word's duration, that word gets a
     dark background box (BorderStyle=3) while the others stay plain white.
+
+    IMPORTANT: Dialogue lines are made contiguous — each word's display extends
+    to the next word's start (not its own end). This prevents flashing/gaps
+    between words that cause the entire text to disappear and reappear.
     """
     header = generate_branded_header(style)
     events = []
@@ -289,12 +293,21 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
             normalized.append(text)
 
         # For each word in the chunk, emit a dialogue line for its active window
-        # where THAT word has a dark box and the rest are plain
+        # where THAT word has a dark box and the rest are plain.
+        # Key: each word's display extends to the NEXT word's start (contiguous)
+        # to prevent flashing/gaps between words.
         for wi, w in enumerate(chunk):
             w_start = max(0, w["start"] - offset)
-            w_end = max(0, w["end"] - offset)
+
+            # End at next word's start (contiguous) instead of this word's end (gaps)
+            if wi < len(chunk) - 1:
+                w_end = max(0, chunk[wi + 1]["start"] - offset)
+            else:
+                # Last word in chunk: extend to chunk end
+                w_end = chunk_end
+
             if w_end <= w_start:
-                continue
+                w_end = w_start + 0.1  # minimum display time
 
             # Build line: all words visible, active one gets box override
             parts = []
@@ -303,8 +316,9 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
                     # Active word: dark rounded box background, white text
                     # BorderStyle=3: \4c = box fill color, \3c = box border
                     # \xbord/\ybord = horizontal/vertical padding around text
+                    # \bord with higher value creates visible rounded-ish box
                     parts.append(
-                        f"{{\\4c{box_color}\\3c{box_color}\\xbord14\\ybord8\\bord1\\shad0}}{text}{{\\4c&H00000000&\\3c&H00000000&\\xbord0\\ybord0\\bord0}}"
+                        f"{{\\4c{box_color}\\3c{box_color}\\xbord18\\ybord10\\bord4\\shad0}}{text}{{\\4c&H00000000&\\3c&H00000000&\\xbord0\\ybord0\\bord0}}"
                     )
                 else:
                     parts.append(text)
@@ -317,8 +331,5 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
             events.append(
                 f"Dialogue: 0,{start_ts},{end_ts},BrandedNormal,,0,0,0,,{line_text}"
             )
-
-        # Also show the chunk text in the gap between chunks (if any)
-        # This ensures words stay visible for the full chunk duration
 
     return header + "\n".join(events) + "\n"
