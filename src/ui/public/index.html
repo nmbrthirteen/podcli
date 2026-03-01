@@ -1,26 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>podcli</title>
-  <link rel="icon" type="image/png" href="/podcli-icon-transparent.png">
+  <link rel="icon" type="image/png" href="/podcli-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+    rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
   <link rel="stylesheet" href="css/styles.css">
 </head>
+
 <body>
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef, useCallback } = React;
 
-    const fmt = (s) => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
-    const api = async (path, opts={}) => (await fetch(`/api${path}`, { headers:{'Content-Type':'application/json',...opts.headers}, ...opts })).json();
+    const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+    const api = async (path, opts = {}) => (await fetch(`/api${path}`, { headers: { 'Content-Type': 'application/json', ...opts.headers }, ...opts })).json();
 
     function uploadFile(file, onProgress) {
       return new Promise((resolve, reject) => {
@@ -28,7 +32,7 @@
         const fd = new FormData();
         fd.append('file', file);
         xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100)); };
-        xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)); } catch(e) { reject(e); } };
+        xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)); } catch (e) { reject(e); } };
         xhr.onerror = () => reject(new Error('Upload failed'));
         xhr.open('POST', '/api/upload');
         xhr.send(fd);
@@ -40,7 +44,7 @@
       useEffect(() => {
         if (!jobId) { setState(null); return; }
         const es = new EventSource(`/api/job/${jobId}/stream`);
-        es.onmessage = e => { const d=JSON.parse(e.data); setState(d); if(d.status==='done'||d.status==='error') es.close(); };
+        es.onmessage = e => { const d = JSON.parse(e.data); setState(d); if (d.status === 'done' || d.status === 'error') es.close(); };
         es.onerror = () => es.close();
         return () => es.close();
       }, [jobId]);
@@ -54,7 +58,7 @@
       useEffect(() => {
         const es = new EventSource('/api/events');
         const handle = (type) => (e) => {
-          try { setLastEvent({ type, data: JSON.parse(e.data), ts: Date.now() }); } catch {}
+          try { setLastEvent({ type, data: JSON.parse(e.data), ts: Date.now() }); } catch { }
         };
         es.addEventListener('state', (e) => { setConnected(true); handle('state')(e); });
         es.addEventListener('state-sync', handle('state-sync'));
@@ -62,14 +66,14 @@
         es.addEventListener('job-update', handle('job-update'));
         es.addEventListener('job-complete', handle('job-complete'));
         es.addEventListener('job-error', handle('job-error'));
-        es.onerror = () => {};
+        es.onerror = () => { };
         return () => es.close();
       }, []);
       return { lastEvent, connected };
     }
 
-    const CheckIcon = () => (<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>);
-    const CheckSmall = ({ color = 'var(--green)' }) => (<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+    const CheckIcon = () => (<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>);
+    const CheckSmall = ({ color = 'var(--green)' }) => (<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>);
 
     /* ── Style Preview Component ── */
     const STYLE_CONFIGS = {
@@ -77,32 +81,32 @@
         words: ['Did you ever,', 'felt', 'like I\u2019m in the', 'wrong place'],
         fontSize: 19, fontWeight: 800, bottom: '30%',
         lineHeight: 1.3, textShadow: 'none',
-        activeStyle: { background:'#1a1a1a', borderRadius:5, padding:'2px 6px', color:'#fff' },
-        normalStyle: { background:'transparent', borderRadius:5, padding:'2px 6px', color:'#fff' },
+        activeStyle: { background: '#1a1a1a', borderRadius: 5, padding: '2px 6px', color: '#fff' },
+        normalStyle: { background: 'transparent', borderRadius: 5, padding: '2px 6px', color: '#fff' },
         gradient: true,
       },
       hormozi: {
         words: ['LOOKING', 'FOR', 'HIGH ENERGY'],
         fontSize: 22, fontWeight: 900, bottom: '22%',
         lineHeight: 1.25, textShadow: '0 2px 8px rgba(0,0,0,0.7)',
-        activeStyle: { color:'#ffff00' },
-        normalStyle: { color:'#fff' },
+        activeStyle: { color: '#ffff00' },
+        normalStyle: { color: '#fff' },
         gradient: false,
       },
       karaoke: {
         words: ['the secret to', 'building', 'something', 'people', 'actually want'],
         fontSize: 15, fontWeight: 600, bottom: '22%',
         lineHeight: 1.4, textShadow: '0 1px 6px rgba(0,0,0,0.6)',
-        activeStyle: { color:'#fff' },
-        normalStyle: { color:'rgba(255,255,255,0.35)' },
+        activeStyle: { color: '#fff' },
+        normalStyle: { color: 'rgba(255,255,255,0.35)' },
         gradient: false,
       },
       subtle: {
         words: ['the secret to building something people actually want'],
         fontSize: 13, fontWeight: 400, bottom: '12%',
         lineHeight: 1.5, textShadow: '0 1px 4px rgba(0,0,0,0.8)',
-        activeStyle: { color:'rgba(255,255,255,0.9)' },
-        normalStyle: { color:'rgba(255,255,255,0.9)' },
+        activeStyle: { color: 'rgba(255,255,255,0.9)' },
+        normalStyle: { color: 'rgba(255,255,255,0.9)' },
         gradient: false,
       },
     };
@@ -128,11 +132,11 @@
           {cfg.gradient && <div className="sp-gradient" />}
           {showLogo && (
             <div className="sp-logo">
-              <img src={`/api/stream-source?path=${encodeURIComponent(logoPath)}`} style={{ width:'100%', height:'100%', objectFit:'contain', borderRadius:6 }} />
+              <img src={`/api/stream-source?path=${encodeURIComponent(logoPath)}`} style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 6 }} />
             </div>
           )}
           <div className="sp-captions" style={{ bottom: cfg.bottom, fontSize: cfg.fontSize, fontWeight: cfg.fontWeight, lineHeight: cfg.lineHeight, textShadow: cfg.textShadow }}>
-            <div style={{ display:'flex', flexWrap:'wrap', justifyContent:'center', gap:'4px 6px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '4px 6px' }}>
               {cfg.words.map((w, i) => (
                 <span key={w} className="sp-word" style={i === activeIdx ? cfg.activeStyle : cfg.normalStyle}>{w}</span>
               ))}
@@ -153,14 +157,14 @@
         if (!mcpConnected) return;
         fetch('/api/mcp-hints').then(r => r.json()).then(d => {
           if (d.hints) setHints(d.hints);
-        }).catch(() => {});
+        }).catch(() => { });
       }, [phase, videoPath, !!transcript, !!transcriptText, suggestions?.length, mcpConnected]);
 
       const copyPrompt = (prompt, idx) => {
         navigator.clipboard.writeText(prompt).then(() => {
           setCopied(idx);
           setTimeout(() => setCopied(null), 1500);
-        }).catch(() => {});
+        }).catch(() => { });
       };
 
       // Only show when MCP is connected AND there are actionable hints
@@ -168,13 +172,13 @@
 
       return (
         <div className="mcp-hints">
-          <div className="mcp-hints-header" style={{cursor:'pointer'}} onClick={() => setCollapsed(!collapsed)}>
+          <div className="mcp-hints-header" style={{ cursor: 'pointer' }} onClick={() => setCollapsed(!collapsed)}>
             <div className="mcp-hints-icon">AI</div>
             <div className="mcp-hints-title">MCP Prompts</div>
             <div className="mcp-hints-subtitle">
               {collapsed ? `${hints.length} prompts` : 'click to copy'}
             </div>
-            <span style={{fontSize:10,color:'var(--text3)',transition:'transform 0.2s',transform:collapsed?'rotate(-90deg)':'rotate(0)',marginLeft:4}}>{'\u25BC'}</span>
+            <span style={{ fontSize: 10, color: 'var(--text3)', transition: 'transform 0.2s', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0)', marginLeft: 4 }}>{'\u25BC'}</span>
           </div>
           {!collapsed && (
             <div className="mcp-hint-list">
@@ -237,10 +241,10 @@
 
       const [encoderInfo, setEncoderInfo] = useState(null);
       const [generateCopied, setGenerateCopied] = useState(false);
-      useEffect(() => { api('/encoder-info').then(d => { if(d.best) setEncoderInfo(d); }).catch(()=>{}); }, []);
+      useEffect(() => { api('/encoder-info').then(d => { if (d.best) setEncoderInfo(d); }).catch(() => { }); }, []);
 
       // Fetch clip history on mount and after exports
-      const fetchHistory = () => { fetch('/api/history?limit=50').then(r=>r.json()).then(d=>{ if(Array.isArray(d)) setClipHistory(d); }).catch(()=>{}); };
+      const fetchHistory = () => { fetch('/api/history?limit=50').then(r => r.json()).then(d => { if (Array.isArray(d)) setClipHistory(d); }).catch(() => { }); };
       useEffect(fetchHistory, []);
       useEffect(() => { if (phase === 'done') fetchHistory(); }, [phase]);
 
@@ -264,7 +268,7 @@
         const key = JSON.stringify(state);
         if (key === prevSyncRef.current) return;
         prevSyncRef.current = key;
-        fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => {});
+        fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => { });
       }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, logoPath, outroPath, phase]);
 
       // Sync transcript separately (large payload)
@@ -273,7 +277,7 @@
         if (!initializedRef.current) return;
         if (!transcript || transcript === prevTranscriptRef.current) return;
         prevTranscriptRef.current = transcript;
-        fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', transcript }) }).catch(() => {});
+        fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', transcript }) }).catch(() => { });
       }, [transcript]);
 
       // Sync raw transcript text so MCP can read it before pipeline runs
@@ -283,7 +287,7 @@
         if (transcriptText === prevRawRef.current) return;
         prevRawRef.current = transcriptText;
         if (transcriptText.trim()) {
-          fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', rawTranscriptText: transcriptText }) }).catch(() => {});
+          fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', rawTranscriptText: transcriptText }) }).catch(() => { });
         }
       }, [transcriptText]);
 
@@ -348,7 +352,7 @@
         if (!clip || !videoRef.current) return;
         const seek = () => {
           videoRef.current.currentTime = clip.start_second;
-          videoRef.current.play().catch(() => {});
+          videoRef.current.play().catch(() => { });
         };
         if (videoRef.current.readyState >= 1) seek();
         else videoRef.current.addEventListener('loadedmetadata', seek, { once: true });
@@ -381,19 +385,21 @@
         try {
           const d = await api('/browse-file');
           if (d.file_path) setVideoPath(d.file_path);
-        } catch(e) { setError('Browse failed: ' + e.message); }
+        } catch (e) { setError('Browse failed: ' + e.message); }
         finally { setBrowsing(false); }
       }, []);
 
       const startExport = async () => {
         setPhase('exporting'); setResults([]);
-        const sc = suggestions.filter((_,i) => !deselected.has(i));
+        const sc = suggestions.filter((_, i) => !deselected.has(i));
         const vp = file?.file_path || videoPath.trim();
-        const data = await api('/batch-clips', { method:'POST', body: JSON.stringify({
-          video_path: vp,
-          clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title.slice(0,40), caption_style: captionStyle, crop_strategy: cropStrategy })),
-          transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined,
-        })});
+        const data = await api('/batch-clips', {
+          method: 'POST', body: JSON.stringify({
+            video_path: vp,
+            clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy })),
+            transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined,
+          })
+        });
         setBatchJobId(data.job_id);
       };
 
@@ -403,14 +409,16 @@
       }, [batchStream?.status]);
 
       const retryClip = async (idx) => {
-        const sc = suggestions.filter((_,i) => !deselected.has(i));
+        const sc = suggestions.filter((_, i) => !deselected.has(i));
         const c = sc[idx]; setRetryIdx(idx); setRetryJobId(null);
         const vp = file?.file_path || videoPath.trim();
-        const data = await api('/create-clip', { method:'POST', body: JSON.stringify({
-          video_path: vp, start_second: c.start_second, end_second: c.end_second,
-          title: c.title.slice(0,40), caption_style: captionStyle, crop_strategy: cropStrategy,
-          transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined,
-        })});
+        const data = await api('/create-clip', {
+          method: 'POST', body: JSON.stringify({
+            video_path: vp, start_second: c.start_second, end_second: c.end_second,
+            title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy,
+            transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined,
+          })
+        });
         setRetryJobId(data.job_id);
       };
 
@@ -421,18 +429,18 @@
         }
       }, [retryStream?.status]);
 
-      const toggleClip = (i) => setDeselected(prev => { const n=new Set(prev); n.has(i)?n.delete(i):n.add(i); return n; });
+      const toggleClip = (i) => setDeselected(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
       const selectedCount = suggestions.length - deselected.size;
       const handleLogoUpload = async (f) => {
         setLogoUploading(true);
-        try { const d = await uploadFile(f, ()=>{}); if(d.file_path) setLogoPath(d.file_path); }
-        catch(e) { setError('Logo upload failed'); }
+        try { const d = await uploadFile(f, () => { }); if (d.file_path) setLogoPath(d.file_path); }
+        catch (e) { setError('Logo upload failed'); }
         finally { setLogoUploading(false); }
       };
       const handleOutroUpload = async (f) => {
         setOutroUploading(true);
-        try { const d = await uploadFile(f, ()=>{}); if(d.file_path) setOutroPath(d.file_path); }
-        catch(e) { setError('Outro upload failed'); }
+        try { const d = await uploadFile(f, () => { }); if (d.file_path) setOutroPath(d.file_path); }
+        catch (e) { setError('Outro upload failed'); }
         finally { setOutroUploading(false); }
       };
       const buildLocalPrompt = () => {
@@ -461,7 +469,7 @@
         if (transcriptMode === 'import' && transcriptText.trim() && !transcript) {
           setError(null);
           setPhase('parsing');
-          const fileData = await api('/select-file', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim() }) });
+          const fileData = await api('/select-file', { method: 'POST', body: JSON.stringify({ file_path: videoPath.trim() }) });
           if (fileData.error) { setError(fileData.error); setPhase('idle'); return; }
           setFile(fileData);
           const text = transcriptText.trim();
@@ -470,11 +478,11 @@
           if (isJson) {
             const parsed = JSON.parse(text);
             const tr = Array.isArray(parsed) ? { words: parsed } : parsed;
-            const data = await api('/import-transcript', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim(), transcript: tr }) });
+            const data = await api('/import-transcript', { method: 'POST', body: JSON.stringify({ file_path: videoPath.trim(), transcript: tr }) });
             if (data.error) { setError(data.error); setPhase('idle'); return; }
             t = data.data;
           } else {
-            const data = await api('/parse-transcript', { method:'POST', body: JSON.stringify({ file_path: videoPath.trim(), raw_text: text, time_adjust: timeAdjust }) });
+            const data = await api('/parse-transcript', { method: 'POST', body: JSON.stringify({ file_path: videoPath.trim(), raw_text: text, time_adjust: timeAdjust }) });
             if (data.error) { setError(data.error); setPhase('idle'); return; }
             t = data.data;
           }
@@ -484,7 +492,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ _source: 'ui', transcript: t, videoPath: videoPath.trim(), filePath: fileData.file_path }),
-          }).catch(() => {});
+          }).catch(() => { });
           setPhase('idle');
         }
 
@@ -499,7 +507,7 @@
               rawTranscriptText: transcriptText.trim() || undefined,
               settings: { captionStyle, cropStrategy, logoPath, outroPath },
             }),
-          }).catch(() => {});
+          }).catch(() => { });
         }
 
         let prompt;
@@ -517,11 +525,11 @@
         navigator.clipboard.writeText(prompt).then(() => {
           setGenerateCopied(true);
           setTimeout(() => setGenerateCopied(false), 2000);
-        }).catch(() => {});
+        }).catch(() => { });
       };
 
       const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting';
-      const selectedClips = suggestions.filter((_,i) => !deselected.has(i));
+      const selectedClips = suggestions.filter((_, i) => !deselected.has(i));
 
       const getExportStatus = (resultIdx) => {
         if (phase !== 'exporting' || !batchStream) return null;
@@ -534,8 +542,8 @@
       };
 
       const handleVideoDrop = (e) => { e.preventDefault(); };
-      const handleTranscriptDrop = (e) => { e.preventDefault(); setTranscriptDragOver(false); const files = e.dataTransfer?.files; if(!files?.length) return; const f=files[0]; setTranscriptFileName(f.name); const reader=new FileReader(); reader.onload=(ev)=>setTranscriptText(ev.target.result); reader.readAsText(f); };
-      const handleTranscriptFileSelect = (e) => { const f=e.target.files?.[0]; if(!f) return; setTranscriptFileName(f.name); const reader=new FileReader(); reader.onload=(ev)=>setTranscriptText(ev.target.result); reader.readAsText(f); };
+      const handleTranscriptDrop = (e) => { e.preventDefault(); setTranscriptDragOver(false); const files = e.dataTransfer?.files; if (!files?.length) return; const f = files[0]; setTranscriptFileName(f.name); const reader = new FileReader(); reader.onload = (ev) => setTranscriptText(ev.target.result); reader.readAsText(f); };
+      const handleTranscriptFileSelect = (e) => { const f = e.target.files?.[0]; if (!f) return; setTranscriptFileName(f.name); const reader = new FileReader(); reader.onload = (ev) => setTranscriptText(ev.target.result); reader.readAsText(f); };
       const preventDef = (e) => e.preventDefault();
 
       const activeClip = activeClipIdx !== null ? suggestions[activeClipIdx] : null;
@@ -543,21 +551,21 @@
       return (
         <div className="app">
           <div className="header">
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <img src="/podcli-logo-transparent.png" alt="podcli" style={{ height: 22 }} />
-              <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {mcpConnected && (
-                  <span className="pill" style={{ fontSize:10, letterSpacing:'0.5px', background:'var(--green-subtle)', color:'var(--green)', border:'1px solid var(--green-border)' }}>
+                  <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'var(--green-subtle)', color: 'var(--green)', border: '1px solid var(--green-border)' }}>
                     MCP linked
                   </span>
                 )}
                 {encoderInfo && (
-                  <span className="pill pill-blue" style={{ fontSize:10, letterSpacing:'0.5px' }}>
-                    {encoderInfo.best === 'libx264' ? 'CPU' : encoderInfo.best.replace('h264_','').toUpperCase()}
+                  <span className="pill pill-blue" style={{ fontSize: 10, letterSpacing: '0.5px' }}>
+                    {encoderInfo.best === 'libx264' ? 'CPU' : encoderInfo.best.replace('h264_', '').toUpperCase()}
                   </span>
                 )}
-                <a href="/knowledge.html" style={{ fontSize:12, fontWeight:600, color:'var(--text2)', textDecoration:'none', padding:'5px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', transition:'all 0.15s' }}>Knowledge</a>
-                <a href="/integration.html" style={{ fontSize:12, fontWeight:600, color:'var(--text2)', textDecoration:'none', padding:'5px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', transition:'all 0.15s' }}>MCP Setup</a>
+                <a href="/knowledge.html" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', textDecoration: 'none', padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', transition: 'all 0.15s' }}>Knowledge</a>
+                <a href="/integration.html" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', textDecoration: 'none', padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', transition: 'all 0.15s' }}>MCP Setup</a>
               </div>
             </div>
             <h1>Create short-form clips</h1>
@@ -571,12 +579,12 @@
               <div className="section">
                 <div className="section-label">Video</div>
                 {!videoPath && (
-                  <div className="drop-zone" style={{cursor:'pointer'}} onClick={browsing||isProcessing ? undefined : doBrowse}
+                  <div className="drop-zone" style={{ cursor: 'pointer' }} onClick={browsing || isProcessing ? undefined : doBrowse}
                     onDragOver={preventDef} onDrop={handleVideoDrop}>
                     {browsing ? (
-                      <div style={{display:'flex',alignItems:'center',gap:10}}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div className="spinner sm" />
-                        <div style={{fontSize:13,fontWeight:600}}>Waiting for file selection{'\u2026'}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>Waiting for file selection{'\u2026'}</div>
                       </div>
                     ) : (
                       <>
@@ -590,56 +598,56 @@
                   <div className="file-badge fade-in">
                     <div className="dot" />
                     <div className="name">{videoPath.split('/').pop()}</div>
-                    <button className="btn btn-ghost btn-sm" onClick={()=>setVideoPath('')} style={{padding:'4px 10px',fontSize:11}}>Clear</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setVideoPath('')} style={{ padding: '4px 10px', fontSize: 11 }}>Clear</button>
                   </div>
                 )}
                 <input type="text" placeholder="Or paste a local path: /Users/you/episode.mp4"
-                  value={videoPath} onChange={e=>setVideoPath(e.target.value)}
-                  disabled={isProcessing||browsing}
-                  style={{ marginTop:8, fontSize:12, padding:'9px 13px', background:'var(--bg)', borderColor: videoPath?'var(--green-border)':'var(--border)' }} />
+                  value={videoPath} onChange={e => setVideoPath(e.target.value)}
+                  disabled={isProcessing || browsing}
+                  style={{ marginTop: 8, fontSize: 12, padding: '9px 13px', background: 'var(--bg)', borderColor: videoPath ? 'var(--green-border)' : 'var(--border)' }} />
               </div>
 
               {/* Transcript */}
               <div className="section">
                 <div className="section-label">Transcript</div>
                 <div className="tabs">
-                  <div className={`tab ${transcriptMode==='import'?'active':''}`} onClick={()=>setTranscriptMode('import')}>Paste Transcript</div>
-                  <div className={`tab ${transcriptMode==='whisper'?'active':''}`} onClick={()=>setTranscriptMode('whisper')}>Auto (Whisper)</div>
+                  <div className={`tab ${transcriptMode === 'import' ? 'active' : ''}`} onClick={() => setTranscriptMode('import')}>Paste Transcript</div>
+                  <div className={`tab ${transcriptMode === 'whisper' ? 'active' : ''}`} onClick={() => setTranscriptMode('whisper')}>Auto (Whisper)</div>
                 </div>
                 {transcriptMode === 'import' && (
                   <div className="fade-in">
                     {!transcriptText && (
-                      <div className={`drop-zone ${transcriptDragOver?'drag-over':''}`}
-                        onDragOver={e=>{preventDef(e);setTranscriptDragOver(true);}} onDragLeave={()=>setTranscriptDragOver(false)}
-                        onDrop={handleTranscriptDrop} style={{marginBottom:10,padding:'22px 20px'}}>
+                      <div className={`drop-zone ${transcriptDragOver ? 'drag-over' : ''}`}
+                        onDragOver={e => { preventDef(e); setTranscriptDragOver(true); }} onDragLeave={() => setTranscriptDragOver(false)}
+                        onDrop={handleTranscriptDrop} style={{ marginBottom: 10, padding: '22px 20px' }}>
                         <div className="icon">{'\uD83D\uDCC4'}</div>
                         <div className="label">Drop a transcript file or <strong>browse</strong></div>
                         <input type="file" accept=".txt,.json,.srt,.vtt" onChange={handleTranscriptFileSelect} disabled={isProcessing} />
                       </div>
                     )}
                     {transcriptText && transcriptFileName && (
-                      <div className="file-badge fade-in" style={{marginBottom:10}}>
-                        <div className="dot"/><div className="name">{transcriptFileName}</div>
+                      <div className="file-badge fade-in" style={{ marginBottom: 10 }}>
+                        <div className="dot" /><div className="name">{transcriptFileName}</div>
                         <div className="meta">{transcriptText.split('\n').length} lines</div>
-                        <button className="btn btn-ghost btn-sm" onClick={()=>{setTranscriptText('');setTranscriptFileName('');}} style={{padding:'4px 10px',fontSize:11}}>Clear</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => { setTranscriptText(''); setTranscriptFileName(''); }} style={{ padding: '4px 10px', fontSize: 11 }}>Clear</button>
                       </div>
                     )}
                     <textarea placeholder={'Speaker (00:00)\nText of what they said...\n\nSpeaker2 (00:15)\nMore text...\n\n— or paste JSON / drag a .txt file above —'}
-                      value={transcriptText} onChange={e=>{setTranscriptText(e.target.value);setTranscriptFileName('');}}
-                      disabled={isProcessing} style={{minHeight:transcriptText?80:120}}
-                      onDragOver={e=>{preventDef(e);setTranscriptDragOver(true);}} onDrop={handleTranscriptDrop} />
-                    <div style={{display:'flex',gap:8,alignItems:'center',marginTop:10}}>
-                      <span style={{fontSize:12,color:'var(--text2)',whiteSpace:'nowrap'}}>Time offset</span>
-                      <input type="number" step="0.5" value={timeAdjust} onChange={e=>setTimeAdjust(parseFloat(e.target.value)||0)}
-                        style={{width:72,padding:'7px 10px',fontSize:12}} disabled={isProcessing} />
-                      <span style={{fontSize:11,color:'var(--text3)'}}>sec</span>
+                      value={transcriptText} onChange={e => { setTranscriptText(e.target.value); setTranscriptFileName(''); }}
+                      disabled={isProcessing} style={{ minHeight: transcriptText ? 80 : 120 }}
+                      onDragOver={e => { preventDef(e); setTranscriptDragOver(true); }} onDrop={handleTranscriptDrop} />
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
+                      <span style={{ fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>Time offset</span>
+                      <input type="number" step="0.5" value={timeAdjust} onChange={e => setTimeAdjust(parseFloat(e.target.value) || 0)}
+                        style={{ width: 72, padding: '7px 10px', fontSize: 12 }} disabled={isProcessing} />
+                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>sec</span>
                     </div>
                   </div>
                 )}
                 {transcriptMode === 'whisper' && (
                   <div className="fade-in"><div className="row"><div>
                     <label className="field-label">Model</label>
-                    <select value={whisperModel} onChange={e=>setWhisperModel(e.target.value)} disabled={isProcessing}>
+                    <select value={whisperModel} onChange={e => setWhisperModel(e.target.value)} disabled={isProcessing}>
                       <option value="tiny">Tiny (fastest)</option><option value="base">Base</option>
                       <option value="small">Small</option><option value="medium">Medium</option>
                       <option value="large">Large (best)</option>
@@ -654,50 +662,50 @@
                 <div className="settings-grid">
                   <div>
                     <label className="field-label">Caption Style</label>
-                    <select value={captionStyle} onChange={e=>onCaptionChange(e.target.value)} disabled={isProcessing}>
+                    <select value={captionStyle} onChange={e => onCaptionChange(e.target.value)} disabled={isProcessing}>
                       <option value="branded">Branded</option><option value="hormozi">Hormozi</option>
                       <option value="karaoke">Karaoke</option><option value="subtle">Subtle</option>
                     </select>
                   </div>
                   <div>
                     <label className="field-label">Crop</label>
-                    <select value={cropStrategy} onChange={e=>onCropChange(e.target.value)} disabled={isProcessing}>
+                    <select value={cropStrategy} onChange={e => onCropChange(e.target.value)} disabled={isProcessing}>
                       <option value="center">Center</option><option value="face">Face Detection</option>
                     </select>
                   </div>
                 </div>
-                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {captionStyle === 'branded' && (
                     logoPath ? (
                       <div className="asset-pill fade-in">
                         <span className="asset-pill-icon">
                           <img src={`/api/stream-source?path=${encodeURIComponent(logoPath)}`}
-                            style={{width:16,height:16,objectFit:'contain',borderRadius:3}} onError={e=>{e.target.style.display='none'}} />
+                            style={{ width: 16, height: 16, objectFit: 'contain', borderRadius: 3 }} onError={e => { e.target.style.display = 'none' }} />
                         </span>
                         <span className="asset-pill-name">{logoPath.split('/').pop()}</span>
-                        <button className="asset-pill-x" onClick={()=>setLogoPath('')} disabled={isProcessing}>{'\u00D7'}</button>
+                        <button className="asset-pill-x" onClick={() => setLogoPath('')} disabled={isProcessing}>{'\u00D7'}</button>
                       </div>
                     ) : (
-                      <button className="asset-add fade-in" onClick={()=>logoRef.current?.click()} disabled={isProcessing||logoUploading}>
-                        {logoUploading ? <div className="spinner sm"/> : '+'} Logo
+                      <button className="asset-add fade-in" onClick={() => logoRef.current?.click()} disabled={isProcessing || logoUploading}>
+                        {logoUploading ? <div className="spinner sm" /> : '+'} Logo
                       </button>
                     )
                   )}
                   {outroPath ? (
                     <div className="asset-pill">
-                      <span className="asset-pill-icon" style={{fontSize:11}}>{'▶'}</span>
+                      <span className="asset-pill-icon" style={{ fontSize: 11 }}>{'▶'}</span>
                       <span className="asset-pill-name">{outroPath.split('/').pop()}</span>
-                      <button className="asset-pill-x" onClick={()=>setOutroPath('')} disabled={isProcessing}>{'\u00D7'}</button>
+                      <button className="asset-pill-x" onClick={() => setOutroPath('')} disabled={isProcessing}>{'\u00D7'}</button>
                     </div>
                   ) : (
-                    <button className="asset-add" onClick={()=>outroRef.current?.click()} disabled={isProcessing||outroUploading}>
-                      {outroUploading ? <div className="spinner sm"/> : '+'} Outro
+                    <button className="asset-add" onClick={() => outroRef.current?.click()} disabled={isProcessing || outroUploading}>
+                      {outroUploading ? <div className="spinner sm" /> : '+'} Outro
                     </button>
                   )}
-                  <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg,.svg" style={{display:'none'}}
-                    onChange={e=>e.target.files[0]&&handleLogoUpload(e.target.files[0])} />
-                  <input ref={outroRef} type="file" accept=".mp4,.mov,.mkv,.webm" style={{display:'none'}}
-                    onChange={e=>e.target.files[0]&&handleOutroUpload(e.target.files[0])} />
+                  <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg,.svg" style={{ display: 'none' }}
+                    onChange={e => e.target.files[0] && handleLogoUpload(e.target.files[0])} />
+                  <input ref={outroRef} type="file" accept=".mp4,.mov,.mkv,.webm" style={{ display: 'none' }}
+                    onChange={e => e.target.files[0] && handleOutroUpload(e.target.files[0])} />
                 </div>
               </div>
 
@@ -705,7 +713,7 @@
               {error && (
                 <div className="error-bar fade-in">
                   <span>{error}</span>
-                  <button className="btn btn-ghost btn-sm" onClick={()=>setError(null)} style={{flexShrink:0,color:'var(--red)',borderColor:'var(--red-border)'}}>Dismiss</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setError(null)} style={{ flexShrink: 0, color: 'var(--red)', borderColor: 'var(--red-border)' }}>Dismiss</button>
                 </div>
               )}
 
@@ -713,9 +721,9 @@
               {phase === 'idle' && (
                 <div>
                   <button className="btn btn-go"
-                    disabled={!videoPath.trim()||(transcriptMode==='import'&&!transcriptText.trim())||browsing}
+                    disabled={!videoPath.trim() || (transcriptMode === 'import' && !transcriptText.trim()) || browsing}
                     onClick={copyGeneratePrompt}
-                    style={generateCopied ? {background:'var(--green)',transition:'background 0.2s'} : {}}>
+                    style={generateCopied ? { background: 'var(--green)', transition: 'background 0.2s' } : {}}>
                     {generateCopied ? 'Copied — paste in Claude' : 'Generate Clips'}
                   </button>
                   {videoPath.trim() && (transcriptText.trim() || transcript) && (
@@ -726,45 +734,45 @@
 
               {/* Parsing */}
               {phase === 'parsing' && (
-                <div className="fade-in" style={{marginTop:20}}>
-                  <div className="status-line"><span style={{display:'flex',alignItems:'center',gap:8}}><div className="spinner sm"/>Processing transcript{'\u2026'}</span></div>
-                  <div className="progress-track"><div className="progress-fill indeterminate"/></div>
+                <div className="fade-in" style={{ marginTop: 20 }}>
+                  <div className="status-line"><span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div className="spinner sm" />Processing transcript{'\u2026'}</span></div>
+                  <div className="progress-track"><div className="progress-fill indeterminate" /></div>
                 </div>
               )}
 
               {/* Suggesting (no clips yet) */}
               {phase === 'suggesting' && suggestions.length === 0 && (
-                <div className="fade-in" style={{marginTop:20}}>
-                  <div className="status-line"><span style={{display:'flex',alignItems:'center',gap:8}}><div className="spinner sm"/>Analyzing transcript{'\u2026'}</span></div>
-                  <div className="progress-track"><div className="progress-fill indeterminate"/></div>
+                <div className="fade-in" style={{ marginTop: 20 }}>
+                  <div className="status-line"><span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div className="spinner sm" />Analyzing transcript{'\u2026'}</span></div>
+                  <div className="progress-track"><div className="progress-fill indeterminate" /></div>
                 </div>
               )}
 
               {/* Clip list */}
-              {(phase==='suggesting'||phase==='review'||phase==='exporting'||phase==='done') && suggestions.length > 0 && (
+              {(phase === 'suggesting' || phase === 'review' || phase === 'exporting' || phase === 'done') && suggestions.length > 0 && (
                 <div>
                   <div className="spacer" />
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-                    <div className="section-label" style={{margin:0,display:'flex',alignItems:'center',gap:8}}>
-                      {phase === 'suggesting' && <div className="spinner sm"/>}
-                      {phase==='suggesting' ? `Found ${suggestions.length} clip${suggestions.length!==1?'s':''}`
-                        : phase==='review' ? `Clips \u00B7 ${selectedCount} selected` : 'Clips'}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <div className="section-label" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {phase === 'suggesting' && <div className="spinner sm" />}
+                      {phase === 'suggesting' ? `Found ${suggestions.length} clip${suggestions.length !== 1 ? 's' : ''}`
+                        : phase === 'review' ? `Clips \u00B7 ${selectedCount} selected` : 'Clips'}
                     </div>
-                    <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       {phase === 'review' && (
-                        <button className="btn btn-primary btn-sm" disabled={selectedCount===0} onClick={startExport}>
-                          Export {selectedCount} clip{selectedCount!==1?'s':''}
+                        <button className="btn btn-primary btn-sm" disabled={selectedCount === 0} onClick={startExport}>
+                          Export {selectedCount} clip{selectedCount !== 1 ? 's' : ''}
                         </button>
                       )}
                       {transcript && (phase === 'review' || phase === 'done') && (
-                        <div style={{position:'relative'}}>
-                          <button className="btn btn-ghost btn-sm overflow-menu-btn" onClick={e=>{const m=e.currentTarget.nextElementSibling;m.style.display=m.style.display==='block'?'none':'block';}} style={{padding:'4px 8px',fontSize:14,color:'var(--text3)',lineHeight:1}}>
+                        <div style={{ position: 'relative' }}>
+                          <button className="btn btn-ghost btn-sm overflow-menu-btn" onClick={e => { const m = e.currentTarget.nextElementSibling; m.style.display = m.style.display === 'block' ? 'none' : 'block'; }} style={{ padding: '4px 8px', fontSize: 14, color: 'var(--text3)', lineHeight: 1 }}>
                             {'\u22EF'}
                           </button>
-                          <div className="overflow-menu" style={{display:'none'}}>
+                          <div className="overflow-menu" style={{ display: 'none' }}>
                             <div className="overflow-menu-label">Export transcript</div>
-                            {['SRT','VTT','JSON'].map(fmt => (
-                              <button key={fmt} className="overflow-menu-item" onClick={e=>{window.open(`/api/export-transcript?format=${fmt.toLowerCase()}`,'_blank');e.currentTarget.closest('.overflow-menu').style.display='none';}}>
+                            {['SRT', 'VTT', 'JSON'].map(fmt => (
+                              <button key={fmt} className="overflow-menu-item" onClick={e => { window.open(`/api/export-transcript?format=${fmt.toLowerCase()}`, '_blank'); e.currentTarget.closest('.overflow-menu').style.display = 'none'; }}>
                                 {fmt}
                               </button>
                             ))}
@@ -776,7 +784,7 @@
 
                   {suggestions.map((clip, i) => {
                     const off = deselected.has(i);
-                    const resultIdx = [...suggestions.keys()].filter(k=>!deselected.has(k)).indexOf(i);
+                    const resultIdx = [...suggestions.keys()].filter(k => !deselected.has(k)).indexOf(i);
                     const r = results[resultIdx];
                     const outputFile = r?.output_path?.split('/').pop();
                     const failed = r?.status === 'error';
@@ -786,43 +794,43 @@
 
                     return (
                       <div key={i}
-                        className={`clip-item ${off&&phase==='review'?'dimmed':''} ${exportStatus==='rendering'?'active-clip':''} ${phase==='suggesting'?'clip-reveal':''} ${isSelected?'selected':''}`}
+                        className={`clip-item ${off && phase === 'review' ? 'dimmed' : ''} ${exportStatus === 'rendering' ? 'active-clip' : ''} ${phase === 'suggesting' ? 'clip-reveal' : ''} ${isSelected ? 'selected' : ''}`}
                         onClick={() => onClipClick(i)}>
 
                         {phase === 'review' && (
-                          <div className={`checkbox ${!off?'checked':''}`} onClick={(e)=>{e.stopPropagation();toggleClip(i);}}>
-                            {!off && <CheckIcon/>}
+                          <div className={`checkbox ${!off ? 'checked' : ''}`} onClick={(e) => { e.stopPropagation(); toggleClip(i); }}>
+                            {!off && <CheckIcon />}
                           </div>
                         )}
 
                         {phase === 'exporting' && !off && exportStatus && (
-                          <div className={`clip-status ${exportStatus}`}>{exportStatus==='exported'&&<CheckSmall/>}</div>
+                          <div className={`clip-status ${exportStatus}`}>{exportStatus === 'exported' && <CheckSmall />}</div>
                         )}
 
                         {phase === 'done' && !off && r && (
-                          <div className={`status-dot ${failed?'fail':'ok'}`}>{failed?'\u00D7':'\u2713'}</div>
+                          <div className={`status-dot ${failed ? 'fail' : 'ok'}`}>{failed ? '\u00D7' : '\u2713'}</div>
                         )}
 
                         <div className="clip-info">
                           <div className="clip-title">{clip.title}</div>
                           <div className="clip-meta">
                             {fmt(clip.start_second)} {'\u2192'} {fmt(clip.end_second)} {'\u00B7'} {clip.duration}s
-                            {r&&!failed&&<span> {'\u00B7'} {r.file_size_mb}MB</span>}
-                            {failed&&<span className="err"> {'\u00B7'} {r.error?.slice(0,60)}</span>}
-                            {exportStatus==='rendering'&&<span style={{color:'var(--accent)'}}> {'\u00B7'} rendering{'\u2026'}</span>}
+                            {r && !failed && <span> {'\u00B7'} {r.file_size_mb}MB</span>}
+                            {failed && <span className="err"> {'\u00B7'} {r.error?.slice(0, 60)}</span>}
+                            {exportStatus === 'rendering' && <span style={{ color: 'var(--accent)' }}> {'\u00B7'} rendering{'\u2026'}</span>}
                           </div>
                         </div>
 
                         {phase === 'done' && !off && r && !failed && outputFile && (
-                          <div className="clip-actions" onClick={e=>e.stopPropagation()}>
-                            <button className="btn btn-ghost btn-sm" onClick={()=>onPlayRendered(outputFile)} title="Preview">{'\u25B6'}</button>
+                          <div className="clip-actions" onClick={e => e.stopPropagation()}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => onPlayRendered(outputFile)} title="Preview">{'\u25B6'}</button>
                             <a href={`/api/download/${outputFile}`} className="btn btn-primary btn-sm" download title="Download">{'\u2193'}</a>
-                            <button className="btn btn-ghost btn-sm" disabled={isRetryingThis} onClick={()=>retryClip(resultIdx)} title="Retry">{'\u21BB'}</button>
+                            <button className="btn btn-ghost btn-sm" disabled={isRetryingThis} onClick={() => retryClip(resultIdx)} title="Retry">{'\u21BB'}</button>
                           </div>
                         )}
                         {phase === 'done' && !off && r && failed && (
-                          <button className="btn btn-ghost btn-sm" onClick={e=>{e.stopPropagation();retryClip(resultIdx);}} disabled={isRetryingThis}>
-                            {isRetryingThis?'\u2026':'Retry'}
+                          <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); retryClip(resultIdx); }} disabled={isRetryingThis}>
+                            {isRetryingThis ? '\u2026' : 'Retry'}
                           </button>
                         )}
                       </div>
@@ -830,31 +838,32 @@
                   })}
 
                   {phase === 'exporting' && batchStream && (
-                    <div style={{marginTop:14}}>
+                    <div style={{ marginTop: 14 }}>
                       <div className="status-line">
                         <span>{batchStream.message}</span>
-                        <span style={{fontWeight:600,fontVariantNumeric:'tabular-nums'}}>{batchStream.progress||0}%</span>
+                        <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{batchStream.progress || 0}%</span>
                       </div>
-                      <div className="progress-track"><div className="progress-fill" style={{width:`${batchStream.progress||0}%`}}/></div>
+                      <div className="progress-track"><div className="progress-fill" style={{ width: `${batchStream.progress || 0}%` }} /></div>
                     </div>
                   )}
 
                   {retryIdx !== null && retryStream?.status === 'running' && (
-                    <div style={{marginTop:10,padding:12,background:'var(--surface)',borderRadius:'var(--radius-sm)'}}>
-                      <div className="status-line" style={{fontSize:12}}>
-                        <span style={{display:'flex',alignItems:'center',gap:6}}><div className="spinner sm"/>Retrying{'\u2026'}</span>
-                        <span style={{fontWeight:600}}>{retryStream.progress||0}%</span>
+                    <div style={{ marginTop: 10, padding: 12, background: 'var(--surface)', borderRadius: 'var(--radius-sm)' }}>
+                      <div className="status-line" style={{ fontSize: 12 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div className="spinner sm" />Retrying{'\u2026'}</span>
+                        <span style={{ fontWeight: 600 }}>{retryStream.progress || 0}%</span>
                       </div>
-                      <div className="progress-track"><div className="progress-fill" style={{width:`${retryStream.progress||0}%`}}/></div>
+                      <div className="progress-track"><div className="progress-fill" style={{ width: `${retryStream.progress || 0}%` }} /></div>
                     </div>
                   )}
 
                   {(phase === 'done' || phase === 'review' || phase === 'exporting') && (
-                    <div style={{display:'flex',gap:10,justifyContent:'center',marginTop:24}}>
-                      <button className="btn btn-ghost" onClick={()=>{setPhase('idle');setResults([]);setSuggestions([]);setBatchJobId(null);setFile(null);setTranscript(null);setActiveClipIdx(null);setPreviewSrc(null);
-                        fetch('/api/ui-state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_source:'ui',phase:'idle',suggestions:[],deselectedIndices:[]})}).catch(()=>{});
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 24 }}>
+                      <button className="btn btn-ghost" onClick={() => {
+                        setPhase('idle'); setResults([]); setSuggestions([]); setBatchJobId(null); setFile(null); setTranscript(null); setActiveClipIdx(null); setPreviewSrc(null);
+                        fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', phase: 'idle', suggestions: [], deselectedIndices: [] }) }).catch(() => { });
                       }}>Start Over</button>
-                      {phase === 'done' && <button className="btn btn-ghost" onClick={()=>{setPhase('review');setResults([]);setBatchJobId(null);}}>Re-export</button>}
+                      {phase === 'done' && <button className="btn btn-ghost" onClick={() => { setPhase('review'); setResults([]); setBatchJobId(null); }}>Re-export</button>}
                     </div>
                   )}
                   {(phase === 'review' || phase === 'done') && (
@@ -864,26 +873,26 @@
               )}
               {/* ═══════════ CLIP HISTORY ═══════════ */}
               {clipHistory.length > 0 && (
-                <div className="section" style={{marginTop:16}}>
-                  <div className="section-label" style={{cursor:'pointer',userSelect:'none',display:'flex',justifyContent:'space-between',alignItems:'center'}}
-                    onClick={()=>setHistoryOpen(!historyOpen)}>
+                <div className="section" style={{ marginTop: 16 }}>
+                  <div className="section-label" style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    onClick={() => setHistoryOpen(!historyOpen)}>
                     <span>History ({clipHistory.length})</span>
-                    <span style={{fontSize:10,color:'var(--text3)',transition:'transform 0.2s',transform:historyOpen?'rotate(180deg)':'rotate(0)'}}>{'\u25BC'}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text3)', transition: 'transform 0.2s', transform: historyOpen ? 'rotate(180deg)' : 'rotate(0)' }}>{'\u25BC'}</span>
                   </div>
                   {historyOpen && (
-                    <div className="fade-in" style={{display:'flex',flexDirection:'column',gap:4,maxHeight:300,overflowY:'auto',marginTop:8}}>
-                      {clipHistory.map((c,i) => {
+                    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto', marginTop: 8 }}>
+                      {clipHistory.map((c, i) => {
                         const date = new Date(c.created_at);
                         const ago = ((Date.now() - date.getTime()) / 3600000);
-                        const timeStr = ago < 1 ? `${Math.round(ago*60)}m ago` : ago < 24 ? `${Math.round(ago)}h ago` : date.toLocaleDateString();
+                        const timeStr = ago < 1 ? `${Math.round(ago * 60)}m ago` : ago < 24 ? `${Math.round(ago)}h ago` : date.toLocaleDateString();
                         const fname = c.output_path?.split('/').pop() || c.title;
                         return (
-                          <div key={c.id||i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',background:'var(--surface)',borderRadius:'var(--radius-sm)',fontSize:12,cursor:'pointer'}}
-                            onClick={()=>{ const f=c.output_path?.split('/').pop(); if(f) setPreviewSrc(f); }}>
-                            <div style={{width:6,height:6,borderRadius:3,background:'var(--green)',flexShrink:0}}/>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title || fname}</div>
-                              <div style={{color:'var(--text3)',fontSize:11,marginTop:2}}>
+                          <div key={c.id || i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--surface)', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer' }}
+                            onClick={() => { const f = c.output_path?.split('/').pop(); if (f) setPreviewSrc(f); }}>
+                            <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--green)', flexShrink: 0 }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || fname}</div>
+                              <div style={{ color: 'var(--text3)', fontSize: 11, marginTop: 2 }}>
                                 {c.duration}s {'\u00B7'} {c.file_size_mb?.toFixed(1)}MB {'\u00B7'} {c.caption_style} {'\u00B7'} {timeStr}
                               </div>
                             </div>
@@ -920,7 +929,7 @@
                     {previewSrc && (
                       <div className="preview-clip-range">
                         <span className="clip-name">Rendered clip</span>
-                        <button className="preview-back" onClick={()=>setPreviewSrc(null)}>Back to source</button>
+                        <button className="preview-back" onClick={() => setPreviewSrc(null)}>Back to source</button>
                       </div>
                     )}
                   </div>
@@ -931,12 +940,12 @@
 
                 {/* Settings tags */}
                 <div className="preview-settings">
-                  <div className={`preview-tag ${settingsFlash==='caption'?'changed':''}`}
-                    style={settingsFlash==='caption'?{animation:'tagFlash 0.6s var(--ease)'}:{}}>
+                  <div className={`preview-tag ${settingsFlash === 'caption' ? 'changed' : ''}`}
+                    style={settingsFlash === 'caption' ? { animation: 'tagFlash 0.6s var(--ease)' } : {}}>
                     Caption {'\u00B7'} <strong>{captionStyle}</strong>
                   </div>
-                  <div className={`preview-tag ${settingsFlash==='crop'?'changed':''}`}
-                    style={settingsFlash==='crop'?{animation:'tagFlash 0.6s var(--ease)'}:{}}>
+                  <div className={`preview-tag ${settingsFlash === 'crop' ? 'changed' : ''}`}
+                    style={settingsFlash === 'crop' ? { animation: 'tagFlash 0.6s var(--ease)' } : {}}>
                     Crop {'\u00B7'} <strong>{cropStrategy}</strong>
                   </div>
                   {logoPath && (
@@ -956,11 +965,11 @@
 
           {/* Modal (mobile fallback) */}
           {previewFile && (
-            <div className="modal-overlay" onClick={()=>setPreviewFile(null)}>
-              <div className="modal-body" onClick={e=>e.stopPropagation()}>
+            <div className="modal-overlay" onClick={() => setPreviewFile(null)}>
+              <div className="modal-body" onClick={e => e.stopPropagation()}>
                 <video src={`/api/preview/${previewFile}`} controls autoPlay />
-                <div style={{textAlign:'center',marginTop:12}}>
-                  <button className="btn btn-ghost btn-sm" onClick={()=>setPreviewFile(null)}>Close</button>
+                <div style={{ textAlign: 'center', marginTop: 12 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setPreviewFile(null)}>Close</button>
                 </div>
               </div>
             </div>
@@ -972,4 +981,5 @@
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
+
 </html>

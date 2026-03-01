@@ -1,23 +1,36 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>podcli — Knowledge Base</title>
-  <link rel="icon" type="image/png" href="/podcli-icon-transparent.png">
+  <link rel="icon" type="image/png" href="/podcli-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
   <link rel="stylesheet" href="css/styles.css">
   <style>
-    .app { max-width: 860px; }
-    .header { margin-bottom: 32px; }
-    .drop-zone { padding: 36px 24px; margin-bottom: 24px; }
+    .app {
+      max-width: 860px;
+    }
+
+    .header {
+      margin-bottom: 32px;
+    }
+
+    .drop-zone {
+      padding: 36px 24px;
+      margin-bottom: 24px;
+    }
   </style>
 </head>
+
 <body>
   <div id="root"></div>
   <script type="text/babel">
@@ -42,7 +55,7 @@
 
       useEffect(() => {
         loadFiles();
-        fetch('/api/knowledge/dir').then(r => r.json()).then(d => setKbDir(d.path)).catch(() => {});
+        fetch('/api/knowledge/dir').then(r => r.json()).then(d => setKbDir(d.path)).catch(() => { });
       }, []);
 
       const openFile = (f) => {
@@ -161,7 +174,7 @@
                   <button className="file-delete" onClick={(e) => deleteFile(f.filename, e)}>{'\u00D7'}</button>
                   <div className="file-name">{f.filename}</div>
                   <div className="file-meta">{new Date(f.updatedAt).toLocaleDateString()}</div>
-                  <div className="file-preview">{f.content.split('\n').filter(l => l.trim() && !l.startsWith('#')).slice(0,2).join(' ')}</div>
+                  <div className="file-preview">{f.content.split('\n').filter(l => l.trim() && !l.startsWith('#')).slice(0, 2).join(' ')}</div>
                 </div>
               ))}
             </div>
@@ -210,4 +223,5 @@
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
+
 </html>
