@@ -67,7 +67,7 @@ export interface TranscriptResult {
 
 // === Clip Models ===
 
-export type CaptionStyle = "hormozi" | "karaoke" | "subtle";
+export type CaptionStyle = "branded" | "hormozi" | "karaoke" | "subtle";
 export type CropStrategy = "center" | "face";
 
 export interface ClipRequest {

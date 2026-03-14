@@ -13,7 +13,18 @@ from typing import Optional
 from services.encoder import get_video_encode_flags
 import sys
 
-CPU_FLAGS = ["-c:v", "libx264", "-crf", "18", "-preset", "slow", "-profile:v", "high"]
+# Quality presets: name → (crf, preset)
+# Lower CRF = higher quality = larger file. 18 is visually lossless.
+QUALITY_PRESETS = {
+    "low":    {"crf": "28", "preset": "fast"},       # ~2-4 MB/min, fast encode
+    "medium": {"crf": "23", "preset": "medium"},     # ~4-8 MB/min, balanced
+    "high":   {"crf": "18", "preset": "slow"},       # ~8-15 MB/min, great quality
+    "max":    {"crf": "14", "preset": "slower"},      # ~15-30 MB/min, near-lossless
+}
+
+_quality = os.environ.get("PODCLI_QUALITY", "high")
+_qp = QUALITY_PRESETS.get(_quality, QUALITY_PRESETS["high"])
+CPU_FLAGS = ["-c:v", "libx264", "-crf", _qp["crf"], "-preset", _qp["preset"], "-profile:v", "high"]
 
 
 def _run_ffmpeg_with_fallback(cmd_parts_before_enc: list, cmd_parts_after_enc: list, output_path: str, label: str = "encode") -> str:
@@ -100,6 +111,8 @@ def crop_to_vertical(
     input_path: str,
     output_path: str,
     strategy: str = "face",
+    transcript_words: list = None,
+    clip_start: float = 0,
 ) -> str:
     """
     Crop/scale video to 1080x1920 (9:16 vertical).
@@ -107,6 +120,12 @@ def crop_to_vertical(
     Strategies:
     - center: Take center column of the frame, scale to fit
     - face: Detect face position, center crop on face (falls back to center)
+    - speaker: Like face, but switches to the active speaker using transcript
+               word-level speaker labels. Falls back to face then center.
+
+    transcript_words: Word dicts with 'speaker', 'start', 'end' keys (from Whisper+pyannote).
+                      Used by 'face' strategy when speaker data is available.
+    clip_start: The start time of this clip in the original video (for timestamp alignment).
     """
     width, height = get_dimensions(input_path)
     target_w, target_h = 1080, 1920
@@ -114,29 +133,45 @@ def crop_to_vertical(
 
     source_ratio = width / height
 
-    if strategy == "face":
-        crop_x = _detect_face_offset(input_path, width, height, target_ratio)
-        if crop_x is not None:
-            crop_h = height
-            crop_w = int(crop_h * target_ratio)
-            vf = f"crop={crop_w}:{crop_h}:{crop_x}:0,scale={target_w}:{target_h}"
+    if strategy in ("face", "speaker"):
+        # Check if we have multi-speaker data — if so, do speaker-aware crop
+        has_speakers = (
+            transcript_words
+            and len(set(w.get("speaker") for w in transcript_words if w.get("speaker"))) > 1
+        )
+
+        if has_speakers:
+            crop_x_expr = _build_speaker_aware_crop(
+                input_path, width, height, target_ratio,
+                transcript_words, clip_start,
+            )
+            if crop_x_expr is not None:
+                crop_h = height
+                crop_w = int(crop_h * target_ratio)
+                # crop_x_expr is either a static int or an FFmpeg expression for dynamic panning
+                vf = f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,scale={target_w}:{target_h}"
+            else:
+                strategy = "center"
         else:
-            # Fallback to center
-            strategy = "center"
+            # Single speaker or no speaker data — use static face detection
+            crop_x = _detect_face_offset(input_path, width, height, target_ratio)
+            if crop_x is not None:
+                crop_h = height
+                crop_w = int(crop_h * target_ratio)
+                vf = f"crop={crop_w}:{crop_h}:{crop_x}:0,scale={target_w}:{target_h}"
+            else:
+                strategy = "center"
 
     if strategy == "center":
         if source_ratio > target_ratio:
-            # Source is wider than target — crop sides
             crop_h = height
             crop_w = int(crop_h * target_ratio)
             crop_x = (width - crop_w) // 2
             vf = f"crop={crop_w}:{crop_h}:{crop_x}:0,scale={target_w}:{target_h}"
         else:
-            # Source is taller or same — crop top/bottom or pad
             crop_w = width
             crop_h = int(crop_w / target_ratio)
             if crop_h > height:
-                # Need to pad (letterbox)
                 vf = f"scale={target_w}:-2,pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black"
             else:
                 crop_y = (height - crop_h) // 2
@@ -150,13 +185,201 @@ def crop_to_vertical(
         ],
         cmd_parts_after_enc=[
             "-c:a", "aac",
-            "-b:a", "128k",
+            "-b:a", "192k",
             "-ar", "44100",
             "-movflags", "+faststart",
         ],
         output_path=output_path,
         label="crop",
     )
+
+
+def _build_speaker_aware_crop(
+    video_path: str,
+    width: int,
+    height: int,
+    target_ratio: float,
+    transcript_words: list,
+    clip_start: float,
+) -> Optional[str]:
+    """
+    Build a speaker-aware crop that pans to whoever is speaking.
+
+    1. Detect ALL faces in the video and cluster them by position (left vs right).
+    2. Map each cluster to a speaker using transcript word timing + face position.
+    3. Build an FFmpeg expression that switches crop_x based on timestamp.
+
+    Returns an FFmpeg crop x expression string, or None if detection fails.
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return None
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        duration = total_frames / fps
+        crop_w = int(height * target_ratio)
+
+        # Load DNN face detector
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        proto = os.path.join(backend_dir, "models", "deploy.prototxt")
+        model = os.path.join(backend_dir, "models", "res10_300x300_ssd_iter_140000.caffemodel")
+        if not (os.path.exists(proto) and os.path.exists(model)):
+            cap.release()
+            return None
+
+        detector = cv2.dnn.readNetFromCaffe(proto, model)
+
+        # Sample frames and detect ALL faces with their positions and timestamps
+        sample_count = min(80, max(30, int(duration * 4)))  # ~4 samples/sec
+        face_observations = []  # list of (time_in_clip, face_center_x, face_width)
+
+        for i in range(sample_count):
+            t = i * duration / sample_count
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            h, w = frame.shape[:2]
+            blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
+            detector.setInput(blob)
+            detections = detector.forward()
+
+            for j in range(detections.shape[2]):
+                conf = detections[0, 0, j, 2]
+                if conf > 0.5:
+                    x1 = int(detections[0, 0, j, 3] * w)
+                    x2 = int(detections[0, 0, j, 5] * w)
+                    fw = x2 - x1
+                    if fw < w * 0.04:
+                        continue
+                    cx = (x1 + x2) // 2
+                    face_observations.append((t, cx, fw))
+
+        cap.release()
+
+        if len(face_observations) < 5:
+            return None
+
+        # Cluster faces into positions (typically 2 for a podcast: left + right)
+        positions = np.array([obs[1] for obs in face_observations])
+        cluster_radius = width * 0.15
+
+        clusters = []
+        used = np.zeros(len(positions), dtype=bool)
+        sorted_idx = np.argsort(positions)
+
+        for idx in sorted_idx:
+            if used[idx]:
+                continue
+            mask = np.abs(positions - positions[idx]) < cluster_radius
+            mask &= ~used
+            cluster_indices = np.where(mask)[0]
+            if len(cluster_indices) > 0:
+                cluster_center = int(np.median(positions[mask]))
+                clusters.append({
+                    "center_x": cluster_center,
+                    "count": len(cluster_indices),
+                    "crop_x": max(0, min(cluster_center - crop_w // 2, width - crop_w)),
+                })
+                used |= mask
+
+        if len(clusters) < 2:
+            # Only one face position found — use static crop on it
+            if clusters:
+                return str(clusters[0]["crop_x"])
+            return None
+
+        # Sort clusters left to right
+        clusters.sort(key=lambda c: c["center_x"])
+
+        # Map speakers to face positions using transcript word timing.
+        # For each speaker, find which face cluster is most visible when they talk.
+        speakers = list(set(w.get("speaker") for w in transcript_words if w.get("speaker")))
+        if len(speakers) < 2:
+            # Can't distinguish — use the most frequent face
+            clusters.sort(key=lambda c: c["count"], reverse=True)
+            return str(clusters[0]["crop_x"])
+
+        speaker_to_cluster = {}
+        for speaker in speakers:
+            # Get time ranges when this speaker is talking (relative to clip)
+            speaker_times = []
+            for w in transcript_words:
+                if w.get("speaker") == speaker:
+                    speaker_times.append(w["start"] - clip_start)
+
+            # Count which face cluster is most visible during this speaker's words
+            cluster_votes = [0] * len(clusters)
+            for t in speaker_times:
+                # Find face observations near this timestamp
+                for obs_t, obs_cx, obs_fw in face_observations:
+                    if abs(obs_t - t) < 1.0:  # within 1 second
+                        for ci, cl in enumerate(clusters):
+                            if abs(obs_cx - cl["center_x"]) < cluster_radius:
+                                cluster_votes[ci] += 1
+
+            if any(cluster_votes):
+                best_cluster_idx = max(range(len(cluster_votes)), key=lambda i: cluster_votes[i])
+                speaker_to_cluster[speaker] = clusters[best_cluster_idx]
+
+        # Build an FFmpeg expression that pans based on who's speaking.
+        # We create time-based segments and smooth-pan between positions.
+        # Group consecutive words by speaker to create segments
+        segments = []  # (start_time_in_clip, end_time_in_clip, speaker)
+        current_speaker = None
+        seg_start = 0
+
+        for w in sorted(transcript_words, key=lambda x: x["start"]):
+            sp = w.get("speaker")
+            t = w["start"] - clip_start
+            if sp != current_speaker and sp is not None:
+                if current_speaker is not None:
+                    segments.append((seg_start, t, current_speaker))
+                current_speaker = sp
+                seg_start = t
+
+        if current_speaker is not None:
+            segments.append((seg_start, duration, current_speaker))
+
+        if not segments:
+            clusters.sort(key=lambda c: c["count"], reverse=True)
+            return str(clusters[0]["crop_x"])
+
+        # Build FFmpeg crop x expression using nested if(between()) for each segment.
+        # This creates smooth panning between speakers.
+        # Default to the most-detected face
+        default_cluster = max(clusters, key=lambda c: c["count"])
+        default_x = default_cluster["crop_x"]
+
+        # Simplify: if only 2 face positions, use a clean between() chain
+        expr_parts = []
+        for start_t, end_t, speaker in segments:
+            cl = speaker_to_cluster.get(speaker)
+            if cl and cl["crop_x"] != default_x:
+                expr_parts.append(f"if(between(t\\,{start_t:.1f}\\,{end_t:.1f})\\,{cl['crop_x']}\\,")
+
+        if not expr_parts:
+            return str(default_x)
+
+        # Build nested expression: if(cond1, val1, if(cond2, val2, default))
+        expr = ""
+        for part in expr_parts:
+            expr += part
+        expr += str(default_x)
+        expr += ")" * len(expr_parts)
+
+        return expr
+
+    except ImportError:
+        return None
+    except Exception:
+        return None
 
 
 def _create_gradient_png(output_path: str, width: int = 1080, height: int = 1920, opacity: float = 0.7) -> str:

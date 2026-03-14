@@ -4,6 +4,9 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Suppress macOS ObjC duplicate class warnings (OpenCV + Homebrew conflict)
+export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
+
 # Use venv python if available
 if [ -f "$SCRIPT_DIR/venv/bin/python3" ]; then
   PYTHON="$SCRIPT_DIR/venv/bin/python3"
@@ -14,4 +17,4 @@ else
   PYTHON="python3"
 fi
 
-exec "$PYTHON" "$SCRIPT_DIR/backend/cli.py" "$@"
+exec "$PYTHON" -W ignore::UserWarning "$SCRIPT_DIR/backend/cli.py" "$@" 2> >(grep -v -e '^objc\[' -e 'FP16 is not supported' -e 'warnings.warn' >&2)

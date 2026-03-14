@@ -51,7 +51,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: BrandedNormal,{style["font_name"]},{style["font_size"]},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,0,0,{style["alignment"]},80,80,{style["margin_v"]},1
+Style: BrandedNormal,{style["font_name"]},{style["font_size"]},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,2,0,3,0,0,{style["alignment"]},60,60,{style["margin_v"]},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -256,20 +256,26 @@ def _normalize_case(text: str) -> str:
 
 def _render_branded(words: list[dict], style: dict, offset: float) -> str:
     """
-    Branded style — large bold text, dark rounded box on the active word.
-    Each chunk shows ~4 words. For each word's duration, that word gets a
-    dark background box (BorderStyle=3) while the others stay plain white.
+    Branded style — large bold white text, dark rounded pill on active word only.
 
-    IMPORTANT: Dialogue lines are made contiguous — each word's display extends
-    to the next word's start (not its own end). This prevents flashing/gaps
-    between words that cause the entire text to disappear and reappear.
+    Matches the reference: clean white text directly on video, currently-spoken
+    word gets a near-black rounded rectangle background (pill shape). 5-7 words
+    shown at a time across 2 natural lines. No gradient overlay.
+
+    Each word's display is contiguous to the next word's start to prevent
+    flashing/gaps between words.
     """
     header = generate_branded_header(style)
     events = []
-    chunk_size = style.get("words_per_chunk", 4)
-    raw_box = style.get("active_box_color", "&H00181818")
-    # Ensure color has trailing & for inline ASS overrides
+    chunk_size = style.get("words_per_chunk", 6)
+
+    raw_box = style.get("active_box_color", "&H00101010")
     box_color = raw_box if raw_box.endswith("&") else raw_box + "&"
+
+    # Pill dimensions from style config
+    pad_x = style.get("active_box_padding_x", 20)
+    pad_y = style.get("active_box_padding_y", 10)
+    rounding = style.get("active_box_rounding", 8)
 
     # Group words into chunks
     chunks = []
@@ -284,7 +290,7 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
         chunk_start = max(0, chunk[0]["start"] - offset)
         chunk_end = max(0, chunk[-1]["end"] - offset)
 
-        # Normalize casing: lowercase except acronyms, capitalize first word
+        # Normalize casing: sentence-case (lowercase except acronyms/I, capitalize first word)
         normalized = []
         for j, w in enumerate(chunk):
             text = _normalize_case(w["word"])
@@ -292,39 +298,39 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
                 text = text[0].upper() + text[1:] if len(text) > 1 else text.upper()
             normalized.append(text)
 
-        # For each word in the chunk, emit a dialogue line for its active window
-        # where THAT word has a dark box and the rest are plain.
-        # Key: each word's display extends to the NEXT word's start (contiguous)
-        # to prevent flashing/gaps between words.
+        # For each word: emit a dialogue line where THAT word has a dark pill bg
         for wi, w in enumerate(chunk):
             w_start = max(0, w["start"] - offset)
 
-            # End at next word's start (contiguous) instead of this word's end (gaps)
+            # Contiguous: each word's display extends to next word's start
             if wi < len(chunk) - 1:
                 w_end = max(0, chunk[wi + 1]["start"] - offset)
             else:
-                # Last word in chunk: extend to chunk end
                 w_end = chunk_end
 
             if w_end <= w_start:
-                w_end = w_start + 0.1  # minimum display time
+                w_end = w_start + 0.1
 
-            # Build line: all words visible, active one gets box override
+            # Build line: all words visible, active one gets dark pill override
             parts = []
             for wj, text in enumerate(normalized):
                 if wj == wi:
-                    # Active word: dark rounded box background, white text
-                    # BorderStyle=3: \4c = box fill color, \3c = box border
-                    # \xbord/\ybord = horizontal/vertical padding around text
-                    # \bord with higher value creates visible rounded-ish box
+                    # Active word: dark rounded pill background
+                    # \4c = box fill color (BorderStyle=3 uses BackColour as box)
+                    # \3c = box outline color (same as fill for solid pill)
+                    # \xbord = horizontal padding, \ybord = vertical padding
+                    # \bord = border thickness (creates rounding effect)
                     parts.append(
-                        f"{{\\4c{box_color}\\3c{box_color}\\xbord18\\ybord10\\bord4\\shad0}}{text}{{\\4c&H00000000&\\3c&H00000000&\\xbord0\\ybord0\\bord0}}"
+                        f"{{\\4c{box_color}\\3c{box_color}"
+                        f"\\xbord{pad_x}\\ybord{pad_y}\\bord{rounding}"
+                        f"\\shad0}}{text}"
+                        f"{{\\4c&H00000000&\\3c&H00000000&"
+                        f"\\xbord0\\ybord0\\bord0}}"
                     )
                 else:
                     parts.append(text)
 
             line_text = " ".join(parts)
-
             start_ts = seconds_to_ass(w_start)
             end_ts = seconds_to_ass(w_end)
 

@@ -95,11 +95,6 @@ export const createClipToolDef = {
         type: "string",
         description: "Path to an outro video to append at the end of the clip",
       },
-      generate_thumbnail: {
-        type: "boolean",
-        description: "[Future] Whether to auto-generate a thumbnail image",
-        default: false,
-      },
     },
     required: [],
   },
@@ -176,7 +171,6 @@ export async function handleCreateClip(
     clean_fillers: input.clean_fillers !== false,
     logo_path: logoPath,
     outro_path: outroPath,
-    generate_thumbnail: input.generate_thumbnail || false,
   });
 
   const data = result.data as unknown as ClipResult;

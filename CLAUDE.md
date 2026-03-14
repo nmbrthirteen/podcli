@@ -15,6 +15,7 @@ Both share the same knowledge base at `.podcli/knowledge/`.
 
 | Command | Role | What It Does |
 |---------|------|-------------|
+| `/plan-episode` | Episode Architect | Pre-recording: designs questions, story arc, and target moments backwards from ideal output |
 | `/process-transcript` | Content Analyst | Ingests transcript → extracts 8-15 moments → scores → categorizes |
 | `/generate-titles` | Title Writer | Generates 8 title options with full verification checklist |
 | `/generate-descriptions` | Copywriter | Creates descriptions + hashtags + SEO keywords |
@@ -43,9 +44,10 @@ Both share the same knowledge base at `.podcli/knowledge/`.
 ## The Full Pipeline
 
 ```
-/process-transcript  →  /generate-titles  →  /generate-descriptions  →  /plan-thumbnails  →  /review-content  →  /publish-checklist
-         ↑                                                                                                              ↓
-   Raw transcript                                                                                               Published content
+/plan-episode  →  Record  →  /produce-shorts  →  Published content
+     ↑                              ↓
+  Guest info              /process-transcript → /generate-titles → /generate-descriptions
+                          → /plan-thumbnails → /review-content → /publish-checklist
 ```
 
 Or run everything at once: `/prep-episode`

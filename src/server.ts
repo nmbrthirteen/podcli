@@ -255,9 +255,10 @@ export function createServer(): McpServer {
     createClipToolDef.name,
     createClipToolDef.description,
     {
-      video_path: z.string().describe("Path to the original podcast video"),
-      start_second: z.number().describe("Clip start time in seconds"),
-      end_second: z.number().describe("Clip end time in seconds"),
+      clip_number: z.number().optional().describe("Export a suggested clip by its number (from suggest_clips). Auto-fills video_path, start/end times, title, and transcript_words from session state."),
+      video_path: z.string().optional().describe("Path to the original podcast video. Auto-loaded from session state if clip_number is provided."),
+      start_second: z.number().optional().describe("Clip start time in seconds. Auto-loaded from clip_number if omitted."),
+      end_second: z.number().optional().describe("Clip end time in seconds. Auto-loaded from clip_number if omitted."),
       caption_style: z
         .enum(["hormozi", "karaoke", "subtle", "branded"])
         .optional()
@@ -277,7 +278,8 @@ export function createServer(): McpServer {
             confidence: z.number().optional().default(0),
           })
         )
-        .describe("Word-level timestamps"),
+        .optional()
+        .describe("Word-level timestamps. Auto-loaded from session state if omitted."),
       title: z.string().optional().default("clip").describe("Clip title"),
       logo_path: z
         .string()
@@ -287,11 +289,6 @@ export function createServer(): McpServer {
         .string()
         .optional()
         .describe("Path to an outro video to append at the end of the clip"),
-      generate_thumbnail: z
-        .boolean()
-        .optional()
-        .default(false)
-        .describe("[Future] Auto-generate thumbnail"),
     },
     async (params) => {
       try {
@@ -343,8 +340,9 @@ export function createServer(): McpServer {
             const webData = await webRes.json() as any;
             const jobId = webData.job_id;
 
-            // Poll the job until completion
-            while (true) {
+            // Poll the job until completion (1 hour max)
+            const deadline = Date.now() + 3600_000;
+            while (Date.now() < deadline) {
               await new Promise((r) => setTimeout(r, 2000));
               const pollRes = await fetch(`http://localhost:3847/api/job/${jobId}`);
               if (!pollRes.ok) break;
@@ -357,6 +355,9 @@ export function createServer(): McpServer {
               if (job.status === "error") {
                 throw new Error(job.error || "Job failed");
               }
+            }
+            if (!usedWebServer) {
+              throw new Error("Clip creation timed out after 1 hour");
             }
           }
         } catch (webErr: unknown) {
@@ -428,7 +429,7 @@ export function createServer(): McpServer {
     batchClipsToolDef.name,
     batchClipsToolDef.description,
     {
-      video_path: z.string().describe("Path to the original podcast video"),
+      video_path: z.string().optional().describe("Path to the original podcast video. Auto-loaded from session state if omitted."),
       clips: z
         .array(
           z.object({
@@ -439,7 +440,8 @@ export function createServer(): McpServer {
             crop_strategy: z.enum(["center", "face"]).optional(),
           })
         )
-        .describe("Array of clips to create"),
+        .optional()
+        .describe("Array of clips to create. Auto-loaded from suggestions if omitted."),
       transcript_words: z
         .array(
           z.object({
@@ -449,7 +451,10 @@ export function createServer(): McpServer {
             confidence: z.number().optional().default(0),
           })
         )
-        .describe("Word-level timestamps"),
+        .optional()
+        .describe("Word-level timestamps. Auto-loaded from session state if omitted."),
+      export_selected: z.boolean().optional().describe("If true, export all selected suggestions from the UI."),
+      clip_numbers: z.array(z.number()).optional().describe("Export specific clip numbers from suggestions (e.g. [1, 3, 5])."),
     },
     async (params) => {
       try {
@@ -471,8 +476,9 @@ export function createServer(): McpServer {
             const webData = await webRes.json() as any;
             const jobId = webData.job_id;
 
-            // Poll the job until completion
-            while (true) {
+            // Poll the job until completion (1 hour max)
+            const deadline = Date.now() + 3600_000;
+            while (Date.now() < deadline) {
               await new Promise((r) => setTimeout(r, 2000));
               const pollRes = await fetch(`http://localhost:3847/api/job/${jobId}`);
               if (!pollRes.ok) break;
@@ -485,6 +491,9 @@ export function createServer(): McpServer {
               if (job.status === "error") {
                 throw new Error(job.error || "Job failed");
               }
+            }
+            if (!usedWebServer) {
+              throw new Error("Batch clip creation timed out after 1 hour");
             }
           }
         } catch (webErr: unknown) {
@@ -512,7 +521,7 @@ export function createServer(): McpServer {
             for (const r of parsed.results as any[]) {
               if (r.status === "success" && r.output_path) {
                 await history.record({
-                  source_video: params.video_path,
+                  source_video: params.video_path || "",
                   start_second: r.start_second || 0,
                   end_second: r.end_second || 0,
                   caption_style: r.caption_style || "hormozi",

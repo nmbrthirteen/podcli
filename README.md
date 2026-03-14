@@ -284,11 +284,21 @@ Run `./setup.sh --mcp` to get the exact config with your paths filled in.
 |------|-------------|
 | `transcribe_podcast` | Transcribe audio/video with Whisper + speaker detection |
 | `suggest_clips` | Submit clip suggestions (includes duplicate check) |
-| `create_clip` | Render a single short-form clip |
+| `create_clip` | Render a single short-form clip as a vertical short |
 | `batch_create_clips` | Render multiple clips in one batch |
-| `knowledge_base` | Read/write podcast context files |
+| `knowledge_base` | Read/manage podcast context files (hosts, style, audience, etc.) |
 | `manage_assets` | Register/list reusable assets (logos, videos) |
 | `clip_history` | View previously created clips, check for duplicates |
+| `get_ui_state` | Read current session state and get workflow next-step guidance |
+| `modify_clip` | Adjust a suggested clip's timing, title, or caption style (or delete it) |
+| `toggle_clip` | Select or deselect a suggested clip for export |
+| `update_settings` | Update rendering settings (caption style, crop strategy, logo, outro) |
+| `list_outputs` | List all rendered clip files in the output directory |
+| `manage_presets` | Save, load, list, or delete rendering presets |
+| `analyze_energy` | Analyze audio energy levels to find high-energy moments |
+| `set_video` | Set the working video file without transcribing |
+| `import_transcript` | Import an external transcript with word-level timestamps (skips Whisper) |
+| `parse_transcript` | Parse raw speaker-labeled plain text into word-level timestamps |
 
 ---
 

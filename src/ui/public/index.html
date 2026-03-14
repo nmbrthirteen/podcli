@@ -240,8 +240,12 @@
       const [historyOpen, setHistoryOpen] = useState(false);
 
       const [encoderInfo, setEncoderInfo] = useState(null);
+      const [speakerStatus, setSpeakerStatus] = useState(null);
       const [generateCopied, setGenerateCopied] = useState(false);
-      useEffect(() => { api('/encoder-info').then(d => { if (d.best) setEncoderInfo(d); }).catch(() => { }); }, []);
+      useEffect(() => {
+        api('/encoder-info').then(d => { if (d.best) setEncoderInfo(d); }).catch(() => { });
+        api('/speaker-status').then(d => setSpeakerStatus(d)).catch(() => { });
+      }, []);
 
       // Fetch clip history on mount and after exports
       const fetchHistory = () => { fetch('/api/history?limit=50').then(r => r.json()).then(d => { if (Array.isArray(d)) setClipHistory(d); }).catch(() => { }); };
@@ -510,22 +514,56 @@
           }).catch(() => { });
         }
 
-        let prompt;
+        // Ask Claude directly for clip suggestions (same as CLI)
+        setPhase('suggesting');
+        setGenerateCopied(false);
         try {
-          const res = await fetch('/api/generate-prompt', {
+          const res = await fetch('/api/claude-suggest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'suggest' }),
+            body: JSON.stringify({ top_n: 8 }),
           });
           const data = await res.json();
-          prompt = data.prompt || buildLocalPrompt();
-        } catch {
-          prompt = buildLocalPrompt();
+
+          if (data.clips && data.clips.length > 0) {
+            // Claude returned suggestions — populate directly
+            const mapped = data.clips.map((c, i) => ({
+              id: `claude-${i}`,
+              title: c.title,
+              start_second: c.start_second,
+              end_second: c.end_second,
+              reasoning: c.reasoning || c.content_type || '',
+            }));
+            setSuggestions(mapped);
+            setPhase('review');
+          } else if (data.fallback === 'clipboard') {
+            // Claude not installed — fall back to clipboard copy
+            setPhase('idle');
+            setError('Claude Code not found. Install it for automatic clip selection, or use MCP.');
+            let prompt;
+            try {
+              const pRes = await fetch('/api/generate-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'suggest' }),
+              });
+              const pData = await pRes.json();
+              prompt = pData.prompt || '';
+            } catch { prompt = ''; }
+            if (prompt) {
+              navigator.clipboard.writeText(prompt).then(() => {
+                setGenerateCopied(true);
+                setTimeout(() => setGenerateCopied(false), 3000);
+              }).catch(() => { });
+            }
+          } else {
+            setPhase('idle');
+            setError(data.error || 'Claude returned no clips');
+          }
+        } catch (err) {
+          setPhase('idle');
+          setError('Failed to get suggestions: ' + (err.message || err));
         }
-        navigator.clipboard.writeText(prompt).then(() => {
-          setGenerateCopied(true);
-          setTimeout(() => setGenerateCopied(false), 2000);
-        }).catch(() => { });
       };
 
       const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting';
@@ -564,12 +602,45 @@
                     {encoderInfo.best === 'libx264' ? 'CPU' : encoderInfo.best.replace('h264_', '').toUpperCase()}
                   </span>
                 )}
+                {speakerStatus && !speakerStatus.configured && (
+                  <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'rgba(250,204,21,0.08)', color: '#facc15', border: '1px solid rgba(250,204,21,0.2)', cursor: 'pointer' }}
+                    title="Speaker detection not configured — click to learn more"
+                    onClick={() => window.open('https://huggingface.co/pyannote/speaker-diarization-3.1', '_blank')}>
+                    Speakers ✗
+                  </span>
+                )}
+                {speakerStatus && speakerStatus.configured && (
+                  <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'var(--green-subtle)', color: 'var(--green)', border: '1px solid var(--green-border)' }}>
+                    Speakers ✓
+                  </span>
+                )}
                 <a href="/knowledge.html" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', textDecoration: 'none', padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', transition: 'all 0.15s' }}>Knowledge</a>
                 <a href="/integration.html" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', textDecoration: 'none', padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', transition: 'all 0.15s' }}>MCP Setup</a>
               </div>
             </div>
             <h1>Podcast content studio</h1>
           </div>
+
+          {speakerStatus && !speakerStatus.configured && !sessionStorage.getItem('dismiss-speaker') && (
+            <div className="fade-in" style={{ margin: '0 0 16px', padding: '14px 16px', background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.15)', borderRadius: 'var(--radius)', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1 }}>🎙️</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Set up speaker detection</div>
+                <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>
+                  Identify who's talking in your podcast. Free, takes 2 minutes.
+                  <br/>
+                  <span style={{ color: 'var(--text3)' }}>1.</span> <a href="https://huggingface.co/pyannote/speaker-diarization-3.1" target="_blank" rel="noopener" style={{ color: '#facc15', textDecoration: 'none' }}>Accept model terms</a>
+                  {' → '}
+                  <span style={{ color: 'var(--text3)' }}>2.</span> <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener" style={{ color: '#facc15', textDecoration: 'none' }}>Get free token</a> <span style={{ fontSize: 10, color: 'var(--text3)' }}>(Read permission)</span>
+                  {' → '}
+                  <span style={{ color: 'var(--text3)' }}>3.</span> Add <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11, padding: '1px 5px', background: 'rgba(250,204,21,0.1)', borderRadius: 4, color: '#facc15' }}>HF_TOKEN=hf_...</code> to your <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>.env</code>
+                </div>
+              </div>
+              <button onClick={() => { sessionStorage.setItem('dismiss-speaker', '1'); setSpeakerStatus({...speakerStatus, _dismissed: true}); }}
+                style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 16, padding: 4, lineHeight: 1 }}
+                title="Dismiss">✕</button>
+            </div>
+          )}
 
           <div className="layout">
             {/* ═══════════ LEFT COLUMN ═══════════ */}
@@ -724,7 +795,7 @@
                     disabled={!videoPath.trim() || (transcriptMode === 'import' && !transcriptText.trim()) || browsing}
                     onClick={copyGeneratePrompt}
                     style={generateCopied ? { background: 'var(--green)', transition: 'background 0.2s' } : {}}>
-                    {generateCopied ? 'Copied — paste in Claude' : 'Generate Clips'}
+                    {phase === 'suggesting' ? 'Claude is analyzing...' : generateCopied ? 'Copied — paste in Claude' : 'Find Best Moments'}
                   </button>
                   {videoPath.trim() && (transcriptText.trim() || transcript) && (
                     <McpHints phase={phase} videoPath={videoPath} transcript={transcript} transcriptText={transcriptText} suggestions={suggestions} mcpConnected={mcpConnected} />

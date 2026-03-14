@@ -112,27 +112,30 @@ STYLES = {
         "logo_support": False,
     },
     "branded": {
-        "description": "Large bold text, ~7 words wrapping across 2-3 lines, dark box on active word. TikTok/Reels style.",
+        "description": "Large bold text, 5-7 words wrapping across 2 lines, dark rounded pill on active word. Clean, no gradient.",
         "font_name": DETECTED_FONT,
-        "font_size": 90,
-        "primary_color": "&H00FFFFFF",         # White (all words)
-        "active_color": "&H00FFFFFF",           # White text on box
-        "active_box_color": "&H00181818",       # Dark box (near-black)
-        "outline_color": "&H00000000",          # Black outline
-        "back_color": "&H00000000",             # No shadow
+        "font_size": 72,                        # Slightly smaller for clean 2-line fit
+        "primary_color": "&H00FFFFFF",          # White (all words)
+        "active_color": "&H00FFFFFF",           # White text on dark box
+        "active_box_color": "&H00101010",       # Near-black pill bg (slightly lighter than pure black)
+        "active_box_padding_x": 20,             # Horizontal padding inside pill
+        "active_box_padding_y": 10,             # Vertical padding inside pill
+        "active_box_rounding": 8,               # Border rounding for pill shape
+        "outline_color": "&H00000000",          # Black
+        "back_color": "&H00000000",             # Transparent
         "bold": True,
-        "outline_width": 0,                     # No outline — gradient provides contrast
-        "shadow_depth": 0,
+        "outline_width": 0,                     # No outline — clean text
+        "shadow_depth": 0,                      # No shadow
         "alignment": 2,                         # Bottom-center
-        "margin_v": 360,                        # Lower-third area
-        "words_per_chunk": 4,                   # Show ~4 words at a time
-        "uppercase": False,                     # Mixed case
-        "gradient_overlay": True,               # Enable bottom 50% dark gradient
-        "gradient_opacity": 0.7,                # 70% black at bottom edge
-        "logo_support": True,                   # Enable top-left logo
-        "logo_margin_x": 60,                    # Logo X offset from left
-        "logo_margin_y": 80,                    # Logo Y offset from top
-        "logo_height": 130,                     # Logo render height in px
+        "margin_v": 500,                        # Position: ~72% from top (natural lower-third)
+        "words_per_chunk": 6,                   # Show 5-7 words across 2 lines
+        "uppercase": False,                     # Mixed case, natural capitalization
+        "gradient_overlay": False,              # No gradient — clean direct-on-video
+        "gradient_opacity": 0.0,
+        "logo_support": True,                   # Logo top-left
+        "logo_margin_x": 40,                    # Logo X offset from left
+        "logo_margin_y": 60,                    # Logo Y offset from top
+        "logo_height": 100,                     # Logo height in px
     },
 }
 

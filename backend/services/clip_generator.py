@@ -117,7 +117,12 @@ def generate_clip(
             progress_callback(30, f"Resizing for vertical format (2/{total_steps})")
 
         cropped_path = os.path.join(work_dir, "cropped.mp4")
-        crop_to_vertical(segment_path, cropped_path, strategy=crop_strategy)
+        crop_to_vertical(
+            segment_path, cropped_path,
+            strategy=crop_strategy,
+            transcript_words=transcript_words,
+            clip_start=start_second,
+        )
 
         # Step 3: Generate captions + burn (with optional gradient & logo)
         if transcript_words:

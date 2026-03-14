@@ -105,8 +105,8 @@ def handle_batch_clips(task_id: str, params: dict):
                 logo_path=clip.get("logo_path") or params.get("logo_path"),
                 outro_path=params.get("outro_path"),
                 clean_fillers=params.get("clean_fillers", True),
-                progress_callback=lambda pct, msg: emit_progress(
-                    task_id, "batch", int((i / total) * 100 + pct / total), msg
+                progress_callback=lambda pct, msg, _i=i: emit_progress(
+                    task_id, "batch", int((_i / total) * 100 + pct / total), msg
                 ),
             )
             results.append({"clip_index": i, "status": "success", **result})
@@ -126,7 +126,7 @@ def handle_batch_clips(task_id: str, params: dict):
 
 def handle_parse_transcript(task_id: str, params: dict):
     """Parse a speaker-labeled transcript into word-level timestamps."""
-    from services.transcript_parser import parse_speaker_transcript
+    from services.transcript_parser import detect_and_parse
 
     raw_text = params.get("raw_text", "")
     total_duration = params.get("total_duration")
@@ -137,7 +137,7 @@ def handle_parse_transcript(task_id: str, params: dict):
         return
 
     emit_progress(task_id, "parsing", 50, "Parsing transcript...")
-    result = parse_speaker_transcript(raw_text, total_duration=total_duration, time_adjust=time_adjust)
+    result = detect_and_parse(raw_text, total_duration=total_duration, time_adjust=time_adjust)
 
     if "error" in result:
         emit_result(task_id, "error", error=result["error"])

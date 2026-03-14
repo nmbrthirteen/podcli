@@ -96,6 +96,17 @@ install() {
   pip install -q -r backend/requirements.txt 2>&1 | tail -3
   echo "  ✓ Python packages ready"
 
+  # Fix macOS SSL certificates (needed for Whisper model download)
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    CERT_SCRIPT="/Applications/Python ${PY_VER}/Install Certificates.command"
+    if [ -f "$CERT_SCRIPT" ]; then
+      echo "  → Configuring SSL certificates..."
+      bash "$CERT_SCRIPT" > /dev/null 2>&1 || true
+      echo "  ✓ SSL certificates configured"
+    fi
+  fi
+
   echo ""
   echo "━━━ [5/6] Installing Node packages ━━━"
   npm install --silent 2>&1 | tail -1

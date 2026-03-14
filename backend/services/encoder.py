@@ -68,7 +68,9 @@ def _test_encoder(encoder: str) -> bool:
     """
     tmp_out = None
     try:
-        tmp_out = tempfile.mktemp(suffix=".mp4")
+        tmp_fd = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+        tmp_out = tmp_fd.name
+        tmp_fd.close()
         flags = _get_encoder_flags(encoder)
         cmd = [
             "ffmpeg", "-y",

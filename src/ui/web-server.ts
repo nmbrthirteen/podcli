@@ -13,7 +13,8 @@ import express from "express";
 import multer from "multer";
 import { createReadStream, existsSync, statSync, readFileSync, writeFileSync } from "fs";
 import { mkdir, readdir, unlink } from "fs/promises";
-import { join, dirname, basename, extname } from "path";
+import path from "path";
+import { join, dirname, basename, extname, resolve } from "path";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
@@ -37,6 +38,13 @@ const fileManager = new FileManager();
 const assetManager = new AssetManager();
 const clipsHistory = new ClipsHistory();
 const knowledgeBase = new KnowledgeBase();
+
+// --- Path Traversal Protection ---
+function safePath(base: string, filename: string): string | null {
+  const resolved = path.resolve(base, filename);
+  if (!resolved.startsWith(path.resolve(base))) return null;
+  return resolved;
+}
 
 // --- State ---
 // Track active jobs so the UI can poll progress
@@ -693,7 +701,11 @@ app.get("/api/outputs", async (_req, res) => {
  * GET /api/download/:filename — Download a finished clip
  */
 app.get("/api/download/:filename", (req, res) => {
-  const filePath = join(paths.output, req.params.filename);
+  const filePath = safePath(paths.output, req.params.filename);
+  if (!filePath) {
+    res.status(400).json({ error: "Invalid filename" });
+    return;
+  }
   if (!existsSync(filePath)) {
     res.status(404).json({ error: "File not found" });
     return;
@@ -705,7 +717,11 @@ app.get("/api/download/:filename", (req, res) => {
  * GET /api/preview/:filename — Stream a video clip for in-browser playback
  */
 app.get("/api/preview/:filename", (req, res) => {
-  const filePath = join(paths.output, req.params.filename);
+  const filePath = safePath(paths.output, req.params.filename);
+  if (!filePath) {
+    res.status(400).json({ error: "Invalid filename" });
+    return;
+  }
   if (!existsSync(filePath)) {
     res.status(404).json({ error: "File not found" });
     return;
@@ -746,6 +762,14 @@ app.get("/api/stream-source", (req, res) => {
   const filePath = req.query.path as string;
   if (!filePath || !existsSync(filePath)) {
     res.status(404).json({ error: "File not found" });
+    return;
+  }
+  // Validate the path is the current session video or within the uploads directory
+  const resolvedPath = path.resolve(filePath);
+  const isSessionVideo = uiState.videoPath && resolvedPath === path.resolve(uiState.videoPath);
+  const isUploadedFile = resolvedPath.startsWith(path.resolve(join(paths.working, "uploads")));
+  if (!isSessionVideo && !isUploadedFile) {
+    res.status(403).json({ error: "Access denied: path not in allowed directories" });
     return;
   }
 
@@ -859,12 +883,12 @@ app.get("/api/export-transcript", (_req, res) => {
 // --- Analyze audio energy ---
 app.post("/api/analyze-energy", async (req, res) => {
   const { video_path, segments } = req.body;
-  if (!video_path) return res.json({ error: "video_path required" });
+  if (!video_path) return res.status(400).json({ error: "video_path required" });
   try {
     const result = await executor.execute("analyze_energy", { video_path, segments: segments || [] });
     res.json(result.data || {});
   } catch (err: any) {
-    res.json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -874,8 +898,24 @@ app.get("/api/encoder-info", async (_req, res) => {
     const result = await executor.execute("detect_encoder", {});
     res.json(result.data || {});
   } catch (err: any) {
-    res.json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
+});
+
+// --- Speaker Detection Status ---
+app.get("/api/speaker-status", (_req, res) => {
+  const envPath = join(process.cwd(), ".env");
+  let token = process.env.HF_TOKEN || "";
+  if (!token && existsSync(envPath)) {
+    const envContent = readFileSync(envPath, "utf-8");
+    const match = envContent.match(/^HF_TOKEN=(.+)$/m);
+    if (match) token = match[1].trim();
+  }
+  res.json({
+    configured: !!token,
+    setup_url: "https://huggingface.co/pyannote/speaker-diarization-3.1",
+    token_url: "https://huggingface.co/settings/tokens",
+  });
 });
 
 // --- Presets ---
@@ -884,7 +924,7 @@ app.get("/api/presets", async (_req, res) => {
     const result = await executor.execute("presets", { action: "list" });
     res.json(result.data || { presets: [] });
   } catch (err: any) {
-    res.json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -894,7 +934,7 @@ app.post("/api/presets", async (req, res) => {
     const result = await executor.execute("presets", { action, name, config });
     res.json(result.data || {});
   } catch (err: any) {
-    res.json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -904,7 +944,7 @@ app.get("/api/assets", async (req, res) => {
     const items = await assetManager.list(req.query.type as string | undefined);
     res.json(items);
   } catch (err: any) {
-    res.json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -923,7 +963,7 @@ app.post("/api/assets/unregister", async (req, res) => {
     await assetManager.unregister(req.body.name);
     res.json({ ok: true });
   } catch (err: any) {
-    res.json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -1003,6 +1043,10 @@ app.post("/api/knowledge/upload", knowledgeUpload.array("files", 50), (req, res)
 });
 
 app.get("/api/knowledge/:filename", async (req, res) => {
+  if (!safePath(paths.knowledge, req.params.filename)) {
+    res.status(400).json({ error: "Invalid filename" });
+    return;
+  }
   try {
     const content = await knowledgeBase.readFile(req.params.filename);
     res.json({ filename: req.params.filename, content });
@@ -1012,6 +1056,10 @@ app.get("/api/knowledge/:filename", async (req, res) => {
 });
 
 app.post("/api/knowledge/:filename", async (req, res) => {
+  if (!safePath(paths.knowledge, req.params.filename)) {
+    res.status(400).json({ error: "Invalid filename" });
+    return;
+  }
   try {
     await knowledgeBase.writeFile(req.params.filename, req.body.content);
     res.json({ ok: true, filename: req.params.filename });
@@ -1021,11 +1069,15 @@ app.post("/api/knowledge/:filename", async (req, res) => {
 });
 
 app.delete("/api/knowledge/:filename", async (req, res) => {
+  if (!safePath(paths.knowledge, req.params.filename)) {
+    res.status(400).json({ error: "Invalid filename" });
+    return;
+  }
   try {
     await knowledgeBase.deleteFile(req.params.filename);
     res.json({ ok: true });
   } catch (err: any) {
-    res.json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1143,6 +1195,135 @@ app.post("/api/generate-prompt", (req, res) => {
   const prompt = buildPromptForAction(action);
   const ctx = getStateContext();
   res.json({ prompt, action, context: ctx });
+});
+
+// --- Claude-powered clip suggestion (same as CLI) ---
+
+app.post("/api/claude-suggest", async (req, res) => {
+  const { top_n = 5 } = req.body;
+
+  // Find claude binary
+  const homedir = require("os").homedir();
+  const claudeCandidates = [
+    join(homedir, ".local", "bin", "claude"),
+    "/usr/local/bin/claude",
+    "/opt/homebrew/bin/claude",
+  ];
+  const claudePath = claudeCandidates.find((p) => existsSync(p));
+
+  if (!claudePath) {
+    res.json({
+      error: "Claude Code not found",
+      message: "Install Claude Code: https://docs.anthropic.com/en/docs/claude-code",
+      fallback: "clipboard",
+      clips: [],
+    });
+    return;
+  }
+
+  // Need transcript in state
+  if (!uiState.transcript && !uiState.rawTranscriptText) {
+    res.status(400).json({ error: "No transcript loaded. Transcribe or import one first." });
+    return;
+  }
+
+  // Build transcript text from state
+  let transcriptText = "";
+  const segs = (uiState.transcript as any)?.segments;
+  if (segs && Array.isArray(segs)) {
+    transcriptText = segs
+      .map((s: any) => {
+        const sp = s.speaker ? `[${s.speaker}] ` : "";
+        const mins = Math.floor(s.start / 60);
+        const secs = Math.floor(s.start % 60);
+        return `(${mins}:${String(secs).padStart(2, "0")}) ${sp}${s.text}`;
+      })
+      .join("\n");
+  } else if (uiState.rawTranscriptText) {
+    transcriptText = uiState.rawTranscriptText as string;
+  }
+
+  const segCount = segs?.length || 0;
+  const dur = (uiState.transcript as any)?.duration || 0;
+  const durationMin = Math.round(dur / 60);
+
+  const prompt = `You are the clip extraction engine for a podcast. Analyze this transcript and return the ${top_n} best moments for YouTube Shorts.
+
+IMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences.
+
+Use the knowledge base in .podcli/knowledge/ for voice rules, moment selection criteria, content types, and existing episodes.
+
+Score each moment on 4 dimensions (1-5 each):
+- standalone: Makes sense without episode context?
+- hook: Grabs attention in first 3 seconds?
+- relevance: Matters to target audience?
+- quotability: Memorable, shareable phrasing?
+
+Classify each as: guest_story | technical_insight | market_landscape | business_strategy | hot_take
+
+Return JSON: { "clips": [{ "title": "...", "start_second": N, "end_second": N, "duration": N, "content_type": "...", "scores": {"standalone":N,"hook":N,"relevance":N,"quotability":N}, "total_score": N, "quote": "...", "why": "..." }] }
+
+Rules: 20-90 seconds, sentence boundaries, standalone, variety.
+
+Transcript (${segCount} segments, ~${durationMin} min):
+
+${transcriptText}`;
+
+  // Write prompt to temp file
+  const tmpFile = join(process.cwd(), `.tmp-claude-prompt-${Date.now()}.txt`);
+  writeFileSync(tmpFile, prompt);
+
+  try {
+    const { execSync } = require("child_process");
+    const result = execSync(
+      `cat "${tmpFile}" | "${claudePath}" --print -p -`,
+      {
+        cwd: process.cwd(),
+        timeout: 300_000,
+        maxBuffer: 10 * 1024 * 1024,
+        encoding: "utf-8",
+      }
+    );
+
+    // Parse JSON from response
+    const jsonStart = result.indexOf("{");
+    const jsonEnd = result.lastIndexOf("}") + 1;
+    if (jsonStart < 0 || jsonEnd <= jsonStart) {
+      res.status(500).json({ error: "Claude did not return valid JSON" });
+      return;
+    }
+
+    const data = JSON.parse(result.substring(jsonStart, jsonEnd));
+    const clips = (data.clips || []).map((c: any) => ({
+      title: c.title || "Untitled",
+      start_second: c.start_second || 0,
+      end_second: c.end_second || 0,
+      duration: c.duration || 0,
+      reasoning: c.why || "",
+      content_type: c.content_type || "unknown",
+      scores: c.scores || {},
+      total_score: c.total_score || 0,
+    }));
+
+    // Auto-push to UI state as suggestions
+    if (clips.length > 0) {
+      (uiState as any).suggestions = clips.map((c: any, i: number) => ({
+        id: `claude-${i}`,
+        title: c.title,
+        start_second: c.start_second,
+        end_second: c.end_second,
+        reasoning: c.reasoning,
+      }));
+      (uiState as any).phase = "review";
+      broadcastSSE("state-sync", uiState);
+    }
+
+    res.json({ clips, source: "claude" });
+  } catch (err: any) {
+    res.status(500).json({ error: `Claude failed: ${err.message?.substring(0, 200)}` });
+  } finally {
+    try { require("fs").unlinkSync(tmpFile); } catch {}
+  }
 });
 
 // --- MCP ↔ UI Bridge Endpoints ---
