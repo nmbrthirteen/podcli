@@ -21,6 +21,18 @@ os.environ["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
 if sys.platform == "darwin":
     os.environ.setdefault("DYLD_LIBRARY_PATH", "")
 
+# Load .env file into os.environ (HF_TOKEN, PODCLI_QUALITY, etc.)
+_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+if os.path.exists(_env_file):
+    with open(_env_file) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _key, _val = _line.split("=", 1)
+                _key, _val = _key.strip(), _val.strip()
+                if _key and _val:
+                    os.environ.setdefault(_key, _val)
+
 # Add parent dir to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
