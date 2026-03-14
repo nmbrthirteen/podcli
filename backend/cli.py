@@ -188,25 +188,34 @@ def cmd_process(args):
         import warnings
         warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
         from services.transcription import transcribe_file
+        import threading
 
-        _last_pct = [-1]
+        # Spinner runs in background while Whisper blocks
+        _spin_stop = threading.Event()
+        _spin_msg = ["Loading model..."]
+
+        def _spinner():
+            frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+            i = 0
+            while not _spin_stop.is_set():
+                print(f"\r         {frames[i % len(frames)]}  {_spin_msg[0][:55]:<55}", end="", flush=True)
+                i += 1
+                _spin_stop.wait(0.12)
+            print(f"\r         {'':60}", end="\r")  # clear line
+
+        spin_thread = threading.Thread(target=_spinner, daemon=True)
+        spin_thread.start()
+
         def _transcribe_progress(pct, msg):
-            if pct != _last_pct[0]:
-                _last_pct[0] = pct
-                bar_width = 30
-                filled = int(bar_width * pct / 100)
-                bar = "█" * filled + "░" * (bar_width - filled)
-                print(f"\r         {bar} {pct:3d}%  {msg[:45]:<45}", end="", flush=True)
-                if pct >= 100:
-                    print()
+            _spin_msg[0] = f"{msg} ({pct}%)" if pct < 100 else msg
 
         result = transcribe_file(
             file_path=video_path,
             model_size=config.get("whisper_model", "base"),
             progress_callback=_transcribe_progress,
         )
-        if _last_pct[0] < 100:
-            print()  # newline after progress bar
+        _spin_stop.set()
+        spin_thread.join(timeout=1)
         words = result["words"]
         segments = result["segments"]
         print(f"         Done: {len(segments)} segments, {len(words)} words")
