@@ -519,16 +519,30 @@ def concat_outro(
     input_path: str,
     outro_path: str,
     output_path: str,
+    crossfade_duration: float = 0.5,
 ) -> str:
     """
-    Append an outro video to the end of the main clip.
-    Re-encodes the outro to match the main clip's resolution and codec.
+    Append an outro video to the end of the main clip with a crossfade transition.
+
+    Uses FFmpeg xfade filter for a smooth video crossfade and acrossfade for audio.
+    Falls back to hard cut if xfade fails (older FFmpeg).
     """
     width, height = get_dimensions(input_path)
 
-    concat_list = os.path.join(os.path.dirname(output_path), "concat_list.txt")
+    # Get main clip duration for crossfade offset
+    probe_cmd = [
+        "ffprobe", "-v", "quiet", "-print_format", "json",
+        "-show_format", input_path,
+    ]
+    probe = subprocess.run(probe_cmd, capture_output=True, text=True)
+    try:
+        main_duration = float(json.loads(probe.stdout)["format"]["duration"])
+    except Exception:
+        main_duration = 30.0
 
-    # Re-encode outro to match main clip's dimensions
+    fade_offset = max(0, main_duration - crossfade_duration)
+
+    # Re-encode outro to match dimensions
     outro_scaled = output_path + ".outro_scaled.mp4"
     _run_ffmpeg_with_fallback(
         cmd_parts_before_enc=[
@@ -538,15 +552,43 @@ def concat_outro(
                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
         ],
         cmd_parts_after_enc=[
-            "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
             "-movflags", "+faststart",
         ],
         output_path=outro_scaled,
         label="outro_scale",
     )
 
-    # Re-encode main clip to ensure compatible streams for concat
+    # Try crossfade first (requires FFmpeg 4.3+)
+    try:
+        xfade_cmd = [
+            "ffmpeg", "-y",
+            "-i", input_path,
+            "-i", outro_scaled,
+            "-filter_complex",
+            f"[0:v][1:v]xfade=transition=fade:duration={crossfade_duration}:offset={fade_offset}[v];"
+            f"[0:a][1:a]acrossfade=d={crossfade_duration}[a]",
+            "-map", "[v]", "-map", "[a]",
+        ]
+        xfade_cmd += get_video_encode_flags()
+        xfade_cmd += [
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        result = subprocess.run(xfade_cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            # Clean up
+            if os.path.exists(outro_scaled):
+                os.remove(outro_scaled)
+            return output_path
+    except Exception:
+        pass
+
+    # Fallback: hard cut concat
     main_reenc = output_path + ".main_reenc.mp4"
+    concat_list = os.path.join(os.path.dirname(output_path), "concat_list.txt")
+
     _run_ffmpeg_with_fallback(
         cmd_parts_before_enc=[
             "ffmpeg", "-y",
@@ -554,7 +596,7 @@ def concat_outro(
             "-vf", f"scale={width}:{height}",
         ],
         cmd_parts_after_enc=[
-            "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
             "-movflags", "+faststart",
         ],
         output_path=main_reenc,

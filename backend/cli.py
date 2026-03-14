@@ -130,6 +130,14 @@ def cmd_process(args):
         else:
             print(f"  Warning: Logo '{args.logo}' not found (checked assets and filesystem)", file=sys.stderr)
             config["logo_path"] = args.logo  # pass through anyway
+    if args.outro:
+        from services.asset_store import resolve as resolve_asset_outro
+        resolved = resolve_asset_outro(args.outro)
+        if resolved:
+            config["outro_path"] = resolved
+        else:
+            print(f"  Warning: Outro '{args.outro}' not found (checked assets and filesystem)", file=sys.stderr)
+            config["outro_path"] = args.outro
     if args.time_adjust is not None:
         config["time_adjust"] = args.time_adjust
     if args.no_energy:
@@ -314,6 +322,7 @@ def cmd_process(args):
                 title=clip.get("title", f"clip_{i+1}"),
                 output_dir=output_dir,
                 logo_path=config.get("logo_path") or None,
+                outro_path=config.get("outro_path") or None,
             )
             results.append(result)
             print(f" ✓ {result['file_size_mb']}MB")
@@ -918,7 +927,8 @@ def main():
     proc.add_argument("-p", "--preset", help="Load a saved preset")
     proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
     proc.add_argument("--crop", choices=["center", "face"])
-    proc.add_argument("--logo", help="Path to logo image")
+    proc.add_argument("--logo", help="Logo image (asset name or path)")
+    proc.add_argument("--outro", help="Outro video (asset name or path)")
     proc.add_argument("--time-adjust", type=float, help="Timestamp offset in seconds")
     proc.add_argument("--no-energy", action="store_true", help="Skip audio energy analysis")
     proc.add_argument("--quality", choices=["low", "medium", "high", "max"], help="Output quality (default: high)")
@@ -1156,12 +1166,41 @@ def _interactive_process():
     except Exception:
         pass
 
+    # 7. Outro
+    outro = None
+    try:
+        from services.asset_store import list_assets as list_assets_outro
+        outros = [a for a in list_assets_outro() if a["type"] == "video" and os.path.exists(a["path"])]
+        if outros:
+            print(f"\n  {bold}Outro{reset} {dim}(default 0 = none):{reset}")
+            for i, a in enumerate(outros):
+                print(f"  {accent}{i+1}{reset} {a['name']}  {dim}{os.path.basename(a['path'])}{reset}")
+            print(f"  {accent}0{reset} none")
+            oc = _prompt(f"  {accent}▸{reset} ", default="0") or "0"
+            if oc != "0":
+                idx = int(oc) - 1
+                if 0 <= idx < len(outros):
+                    outro = outros[idx]["path"]
+                    print(f"  {green}✓{reset} {outros[idx]['name']}")
+        else:
+            print(f"\n  {bold}Outro:{reset} {dim}(drag video or press Enter to skip):{reset}")
+            o = _prompt(f"  {accent}▸{reset} ", default="")
+            if o:
+                o = _clean_path(o)
+                if os.path.exists(o):
+                    outro = o
+                    print(f"  {green}✓{reset} {os.path.basename(outro)}")
+    except Exception:
+        pass
+
     # Summary + confirm
     print(f"\n  {'─' * 45}")
     print(f"  {bold}Video:{reset}      {os.path.basename(video)}")
     print(f"  {bold}Style:{reset}      {caption_style}  ·  Quality: {quality}  ·  Clips: {top_n}")
     if logo:
         print(f"  {bold}Logo:{reset}       ✓")
+    if outro:
+        print(f"  {bold}Outro:{reset}      ✓  {dim}{os.path.basename(outro)}{reset}")
     print(f"  {bold}Transcript:{reset} {'auto (Whisper)' if not transcript else os.path.basename(transcript)}")
     try:
         input(f"\n  {green}Ready!{reset} {bold}Press Enter to start{reset} {dim}(q to cancel){reset} ")
@@ -1178,6 +1217,8 @@ def _interactive_process():
     cmd += ["--top", str(top_n)]
     if logo:
         cmd += ["--logo", logo]
+    if outro:
+        cmd += ["--outro", outro]
 
     print(f"\n  {green}▶{reset} Starting...\n")
     sys.stdout.flush()
