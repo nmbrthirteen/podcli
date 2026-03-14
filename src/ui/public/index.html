@@ -568,7 +568,7 @@
                 <a href="/integration.html" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', textDecoration: 'none', padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', transition: 'all 0.15s' }}>MCP Setup</a>
               </div>
             </div>
-            <h1>Create short-form clips</h1>
+            <h1>Podcast content studio</h1>
           </div>
 
           <div className="layout">
@@ -868,6 +868,34 @@
                   )}
                   {(phase === 'review' || phase === 'done') && (
                     <McpHints phase={phase} videoPath={videoPath} transcript={transcript} transcriptText={transcriptText} suggestions={suggestions} mcpConnected={mcpConnected} />
+                  )}
+
+                  {phase === 'done' && (
+                    <div className="fade-in" style={{ marginTop: 20, padding: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                        <div style={{ width: 20, height: 20, borderRadius: 6, background: 'rgba(74,222,128,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'var(--green)' }}>P</div>
+                        <span style={{ fontSize: 13, fontWeight: 700 }}>PodStack — next steps</span>
+                      </div>
+                      <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 12 }}>
+                        Clips are rendered. Now generate titles, descriptions, and thumbnails in Claude Code:
+                      </p>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {[
+                          { cmd: '/prep-episode', desc: 'Full pipeline: titles + descriptions + thumbnails' },
+                          { cmd: '/generate-titles', desc: '8 title options per clip' },
+                          { cmd: '/publish-checklist', desc: 'Pre-upload optimization checklist' },
+                        ].map(item => (
+                          <div key={item.cmd} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--bg)', borderRadius: 'var(--radius-sm)', fontSize: 12 }}>
+                            <code style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap' }}>{item.cmd}</code>
+                            <span style={{ color: 'var(--text3)' }}>{item.desc}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <a href="https://github.com/nmbrthirteen/podstack" target="_blank" rel="noopener"
+                        style={{ display: 'inline-block', marginTop: 10, fontSize: 11, color: 'var(--text3)', textDecoration: 'none' }}>
+                        github.com/nmbrthirteen/podstack →
+                      </a>
+                    </div>
                   )}
                 </div>
               )}
