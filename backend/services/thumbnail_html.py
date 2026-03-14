@@ -215,18 +215,47 @@ def _build_html(
     box_fill = cfg.get("box_fill_color", f"rgba(26,26,46,0.90)")
     box_padding = cfg.get("box_padding", "28px 36px")
 
-    l1_size = cfg.get("line1_font_size", "64px")
+    # Base font sizes from config
+    l1_base_size = int(cfg.get("line1_font_size", "64px").replace("px", ""))
+    l2_base_size = int(cfg.get("line2_font_size", "60px").replace("px", ""))
+    l1_base_spacing = int(cfg.get("line1_letter_spacing", "1px").replace("px", ""))
+    l2_base_spacing = int(cfg.get("line2_letter_spacing", "1px").replace("px", ""))
+
+    # Auto-shrink: estimate text width vs box width, scale down if needed.
+    box_w_px = int(str(box_width).replace("px", "")) if "px" in str(box_width) else 860
+    # Parse horizontal padding (format: "Vpx Hpx" or "Apx")
+    pad_parts = [int(p.replace("px", "")) for p in str(box_padding).split() if "px" in p]
+    h_pad = pad_parts[1] if len(pad_parts) >= 2 else pad_parts[0] if pad_parts else 36
+    usable_w = box_w_px - h_pad * 2  # Both sides
+
+    def _fit_size(text, base_size, base_spacing):
+        """Shrink font size so text fits on one line."""
+        # Inter uppercase: average char width ~0.62 × font_size + letter-spacing
+        char_w = 0.62 * base_size + base_spacing
+        est_width = len(text) * char_w
+        if est_width <= usable_w:
+            return base_size, base_spacing
+        scale = usable_w / est_width
+        new_size = max(36, int(base_size * scale))
+        new_spacing = max(0, int(base_spacing * scale))
+        return new_size, new_spacing
+
+    l1_px, l1_sp = _fit_size(l1, l1_base_size, l1_base_spacing)
+    l2_px, l2_sp = _fit_size(l2, l2_base_size, l2_base_spacing)
+
+    l1_size = f"{l1_px}px"
+    l1_spacing = f"{l1_sp}px"
+    l2_size = f"{l2_px}px"
+    l2_spacing = f"{l2_sp}px"
+
     l1_weight = cfg.get("line1_font_weight", "600")
-    l1_spacing = cfg.get("line1_letter_spacing", "1px")
     l1_lh = cfg.get("line1_line_height", 1.15)
     l1_mb = cfg.get("line1_margin_bottom", "10px")
     l1_color = cfg.get("line1_color", "#FFFFFF")
-    l1_nowrap = "nowrap" if cfg.get("line1_nowrap", True) else "normal"
+    l1_nowrap = "nowrap"  # Always nowrap — we shrink to fit instead
 
-    l2_size = cfg.get("line2_font_size", "60px")
     l2_weight = cfg.get("line2_font_weight", "500")
     l2_style = cfg.get("line2_font_style", "italic")
-    l2_spacing = cfg.get("line2_letter_spacing", "1px")
     l2_lh = cfg.get("line2_line_height", 1.15)
     l2_text_color = cfg.get("line2_text_color", "#1A1A2E")
     l2_hl_pad = cfg.get("line2_highlight_padding", "4px 16px")
@@ -386,7 +415,7 @@ def generate_thumbnail(
                 f"file://{tmp_html.name}",
                 output_path,
             ],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=60,
         )
 
         if result.returncode != 0:

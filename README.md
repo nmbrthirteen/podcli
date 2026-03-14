@@ -1,7 +1,4 @@
 <p align="center">
-  <img src="public/podcli-icon.png" width="80" alt="podcli icon" />
-</p>
-<p align="center">
   <img src="public/podcli-logo-transparent.png" height="36" alt="podcli" />
 </p>
 <p align="center">
