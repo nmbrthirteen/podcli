@@ -205,9 +205,13 @@ def _build_speaker_aware_crop(
     """
     Build a speaker-aware crop that pans to whoever is speaking.
 
-    1. Detect ALL faces in the video and cluster them by position (left vs right).
-    2. Map each cluster to a speaker using transcript word timing + face position.
-    3. Build an FFmpeg expression that switches crop_x based on timestamp.
+    Split-screen aware: in a podcast layout where both faces are always
+    visible, we detect left/right face positions, sort speakers by their
+    average word position in the timeline, and map the first speaker to
+    the left face and the second to the right (standard podcast layout).
+
+    For non-split-screen (single face visible at a time), falls back to
+    tracking whichever face is visible when each speaker talks.
 
     Returns an FFmpeg crop x expression string, or None if detection fails.
     """
@@ -234,9 +238,10 @@ def _build_speaker_aware_crop(
 
         detector = cv2.dnn.readNetFromCaffe(proto, model)
 
-        # Sample frames and detect ALL faces with their positions and timestamps
-        sample_count = min(80, max(30, int(duration * 4)))  # ~4 samples/sec
-        face_observations = []  # list of (time_in_clip, face_center_x, face_width)
+        # Sample frames and detect ALL faces
+        sample_count = min(80, max(30, int(duration * 4)))
+        face_observations = []  # (time, face_center_x, face_width)
+        faces_per_frame = []    # count of faces per sampled frame
 
         for i in range(sample_count):
             t = i * duration / sample_count
@@ -250,6 +255,7 @@ def _build_speaker_aware_crop(
             detector.setInput(blob)
             detections = detector.forward()
 
+            frame_faces = 0
             for j in range(detections.shape[2]):
                 conf = detections[0, 0, j, 2]
                 if conf > 0.5:
@@ -260,13 +266,15 @@ def _build_speaker_aware_crop(
                         continue
                     cx = (x1 + x2) // 2
                     face_observations.append((t, cx, fw))
+                    frame_faces += 1
+            faces_per_frame.append(frame_faces)
 
         cap.release()
 
         if len(face_observations) < 5:
             return None
 
-        # Cluster faces into positions (typically 2 for a podcast: left + right)
+        # Cluster faces by position (left vs right)
         positions = np.array([obs[1] for obs in face_observations])
         cluster_radius = width * 0.15
 
@@ -279,18 +287,16 @@ def _build_speaker_aware_crop(
                 continue
             mask = np.abs(positions - positions[idx]) < cluster_radius
             mask &= ~used
-            cluster_indices = np.where(mask)[0]
-            if len(cluster_indices) > 0:
+            if np.any(mask):
                 cluster_center = int(np.median(positions[mask]))
                 clusters.append({
                     "center_x": cluster_center,
-                    "count": len(cluster_indices),
+                    "count": int(np.sum(mask)),
                     "crop_x": max(0, min(cluster_center - crop_w // 2, width - crop_w)),
                 })
                 used |= mask
 
         if len(clusters) < 2:
-            # Only one face position found — use static crop on it
             if clusters:
                 return str(clusters[0]["crop_x"])
             return None
@@ -298,39 +304,48 @@ def _build_speaker_aware_crop(
         # Sort clusters left to right
         clusters.sort(key=lambda c: c["center_x"])
 
-        # Map speakers to face positions using transcript word timing.
-        # For each speaker, find which face cluster is most visible when they talk.
-        speakers = list(set(w.get("speaker") for w in transcript_words if w.get("speaker")))
+        # Get unique speakers
+        speakers = sorted(set(w.get("speaker") for w in transcript_words if w.get("speaker")))
         if len(speakers) < 2:
-            # Can't distinguish — use the most frequent face
             clusters.sort(key=lambda c: c["count"], reverse=True)
             return str(clusters[0]["crop_x"])
 
+        # Detect split-screen: if most frames have 2+ faces, it's split-screen
+        avg_faces = np.mean(faces_per_frame) if faces_per_frame else 0
+        is_split_screen = avg_faces >= 1.5
+
         speaker_to_cluster = {}
-        for speaker in speakers:
-            # Get time ranges when this speaker is talking (relative to clip)
-            speaker_times = []
-            for w in transcript_words:
-                if w.get("speaker") == speaker:
-                    speaker_times.append(w["start"] - clip_start)
 
-            # Count which face cluster is most visible during this speaker's words
-            cluster_votes = [0] * len(clusters)
-            for t in speaker_times:
-                # Find face observations near this timestamp
-                for obs_t, obs_cx, obs_fw in face_observations:
-                    if abs(obs_t - t) < 1.0:  # within 1 second
-                        for ci, cl in enumerate(clusters):
-                            if abs(obs_cx - cl["center_x"]) < cluster_radius:
-                                cluster_votes[ci] += 1
+        if is_split_screen and len(clusters) >= 2 and len(speakers) == 2:
+            # Split-screen: both faces always visible.
+            # Standard podcast layout: host on left, guest on right (or vice versa).
+            # Map by speaker order — typically speaker labels from diarization
+            # are consistent: SPEAKER_00 talks first (host intro), SPEAKER_01 is guest.
+            # Host is usually on the LEFT in Riverside/Zencastr/etc.
+            # So: first speaker (host) → left cluster, second speaker (guest) → right cluster.
+            speaker_to_cluster[speakers[0]] = clusters[0]  # left
+            speaker_to_cluster[speakers[1]] = clusters[1]  # right
+        else:
+            # Non-split-screen: only one face visible at a time.
+            # Map by which face is visible when each speaker talks.
+            for speaker in speakers:
+                speaker_times = [
+                    w["start"] - clip_start
+                    for w in transcript_words
+                    if w.get("speaker") == speaker
+                ]
+                cluster_votes = [0] * len(clusters)
+                for t in speaker_times:
+                    for obs_t, obs_cx, obs_fw in face_observations:
+                        if abs(obs_t - t) < 1.0:
+                            for ci, cl in enumerate(clusters):
+                                if abs(obs_cx - cl["center_x"]) < cluster_radius:
+                                    cluster_votes[ci] += 1
+                if any(cluster_votes):
+                    best = max(range(len(cluster_votes)), key=lambda i: cluster_votes[i])
+                    speaker_to_cluster[speaker] = clusters[best]
 
-            if any(cluster_votes):
-                best_cluster_idx = max(range(len(cluster_votes)), key=lambda i: cluster_votes[i])
-                speaker_to_cluster[speaker] = clusters[best_cluster_idx]
-
-        # Build an FFmpeg expression that pans based on who's speaking.
-        # We create time-based segments and smooth-pan between positions.
-        # Group consecutive words by speaker to create segments
+        # Build speaker segments from transcript words
         segments = []  # (start_time_in_clip, end_time_in_clip, speaker)
         current_speaker = None
         seg_start = 0
@@ -351,28 +366,53 @@ def _build_speaker_aware_crop(
             clusters.sort(key=lambda c: c["count"], reverse=True)
             return str(clusters[0]["crop_x"])
 
-        # Build FFmpeg crop x expression using nested if(between()) for each segment.
-        # This creates smooth panning between speakers.
-        # Default to the most-detected face
-        default_cluster = max(clusters, key=lambda c: c["count"])
+        # Merge very short segments (<0.5s) into neighbors to avoid jitter
+        merged = []
+        for seg in segments:
+            if merged and seg[2] == merged[-1][2]:
+                merged[-1] = (merged[-1][0], seg[1], seg[2])
+            elif merged and (seg[1] - seg[0]) < 0.5:
+                merged[-1] = (merged[-1][0], seg[1], merged[-1][2])
+            else:
+                merged.append(list(seg))
+        segments = merged
+
+        # Default position: whichever speaker talks most
+        speaker_durations = {}
+        for start_t, end_t, sp in segments:
+            speaker_durations[sp] = speaker_durations.get(sp, 0) + (end_t - start_t)
+        dominant_speaker = max(speaker_durations, key=speaker_durations.get)
+        default_cluster = speaker_to_cluster.get(dominant_speaker) or clusters[0]
         default_x = default_cluster["crop_x"]
 
-        # Simplify: if only 2 face positions, use a clean between() chain
+        # Build FFmpeg expression with smooth panning.
+        # Use linear interpolation over 0.3s transition windows.
+        pan_duration = 0.3
         expr_parts = []
         for start_t, end_t, speaker in segments:
             cl = speaker_to_cluster.get(speaker)
-            if cl and cl["crop_x"] != default_x:
-                expr_parts.append(f"if(between(t\\,{start_t:.1f}\\,{end_t:.1f})\\,{cl['crop_x']}\\,")
+            if not cl or cl["crop_x"] == default_x:
+                continue
+            target_x = cl["crop_x"]
+            # Smooth transition: ramp from default to target over pan_duration
+            ramp_end = start_t + pan_duration
+            # if(between(t, start, end), lerp_or_static, ...)
+            # For smooth pan: use linear interp at segment boundaries
+            expr_parts.append(
+                f"if(between(t\\,{start_t:.2f}\\,{end_t:.2f})\\,"
+                f"if(lt(t\\,{ramp_end:.2f})\\,"
+                f"{default_x}+(({target_x}-{default_x})*(t-{start_t:.2f})/{pan_duration:.2f})\\,"
+                f"{target_x})\\,"
+            )
 
         if not expr_parts:
             return str(default_x)
 
-        # Build nested expression: if(cond1, val1, if(cond2, val2, default))
         expr = ""
         for part in expr_parts:
             expr += part
         expr += str(default_x)
-        expr += ")" * len(expr_parts)
+        expr += ")" * (len(expr_parts) * 2)  # Each part has 2 nested ifs
 
         return expr
 
