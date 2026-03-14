@@ -26,6 +26,11 @@ __pycache__/
 # DNN models (large binaries, downloaded by setup.sh)
 backend/models/*.caffemodel
 
+# Test output
+test_thumbs/
+thumbnails/
+tmp*.txt
+
 # Media & temp files
 *.mp4
 *.mp3

@@ -86,4 +86,7 @@ What is the single most compelling image or concept?
 - Text position: Lower third, centered
 
 **Designer notes:** [specific direction]
+
+**Generate thumbnail:** `./podcli thumbnails "[LINE 1] / [LINE 2]" --logo [asset]`
+_(The " / " separator tells the generator where to split lines)_
 ```
