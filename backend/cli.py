@@ -317,6 +317,38 @@ def cmd_process(args):
             print(f"              {c['why'][:70]}")
 
     # ── Step 4: Export ──
+    # Check if thumbnail generation is enabled
+    thumb_dir = os.path.join(output_dir, "thumbnails")
+    _thumb_enabled = True
+    _tc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "thumbnail-config.json")
+    if os.path.exists(_tc_path):
+        try:
+            with open(_tc_path) as _tcf:
+                _thumb_enabled = json.load(_tcf).get("enabled", True)
+        except Exception:
+            pass
+
+    # Pre-load thumbnail tools if enabled
+    _thumb_gen = None
+    _thumb_to_video = None
+    _thumb_logo = None
+    _thumb_photo = None
+    if _thumb_enabled:
+        try:
+            from services.thumbnail_ai import generate_variations as _tv, thumbnail_to_video_frame as _ttv
+            _thumb_gen = _tv
+            _thumb_to_video = _ttv
+            _thumb_logo = config.get("logo_path") or None
+            try:
+                from services.asset_store import list_assets as list_thumb_assets
+                photos = [a for a in list_thumb_assets() if a["type"] == "image" and os.path.exists(a["path"])]
+                if photos:
+                    _thumb_photo = photos[0]["path"]
+            except Exception:
+                pass
+        except Exception:
+            _thumb_enabled = False
+
     print(f"\n  [4/5] Exporting {len(clips)} clips to {output_dir}/")
     results = []
     t0 = time.time()
@@ -341,65 +373,35 @@ def cmd_process(args):
         except Exception as e:
             print(f" ✗ {e}")
             results.append({"status": "error", "error": str(e)})
+            continue
+
+        # Generate thumbnail and append to clip immediately
+        if _thumb_enabled and _thumb_gen and result.get("output_path"):
+            try:
+                clip_thumb_dir = os.path.join(thumb_dir, f"clip_{i+1}")
+                paths = _thumb_gen(
+                    title=clip.get("title", f"Clip {i+1}"),
+                    output_dir=clip_thumb_dir,
+                    photo_path=_thumb_photo,
+                    video_path=video_path,
+                    logo_path=_thumb_logo,
+                )
+                if paths:
+                    thumb_video = os.path.join(clip_thumb_dir, "thumb_frame.mp4")
+                    _thumb_to_video(paths[0], thumb_video)
+                    from services.video_processor import concat_outro
+                    final_with_thumb = result["output_path"].replace(".mp4", "_with_thumb.mp4")
+                    concat_outro(result["output_path"], thumb_video, final_with_thumb, crossfade_duration=0.3)
+                    os.replace(final_with_thumb, result["output_path"])
+                    print(f"                 + thumbnail appended ({len(paths)} variations in {os.path.basename(clip_thumb_dir)}/)")
+            except Exception as e:
+                print(f"                 ⚠ thumbnail: {e}")
 
     elapsed = time.time() - t0
     success = sum(1 for r in results if "output_path" in r)
     print(f"\n         {success}/{len(clips)} clips exported in {elapsed:.1f}s")
-
-    # ── Step 4b: Generate thumbnails (opt-in via thumbnail-config.json) ──
-    thumb_dir = os.path.join(output_dir, "thumbnails")
-    _thumb_enabled = True
-    _tc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "thumbnail-config.json")
-    if os.path.exists(_tc_path):
-        try:
-            with open(_tc_path) as _tcf:
-                _thumb_enabled = json.load(_tcf).get("enabled", True)
-        except Exception:
-            pass
-
     if _thumb_enabled:
-        try:
-            from services.thumbnail_ai import generate_variations, thumbnail_to_video_frame
-
-            logo_for_thumb = config.get("logo_path") or None
-            guest_photo = None
-            try:
-                from services.asset_store import list_assets as list_thumb_assets
-                photos = [a for a in list_thumb_assets() if a["type"] == "image" and os.path.exists(a["path"])]
-                if photos:
-                    guest_photo = photos[0]["path"]
-            except Exception:
-                pass
-
-            print(f"\n  [4b/5] Generating thumbnails (Claude + Playwright)...")
-            for i, clip in enumerate(clips):
-                clip_thumb_dir = os.path.join(thumb_dir, f"clip_{i+1}")
-                paths = generate_variations(
-                    title=clip.get("title", f"Clip {i+1}"),
-                    output_dir=clip_thumb_dir,
-                    photo_path=guest_photo,
-                    video_path=video_path,
-                    logo_path=logo_for_thumb,
-                )
-                print(f"         Clip {i+1}: {len(paths)} variations → {os.path.basename(clip_thumb_dir)}/")
-
-                # Append first thumbnail as 2-sec frame to the clip
-                clip_result = results[i] if i < len(results) else None
-                if clip_result and clip_result.get("output_path") and paths:
-                    thumb_video = os.path.join(clip_thumb_dir, "thumb_frame.mp4")
-                    try:
-                        thumbnail_to_video_frame(paths[0], thumb_video)
-                        from services.video_processor import concat_outro
-                        final_with_thumb = clip_result["output_path"].replace(".mp4", "_with_thumb.mp4")
-                        concat_outro(clip_result["output_path"], thumb_video, final_with_thumb, crossfade_duration=0.3)
-                        os.replace(final_with_thumb, clip_result["output_path"])
-                        print(f"                 + thumbnail appended (2s fade)")
-                    except Exception as e:
-                        print(f"                 ⚠ thumbnail append failed: {e}")
-
-            print(f"         Thumbnails saved to {thumb_dir}/")
-        except Exception as e:
-            print(f"\n  [4b/5] Thumbnails skipped: {e}")
+        print(f"         Thumbnails saved to {thumb_dir}/")
 
     print(f"\n  Output: {output_dir}/")
 
