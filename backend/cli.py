@@ -188,11 +188,25 @@ def cmd_process(args):
         import warnings
         warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
         from services.transcription import transcribe_file
+
+        _last_pct = [-1]
+        def _transcribe_progress(pct, msg):
+            if pct != _last_pct[0]:
+                _last_pct[0] = pct
+                bar_width = 30
+                filled = int(bar_width * pct / 100)
+                bar = "█" * filled + "░" * (bar_width - filled)
+                print(f"\r         {bar} {pct:3d}%  {msg[:45]:<45}", end="", flush=True)
+                if pct >= 100:
+                    print()
+
         result = transcribe_file(
             file_path=video_path,
             model_size=config.get("whisper_model", "base"),
-            progress_callback=lambda pct, msg: print(f"         {pct}% {msg}") if pct % 20 == 0 else None,
+            progress_callback=_transcribe_progress,
         )
+        if _last_pct[0] < 100:
+            print()  # newline after progress bar
         words = result["words"]
         segments = result["segments"]
         print(f"         Done: {len(segments)} segments, {len(words)} words")
@@ -1045,7 +1059,7 @@ def _ask(prompt, default=None, validate=None, required=False, is_path=False):
 
 
 def _interactive_process():
-    """Interactive video processing wizard."""
+    """Interactive video processing wizard. Simple input() calls, no abstraction."""
 
     accent = "\033[38;2;212;135;74m"
     gray = "\033[38;5;245m"
@@ -1055,99 +1069,98 @@ def _interactive_process():
     dim = "\033[2m"
     reset = "\033[0m"
 
-    print()
+    def _prompt(msg, default=None):
+        """Simple prompt. Returns stripped input or default."""
+        try:
+            val = input(msg).strip().strip("'\"")
+            if not val:
+                return default
+            return _clean_path(val) if ("/" in val or "\\" in val) else val
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return default
 
-    # 1. Video path — keep asking until valid
-    def _valid_video(v):
+    # 1. Video
+    print(f"\n  {bold}Drag your episode video here or paste the path:{reset}")
+    video = None
+    while not video:
+        v = _prompt(f"  {accent}▸{reset} ")
+        if v is None:
+            return
+        if not v:
+            continue
         if os.path.exists(v):
-            return True
-        print(f"    {red}✗ File not found.{reset} Try again or drag the file here.")
-        return False
+            video = v
+            print(f"  {green}✓{reset} {os.path.basename(video)}")
+        else:
+            print(f"  {red}✗{reset} File not found, try again")
 
-    print(f"  {gray}Paste the path or drag your video file into this window:{reset}")
-    video = _ask(f"\n  {accent}▸ Video:{reset} ", validate=_valid_video, required=True, is_path=True)
-    if not video:
-        return
-
-    print(f"    {green}✓{reset} {os.path.basename(video)}")
-
-    # 2. Transcript — optional
-    print()
-    transcript = _ask(
-        f"  {accent}Transcript:{reset} {dim}(drag file or press enter to auto-transcribe){reset}\n  {gray}>{reset} ",
-        default="",
-        is_path=True,
-    )
-    if transcript and os.path.exists(transcript):
-        print(f"    {green}✓{reset} {os.path.basename(transcript)}")
+    # 2. Transcript
+    print(f"\n  {bold}Transcript{reset} {dim}(drag file here, or just press Enter to auto-transcribe):{reset}")
+    t = _prompt(f"  {accent}▸{reset} ", default="")
+    transcript = t if t and os.path.exists(t) else None
+    if transcript:
+        print(f"  {green}✓{reset} {os.path.basename(transcript)}")
     else:
-        transcript = None
-        print(f"    {gray}→ Will auto-transcribe with Whisper{reset}")
+        print(f"  {gray}→ Will auto-transcribe with Whisper{reset}")
 
     # 3. Caption style
-    print(f"\n  {accent}Caption style:{reset}")
-    print(f"    {accent}1{reset} branded  {dim}dark pill on active word + logo{reset}")
-    print(f"    {accent}2{reset} hormozi  {dim}bold uppercase, yellow highlight{reset}")
-    print(f"    {accent}3{reset} karaoke  {dim}sentence visible, words light up{reset}")
-    print(f"    {accent}4{reset} subtle   {dim}clean small text at bottom{reset}")
+    print(f"\n  {bold}Caption style{reset} {dim}(1-4, default 1):{reset}")
+    print(f"  {accent}1{reset} branded  {dim}dark pill on active word + logo{reset}")
+    print(f"  {accent}2{reset} hormozi  {dim}bold uppercase, yellow highlight{reset}")
+    print(f"  {accent}3{reset} karaoke  {dim}sentence visible, words light up{reset}")
+    print(f"  {accent}4{reset} subtle   {dim}clean small text at bottom{reset}")
     styles = {"1": "branded", "2": "hormozi", "3": "karaoke", "4": "subtle"}
-    style_choice = _ask(f"  {gray}>{reset} ", default="1")
-    caption_style = styles.get(style_choice, "branded")
-    print(f"    {green}✓{reset} {caption_style}")
+    caption_style = styles.get(_prompt(f"  {accent}▸{reset} ", default="1") or "1", "branded")
+    print(f"  {green}✓{reset} {caption_style}")
 
     # 4. Quality
-    print(f"\n  {accent}Quality:{reset}  {dim}1 low · 2 medium · {bold}3 high{reset}{dim} · 4 max{reset}")
+    print(f"\n  {bold}Quality{reset} {dim}(1-4, default 3):{reset}  {dim}1 low · 2 medium · 3 high · 4 max{reset}")
     qualities = {"1": "low", "2": "medium", "3": "high", "4": "max"}
-    q_choice = _ask(f"  {gray}>{reset} ", default="3")
-    quality = qualities.get(q_choice, "high")
-    print(f"    {green}✓{reset} {quality}")
+    quality = qualities.get(_prompt(f"  {accent}▸{reset} ", default="3") or "3", "high")
+    print(f"  {green}✓{reset} {quality}")
 
     # 5. Number of clips
-    top_input = _ask(f"\n  {accent}Number of clips{reset} {dim}(default 5){reset}: ", default="5")
+    print(f"\n  {bold}How many clips?{reset} {dim}(default 5):{reset}")
     try:
-        top_n = int(top_input)
+        top_n = int(_prompt(f"  {accent}▸{reset} ", default="5") or "5")
     except ValueError:
         top_n = 5
-    print(f"    {green}✓{reset} {top_n} clips")
+    print(f"  {green}✓{reset} {top_n} clips")
 
-    # 6. Logo from assets
+    # 6. Logo
     logo = None
     try:
         from services.asset_store import list_assets
         logos = [a for a in list_assets() if a["type"] == "logo" and os.path.exists(a["path"])]
         if logos:
-            print(f"\n  {accent}Logo:{reset}")
+            print(f"\n  {bold}Logo{reset} {dim}(default 1):{reset}")
             for i, a in enumerate(logos):
-                print(f"    {accent}{i+1}{reset} {a['name']}  {dim}{os.path.basename(a['path'])}{reset}")
-            print(f"    {accent}0{reset} none")
-            logo_choice = _ask(f"  {gray}>{reset} ", default="1")
-            if logo_choice and logo_choice != "0":
-                idx = int(logo_choice) - 1
+                print(f"  {accent}{i+1}{reset} {a['name']}  {dim}{os.path.basename(a['path'])}{reset}")
+            print(f"  {accent}0{reset} none")
+            lc = _prompt(f"  {accent}▸{reset} ", default="1") or "1"
+            if lc != "0":
+                idx = int(lc) - 1
                 if 0 <= idx < len(logos):
                     logo = logos[idx]["path"]
-                    print(f"    {green}✓{reset} {logos[idx]['name']}")
+                    print(f"  {green}✓{reset} {logos[idx]['name']}")
     except Exception:
         pass
 
-    # Summary
-    print(f"\n  {gray}{'─' * 40}{reset}")
-    print(f"  {bold}Ready to process:{reset}")
-    print(f"    Video:    {os.path.basename(video)}")
-    print(f"    Style:    {caption_style}  ·  Quality: {quality}  ·  Clips: {top_n}")
+    # Summary + confirm
+    print(f"\n  {'─' * 45}")
+    print(f"  {bold}Video:{reset}      {os.path.basename(video)}")
+    print(f"  {bold}Style:{reset}      {caption_style}  ·  Quality: {quality}  ·  Clips: {top_n}")
     if logo:
-        print(f"    Logo:     ✓")
-    if transcript:
-        print(f"    Transcript: {os.path.basename(transcript)}")
-    else:
-        print(f"    Transcript: auto (Whisper)")
-    print()
-
-    confirm = _ask(f"  {accent}Start?{reset} {dim}(Y/n){reset} ", default="y")
-    if confirm.lower() not in ("y", "yes", ""):
-        print(f"  {gray}Cancelled.{reset}")
+        print(f"  {bold}Logo:{reset}       ✓")
+    print(f"  {bold}Transcript:{reset} {'auto (Whisper)' if not transcript else os.path.basename(transcript)}")
+    try:
+        input(f"\n  {green}Ready!{reset} {bold}Press Enter to start{reset} {dim}(q to cancel){reset} ")
+    except (EOFError, KeyboardInterrupt):
+        print(f"\n  {gray}Cancelled.{reset}")
         return
 
-    # Build command and run
+    # Run
     cmd = [sys.executable, os.path.abspath(__file__), "process", video]
     if transcript:
         cmd += ["--transcript", transcript]
