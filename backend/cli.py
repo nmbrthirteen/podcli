@@ -344,8 +344,60 @@ def cmd_process(args):
 
     elapsed = time.time() - t0
     success = sum(1 for r in results if "output_path" in r)
-    print(f"\n  Done! {success}/{len(clips)} clips exported in {elapsed:.1f}s")
-    print(f"  Output: {output_dir}/")
+    print(f"\n         {success}/{len(clips)} clips exported in {elapsed:.1f}s")
+
+    # ── Step 4b: Generate thumbnails for each clip ──
+    thumb_dir = os.path.join(output_dir, "thumbnails")
+    try:
+        from services.thumbnail_generator import generate_variations, thumbnail_to_video_frame
+        from services.asset_store import resolve as resolve_thumb_asset
+
+        logo_for_thumb = config.get("logo_path") or None
+        # Try to find a guest photo from assets
+        guest_photo = None
+        try:
+            from services.asset_store import list_assets as list_thumb_assets
+            photos = [a for a in list_thumb_assets() if a["type"] == "image" and os.path.exists(a["path"])]
+            if photos:
+                guest_photo = photos[0]["path"]
+        except Exception:
+            pass
+
+        print(f"\n  [4b/5] Generating thumbnails...")
+        for i, clip in enumerate(clips):
+            clip_thumb_dir = os.path.join(thumb_dir, f"clip_{i+1}")
+            paths = generate_variations(
+                title=clip.get("title", f"Clip {i+1}"),
+                output_dir=clip_thumb_dir,
+                guest_photo_path=guest_photo,
+                logo_path=logo_for_thumb,
+            )
+            print(f"         Clip {i+1}: {len(paths)} variations → {os.path.basename(clip_thumb_dir)}/")
+
+            # Append thumbnail as 2-sec frame to the rendered clip
+            clip_result = results[i] if i < len(results) else None
+            if clip_result and clip_result.get("output_path") and paths:
+                # Use first variation as default (user can re-run with specific choice)
+                thumb_video = os.path.join(clip_thumb_dir, "thumb_frame.mp4")
+                try:
+                    thumbnail_to_video_frame(paths[0], thumb_video)
+                    # Append to clip
+                    from services.video_processor import concat_outro
+                    final_with_thumb = clip_result["output_path"].replace(".mp4", "_with_thumb.mp4")
+                    concat_outro(clip_result["output_path"], thumb_video, final_with_thumb, crossfade_duration=0.3)
+                    # Replace original
+                    os.replace(final_with_thumb, clip_result["output_path"])
+                    print(f"                 + thumbnail appended (2s fade)")
+                except Exception as e:
+                    print(f"                 ⚠ thumbnail append failed: {e}")
+
+        print(f"         Thumbnails saved to {thumb_dir}/")
+    except ImportError:
+        print(f"\n  [4b/5] Thumbnails skipped (pip install Pillow)")
+    except Exception as e:
+        print(f"\n  [4b/5] Thumbnails skipped: {e}")
+
+    print(f"\n  Output: {output_dir}/")
 
     # ── Step 5: Content generation via Claude (PodStack /produce-shorts) ──
     from services.claude_suggest import _find_claude
@@ -817,6 +869,52 @@ def cmd_assets(args):
             sys.exit(1)
 
 
+def cmd_thumbnails(args):
+    """Generate thumbnail variations for a title."""
+    from services.thumbnail_generator import generate_variations
+    from services.asset_store import resolve as resolve_asset
+
+    accent = "\033[38;2;212;135;74m"
+    green = "\033[38;2;74;222;128m"
+    gray = "\033[38;5;245m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    logo = None
+    if args.logo:
+        logo = resolve_asset(args.logo)
+    else:
+        # Auto-use first logo asset
+        try:
+            from services.asset_store import list_assets
+            logos = [a for a in list_assets() if a["type"] == "logo" and os.path.exists(a["path"])]
+            if logos:
+                logo = logos[0]["path"]
+        except Exception:
+            pass
+
+    photo = None
+    if args.photo:
+        photo = resolve_asset(args.photo)
+
+    print(f"\n  {bold}Generating {args.variations} thumbnail variations...{reset}")
+    print(f"  Title: {accent}{args.title}{reset}")
+
+    paths = generate_variations(
+        title=args.title,
+        output_dir=args.output,
+        guest_photo_path=photo,
+        logo_path=logo,
+        config={"variations": args.variations},
+    )
+
+    for p in paths:
+        print(f"  {green}✓{reset} {p}")
+
+    print(f"\n  {gray}Open the folder to preview and pick the best one.{reset}")
+    print(f"  {gray}Edit .podcli/thumbnail-config.json to customize colors, fonts, layout.{reset}\n")
+
+
 def cmd_info(args):
     """Show system info."""
     from services.encoder import get_encoder_info
@@ -982,6 +1080,14 @@ def main():
     ast_resolve = ast_sub.add_parser("resolve", help="Print the path for an asset name")
     ast_resolve.add_argument("name")
 
+    # ── thumbnails ──
+    thumb = sub.add_parser("thumbnails", help="Generate thumbnail variations for a title")
+    thumb.add_argument("title", help="Title text for the thumbnail")
+    thumb.add_argument("-o", "--output", default="./thumbnails", help="Output directory")
+    thumb.add_argument("--photo", help="Guest photo (asset name or path)")
+    thumb.add_argument("--logo", help="Logo (asset name or path)")
+    thumb.add_argument("-n", "--variations", type=int, default=3, help="Number of variations")
+
     # ── info ──
     sub.add_parser("info", help="Show system info (encoder, etc.)")
 
@@ -991,6 +1097,8 @@ def main():
         if not getattr(args, "no_banner", False):
             print()
         cmd_process(args)
+    elif args.command == "thumbnails":
+        cmd_thumbnails(args)
     elif args.command == "presets":
         cmd_presets(args)
     elif args.command == "assets":
