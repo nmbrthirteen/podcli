@@ -38,16 +38,47 @@ def _find_claude() -> Optional[str]:
 
 
 def _build_prompt(transcript_text: str, segment_count: int, duration_min: float, top_n: int) -> str:
-    """Build the prompt for Claude to extract clips."""
+    """Build the prompt for Claude to extract clips.
+
+    Inlines key rules from the knowledge base since Claude --print mode
+    can't read project files.
+    """
+
+    # Try to load knowledge base files inline
+    kb_context = ""
+    kb_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", ".podcli", "knowledge"
+    )
+    for fname in ["04-shorts-creation-guide.md", "05-title-formulas.md", "02-voice-and-tone.md"]:
+        fpath = os.path.join(kb_dir, fname)
+        if os.path.exists(fpath):
+            try:
+                with open(fpath) as f:
+                    content = f.read()
+                kb_context += f"\n--- {fname} ---\n{content[:2000]}\n"
+            except Exception:
+                pass
+
     return f"""You are the clip extraction engine for a podcast. Analyze this transcript and return the {top_n} best moments for YouTube Shorts.
 
 IMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences.
 
-Use the knowledge base in .podcli/knowledge/ for:
-- Voice and tone rules (02-voice-and-tone.md)
-- Moment selection criteria (04-shorts-creation-guide.md)
-- Content type classification (05-title-formulas.md)
-- Existing episodes to avoid duplicates (03-episodes-database.md)
+DURATION RULES (CRITICAL):
+- Target: 30-45 seconds per clip (ideal for YouTube Shorts)
+- Maximum: 60 seconds (hard limit — YouTube Shorts cuts off at 60s)
+- Minimum: 20 seconds (too short = no value)
+- If a moment runs longer than 50 seconds, find a tighter cut point
+
+MOMENT SELECTION:
+- Must start with a strong hook (first 3 seconds grab attention)
+- Must make complete sense standalone — no "as I mentioned" or "going back to"
+- Must end cleanly on a sentence boundary (not mid-thought)
+- Single focused idea per clip — one concept, fully delivered
+- Prioritize: surprising facts, bold claims, founder stories, counterintuitive insights, "aha" moments
+- Variety across content types
+- In conversations, include moments where both speakers contribute (back-and-forth exchanges can be powerful shorts)
+
+{f"KNOWLEDGE BASE:{kb_context}" if kb_context else ""}
 
 Score each moment on 4 dimensions (1-5 each):
 - standalone: Makes sense without episode context?
@@ -63,8 +94,8 @@ Return this exact JSON structure:
     {{
       "title": "First strong sentence from the moment",
       "start_second": 123.4,
-      "end_second": 178.9,
-      "duration": 55,
+      "end_second": 168.4,
+      "duration": 45,
       "content_type": "guest_story",
       "scores": {{"standalone": 4, "hook": 5, "relevance": 4, "quotability": 3}},
       "total_score": 16,
@@ -75,11 +106,9 @@ Return this exact JSON structure:
 }}
 
 Rules:
-- Clips must be 20-90 seconds
+- Clips MUST be 20-60 seconds (target 30-45s)
 - Must start and end on sentence boundaries
-- Must make sense standalone (no "as I mentioned earlier")
-- Prioritize: surprising facts, bold claims, founder stories, counterintuitive insights
-- Variety across content types
+- Must make sense standalone
 - Sort by timestamp order
 
 Transcript ({segment_count} segments, ~{duration_min:.0f} min):
