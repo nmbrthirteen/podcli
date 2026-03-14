@@ -5,26 +5,122 @@
   <img src="public/podcli-logo-transparent.png" height="36" alt="podcli" />
 </p>
 <p align="center">
-  AI-powered podcast clip generator. Takes a long-form podcast video, identifies viral moments, and exports upload-ready TikTok / YouTube Shorts (1080x1920, 9:16, burned captions, normalized audio).
+  AI-powered podcast content studio. Transcribe episodes, find viral moments, render upload-ready Shorts with burned captions — then generate titles, descriptions, thumbnails, and a full publish-ready content package. All from your terminal.
 </p>
+
+---
+
+## What It Does
+
+**podcli** takes a long-form podcast and turns it into a complete content operation:
+
+```
+Record episode
+    ↓
+Transcribe (Whisper, speaker detection)
+    ↓
+Find viral moments (audio energy + text heuristics)
+    ↓
+Render clips (9:16, captions, smart crop, normalized audio)
+    ↓
+Generate content package (titles, descriptions, thumbnails, SEO)    ← PodStack
+    ↓
+Publish with optimization checklist                                  ← PodStack
+    ↓
+Review performance                                                   ← PodStack
+```
+
+The first half is **video processing** — podcli's core engine. The second half is **content workflow** — powered by [PodStack](https://github.com/nmbrthirteen/podstack), a set of Claude Code slash commands that ship with podcli.
+
+---
+
+## How It Works (From a User's Perspective)
+
+### 1. Drop in your episode
+
+```bash
+./setup.sh --ui
+# → http://localhost:3847
+```
+
+Drag your video into the Web UI, or use the CLI:
+
+```bash
+./podcli process episode.mp4 --transcript transcript.txt --top 8
+```
+
+### 2. Get clips automatically
+
+podcli analyzes your transcript + audio energy to find the best moments. It scores each one, suggests clips, and lets you toggle them on/off before rendering.
+
+Clips come out as **upload-ready Shorts**: 1080x1920, 9:16 vertical, with burned-in captions, normalized audio, and your logo.
+
+### 3. Generate the full content package
+
+Open the project in **Claude Code** and run:
+
+```
+/prep-episode
+```
+
+This runs the [PodStack](https://github.com/nmbrthirteen/podstack) pipeline — a gstack-style workflow that gives you:
+
+- **8-15 scored moments** with timestamps, categories, and reasoning
+- **8 title options per clip** following your show's title spec (verified against 6 quality gates)
+- **Ready-to-paste descriptions** with hooks, guest attribution, hashtags, SEO keywords
+- **Thumbnail briefs** for both podcast (16:9) and shorts (9:16) formats
+- **Brand review** that catches banned words, voice violations, and weak hooks
+- **Publish checklist** covering pre-upload, at-publish, first-24-hours, and day 3-4 optimization
+
+### 4. Publish and track
+
+Run `/publish-checklist` when uploading. A week later, run `/retro-episode` with your YouTube Studio stats to see what worked and what to improve.
+
+---
+
+## The Two Halves
+
+| | Video Engine (podcli core) | Content Workflow (PodStack) |
+|---|---|---|
+| **What** | Transcription, clip detection, rendering | Titles, descriptions, thumbnails, publishing |
+| **How** | Python + FFmpeg + Whisper + OpenCV | Claude Code slash commands |
+| **Interface** | Web UI, CLI, MCP tools | `/slash-commands` in Claude Code |
+| **Output** | `.mp4` files ready to upload | Content packages ready to paste into YouTube |
+
+Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your show's brand, voice, title formulas, episode database, and style guide. Set it up once, everything stays on-brand.
 
 ---
 
 ## Features
 
+### Video Processing
 - **Auto clip suggestion** — text heuristics + audio energy analysis
-- **Burned-in captions** — 4 styles: branded (dark box highlight), hormozi (bold pop-on), karaoke (progressive highlight), subtle (clean bottom text)
-- **Hardware-accelerated encoding** — auto-detects VideoToolbox (Mac), NVENC (NVIDIA), VAAPI, or CPU fallback
+- **Burned-in captions** — 4 styles: branded, hormozi, karaoke, subtle
+- **Hardware-accelerated encoding** — VideoToolbox (Mac), NVENC (NVIDIA), VAAPI, CPU fallback
 - **Smart cropping** — center crop or face detection (OpenCV)
-- **Knowledge base** — drop `.md` files to give the AI context about your podcast, hosts, and style
-- **Asset management** — register logos and videos by name for quick reuse
-- **Clip history** — tracks all generated clips to avoid duplicates
-- **Transcript import** — paste `Speaker (MM:SS)` format, JSON, or drag-and-drop `.txt` files
-- **Whisper transcription** — auto-transcribe with OpenAI Whisper (tiny → large)
-- **Preset system** — save and load named configurations per show
-- **MCP server** — use as a Claude Desktop / Claude Code tool (7 tools)
-- **Web UI** — single-page flow: input → suggest → review → export
-- **CLI mode** — one-command processing: `./podcli process video.mp4 --top 5`
+- **Whisper transcription** — auto-transcribe with speaker detection (tiny → large)
+- **Transcript import** — paste `Speaker (MM:SS)`, JSON, drag-drop `.txt` / `.srt` / `.vtt`
+
+### Content Workflow (PodStack)
+- **`/process-transcript`** — extract and score best moments from any transcript
+- **`/generate-titles`** — 8 titles per clip with 6-point verification checklist
+- **`/generate-descriptions`** — descriptions + hashtags + SEO keywords
+- **`/plan-thumbnails`** — thumbnail text + designer briefs for both formats
+- **`/review-content`** — paranoid brand check (banned words, voice, title rules)
+- **`/prep-episode`** — full pipeline: transcript → publish-ready package
+- **`/publish-checklist`** — pre/post-publish optimization
+- **`/retro-episode`** — performance analysis after publishing
+
+### Infrastructure
+- **Knowledge base** — `.md` files that teach the AI your brand, voice, and style
+- **Asset management** — register logos and videos for quick reuse
+- **Clip history** — tracks everything to avoid duplicates
+- **Preset system** — save named configurations per show
+- **MCP server** — 7 tools for Claude Desktop / Claude Code integration
+- **Web UI** — single-page flow at `localhost:3847`
+- **CLI** — one-command processing: `./podcli process video.mp4 --top 5`
+
+---
 
 ## Prerequisites
 
@@ -33,11 +129,12 @@
 | **Node.js** >= 18 | [nodejs.org](https://nodejs.org) |
 | **Python** >= 3.10 | [python.org](https://python.org) |
 | **FFmpeg** | `brew install ffmpeg` / `sudo apt install ffmpeg` |
+| **Claude Code** (optional) | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) — needed for PodStack slash commands |
 
 ## Quick Start
 
 ```bash
-git clone <repo-url> podcli
+git clone https://github.com/nmbrthirteen/podcli.git
 cd podcli
 chmod +x setup.sh podcli
 ./setup.sh
@@ -48,8 +145,9 @@ This will:
 1. Check system dependencies (Node, Python, FFmpeg)
 2. Create a Python virtual environment and install packages
 3. Install Node packages and build TypeScript
-4. Create the local `.podcli/` data directory
-5. Launch the web UI at **http://localhost:3847**
+4. Set up PodStack slash commands and knowledge base templates
+5. Create the local `.podcli/` data directory
+6. Launch the web UI at **http://localhost:3847**
 
 ### Setup options
 
@@ -59,6 +157,8 @@ This will:
 ./setup.sh --ui         # launch UI only (skip install)
 ./setup.sh --mcp        # print MCP config for Claude
 ```
+
+---
 
 ## Usage
 
@@ -102,7 +202,55 @@ This will:
 ./podcli process video.mp4 --preset myshow
 ```
 
-### MCP Server (Claude integration)
+### Content Workflow (PodStack)
+
+Open the project in Claude Code, then use slash commands:
+
+```bash
+# Full pipeline — transcript to publish-ready package
+/prep-episode
+
+# Individual steps
+/process-transcript        # extract moments from a transcript
+/generate-titles           # get 8 title options for a clip
+/generate-descriptions     # get descriptions + hashtags
+/plan-thumbnails           # get thumbnail briefs for your designer
+/review-content            # brand and quality review
+/publish-checklist         # pre/post-publish ops
+/retro-episode             # performance analysis
+```
+
+Or just paste a transcript — Claude auto-detects the input and runs the right command.
+
+---
+
+## Knowledge Base
+
+The knowledge base is what makes podcli understand *your* show. Drop `.md` files into `.podcli/knowledge/` and both the video engine and content workflow use them.
+
+PodStack ships with **13 starter templates** that you fill in with your show's details:
+
+| File | What It Teaches The AI |
+|------|----------------------|
+| `00-master-instructions.md` | Auto-detection rules, decision tree, quality gates |
+| `01-brand-identity.md` | Show name, positioning, tagline, hosts, format |
+| `02-voice-and-tone.md` | Voice fingerprint, banned words, the Coffee Test |
+| `03-episodes-database.md` | Episode tracking, existing shorts (for dedup) |
+| `04-shorts-creation-guide.md` | Moment types, selection criteria, extraction process |
+| `05-title-formulas.md` | Title shapes, rules, templates by content type |
+| `06-descriptions-template.md` | Description formulas, hashtag library, SEO keywords |
+| `07-thumbnail-guide.md` | Layouts, brand colors, typography, visual specs |
+| `08-topics-themes.md` | Core topics, cross-cutting themes, audience map |
+| `09-content-workflow.md` | End-to-end workflow phases, handoff specs |
+| `10-internal-processing.md` | Auto-execution rules, internal quality gates |
+| `11-inspiration-channels.md` | Reference channels, viral hooks, hybrid formulas |
+| `12-quick-reference.md` | Copy-paste hooks, hashtags, CTAs, checklists |
+
+Manage via the web UI at `/knowledge.html` (drag & drop, inline editor) or through the `knowledge_base` MCP tool.
+
+---
+
+## MCP Server (Claude Integration)
 
 podcli is a [Model Context Protocol](https://modelcontextprotocol.io) server — Claude can use it as a tool to create clips through conversation.
 
@@ -130,11 +278,11 @@ claude mcp add podcli -- node /path/to/podcli/dist/index.js
 
 Run `./setup.sh --mcp` to get the exact config with your paths filled in.
 
-#### MCP Tools
+### MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `transcribe_podcast` | Transcribe audio/video with Whisper |
+| `transcribe_podcast` | Transcribe audio/video with Whisper + speaker detection |
 | `suggest_clips` | Submit clip suggestions (includes duplicate check) |
 | `create_clip` | Render a single short-form clip |
 | `batch_create_clips` | Render multiple clips in one batch |
@@ -142,18 +290,7 @@ Run `./setup.sh --mcp` to get the exact config with your paths filled in.
 | `manage_assets` | Register/list reusable assets (logos, videos) |
 | `clip_history` | View previously created clips, check for duplicates |
 
-## Knowledge Base
-
-Drop `.md` files into `.podcli/knowledge/` to give the AI context about your podcast. The MCP server reads these before every request.
-
-Suggested files:
-- `podcast.md` — show name, format, episode structure
-- `hosts.md` — host names, speaking styles
-- `style.md` — preferred caption style, logo, colors
-- `audience.md` — target audience, platform preferences
-- `avoid.md` — topics or segments to skip
-
-Manage via the web UI at `/knowledge.html` (drag & drop, inline editor) or through the `knowledge_base` MCP tool.
+---
 
 ## Caption Styles
 
@@ -164,6 +301,8 @@ Manage via the web UI at `/knowledge.html` (drag & drop, inline editor) or throu
 | **karaoke** | Full sentence visible, words highlight progressively |
 | **subtle** | Clean minimal white text at bottom |
 
+---
+
 ## Project Structure
 
 ```
@@ -171,7 +310,17 @@ podcli/
 ├── podcli                    # CLI entry point
 ├── setup.sh                  # one-command install & launch
 ├── package.json
-├── .env.example
+├── CLAUDE.md                 # PodStack master config
+│
+├── .claude/commands/         # PodStack slash commands
+│   ├── process-transcript.md
+│   ├── generate-titles.md
+│   ├── generate-descriptions.md
+│   ├── plan-thumbnails.md
+│   ├── review-content.md
+│   ├── prep-episode.md
+│   ├── publish-checklist.md
+│   └── retro-episode.md
 │
 ├── src/                      # TypeScript
 │   ├── index.ts              # MCP server entry (stdio)
@@ -200,10 +349,10 @@ podcli/
 │       └── caption_styles.py
 │
 └── .podcli/                  # local data (gitignored)
+    ├── knowledge/            # .md context files for AI (13 templates)
     ├── assets/               # registered logos, videos
     ├── cache/transcripts/    # cached transcriptions
     ├── history/              # generated clip history
-    ├── knowledge/            # .md context files for AI
     ├── output/               # rendered clips
     ├── presets/              # saved configurations
     └── working/              # temp files
@@ -233,6 +382,12 @@ Their response text here.
 ```
 
 The time offset field (default: -1s) shifts all timestamps to sync with audio.
+
+---
+
+## Credits
+
+Content workflow powered by [PodStack](https://github.com/nmbrthirteen/podstack) — inspired by [gstack](https://github.com/garrytan/gstack) by Garry Tan.
 
 ## License
 
