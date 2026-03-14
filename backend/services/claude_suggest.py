@@ -136,10 +136,10 @@ def suggest_with_claude(
         progress_callback(20, "Asking Claude to analyze transcript...")
 
     try:
-        # Call claude with --print (non-interactive, outputs result directly)
+        # Pipe prompt via stdin — avoids shell escaping and arg size limits
         # Run from the podcli project dir so it picks up CLAUDE.md + knowledge base
         result = subprocess.run(
-            [claude_path, "--print", "-p", f"$(cat {prompt_file})"],
+            f'cat "{prompt_file}" | "{claude_path}" --print -p -',
             capture_output=True,
             text=True,
             cwd=project_dir,
