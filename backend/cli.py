@@ -1189,7 +1189,9 @@ def interactive_menu():
 
     _flush_stdin()
     try:
-        choice = input(f"  {gray}>{reset} ").strip()
+        choice = ""
+        while not choice:
+            choice = input(f"  {gray}>{reset} ").strip()
     except (EOFError, KeyboardInterrupt):
         print()
         return
