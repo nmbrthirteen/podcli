@@ -405,7 +405,7 @@ def cmd_process(args):
 
     print(f"\n  Output: {output_dir}/")
 
-    # ── Step 5: Content generation via Claude (PodStack /produce-shorts) ──
+    # ── Step 5: Content generation via Claude (with PodStack knowledge base) ──
     from services.claude_suggest import _find_claude
     claude_path = _find_claude()
 
@@ -416,7 +416,29 @@ def cmd_process(args):
     reset = "\033[0m"
 
     if claude_path:
-        print(f"\n  {bold}[5/5] Generating content package (PodStack)...{reset}")
+        print(f"\n  {bold}[5/5] Generating content package...{reset}")
+
+        # Load PodStack knowledge base files inline
+        kb_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "knowledge")
+        kb_sections = {}
+        for fname in [
+            "02-voice-and-tone.md",
+            "05-title-formulas.md",
+            "06-descriptions-template.md",
+            "07-thumbnail-guide.md",
+            "12-quick-reference.md",
+        ]:
+            fpath = os.path.join(kb_dir, fname)
+            if os.path.exists(fpath):
+                try:
+                    with open(fpath) as kf:
+                        kb_sections[fname] = kf.read()
+                except Exception:
+                    pass
+
+        kb_context = ""
+        for fname, content in kb_sections.items():
+            kb_context += f"\n\n--- {fname} ---\n{content[:3000]}"
 
         # Build transcript text for Claude
         transcript_lines = []
@@ -432,30 +454,56 @@ def cmd_process(args):
 
         # Build clip summary for context
         clip_summary = "\n".join(
-            f"- Short {i+1}: \"{c['title']}\" ({c['start_second']}s-{c['end_second']}s) [{c.get('content_type', '')}]"
+            f"- Short {i+1}: \"{c['title']}\" ({c['start_second']}s-{c['end_second']}s, {c['end_second']-c['start_second']:.0f}s) [{c.get('content_type', '')}]"
             for i, c in enumerate(clips)
         )
 
-        prompt = f"""Run /produce-shorts for this episode. Clips are already rendered — now generate the content package.
+        prompt = f"""You are the content production team for a podcast. Generate a complete publish-ready content package for these clips.
 
-Video: {os.path.basename(video_path)}
-Clips rendered: {success}
-Output: {output_dir}/
+KNOWLEDGE BASE (follow these specs exactly):
+{kb_context}
 
-Selected clips:
+---
+
+VIDEO: {os.path.basename(video_path)}
+CLIPS RENDERED: {success}
+OUTPUT DIR: {output_dir}/
+
+SELECTED CLIPS:
 {clip_summary}
 
-Transcript:
+TRANSCRIPT (for context):
 {chr(10).join(transcript_lines[:500])}
 
-Generate:
-1. 8 title options per clip (using knowledge base title formulas)
-2. Ready-to-paste descriptions with hashtags for each clip
-3. Thumbnail text briefs (podcast 16:9 + shorts 9:16) for each clip
-4. Posting schedule recommendation
-5. Publish checklist
+---
 
-Save the content package to episodes/ directory."""
+GENERATE FOR EACH CLIP:
+
+## 1. TITLES (8 per clip)
+Follow the title spec exactly:
+- 40-60 chars target, 70 max
+- 5-11 words, keyword in first 3 words
+- 4 shapes: topic+tension, result+cause, X vs Y, number+noun
+- Generate: 2 guest/decision, 2 insight/technical, 1-2 market/hot take, 1-2 safe/descriptive
+- Verify each: Coffee Test, banned words check, hook alignment
+- Flag top 2 picks with reasoning
+
+## 2. DESCRIPTIONS (per clip)
+- Short description: hook line + guest attribution + hashtags (under 150 chars)
+- Use the description template from the knowledge base
+
+## 3. THUMBNAIL TEXT (per clip)
+- Line 1 (top): 2-3 words, setup/topic
+- Line 2 (bottom): 2-3 words, payoff/hook (appears on teal highlight)
+- Format as: "LINE 1 / LINE 2"
+
+## 4. POSTING SCHEDULE
+- Recommend optimal posting times and order
+
+## 5. PUBLISH CHECKLIST
+- Pre-publish, post-publish, and day 3-4 optimization steps
+
+Output as clean markdown. No code fences around the whole thing."""
 
         import tempfile, subprocess as sp
         project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
