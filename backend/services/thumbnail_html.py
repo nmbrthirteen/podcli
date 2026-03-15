@@ -493,19 +493,25 @@ def thumbnail_to_video_frame(
     thumbnail_path: str,
     output_path: str,
     duration: float = 2.0,
-    fade_in: float = 0.3,
-    fade_out: float = 0.3,
     width: int = 1080,
     height: int = 1920,
 ) -> str:
-    """Convert thumbnail PNG to a short video clip with fade."""
+    """Convert thumbnail PNG to a short video clip for appending.
+
+    Includes a silent audio track so concat_outro's acrossfade filter
+    works correctly. No baked-in fades — the crossfade transition
+    handles the visual blend.
+    """
     cmd = [
         "ffmpeg", "-y",
         "-loop", "1", "-i", thumbnail_path,
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
         "-t", str(duration),
-        "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,fade=t=in:st=0:d={fade_in},fade=t=out:st={duration-fade_out}:d={fade_out}",
+        "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-        "-pix_fmt", "yuv420p", "-an",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        "-shortest",
         output_path,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)

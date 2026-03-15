@@ -475,24 +475,27 @@ def thumbnail_to_video_frame(
     thumbnail_path: str,
     output_path: str,
     duration: float = 2.0,
-    fade_in: float = 0.3,
-    fade_out: float = 0.3,
     width: int = 1080,
     height: int = 1920,
 ) -> str:
-    """Convert thumbnail to a short video clip with fade."""
+    """Convert thumbnail to a short video clip for appending.
+
+    Includes silent audio so concat_outro's acrossfade works.
+    No baked-in fades — crossfade handles the transition.
+    """
     cmd = [
         "ffmpeg", "-y",
         "-loop", "1", "-i", thumbnail_path,
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
         "-t", str(duration),
         "-vf", (
             f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"fade=t=in:st=0:d={fade_in},"
-            f"fade=t=out:st={duration - fade_out}:d={fade_out}"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black"
         ),
         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-        "-pix_fmt", "yuv420p", "-an",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        "-shortest",
         output_path,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
