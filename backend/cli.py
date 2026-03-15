@@ -1187,6 +1187,7 @@ def interactive_menu():
     print(f"    {accent}q{reset}  Quit")
     print()
 
+    _flush_stdin()
     try:
         choice = input(f"  {gray}>{reset} ").strip()
     except (EOFError, KeyboardInterrupt):
