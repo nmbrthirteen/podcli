@@ -91,12 +91,17 @@ def cut_segment(
     """
     duration = end_second - start_second
 
+    # Use lossless copy for this intermediate step — the crop/caption
+    # pipeline will re-encode with the proper encoder anyway.
+    # -ss before -i seeks to nearest keyframe, -noaccurate_seek is fast.
+    # We still re-encode video to get frame-accurate start, but use
+    # high quality CRF to minimize generation loss.
     cmd = [
         "ffmpeg", "-y",
         "-ss", str(start_second),
         "-i", input_path,
         "-t", str(duration),
-        "-c:v", "libx264", "-crf", "18", "-preset", "ultrafast",
+        "-c:v", "libx264", "-crf", "12", "-preset", "fast",
         "-c:a", "aac", "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",
         output_path,
