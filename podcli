@@ -17,4 +17,32 @@ else
   PYTHON="python3"
 fi
 
+# ── PodStack slash commands → redirect to Claude Code ──
+CMD="$1"
+# Strip leading / or -- prefix (user might try /prep-episode, --prep-episode, or prep-episode)
+CMD_CLEAN="${CMD#/}"
+CMD_CLEAN="${CMD_CLEAN#--}"
+
+PODSTACK_COMMANDS="prep-episode process-transcript generate-titles generate-descriptions plan-thumbnails review-content publish-checklist retro-episode plan-episode produce-shorts"
+
+for pc in $PODSTACK_COMMANDS; do
+  if [ "$CMD_CLEAN" = "$pc" ]; then
+    ACCENT="\033[38;2;212;135;74m"
+    BOLD="\033[1m"
+    DIM="\033[2m"
+    RESET="\033[0m"
+    echo ""
+    echo -e "  ${BOLD}/$pc${RESET} is a PodStack command — it runs inside ${ACCENT}Claude Code${RESET}, not the terminal."
+    echo ""
+    echo -e "  ${BOLD}How to use:${RESET}"
+    echo -e "    1. Open Claude Code:  ${DIM}claude${RESET}"
+    echo -e "    2. Type:              ${ACCENT}/$pc${RESET}"
+    echo ""
+    echo -e "  ${DIM}PodStack commands use AI to generate titles, descriptions, thumbnails, etc.${RESET}"
+    echo -e "  ${DIM}They need Claude Code's LLM context to work.${RESET}"
+    echo ""
+    exit 0
+  fi
+done
+
 exec "$PYTHON" -W ignore::UserWarning "$SCRIPT_DIR/backend/cli.py" "$@" 2> >(grep -v -e '^objc\[' -e 'FP16 is not supported' -e 'warnings.warn' >&2)
