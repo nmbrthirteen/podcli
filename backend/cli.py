@@ -1076,11 +1076,69 @@ def print_banner():
     print()
 
 
+def print_help():
+    """Print custom help screen."""
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    green = "\033[38;2;74;222;128m"
+    bold = "\033[1m"
+    dim = "\033[2m"
+    reset = "\033[0m"
+    ul = "\033[4m"
+
+    print(BANNER)
+    print(f"  {bold}podcli{reset} v{VERSION} — AI-powered podcast clip generator")
+    print()
+    print(f"  {bold}Usage:{reset}  podcli {accent}<command>{reset} [options]")
+    print(f"          podcli {dim}(interactive mode){reset}")
+    print()
+    print(f"  {bold}Commands:{reset}")
+    print(f"    {accent}process{reset} {gray}<video>{reset}       Transcribe + detect clips + render shorts")
+    print(f"    {accent}assets{reset}  {gray}<action>{reset}      Manage logos, intros, outros")
+    print(f"    {accent}presets{reset} {gray}<action>{reset}      Save/load rendering presets")
+    print(f"    {accent}thumbnails{reset} {gray}<title>{reset}   Generate thumbnail variations")
+    print(f"    {accent}info{reset}                 Show system info (encoder, codecs)")
+    print()
+    print(f"  {bold}Process options:{reset}")
+    print(f"    {green}-t{reset}, {green}--transcript{reset} {gray}<file>{reset}   Use existing transcript (.txt/.json)")
+    print(f"    {green}-n{reset}, {green}--top{reset} {gray}<N>{reset}            Export top N clips {dim}(default: 5){reset}")
+    print(f"    {green}-o{reset}, {green}--output{reset} {gray}<dir>{reset}        Output directory {dim}(default: ./clips){reset}")
+    print(f"    {green}-p{reset}, {green}--preset{reset} {gray}<name>{reset}       Load a saved preset")
+    print(f"    {green}--caption-style{reset} {gray}<style>{reset}  branded | hormozi | karaoke | subtle")
+    print(f"    {green}--crop{reset} {gray}<strategy>{reset}       center | face")
+    print(f"    {green}--logo{reset} {gray}<asset|path>{reset}     Overlay logo image")
+    print(f"    {green}--outro{reset} {gray}<asset|path>{reset}    Append outro video")
+    print(f"    {green}--quality{reset} {gray}<level>{reset}       low | medium | high | max")
+    print(f"    {green}--no-energy{reset}            Skip audio energy analysis")
+    print()
+    print(f"  {bold}Examples:{reset}")
+    print(f"    {dim}${reset} podcli process episode.mp4")
+    print(f"    {dim}${reset} podcli process ep42.mp4 -t transcript.json --top 8 --caption-style hormozi")
+    print(f"    {dim}${reset} podcli process ep42.mp4 --preset myshow --quality max")
+    print(f"    {dim}${reset} podcli assets add mylogo ~/branding/logo.png")
+    print(f"    {dim}${reset} podcli presets save myshow --caption-style branded --logo mylogo")
+    print(f"    {dim}${reset} podcli thumbnails \"Why AI Changes Everything\" --video ep42.mp4")
+    print()
+    print(f"  {bold}PodStack{reset} {dim}(Claude Code slash commands):{reset}")
+    print(f"    {accent}/prep-episode{reset}          Full pipeline: transcript → publish-ready")
+    print(f"    {accent}/process-transcript{reset}    Extract clip-worthy moments from transcript")
+    print(f"    {accent}/generate-titles{reset}       Generate 8 title options with verification")
+    print(f"    {accent}/generate-descriptions{reset} Descriptions + hashtags + SEO")
+    print(f"    {accent}/plan-thumbnails{reset}       Thumbnail text + layout briefs")
+    print(f"    {accent}/review-content{reset}        Brand voice & quality gate check")
+    print(f"    {accent}/publish-checklist{reset}     Pre/post-publish checklist")
+    print()
+    print(f"  {gray}Run {reset}podcli <command> --help{gray} for command-specific options{reset}")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="podcli",
         description="AI-powered podcast clip generator",
+        add_help=False,
     )
+    parser.add_argument("-h", "--help", action="store_true", dest="show_help")
     parser.add_argument("--version", action="version", version=f"podcli {VERSION}")
     parser.add_argument("--no-banner", action="store_true", help=argparse.SUPPRESS)
     sub = parser.add_subparsers(dest="command")
@@ -1150,6 +1208,10 @@ def main():
     sub.add_parser("info", help="Show system info (encoder, etc.)")
 
     args = parser.parse_args()
+
+    if getattr(args, "show_help", False) and args.command is None:
+        print_help()
+        return
 
     if args.command == "process":
         if not getattr(args, "no_banner", False):
