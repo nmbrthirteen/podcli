@@ -31,6 +31,9 @@ test_thumbs/
 thumbnails/
 tmp*.txt
 
+# Episodes (generated content packages)
+episodes/
+
 # Media & temp files
 *.mp4
 *.mp3

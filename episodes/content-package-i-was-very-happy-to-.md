@@ -1,36 +1,29 @@
-Content package is ready. Here's the full breakdown — I'll save it once you approve the file write to `episodes/elias-almqvist-zett-mar2026/content-package.md`.
+The full content package is ready. Here's the overview:
+
+### 5 Shorts — 40 Title Options
+
+| Short | Top Pick | Category | Score |
+|-------|----------|----------|-------|
+| 1 | **Silicon Valley Cheers You On Even When You're "Stupid"** | Guest Story | 17/20 |
+| 2 | **AI Is Not a Bubble — LLMs Are** | Hot Take | 19/20 |
+| 3 | **CUDA Is Not a Moat — Developers Will Leave** | Technical Insight | 18/20 |
+| 4 | **"I Want to Build a Future for the People I Love"** | Guest Story | 16/20 |
+| 5 | **Not Taking Risk Is a Risk — Why I Dropped Out** | Guest Story | 17/20 |
+
+### Posting Schedule (lead with hot takes)
+
+| Day | Short | Reason |
+|-----|-------|--------|
+| Mon Mar 17 | "AI Is Not a Bubble — LLMs Are" | Strongest hook, most polarizing. Drop with full episode. |
+| Wed Mar 19 | "CUDA Is Not a Moat" | Technical follow-up, same contrarian energy |
+| Fri Mar 21 | "Silicon Valley Cheers You On" | Personal story palette cleanser |
+| Mon Mar 24 | "Not Taking Risk Is a Risk" | Universal founder/student hook |
+| Wed Mar 26 | "Build a Future for People I Love" | Emotional closer, best for shares |
+
+### Blocking Issue
+
+Shorts 2 (74s), 3 (83s), and 4 (71s) are **over 60s** — they'll need trimming to qualify as YouTube Shorts, or upload as regular vertical videos.
 
 ---
 
-## Summary
-
-### 5 Shorts with 40 Title Options
-
-| Short | Top Pick Title | Category |
-|-------|---------------|----------|
-| 1 | **Elias Dropped Out at 20 to Build AI Chips** | Origin Story |
-| 2 | **He Visited SF at 11 and Never Stopped Thinking About It** | Origin / Emotional |
-| 3 | **AI Is Not a Bubble. LLMs Are.** | Hot Take |
-| 4 | **CUDA Is Not a Moat — Here's Why** | Technical / Hot Take |
-| 5 | **Open Source Will Kill CUDA in 2 Years** | Market Landscape |
-
-### Posting Schedule — Lead with the hot takes
-
-| Day | Short |
-|-----|-------|
-| **Mon Mar 17** | Short 3: "AI Is Not a Bubble. LLMs Are." (strongest hook, leads the week) |
-| **Wed Mar 19** | Short 4: "CUDA Is Not a Moat" |
-| **Fri Mar 21** | Short 5: "Open Source Will Kill CUDA" |
-| **Mon Mar 24** | Short 1: "Dropped Out at 20" (human story resets cycle) |
-| **Wed Mar 26** | Short 2: "Inventor at 10, Founder at 20" |
-
-Full episode drops Monday Mar 17 alongside the first short.
-
-### Each short includes:
-- 8 title options (2 flagged as top picks with reasoning)
-- Ready-to-paste description with hashtags
-- Thumbnail text briefs for both 16:9 and 9:16
-- All titles verified: Coffee Test, keyword-first, under 70 chars, zero banned words
-
-### Note
-Short 3 is 68s — slightly over the 60s Shorts limit. You may want to trim it or split it. The other 4 are all under 60s.
+The file write to `episodes/ep01-elias-almqvist-zett-production-package.md` is pending your approval. It includes all 40 titles, ready-to-paste descriptions with hashtags, thumbnail briefs (16:9 + 9:16), the schedule, publish checklist, and quality review.
