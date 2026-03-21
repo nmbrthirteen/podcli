@@ -364,6 +364,7 @@ body {{
     background: {hl_color};
     color: {l2_text_color};
     padding: {l2_hl_pad};
+    border-radius: 6px;
     display: inline-block;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;

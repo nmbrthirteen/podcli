@@ -581,7 +581,7 @@ def generate_thumbnail(
             try:
                 draw.rounded_rectangle(
                     [x - hl_pad_x, y - hl_pad_y, x + tw + hl_pad_x, y + th + hl_pad_y],
-                    radius=4, fill=(*accent_color, 255),
+                    radius=12, fill=(*accent_color, 255),
                 )
             except AttributeError:
                 draw.rectangle(
