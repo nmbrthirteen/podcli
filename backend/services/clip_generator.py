@@ -225,6 +225,10 @@ def generate_clip(
             "duration": round(duration, 2),
             "file_size_mb": file_size_mb,
             "title": title,
+            "start_second": start_second,
+            "end_second": end_second,
+            "caption_style": caption_style,
+            "crop_strategy": crop_strategy,
         }
 
     finally:

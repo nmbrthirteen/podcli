@@ -298,6 +298,34 @@ export function createServer(): McpServer {
           if (resolved) params.logo_path = resolved;
         }
 
+        // Resolve clip_number from UI state BEFORE routing
+        if (params.clip_number != null && (params.start_second == null || params.end_second == null)) {
+          const uiState = await readUIState();
+          const suggestions = (uiState?.suggestions as Array<Record<string, unknown>>) || [];
+          const settings = (uiState?.settings as Record<string, string>) || {};
+          const idx = (params.clip_number as number) - 1;
+          if (idx < 0 || idx >= suggestions.length) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Clip #${params.clip_number} not found. Available: 1-${suggestions.length}`,
+              }],
+            };
+          }
+          const suggestion = suggestions[idx];
+          if (params.start_second == null) params.start_second = suggestion.start_second as number;
+          if (params.end_second == null) params.end_second = suggestion.end_second as number;
+          if (!params.video_path) params.video_path = (uiState?.videoPath || uiState?.filePath || "") as string;
+          if (!params.title || params.title === "clip") params.title = (suggestion.title as string) || "clip";
+          if (!params.caption_style || params.caption_style === "hormozi") {
+            params.caption_style = ((suggestion.suggested_caption_style as string) || settings.captionStyle || "hormozi") as typeof params.caption_style;
+          }
+          if (!params.transcript_words) {
+            const transcript = uiState?.transcript as Record<string, unknown> | null;
+            if (transcript?.words) params.transcript_words = transcript.words as any;
+          }
+        }
+
         // Check for duplicates
         const dup = await history.findDuplicate(
           params.video_path as string,
@@ -458,6 +486,47 @@ export function createServer(): McpServer {
     },
     async (params) => {
       try {
+        // Resolve clip_numbers/export_selected from UI state BEFORE routing
+        let resolvedClips = params.clips;
+        let resolvedVideoPath = params.video_path;
+        let resolvedTranscriptWords = params.transcript_words;
+        if (!resolvedClips && (params.export_selected || params.clip_numbers)) {
+          const uiState = await readUIState();
+          const suggestions = (uiState?.suggestions as Array<Record<string, unknown>>) || [];
+          const settings = (uiState?.settings as Record<string, string>) || {};
+          const deselected = (uiState?.deselectedIndices as number[]) || [];
+          if (!resolvedVideoPath) resolvedVideoPath = (uiState?.videoPath || uiState?.filePath || "") as string;
+          if (!resolvedTranscriptWords) {
+            const transcript = uiState?.transcript as Record<string, unknown> | null;
+            if (transcript?.words) resolvedTranscriptWords = transcript.words as any;
+          }
+
+          if (params.export_selected) {
+            resolvedClips = suggestions
+              .filter((_: unknown, i: number) => !deselected.includes(i))
+              .map((s: Record<string, unknown>, i: number) => ({
+                start_second: s.start_second,
+                end_second: s.end_second,
+                title: s.title || `clip_${i + 1}`,
+                caption_style: (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
+                crop_strategy: settings.cropStrategy || "face",
+              })) as any;
+          } else if (params.clip_numbers) {
+            resolvedClips = (params.clip_numbers as number[])
+              .filter((n) => n >= 1 && n <= suggestions.length)
+              .map((n) => {
+                const s = suggestions[n - 1];
+                return {
+                  start_second: s.start_second,
+                  end_second: s.end_second,
+                  title: s.title || `clip_${n}`,
+                  caption_style: (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
+                  crop_strategy: settings.cropStrategy || "face",
+                };
+              }) as any;
+          }
+        }
+
         // Try routing through web server for real-time UI progress
         // The web server handles SSE broadcasts (export-started, job-update, job-complete)
         let usedWebServer = false;
@@ -467,9 +536,9 @@ export function createServer(): McpServer {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              video_path: params.video_path,
-              clips: params.clips,
-              transcript_words: params.transcript_words,
+              video_path: resolvedVideoPath,
+              clips: resolvedClips,
+              transcript_words: resolvedTranscriptWords,
             }),
           });
           if (webRes.ok) {

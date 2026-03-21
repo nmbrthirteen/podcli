@@ -101,7 +101,7 @@ def cut_segment(
         "-ss", str(start_second),
         "-i", input_path,
         "-t", str(duration),
-        "-c:v", "libx264", "-crf", "12", "-preset", "fast",
+        "-c:v", "libx264", "-crf", "18", "-preset", "fast", "-profile:v", "high",
         "-c:a", "aac", "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",
         output_path,
@@ -281,7 +281,7 @@ def _build_speaker_aware_crop(
 
         # Cluster faces by position (left vs right)
         positions = np.array([obs[1] for obs in face_observations])
-        cluster_radius = width * 0.15
+        cluster_radius = width * 0.20  # 20% of frame width — groups face positions with natural head movement
 
         clusters = []
         used = np.zeros(len(positions), dtype=bool)
@@ -322,14 +322,19 @@ def _build_speaker_aware_crop(
         speaker_to_cluster = {}
 
         if is_split_screen and len(clusters) >= 2 and len(speakers) == 2:
-            # Split-screen: both faces always visible.
-            # Standard podcast layout: host on left, guest on right (or vice versa).
-            # Map by speaker order — typically speaker labels from diarization
-            # are consistent: SPEAKER_00 talks first (host intro), SPEAKER_01 is guest.
-            # Host is usually on the LEFT in Riverside/Zencastr/etc.
-            # So: first speaker (host) → left cluster, second speaker (guest) → right cluster.
-            speaker_to_cluster[speakers[0]] = clusters[0]  # left
-            speaker_to_cluster[speakers[1]] = clusters[1]  # right
+            # Split-screen: both faces are always visible, so we can't use
+            # audio-visual correlation (both clusters get equal votes).
+            # Use positional heuristic: whoever speaks first in this clip
+            # is mapped to the LEFT face (standard podcast layout: host left,
+            # host does intro). Sort speakers by first word time, not label.
+            speaker_first_word = {}
+            for w in transcript_words:
+                sp = w.get("speaker")
+                if sp and sp not in speaker_first_word:
+                    speaker_first_word[sp] = w["start"]
+            speakers_by_first_word = sorted(speakers, key=lambda s: speaker_first_word.get(s, float("inf")))
+            speaker_to_cluster[speakers_by_first_word[0]] = clusters[0]  # left
+            speaker_to_cluster[speakers_by_first_word[1]] = clusters[1]  # right
         else:
             # Non-split-screen: only one face visible at a time.
             # Map by which face is visible when each speaker talks.
@@ -371,12 +376,15 @@ def _build_speaker_aware_crop(
             clusters.sort(key=lambda c: c["count"], reverse=True)
             return str(clusters[0]["crop_x"])
 
-        # Merge very short segments (<0.5s) into neighbors to avoid jitter
+        # Merge very short segments (<1.0s) into neighbors to avoid jitter.
+        # 0.5s was too aggressive — fast back-and-forth crosstalk caused rapid panning.
         merged = []
         for seg in segments:
             if merged and seg[2] == merged[-1][2]:
+                # Same speaker: extend previous segment
                 merged[-1] = (merged[-1][0], seg[1], seg[2])
-            elif merged and (seg[1] - seg[0]) < 0.5:
+            elif merged and (seg[1] - seg[0]) < 1.0:
+                # Too short to pan — absorb into previous segment
                 merged[-1] = (merged[-1][0], seg[1], merged[-1][2])
             else:
                 merged.append(list(seg))
@@ -390,40 +398,63 @@ def _build_speaker_aware_crop(
         default_cluster = speaker_to_cluster.get(dominant_speaker) or clusters[0]
         default_x = default_cluster["crop_x"]
 
-        # Build FFmpeg expression with smooth panning.
-        # Use linear interpolation over 0.3s transition windows.
-        pan_duration = 0.3
-        expr_parts = []
+        # Build a timeline: list of (time, target_x) keyframes with smooth transitions.
+        # Instead of nested if/between (breaks with many segments), use a linear
+        # interpolation chain: lerp between keyframes.
+        pan_duration = 0.4  # 400ms smooth pan (was 300ms, felt jerky)
+
+        # Build keyframe list: (time, crop_x)
+        keyframes = []
+        prev_x = default_x
         for start_t, end_t, speaker in segments:
             cl = speaker_to_cluster.get(speaker)
-            if not cl or cl["crop_x"] == default_x:
-                continue
-            target_x = cl["crop_x"]
-            # Smooth transition: ramp from default to target over pan_duration
-            ramp_end = start_t + pan_duration
-            # if(between(t, start, end), lerp_or_static, ...)
-            # For smooth pan: use linear interp at segment boundaries
-            expr_parts.append(
-                f"if(between(t\\,{start_t:.2f}\\,{end_t:.2f})\\,"
-                f"if(lt(t\\,{ramp_end:.2f})\\,"
-                f"{default_x}+(({target_x}-{default_x})*(t-{start_t:.2f})/{pan_duration:.2f})\\,"
-                f"{target_x})\\,"
-            )
+            target_x = cl["crop_x"] if cl else default_x
 
-        if not expr_parts:
+            if target_x != prev_x:
+                # Ease into the new position over pan_duration
+                keyframes.append((start_t, prev_x))
+                keyframes.append((start_t + pan_duration, target_x))
+            prev_x = target_x
+
+        if not keyframes:
             return str(default_x)
 
-        expr = ""
-        for part in expr_parts:
-            expr += part
-        expr += str(default_x)
-        expr += ")" * (len(expr_parts) * 2)  # Each part has 2 nested ifs
+        # Build FFmpeg expression using chained lerp:
+        # For each keyframe pair, if t is in [t0, t1], lerp from x0 to x1
+        # Otherwise fall through to next pair or default
+        expr_parts = []
+        for i in range(0, len(keyframes) - 1, 2):
+            t0, x0 = keyframes[i]
+            t1, x1 = keyframes[i + 1]
+            # During transition: linear interpolation
+            expr_parts.append(
+                f"if(between(t\\,{t0:.2f}\\,{t1:.2f})\\,"
+                f"{x0}+(({x1}-{x0})*(t-{t0:.2f})/{max(0.01, t1 - t0):.2f})\\,"
+            )
+            # After transition until next one: hold at target
+            if i + 2 < len(keyframes):
+                next_t = keyframes[i + 2][0]
+            else:
+                next_t = duration
+            expr_parts.append(
+                f"if(between(t\\,{t1:.2f}\\,{next_t:.2f})\\,"
+                f"{x1}\\,"
+            )
+
+        # Cap nesting depth to avoid FFmpeg expression parser limits
+        if len(expr_parts) > 30:
+            print(f"Warning: {len(expr_parts)} pan segments, simplifying to avoid FFmpeg limits", file=sys.stderr)
+            # Fallback: just use the dominant speaker position
+            return str(default_x)
+
+        expr = "".join(expr_parts) + str(default_x) + ")" * len(expr_parts)
 
         return expr
 
     except ImportError:
         return None
-    except Exception:
+    except Exception as e:
+        print(f"Warning: speaker-aware crop failed: {e}", file=sys.stderr)
         return None
 
 
@@ -724,7 +755,7 @@ def normalize_audio(
         "-af", af_filter,
         "-c:v", "copy",
         "-c:a", "aac",
-        "-b:a", "128k",
+        "-b:a", "192k",
         "-ar", "44100",
         "-movflags", "+faststart",
         output_path,
@@ -858,7 +889,7 @@ def _detect_face_offset(
         # When two speakers are visible, positions will form two groups.
         # Pick the largest cluster (most frequently detected face).
         crop_w = int(height * target_ratio)
-        cluster_radius = crop_w * 0.25  # positions within 25% of crop width = same face
+        cluster_radius = crop_w * 0.35  # positions within 35% of crop width = same face (allows for head movement)
 
         positions = np.array(face_positions)
 
@@ -901,5 +932,6 @@ def _detect_face_offset(
     except ImportError:
         # OpenCV not installed, fall back to center
         return None
-    except Exception:
+    except Exception as e:
+        print(f"Warning: face detection failed: {e}", file=sys.stderr)
         return None

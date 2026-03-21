@@ -124,8 +124,8 @@ STYLES = {
         "outline_color": "&H00000000",          # Black
         "back_color": "&H00000000",             # Transparent
         "bold": True,
-        "outline_width": 0,                     # No outline — clean text
-        "shadow_depth": 0,                      # No shadow
+        "outline_width": 0,                     # No box border (BackColour used for pill)
+        "shadow_depth": 1,                      # Subtle shadow for text edge smoothing
         "alignment": 2,                         # Bottom-center
         "margin_v": 500,                        # Position: ~72% from top (natural lower-third)
         "words_per_chunk": 6,                   # Show 5-7 words across 2 lines

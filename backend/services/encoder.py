@@ -105,7 +105,7 @@ def _get_encoder_flags(encoder: str) -> list[str]:
     flags = {
         "h264_videotoolbox": [
             "-c:v", "h264_videotoolbox",
-            "-b:v", "20M",             # High bitrate for crisp 1080x1920
+            "-b:v", "6M",              # 6 Mbps — plenty for 1080x1920 vertical
             "-profile:v", "high",
             "-allow_sw", "1",          # Allow software fallback
         ],

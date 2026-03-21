@@ -109,7 +109,13 @@ def handle_batch_clips(task_id: str, params: dict):
                     task_id, "batch", int((_i / total) * 100 + pct / total), msg
                 ),
             )
-            results.append({"clip_index": i, "status": "success", **result})
+            results.append({
+                "clip_index": i,
+                "status": "success",
+                "start_second": clip["start_second"],
+                "end_second": clip["end_second"],
+                **result,
+            })
         except Exception as e:
             results.append({"clip_index": i, "status": "error", "error": str(e)})
 

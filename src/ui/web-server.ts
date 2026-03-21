@@ -568,6 +568,11 @@ app.post("/api/batch-clips", async (req, res) => {
   };
   jobs.set(jobId, job);
 
+  broadcastSSE("export-started", { jobId, clipCount: clips.length });
+  uiState.phase = "exporting";
+  uiState.lastUpdated = Date.now();
+  persistState();
+
   res.json({ job_id: jobId, status: "running" });
 
   executor
@@ -577,6 +582,7 @@ app.post("/api/batch-clips", async (req, res) => {
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
+        broadcastSSE("job-update", { jobId, progress: event.percent, message: event.message });
       }
     )
     .then(async (result) => {

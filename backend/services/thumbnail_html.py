@@ -230,13 +230,17 @@ def _build_html(
 
     def _fit_size(text, base_size, base_spacing):
         """Shrink font size so text fits on one line."""
-        # Inter uppercase: average char width ~0.62 × font_size + letter-spacing
-        char_w = 0.62 * base_size + base_spacing
+        # Character width varies by font. Use conservative estimate:
+        # uppercase chars ~0.68× font_size, lowercase ~0.52×, average ~0.60×
+        # Add safety margin of 5% to prevent edge-case overflow
+        is_upper = text == text.upper()
+        char_ratio = 0.68 if is_upper else 0.58
+        char_w = char_ratio * base_size + base_spacing
         est_width = len(text) * char_w
-        if est_width <= usable_w:
+        if est_width <= usable_w * 0.95:  # 5% safety margin
             return base_size, base_spacing
-        scale = usable_w / est_width
-        new_size = max(36, int(base_size * scale))
+        scale = (usable_w * 0.95) / est_width
+        new_size = max(32, int(base_size * scale))
         new_spacing = max(0, int(base_spacing * scale))
         return new_size, new_spacing
 
@@ -340,6 +344,9 @@ body {{
     line-height: {l1_lh};
     margin-bottom: {l1_mb};
     white-space: {l1_nowrap};
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 }}
 
 .line2 {{

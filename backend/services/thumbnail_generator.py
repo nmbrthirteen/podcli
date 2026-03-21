@@ -161,19 +161,36 @@ def _get_font(size: int, bold: bool = True, italic: bool = False) -> ImageFont.F
     return ImageFont.load_default()
 
 
-def _wrap_text(text: str, max_chars: int) -> list[str]:
-    """Wrap text into lines of max_chars, breaking at word boundaries."""
+def _wrap_text(text: str, max_chars: int, font=None, max_width: int = 0) -> list[str]:
+    """Wrap text into lines, using pixel width if font provided, otherwise char count."""
     words = text.split()
     lines = []
     current = ""
-    for word in words:
-        test = f"{current} {word}".strip()
-        if len(test) <= max_chars:
-            current = test
-        else:
-            if current:
-                lines.append(current)
-            current = word
+
+    if font and max_width > 0:
+        # Pixel-accurate wrapping using actual font metrics
+        from PIL import ImageDraw, Image
+        _measure = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+        for word in words:
+            test = f"{current} {word}".strip()
+            bbox = _measure.textbbox((0, 0), test, font=font)
+            if (bbox[2] - bbox[0]) <= max_width:
+                current = test
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+    else:
+        # Fallback: char-count wrapping
+        for word in words:
+            test = f"{current} {word}".strip()
+            if len(test) <= max_chars:
+                current = test
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+
     if current:
         lines.append(current)
     return lines
@@ -451,13 +468,39 @@ def generate_thumbnail(
     draw = ImageDraw.Draw(img)
 
     # ── Layer 4: Text box + text ──
+    # Safe text area: 80% of image width with margins
+    safe_margin = int(w * 0.08)
+    max_text_w = w - safe_margin * 2
+
     font1 = _get_font(cfg["font_size_line1"], bold=cfg.get("line1_bold", True))
     font2 = _get_font(cfg["font_size_line2"], bold=cfg.get("line2_bold", True), italic=cfg.get("line2_italic", True))
 
     l1_text = title_line1.upper() if cfg.get("line1_uppercase", True) else title_line1
     l2_text = title_line2.upper() if cfg.get("line2_uppercase", True) else title_line2
-    l1_lines = _wrap_text(l1_text, cfg["max_chars_per_line"])
-    l2_lines = _wrap_text(l2_text, cfg["max_chars_per_line"])
+
+    # Pixel-aware wrapping with auto-shrink if text still overflows
+    def _wrap_and_fit(text, font, font_size, bold=True, italic=False):
+        """Wrap text using pixel width, shrink font if any single word is too wide."""
+        current_font = font
+        current_size = font_size
+        for _ in range(5):  # max 5 shrink attempts
+            lines = _wrap_text(text, cfg["max_chars_per_line"], font=current_font, max_width=max_text_w)
+            # Check if any line overflows
+            overflow = False
+            for line in lines:
+                bbox = draw.textbbox((0, 0), line, font=current_font)
+                if (bbox[2] - bbox[0]) > max_text_w:
+                    overflow = True
+                    break
+            if not overflow:
+                return lines, current_font
+            # Shrink font by 15%
+            current_size = max(28, int(current_size * 0.85))
+            current_font = _get_font(current_size, bold=bold, italic=italic)
+        return lines, current_font
+
+    l1_lines, font1 = _wrap_and_fit(l1_text, font1, cfg["font_size_line1"], bold=cfg.get("line1_bold", True))
+    l2_lines, font2 = _wrap_and_fit(l2_text, font2, cfg["font_size_line2"], bold=cfg.get("line2_bold", True), italic=cfg.get("line2_italic", True))
 
     line2_style = cfg.get("line2_style", "highlight")
     hl_pad_x, hl_pad_y = 16, 8
@@ -481,9 +524,9 @@ def generate_thumbnail(
     l2_block_h = sum(s[1] + hl_pad_y * 2 for s in l2_sizes) if line2_style == "highlight" else sum(s[1] for s in l2_sizes)
     total_content_h = l1_block_h + block_gap + l2_block_h
 
-    # Max width for box sizing
+    # Max width for box sizing — clamp to image bounds
     all_widths = [s[0] for s in l1_sizes] + [s[0] + hl_pad_x * 2 for s in l2_sizes]
-    max_content_w = max(all_widths) if all_widths else 400
+    max_content_w = min(max(all_widths) if all_widths else 400, max_text_w)
 
     # Vertical position + variation shift
     text_y_ratio = cfg.get("text_y", 0.72)
@@ -492,16 +535,18 @@ def generate_thumbnail(
     elif variation == 2:
         text_y_ratio += 0.03
     content_top = int(h * text_y_ratio) - total_content_h // 2
+    # Clamp: keep text within image bounds
+    content_top = max(10, min(content_top, h - total_content_h - 10))
 
     # Draw text box
     box_enabled = cfg.get("box_enabled", True)
     if box_enabled:
         pad_x = cfg.get("box_padding_x", 50)
         pad_y = cfg.get("box_padding_y", 35)
-        box_l = (w - max_content_w) // 2 - pad_x
-        box_t = content_top - pad_y
-        box_r = (w + max_content_w) // 2 + pad_x
-        box_b = content_top + total_content_h + pad_y
+        box_l = max(0, (w - max_content_w) // 2 - pad_x)
+        box_t = max(0, content_top - pad_y)
+        box_r = min(w, (w + max_content_w) // 2 + pad_x)
+        box_b = min(h, content_top + total_content_h + pad_y)
 
         fill_rgba = _hex_to_rgba(cfg.get("box_fill_color", "#0D0D0DE0"))
         border_w = cfg.get("box_border_width", 4)
