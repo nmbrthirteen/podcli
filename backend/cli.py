@@ -163,6 +163,8 @@ def cmd_process(args):
         config["energy_boost"] = False
     if getattr(args, "no_speakers", False):
         config["no_speakers"] = True
+    if getattr(args, "no_cache", False):
+        config["no_cache"] = True
     if args.quality:
         config["quality"] = args.quality
 
@@ -185,6 +187,38 @@ def cmd_process(args):
     transcript = None
     words = []
     segments = []
+    result = {}
+
+    # Transcription cache: keyed by video file path + size + mtime.
+    # Saves ~2-5 min on re-runs by skipping Whisper + speaker detection.
+    import hashlib
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "cache")
+
+    def _cache_key(path):
+        stat = os.stat(path)
+        raw = f"{os.path.abspath(path)}:{stat.st_size}:{stat.st_mtime}"
+        return hashlib.md5(raw.encode()).hexdigest()
+
+    def _load_cache(path):
+        try:
+            key = _cache_key(path)
+            cache_file = os.path.join(cache_dir, f"{key}.json")
+            if os.path.exists(cache_file):
+                with open(cache_file) as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return None
+
+    def _save_cache(path, data):
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            key = _cache_key(path)
+            cache_file = os.path.join(cache_dir, f"{key}.json")
+            with open(cache_file, "w") as f:
+                json.dump(data, f)
+        except Exception:
+            pass
 
     if args.transcript:
         print("  [1/5] Loading transcript...")
@@ -212,43 +246,55 @@ def cmd_process(args):
             segments = parsed["segments"]
             print(f"         Parsed: {len(segments)} segments, {len(words)} words")
     else:
-        print("  [1/5] Transcribing with Whisper...")
-        _ensure_ssl_certs()
-        import warnings
-        warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
-        from services.transcription import transcribe_file
-        import threading
+        # Check cache first
+        cached = _load_cache(video_path)
+        if cached and not config.get("no_cache", False):
+            print("  [1/5] Loaded from cache (instant)")
+            words = cached["words"]
+            segments = cached["segments"]
+            result = cached
+            print(f"         {len(segments)} segments, {len(words)} words")
+        else:
+            print("  [1/5] Transcribing with Whisper...")
+            _ensure_ssl_certs()
+            import warnings
+            warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
+            from services.transcription import transcribe_file
+            import threading
 
-        # Spinner runs in background while Whisper blocks
-        _spin_stop = threading.Event()
-        _spin_msg = ["Loading model..."]
+            # Spinner runs in background while Whisper blocks
+            _spin_stop = threading.Event()
+            _spin_msg = ["Loading model..."]
 
-        def _spinner():
-            frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-            i = 0
-            while not _spin_stop.is_set():
-                print(f"\r         {frames[i % len(frames)]}  {_spin_msg[0][:55]:<55}", end="", flush=True)
-                i += 1
-                _spin_stop.wait(0.12)
-            print(f"\r         {'':60}", end="\r")  # clear line
+            def _spinner():
+                frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+                i = 0
+                while not _spin_stop.is_set():
+                    print(f"\r         {frames[i % len(frames)]}  {_spin_msg[0][:55]:<55}", end="", flush=True)
+                    i += 1
+                    _spin_stop.wait(0.12)
+                print(f"\r         {'':60}", end="\r")  # clear line
 
-        spin_thread = threading.Thread(target=_spinner, daemon=True)
-        spin_thread.start()
+            spin_thread = threading.Thread(target=_spinner, daemon=True)
+            spin_thread.start()
 
-        def _transcribe_progress(pct, msg):
-            _spin_msg[0] = f"{msg} ({pct}%)" if pct < 100 else msg
+            def _transcribe_progress(pct, msg):
+                _spin_msg[0] = f"{msg} ({pct}%)" if pct < 100 else msg
 
-        result = transcribe_file(
-            file_path=video_path,
-            model_size=config.get("whisper_model", "base"),
-            enable_diarization=not config.get("no_speakers", False),
-            progress_callback=_transcribe_progress,
-        )
-        _spin_stop.set()
-        spin_thread.join(timeout=1)
-        words = result["words"]
-        segments = result["segments"]
-        print(f"         Done: {len(segments)} segments, {len(words)} words")
+            result = transcribe_file(
+                file_path=video_path,
+                model_size=config.get("whisper_model", "base"),
+                enable_diarization=not config.get("no_speakers", False),
+                progress_callback=_transcribe_progress,
+            )
+            _spin_stop.set()
+            spin_thread.join(timeout=1)
+            words = result["words"]
+            segments = result["segments"]
+            print(f"         Done: {len(segments)} segments, {len(words)} words")
+
+            # Save to cache for next run
+            _save_cache(video_path, result)
 
     # Check speaker data availability (needed for smart cropping)
     speakers_in_words = set(w.get("speaker") for w in words if w.get("speaker"))
@@ -527,12 +573,12 @@ Output as clean markdown. No code fences around the whole thing."""
 
         try:
             print(f"         {gray}Claude is generating titles, descriptions, thumbnails...{reset}")
-            result = sp.run(
+            claude_result = sp.run(
                 f'cat "{prompt_file}" | "{claude_path}" --print -p -',
                 capture_output=True, text=True, cwd=project_dir,
                 timeout=300, shell=True,
             )
-            if result.returncode == 0 and result.stdout.strip():
+            if claude_result.returncode == 0 and claude_result.stdout.strip():
                 # Save content package
                 import re
                 guest = "episode"
@@ -546,9 +592,34 @@ Output as clean markdown. No code fences around the whole thing."""
                 os.makedirs(episodes_dir, exist_ok=True)
                 pkg_path = os.path.join(episodes_dir, f"content-package-{guest[:20]}.md")
                 with open(pkg_path, "w") as f:
-                    f.write(result.stdout)
+                    f.write(claude_result.stdout)
 
-                print(f"         {green}✓{reset} Content package saved to {accent}episodes/{os.path.basename(pkg_path)}{reset}")
+                print(f"         {green}✓{reset} Saved to {accent}episodes/{os.path.basename(pkg_path)}{reset}")
+                print()
+
+                # Print content package in terminal
+                dim = "\033[2m"
+                cyan = "\033[36m"
+                yellow = "\033[33m"
+                pkg_text = claude_result.stdout.strip()
+                print(f"  {'━' * 50}")
+                print(f"  {bold}📋 CONTENT PACKAGE{reset}")
+                print(f"  {'━' * 50}")
+                for line in pkg_text.split("\n"):
+                    stripped = line.strip()
+                    if stripped.startswith("# "):
+                        print(f"\n  {bold}{cyan}{stripped}{reset}")
+                    elif stripped.startswith("## "):
+                        print(f"\n  {bold}{stripped[3:]}{reset}")
+                    elif stripped.startswith("### "):
+                        print(f"  {yellow}{stripped[4:]}{reset}")
+                    elif stripped.startswith("- ⭐") or stripped.startswith("- **⭐") or "TOP PICK" in stripped.upper():
+                        print(f"  {green}{stripped}{reset}")
+                    elif stripped.startswith("- "):
+                        print(f"  {stripped}")
+                    elif stripped:
+                        print(f"  {dim}{stripped}{reset}")
+                print(f"\n  {'━' * 50}")
             else:
                 print(f"         {gray}⚠ Claude returned no content. Run {accent}/produce-shorts{reset} {gray}in Claude Code manually.{reset}")
         except Exception as e:
@@ -1144,6 +1215,7 @@ def print_help():
     print(f"    {green}--quality{reset} {gray}<level>{reset}       low | medium | high | max")
     print(f"    {green}--no-energy{reset}            Skip audio energy analysis")
     print(f"    {green}--no-speakers{reset}          Skip speaker detection (faster)")
+    print(f"    {green}--no-cache{reset}             Force re-transcription")
     print()
     print(f"  {bold}Examples:{reset}")
     print(f"    {dim}${reset} podcli process episode.mp4")
@@ -1191,6 +1263,7 @@ def main():
     proc.add_argument("--time-adjust", type=float, help="Timestamp offset in seconds")
     proc.add_argument("--no-energy", action="store_true", help="Skip audio energy analysis")
     proc.add_argument("--no-speakers", action="store_true", help="Skip speaker detection (faster, uses face detection only)")
+    proc.add_argument("--no-cache", action="store_true", help="Force re-transcription (ignore cached transcript)")
     proc.add_argument("--quality", choices=["low", "medium", "high", "max"], help="Output quality (default: high)")
 
     # ── presets ──
