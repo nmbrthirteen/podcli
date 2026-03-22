@@ -219,9 +219,35 @@ def crop_to_vertical(
                 crop_x_expr = _detect_face_center(input_path, width, height, target_ratio)
 
         if crop_x_expr is not None:
+            crop_w = int(height * target_ratio)
             crop_h = height
-            crop_w = int(crop_h * target_ratio)
-            vf = f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,scale={target_w}:{target_h}"
+            crop_y = 0
+
+            # Detect face Y — if face is significantly off-center vertically,
+            # apply a two-step crop: first horizontal (with speaker tracking),
+            # then vertical zoom to center face. This handles webcams where
+            # the person sits low/high in frame.
+            face_y = _detect_face_y(input_path, width, height, crop_w, crop_x_expr)
+            if face_y is not None:
+                face_off_center = abs(face_y - height / 2) / height
+                if face_off_center > 0.12:
+                    # Vertical adjustment: crop horizontally first at full height,
+                    # then crop+scale vertically to center face.
+                    # This preserves the crop_x_expr (which may be a dynamic expression).
+                    adjusted_h = int(height * 0.82)
+                    adj_y = face_y - int(adjusted_h * 0.38)
+                    adj_y = max(0, min(adj_y, height - adjusted_h))
+                    adj_w = int(adjusted_h * target_ratio)
+                    # Two-step: crop horizontal column, then crop vertical + scale
+                    vf = (
+                        f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,"
+                        f"crop={adj_w}:{adjusted_h}:(iw-{adj_w})/2:{adj_y},"
+                        f"scale={target_w}:{target_h}"
+                    )
+                else:
+                    vf = f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,scale={target_w}:{target_h}"
+            else:
+                vf = f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,scale={target_w}:{target_h}"
         else:
             strategy = "center"
 
@@ -988,6 +1014,91 @@ def normalize_audio(
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg normalize failed: {result.stderr[-500:]}")
     return output_path
+
+
+def _detect_face_y(
+    video_path: str,
+    width: int,
+    height: int,
+    crop_w: int,
+    crop_x_expr: str,
+) -> Optional[int]:
+    """
+    Detect the median face Y position in the video.
+    Used to vertically center the crop on the face when the person
+    is sitting high or low in their webcam feed.
+
+    Returns the median face center Y coordinate, or None.
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return None
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        duration = total_frames / fps
+
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        proto = os.path.join(backend_dir, "models", "deploy.prototxt")
+        model = os.path.join(backend_dir, "models", "res10_300x300_ssd_iter_140000.caffemodel")
+        if not (os.path.exists(proto) and os.path.exists(model)):
+            cap.release()
+            return None
+
+        detector = cv2.dnn.readNetFromCaffe(proto, model)
+
+        # Try to evaluate crop_x as a static value for sampling
+        try:
+            crop_x = int(float(crop_x_expr))
+        except (ValueError, TypeError):
+            crop_x = None
+
+        face_ys = []
+        sample_count = min(20, max(5, int(duration)))
+
+        for i in range(sample_count):
+            t = (i + 1) * duration / (sample_count + 1)
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            # If we know crop_x, only look at that column for faces
+            h, w = frame.shape[:2]
+            if crop_x is not None:
+                x1 = max(0, crop_x)
+                x2 = min(w, crop_x + crop_w)
+                roi = frame[:, x1:x2]
+            else:
+                roi = frame
+
+            rh, rw = roi.shape[:2]
+            blob = cv2.dnn.blobFromImage(cv2.resize(roi, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
+            detector.setInput(blob)
+            dets = detector.forward()
+
+            for j in range(dets.shape[2]):
+                conf = dets[0, 0, j, 2]
+                if conf > 0.5:
+                    y1 = int(dets[0, 0, j, 4] * rh)
+                    y2 = int(dets[0, 0, j, 6] * rh)
+                    fh = y2 - y1
+                    if fh > rh * 0.05:
+                        face_ys.append((y1 + y2) // 2)
+
+        cap.release()
+
+        if len(face_ys) < 3:
+            return None
+
+        return int(np.median(face_ys))
+
+    except Exception:
+        return None
 
 
 def _detect_face_center(
