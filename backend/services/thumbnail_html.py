@@ -215,11 +215,16 @@ def _build_html(
     box_fill = cfg.get("box_fill_color", f"rgba(26,26,46,0.90)")
     box_padding = cfg.get("box_padding", "28px 36px")
 
-    # Base font sizes from config
-    l1_base_size = int(cfg.get("line1_font_size", "64px").replace("px", ""))
-    l2_base_size = int(cfg.get("line2_font_size", "60px").replace("px", ""))
-    l1_base_spacing = int(cfg.get("line1_letter_spacing", "1px").replace("px", ""))
-    l2_base_spacing = int(cfg.get("line2_letter_spacing", "1px").replace("px", ""))
+    # Base font sizes from config — extract int from "64px", "1.5rem", or bare "64"
+    def _px(val, default):
+        import re
+        m = re.search(r"(\d+)", str(val))
+        return int(m.group(1)) if m else default
+
+    l1_base_size = _px(cfg.get("line1_font_size", "56px"), 56)
+    l2_base_size = _px(cfg.get("line2_font_size", "52px"), 52)
+    l1_base_spacing = _px(cfg.get("line1_letter_spacing", "1px"), 1)
+    l2_base_spacing = _px(cfg.get("line2_letter_spacing", "1px"), 1)
 
     # Auto-shrink: estimate text width vs box width, scale down if needed.
     box_w_px = int(str(box_width).replace("px", "")) if "px" in str(box_width) else 860

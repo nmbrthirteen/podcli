@@ -136,13 +136,13 @@ def cut_multi_segment(
             for p in part_paths:
                 f.write(f"file '{os.path.abspath(p)}'\n")
 
-        # Concatenate — re-encode to ensure seamless joins
+        # Concatenate with stream copy — parts already have matching codecs
+        # from cut_segment, so no re-encode needed
         cmd = [
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0",
             "-i", concat_file,
-            "-c:v", "libx264", "-crf", "18", "-preset", "fast", "-profile:v", "high",
-            "-c:a", "aac", "-b:a", "192k",
+            "-c", "copy",
             "-movflags", "+faststart",
             output_path,
         ]
@@ -471,20 +471,23 @@ def _build_speaker_aware_crop(
         left_pos = positions[positions < mid_x]
         right_pos = positions[positions >= mid_x]
 
+        # Seam margin: keep crop at least 20px away from the center line
+        # to avoid showing the split-screen divider at the frame edge
+        seam_margin = 20
         clusters = []
         if len(left_pos) >= 3:
             cx = int(np.median(left_pos))
             clusters.append({
                 "center_x": cx,
                 "count": len(left_pos),
-                "crop_x": max(0, min(cx - crop_w // 2, mid_x - crop_w)),
+                "crop_x": max(0, min(cx - crop_w // 2, mid_x - crop_w - seam_margin)),
             })
         if len(right_pos) >= 3:
             cx = int(np.median(right_pos))
             clusters.append({
                 "center_x": cx,
                 "count": len(right_pos),
-                "crop_x": max(mid_x, min(cx - crop_w // 2, width - crop_w)),
+                "crop_x": max(mid_x + seam_margin, min(cx - crop_w // 2, width - crop_w)),
             })
 
         if len(clusters) < 2:
@@ -535,9 +538,10 @@ def _build_speaker_aware_crop(
             speaker_to_cluster[top_2_by_first_word[0]] = clusters[0]  # left
             speaker_to_cluster[top_2_by_first_word[1]] = clusters[1]  # right
 
-            # Map any remaining speakers to the dominant speaker's cluster
+            # Map any remaining speakers to the dominant (most talk time) speaker's cluster
+            dominant = speakers_by_talk[0]
             for sp in speakers_by_talk[2:]:
-                speaker_to_cluster[sp] = speaker_to_cluster[top_2_by_first_word[0]]
+                speaker_to_cluster[sp] = speaker_to_cluster[dominant]
         else:
             # Non-split-screen: only one face visible at a time.
             # Map by which face is visible when each speaker talks.
@@ -1057,15 +1061,16 @@ def _detect_face_center(
 
         if left_count >= 3 and right_count >= 3:
             # Split-screen — pick the side with the most detections,
-            # clamp crop to that half so we never show the seam.
+            # clamp crop to that half with margin away from seam.
+            seam_margin = 20
             if left_count >= right_count:
                 side_pos = positions[positions < mid_x]
                 face_x = int(np.median(side_pos))
-                crop_x = max(0, min(face_x - crop_w // 2, mid_x - crop_w))
+                crop_x = max(0, min(face_x - crop_w // 2, mid_x - crop_w - seam_margin))
             else:
                 side_pos = positions[positions >= mid_x]
                 face_x = int(np.median(side_pos))
-                crop_x = max(mid_x, min(face_x - crop_w // 2, width - crop_w))
+                crop_x = max(mid_x + seam_margin, min(face_x - crop_w // 2, width - crop_w))
         else:
             face_x = int(np.median(face_positions))
             crop_x = face_x - crop_w // 2

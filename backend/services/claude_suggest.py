@@ -209,14 +209,20 @@ def suggest_with_claude(
         # Parse JSON from Claude's response
         response = result.stdout.strip()
 
-        # Try to find JSON in the response (Claude might add text around it)
+        # Strip markdown code fences if present
+        if "```" in response:
+            import re
+            fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", response, re.DOTALL)
+            if fence_match:
+                response = fence_match.group(1).strip()
+
+        # Use raw_decode to extract the first complete JSON object
+        # (safer than rfind which can grab a stray "}" after the JSON)
         json_start = response.find("{")
-        json_end = response.rfind("}") + 1
-        if json_start >= 0 and json_end > json_start:
-            json_str = response[json_start:json_end]
-            data = json.loads(json_str)
+        if json_start >= 0:
+            decoder = json.JSONDecoder()
+            data, _ = decoder.raw_decode(response, json_start)
         else:
-            # Try parsing the whole thing
             data = json.loads(response)
 
         clips = data.get("clips", [])
@@ -226,6 +232,22 @@ def suggest_with_claude(
 
         # Normalize to the format the CLI expects
         normalized = []
+        def _parse_seconds(val) -> float:
+            """Parse a timestamp value — handles both 123.4 and '2:03' formats."""
+            if isinstance(val, (int, float)):
+                return float(val)
+            s = str(val).strip()
+            if ":" in s:
+                parts = s.split(":")
+                try:
+                    return float(parts[0]) * 60 + float(parts[1])
+                except (ValueError, IndexError):
+                    return 0.0
+            try:
+                return float(s)
+            except ValueError:
+                return 0.0
+
         for c in clips:
             scores = c.get("scores", {})
             total = sum(scores.values()) if scores else c.get("total_score", 0)
@@ -234,13 +256,13 @@ def suggest_with_claude(
             raw_segments = c.get("segments", [])
             keep_segments = []
             for seg in raw_segments:
-                s = round(float(seg.get("start", 0)), 1)
-                e = round(float(seg.get("end", 0)), 1)
+                s = round(_parse_seconds(seg.get("start", 0)), 1)
+                e = round(_parse_seconds(seg.get("end", 0)), 1)
                 if e > s:
                     keep_segments.append({"start": s, "end": e})
 
-            start_sec = round(float(c.get("start_second", 0)), 1)
-            end_sec = round(float(c.get("end_second", 0)), 1)
+            start_sec = round(_parse_seconds(c.get("start_second", 0)), 1)
+            end_sec = round(_parse_seconds(c.get("end_second", 0)), 1)
 
             # Fall back to single segment if none provided
             if not keep_segments and end_sec > start_sec:

@@ -267,13 +267,19 @@ def generate_clip(
                     w for w in transcript_words
                     if w["end"] > seg["start"] and w["start"] < seg["end"]
                 ]
+                seg_duration = seg["end"] - seg["start"]
                 for w in seg_words:
-                    remapped_words.append({
-                        **w,
-                        "start": cumulative_t + (w["start"] - seg["start"]),
-                        "end": cumulative_t + (w["end"] - seg["start"]),
-                    })
-                cumulative_t += seg["end"] - seg["start"]
+                    # Clamp to segment bounds to avoid negative/overflow timestamps
+                    # for words that straddle a segment boundary
+                    remapped_start = max(0, cumulative_t + (w["start"] - seg["start"]))
+                    remapped_end = min(cumulative_t + seg_duration, cumulative_t + (w["end"] - seg["start"]))
+                    if remapped_end > remapped_start:
+                        remapped_words.append({
+                            **w,
+                            "start": round(remapped_start, 3),
+                            "end": round(remapped_end, 3),
+                        })
+                cumulative_t += seg_duration
             crop_words = remapped_words
             crop_clip_start = 0
             caption_time_offset = 0
