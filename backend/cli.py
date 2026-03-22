@@ -1443,7 +1443,6 @@ def interactive_menu():
         print()
 
         try:
-            _flush_stdin()
             raw = input(f"  {accent}▸{reset} ")
             choice = "".join(c for c in raw if c.isprintable()).strip()
         except (EOFError, KeyboardInterrupt):
@@ -1485,17 +1484,12 @@ def _clean_path(val):
 
 def _flush_stdin():
     """Flush any buffered stdin (leftover newlines from previous inputs)."""
+    import select
     try:
-        import termios
-        termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
-    except (ImportError, termios.error, OSError):
-        # Fallback for non-Unix or piped stdin
-        import select
-        try:
-            while select.select([sys.stdin], [], [], 0.0)[0]:
-                sys.stdin.readline()
-        except Exception:
-            pass
+        while select.select([sys.stdin], [], [], 0.0)[0]:
+            sys.stdin.readline()
+    except Exception:
+        pass
 
 
 def _ask(prompt, default=None, validate=None, required=False, is_path=False):
