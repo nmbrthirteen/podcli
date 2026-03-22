@@ -1433,38 +1433,36 @@ def interactive_menu():
 
     print_banner()
 
-    print(f"  {bold}Quick start:{reset}")
-    print(f"    {accent}1{reset}  Process a video → shorts + content package")
-    print(f"    {accent}2{reset}  Open Web UI")
-    print(f"    {accent}3{reset}  Manage assets")
-    print(f"    {accent}4{reset}  Cache {gray}(view/clear transcription cache){reset}")
-    print(f"    {accent}q{reset}  Quit")
-    print()
-
-    try:
-        choice = input(f"  {accent}▸{reset} ").strip()
-    except (EOFError, KeyboardInterrupt):
+    while True:
+        print(f"  {bold}Quick start:{reset}")
+        print(f"    {accent}1{reset}  Process a video → shorts + content package")
+        print(f"    {accent}2{reset}  Open Web UI")
+        print(f"    {accent}3{reset}  Manage assets")
+        print(f"    {accent}4{reset}  Cache {gray}(view/clear transcription cache){reset}")
+        print(f"    {accent}q{reset}  Quit")
         print()
-        return
-    if not choice:
-        return
 
-    if choice == "1":
-        _interactive_process()
-    elif choice == "2":
-        print(f"\n  {gray}Starting Web UI...{reset}\n")
-        import subprocess as sp
-        sp.run(["npm", "run", "ui"], cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-        interactive_menu()
-    elif choice == "3":
-        _interactive_assets()
-        interactive_menu()
-    elif choice == "4":
-        _interactive_cache()
-    elif choice in ("q", "Q"):
-        return
-    else:
-        interactive_menu()
+        try:
+            choice = input(f"  {accent}▸{reset} ").strip().strip("\r")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not choice:
+            continue
+
+        if choice == "1":
+            _interactive_process()
+            return
+        elif choice == "2":
+            print(f"\n  {gray}Starting Web UI...{reset}\n")
+            import subprocess as sp
+            sp.run(["npm", "run", "ui"], cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        elif choice == "3":
+            _interactive_assets()
+        elif choice == "4":
+            _interactive_cache()
+        elif choice in ("q", "Q"):
+            return
 
 
 def _clean_path(val):
@@ -1694,12 +1692,10 @@ def _interactive_cache():
         choice = input(f"  {gray}Clear cache? (y/n/enter=back){reset} {accent}▸{reset} ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print()
-        return interactive_menu()
+        return
 
     if choice in ("y", "yes"):
         cmd_cache(_ap.Namespace(cache_action="clear"))
-
-    interactive_menu()
 
 
 def _interactive_assets():
