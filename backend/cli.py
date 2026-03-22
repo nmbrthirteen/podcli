@@ -429,6 +429,7 @@ def cmd_process(args):
                 logo_path=config.get("logo_path") or None,
                 outro_path=config.get("outro_path") or None,
                 keep_segments=clip.get("segments"),
+                face_map=result.get("face_map"),
             )
             results.append(result)
             print(f" ✓ {result['file_size_mb']}MB")

@@ -275,7 +275,10 @@ def _use_face_map(
     clusters = face_map.get("clusters", [])
     speaker_mappings = face_map.get("speaker_mappings", {})
     dominant = face_map.get("dominant_speaker")
+    is_split_screen = face_map.get("is_split_screen", False)
     crop_w = int(height * target_ratio)
+    mid_x = width // 2
+    seam_margin = 20
 
     if not clusters:
         return None
@@ -283,8 +286,15 @@ def _use_face_map(
     # Verify face_map was computed at the same resolution
     map_w = face_map.get("video_width", width)
     if map_w != width:
-        # Resolution mismatch — face_map positions don't apply
         return None
+
+    # Apply seam margin to pre-computed crop_x values for split-screen
+    if is_split_screen and len(clusters) >= 2:
+        for cl in clusters:
+            if cl["center_x"] < mid_x:
+                cl["crop_x"] = max(0, min(cl["crop_x"], mid_x - crop_w - seam_margin))
+            else:
+                cl["crop_x"] = max(mid_x + seam_margin, min(cl["crop_x"], width - crop_w))
 
     # Check if clip has multiple speakers
     speakers_in_clip = set()
@@ -297,7 +307,6 @@ def _use_face_map(
             ci = speaker_mappings.get(sp)
             if ci is not None and ci < len(clusters):
                 return str(clusters[ci]["crop_x"])
-        # Fallback to dominant speaker's position
         if dominant and dominant in speaker_mappings:
             ci = speaker_mappings[dominant]
             if ci < len(clusters):
@@ -341,8 +350,8 @@ def _use_face_map(
     default_ci = speaker_mappings.get(dominant, 0)
     default_x = clusters[min(default_ci, len(clusters) - 1)]["crop_x"]
 
-    # Build keyframes
-    pan_duration = 0.4
+    # Build keyframes — instant cut for split-screen, smooth pan otherwise
+    pan_duration = 0.0 if is_split_screen else 0.4
     duration = segments[-1][1] if segments else 1.0
     keyframes = []
     prev_x = default_x
@@ -352,8 +361,12 @@ def _use_face_map(
         target_x = clusters[ci]["crop_x"] if ci is not None and ci < len(clusters) else default_x
 
         if target_x != prev_x:
-            keyframes.append((start_t, prev_x))
-            keyframes.append((start_t + pan_duration, target_x))
+            if pan_duration > 0:
+                keyframes.append((start_t, prev_x))
+                keyframes.append((start_t + pan_duration, target_x))
+            else:
+                keyframes.append((start_t, prev_x))
+                keyframes.append((start_t + 0.01, target_x))
         prev_x = target_x
 
     if not keyframes:
