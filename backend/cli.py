@@ -401,10 +401,10 @@ def cmd_process(args):
                 )
                 if paths:
                     thumb_video = os.path.join(clip_thumb_dir, "thumb_frame.mp4")
-                    _thumb_to_video(paths[0], thumb_video)
+                    _thumb_to_video(paths[0], thumb_video, duration=1.5)
                     from services.video_processor import concat_outro
                     final_with_thumb = result["output_path"].replace(".mp4", "_with_thumb.mp4")
-                    concat_outro(result["output_path"], thumb_video, final_with_thumb, crossfade_duration=0.3)
+                    concat_outro(result["output_path"], thumb_video, final_with_thumb, crossfade_duration=0.15)
                     os.replace(final_with_thumb, result["output_path"])
                     print(f"                 + thumbnail appended ({len(paths)} variations in {os.path.basename(clip_thumb_dir)}/)")
             except Exception as e:

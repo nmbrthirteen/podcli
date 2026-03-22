@@ -36,29 +36,29 @@ def _load_config() -> dict:
         "frame_border_color": None,  # None = accent
 
         # Text box
-        "box_x": "110px",       # CSS left
+        "box_x": "40px",        # CSS left — near edge with safe area
         "box_y": "73%",         # CSS top (no photo)
         "box_y_with_photo": "76%",
-        "box_width": "860px",   # CSS width
-        "box_min_height": "220px",
+        "box_width": "1000px",  # CSS width — max width with safe areas
+        "box_min_height": "180px",
         "box_border_width": 3,
         "box_border_color": None,  # None = accent
         "box_fill_color": "rgba(26,26,46,0.90)",
-        "box_padding": "28px 36px",
+        "box_padding": "24px 32px",
 
         # Line 1 (top line — typically white text)
-        "line1_font_size": "64px",
+        "line1_font_size": "56px",
         "line1_font_weight": "600",
         "line1_letter_spacing": "1px",
         "line1_line_height": 1.15,
-        "line1_margin_bottom": "10px",
+        "line1_margin_bottom": "8px",
         "line1_uppercase": True,
         "line1_color": "#FFFFFF",
         "line1_nowrap": True,
 
         # Line 2 (bottom line — highlighted)
-        "line2_font_size": "60px",
-        "line2_font_weight": "500",
+        "line2_font_size": "52px",
+        "line2_font_weight": "400",
         "line2_font_style": "italic",
         "line2_letter_spacing": "1px",
         "line2_line_height": 1.15,
@@ -364,7 +364,7 @@ body {{
     background: {hl_color};
     color: {l2_text_color};
     padding: {l2_hl_pad};
-    border-radius: 6px;
+    border-radius: 0;
     display: inline-block;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;

@@ -411,31 +411,38 @@ def _build_speaker_aware_crop(
         if len(face_observations) < 5:
             return None
 
-        # Cluster faces by position (left vs right)
+        # Cluster faces by position (left vs right).
+        # Simple split: faces in the left half vs right half of the frame.
+        # This is more robust than radius-based clustering which can merge
+        # faces that are close to the center line.
         positions = np.array([obs[1] for obs in face_observations])
-        cluster_radius = width * 0.20  # 20% of frame width — groups face positions with natural head movement
+        mid_x = width // 2
+
+        left_pos = positions[positions < mid_x]
+        right_pos = positions[positions >= mid_x]
 
         clusters = []
-        used = np.zeros(len(positions), dtype=bool)
-        sorted_idx = np.argsort(positions)
-
-        for idx in sorted_idx:
-            if used[idx]:
-                continue
-            mask = np.abs(positions - positions[idx]) < cluster_radius
-            mask &= ~used
-            if np.any(mask):
-                cluster_center = int(np.median(positions[mask]))
-                clusters.append({
-                    "center_x": cluster_center,
-                    "count": int(np.sum(mask)),
-                    "crop_x": max(0, min(cluster_center - crop_w // 2, width - crop_w)),
-                })
-                used |= mask
+        if len(left_pos) >= 3:
+            cx = int(np.median(left_pos))
+            clusters.append({
+                "center_x": cx,
+                "count": len(left_pos),
+                "crop_x": max(0, min(cx - crop_w // 2, mid_x - crop_w)),
+            })
+        if len(right_pos) >= 3:
+            cx = int(np.median(right_pos))
+            clusters.append({
+                "center_x": cx,
+                "count": len(right_pos),
+                "crop_x": max(mid_x, min(cx - crop_w // 2, width - crop_w)),
+            })
 
         if len(clusters) < 2:
-            if clusters:
-                return str(clusters[0]["crop_x"])
+            # Not a clear split-screen — try single cluster from all positions
+            if len(positions) >= 3:
+                cx = int(np.median(positions))
+                crop_x = max(0, min(cx - crop_w // 2, width - crop_w))
+                return str(crop_x)
             return None
 
         # Sort clusters left to right
@@ -986,52 +993,24 @@ def _detect_face_center(
         if not face_positions:
             return None
 
-        # Cluster face positions to detect split-screen layouts.
-        # Use a tighter radius (15%) so faces at 25% and 75% don't merge.
+        # Detect split-screen: check if faces appear in both halves
         positions = np.array(face_positions)
-        cluster_radius = width * 0.15
+        mid_x = width // 2
 
-        clusters = []
-        used = np.zeros(len(positions), dtype=bool)
-        sorted_idx = np.argsort(positions)
+        left_count = np.sum(positions < mid_x)
+        right_count = np.sum(positions >= mid_x)
 
-        for idx in sorted_idx:
-            if used[idx]:
-                continue
-            mask = np.abs(positions - positions[idx]) < cluster_radius
-            mask &= ~used
-            if np.any(mask):
-                cluster_center = int(np.median(positions[mask]))
-                clusters.append({
-                    "center_x": cluster_center,
-                    "count": int(np.sum(mask)),
-                })
-                used |= mask
-
-        if len(clusters) >= 2:
-            # Split-screen: faces in distinct horizontal groups.
-            # Pick the cluster with the most detections, then crop to
-            # that HALF of the frame (not just center on face — centering
-            # still shows the seam between cameras).
-            clusters.sort(key=lambda c: c["count"], reverse=True)
-            best_cx = clusters[0]["center_x"]
-
-            # Snap to the half containing this face
-            if best_cx < width // 2:
-                # Left half: crop starts at 0
-                half_w = width // 2
-                face_x = best_cx  # within the left half
+        if left_count >= 3 and right_count >= 3:
+            # Split-screen — pick the side with the most detections,
+            # clamp crop to that half so we never show the seam.
+            if left_count >= right_count:
+                side_pos = positions[positions < mid_x]
+                face_x = int(np.median(side_pos))
+                crop_x = max(0, min(face_x - crop_w // 2, mid_x - crop_w))
             else:
-                # Right half: crop starts at midpoint
-                half_w = width - width // 2
-                face_x = best_cx
-
-            crop_x = face_x - crop_w // 2
-            # Clamp to stay within the chosen half
-            if best_cx < width // 2:
-                crop_x = max(0, min(crop_x, half_w - crop_w))
-            else:
-                crop_x = max(width // 2, min(crop_x, width - crop_w))
+                side_pos = positions[positions >= mid_x]
+                face_x = int(np.median(side_pos))
+                crop_x = max(mid_x, min(face_x - crop_w // 2, width - crop_w))
         else:
             face_x = int(np.median(face_positions))
             crop_x = face_x - crop_w // 2

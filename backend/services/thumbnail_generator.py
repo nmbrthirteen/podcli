@@ -578,16 +578,10 @@ def generate_thumbnail(
         x = (w - tw) // 2
 
         if line2_style == "highlight":
-            try:
-                draw.rounded_rectangle(
-                    [x - hl_pad_x, y - hl_pad_y, x + tw + hl_pad_x, y + th + hl_pad_y],
-                    radius=12, fill=(*accent_color, 255),
-                )
-            except AttributeError:
-                draw.rectangle(
-                    [x - hl_pad_x, y - hl_pad_y, x + tw + hl_pad_x, y + th + hl_pad_y],
-                    fill=(*accent_color, 255),
-                )
+            draw.rectangle(
+                [x - hl_pad_x, y - hl_pad_y, x + tw + hl_pad_x, y + th + hl_pad_y],
+                fill=(*accent_color, 255),
+            )
             draw.text((x, y), line, fill=(*dark_text, 255), font=font2)
             y += th + hl_pad_y * 2
         else:
