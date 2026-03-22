@@ -1433,6 +1433,12 @@ def interactive_menu():
 
     print_banner()
 
+    # Reset terminal to sane state — fixes ^M echo from corrupted tty settings
+    try:
+        os.system("stty sane 2>/dev/null")
+    except Exception:
+        pass
+
     while True:
         print(f"  {bold}Quick start:{reset}")
         print(f"    {accent}1{reset}  Process a video → shorts + content package")
