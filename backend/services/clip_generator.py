@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.caption_renderer import render_captions
 from services.video_processor import (
     cut_segment,
+    cut_multi_segment,
     crop_to_vertical,
     burn_captions,
     normalize_audio,
@@ -103,6 +104,7 @@ def generate_clip(
     logo_path: Optional[str] = None,
     outro_path: Optional[str] = None,
     clean_fillers: bool = True,
+    keep_segments: list[dict] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """
@@ -134,12 +136,23 @@ def generate_clip(
     if end_second <= start_second:
         raise ValueError("end_second must be greater than start_second")
 
-    # Snap clip boundaries to sentence endings if transcript is available.
-    # Extends up to 3s forward to find a sentence boundary (. ! ?).
-    if transcript_words:
-        end_second = _snap_to_sentence_end(transcript_words, start_second, end_second)
+    # Multi-segment cutting: if keep_segments provided, use those ranges.
+    # Otherwise fall back to single start→end range with sentence snapping.
+    if keep_segments and len(keep_segments) > 0:
+        # Validate segments
+        keep_segments = [s for s in keep_segments if s["end"] > s["start"]]
+        keep_segments.sort(key=lambda s: s["start"])
+        # Override start/end to match segments
+        start_second = keep_segments[0]["start"]
+        end_second = keep_segments[-1]["end"]
+        duration = sum(s["end"] - s["start"] for s in keep_segments)
+    else:
+        # Snap clip boundaries to sentence endings if transcript is available.
+        if transcript_words:
+            end_second = _snap_to_sentence_end(transcript_words, start_second, end_second)
+        keep_segments = None
+        duration = end_second - start_second
 
-    duration = end_second - start_second
     if duration > 180:
         raise ValueError(f"Clip too long ({duration:.0f}s). Max 180 seconds for shorts.")
 
@@ -152,12 +165,42 @@ def generate_clip(
     try:
         total_steps = 4 + (1 if outro_path and os.path.exists(str(outro_path)) else 0)
 
-        # Step 1: Cut the segment from the source video
+        # Step 1: Cut the segment(s) from the source video
         if progress_callback:
-            progress_callback(10, f"Trimming to selected time range (1/{total_steps})")
+            n_segs = len(keep_segments) if keep_segments else 1
+            msg = f"Cutting {n_segs} segment{'s' if n_segs > 1 else ''} (1/{total_steps})"
+            progress_callback(10, msg)
 
         segment_path = os.path.join(work_dir, "segment.mp4")
-        cut_segment(video_path, segment_path, start_second, end_second)
+        if keep_segments and len(keep_segments) > 1:
+            cut_multi_segment(video_path, segment_path, keep_segments)
+        else:
+            cut_segment(video_path, segment_path, start_second, end_second)
+
+        # Remap transcript words for multi-segment clips.
+        # Needed before crop (speaker detection) and captions.
+        if keep_segments and len(keep_segments) > 1 and transcript_words:
+            remapped_words = []
+            cumulative_t = 0.0
+            for seg in keep_segments:
+                seg_words = [
+                    w for w in transcript_words
+                    if w["end"] > seg["start"] and w["start"] < seg["end"]
+                ]
+                for w in seg_words:
+                    remapped_words.append({
+                        **w,
+                        "start": cumulative_t + (w["start"] - seg["start"]),
+                        "end": cumulative_t + (w["end"] - seg["start"]),
+                    })
+                cumulative_t += seg["end"] - seg["start"]
+            crop_words = remapped_words
+            crop_clip_start = 0
+            caption_time_offset = 0
+        else:
+            crop_words = transcript_words
+            crop_clip_start = start_second
+            caption_time_offset = start_second
 
         # Step 2: Crop to vertical 9:16
         if progress_callback:
@@ -167,8 +210,8 @@ def generate_clip(
         crop_to_vertical(
             segment_path, cropped_path,
             strategy=crop_strategy,
-            transcript_words=transcript_words,
-            clip_start=start_second,
+            transcript_words=crop_words,
+            clip_start=crop_clip_start,
             face_map=face_map,
         )
 
@@ -177,15 +220,15 @@ def generate_clip(
             if progress_callback:
                 progress_callback(50, f"Adding {caption_style} captions (3/{total_steps})")
 
-            # Filter words that overlap with our clip's time range
-            # Use overlap check instead of strict containment to avoid
-            # dropping words at boundaries
-            clip_words = [
-                w for w in transcript_words
-                if w["end"] > start_second and w["start"] < end_second
-            ]
+            if keep_segments and len(keep_segments) > 1:
+                clip_words = remapped_words
+            else:
+                clip_words = [
+                    w for w in transcript_words
+                    if w["end"] > start_second and w["start"] < end_second
+                ]
 
-            # Clean filler words and compress large gaps (opt-out via clean_fillers=false)
+            # Clean filler words
             if clean_fillers:
                 clip_words = _clean_transcript_words(clip_words)
 
@@ -196,7 +239,7 @@ def generate_clip(
                     words=clip_words,
                     caption_style=caption_style,
                     output_path=ass_path,
-                    time_offset=start_second,
+                    time_offset=caption_time_offset,
                 )
 
                 # Burn captions into video

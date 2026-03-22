@@ -103,7 +103,11 @@ Return this exact JSON structure:
       "title": "First strong sentence from the moment",
       "start_second": 123.4,
       "end_second": 168.4,
-      "duration": 45,
+      "segments": [
+        {{"start": 123.4, "end": 140.0}},
+        {{"start": 145.2, "end": 168.4}}
+      ],
+      "duration": 40,
       "content_type": "guest_story",
       "scores": {{"standalone": 4, "hook": 5, "relevance": 4, "quotability": 3}},
       "total_score": 16,
@@ -113,11 +117,21 @@ Return this exact JSON structure:
   ]
 }}
 
+SEGMENTS RULES:
+- "segments" is an array of keep-ranges within the clip. Use it to CUT OUT dead weight.
+- If the moment is clean with no filler, use a single segment: [{{"start": X, "end": Y}}]
+- If there's a ramble/tangent/filler in the middle, split into multiple segments that skip it
+- Each segment must start and end on sentence boundaries
+- The rendered video will stitch these segments together seamlessly
+- "duration" = total kept time (sum of all segment lengths), NOT end - start
+- "start_second" / "end_second" = outer bounds (first segment start, last segment end)
+- Example: speaker makes great point (10s), rambles (8s), delivers punchline (12s) → 2 segments, 22s total
+
 Rules:
-- Clips MUST be 20-60 seconds (target 30-45s)
-- Must start and end on sentence boundaries
-- Must make sense standalone
-- Sort by timestamp order
+- Final clip duration (sum of segments) MUST be 20-60 seconds (target 30-45s)
+- Each segment must start and end on sentence boundaries
+- Must make sense standalone when stitched together
+- Sort clips by timestamp order
 
 Transcript ({segment_count} segments, ~{duration_min:.0f} min):
 
@@ -215,11 +229,32 @@ def suggest_with_claude(
         for c in clips:
             scores = c.get("scores", {})
             total = sum(scores.values()) if scores else c.get("total_score", 0)
+
+            # Parse segments (multi-cut ranges) or fall back to single range
+            raw_segments = c.get("segments", [])
+            keep_segments = []
+            for seg in raw_segments:
+                s = round(float(seg.get("start", 0)), 1)
+                e = round(float(seg.get("end", 0)), 1)
+                if e > s:
+                    keep_segments.append({"start": s, "end": e})
+
+            start_sec = round(float(c.get("start_second", 0)), 1)
+            end_sec = round(float(c.get("end_second", 0)), 1)
+
+            # Fall back to single segment if none provided
+            if not keep_segments and end_sec > start_sec:
+                keep_segments = [{"start": start_sec, "end": end_sec}]
+
+            # Compute actual kept duration
+            kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
+
             normalized.append({
                 "title": c.get("title", "Untitled")[:55],
-                "start_second": round(float(c.get("start_second", 0)), 1),
-                "end_second": round(float(c.get("end_second", 0)), 1),
-                "duration": round(float(c.get("duration", 0))),
+                "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
+                "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
+                "segments": keep_segments,
+                "duration": round(kept_duration),
                 "score": total,
                 "content_type": c.get("content_type", "unknown"),
                 "quote": c.get("quote", ""),

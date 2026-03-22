@@ -371,7 +371,9 @@ def cmd_process(args):
         score_val = c.get("score", 0)
         score_str = f"({score_val}/20)" if isinstance(score_val, int) and score_val <= 20 else f"({score_val:.0f}pts)"
         type_tag = f" [{ctype}]" if ctype and ctype != "unknown" else ""
-        print(f"           {i+1}. [{m_s}:{s_s:02d} → +{c['duration']}s] {score_str}{type_tag} {c['title'][:50]}")
+        n_segs = len(c.get("segments", [])) if c.get("segments") else 1
+        cuts_tag = f" ({n_segs} cuts)" if n_segs > 1 else ""
+        print(f"           {i+1}. [{m_s}:{s_s:02d} → +{c['duration']}s] {score_str}{type_tag}{cuts_tag} {c['title'][:50]}")
         if c.get("why"):
             print(f"              {c['why'][:70]}")
 
@@ -426,6 +428,7 @@ def cmd_process(args):
                 output_dir=output_dir,
                 logo_path=config.get("logo_path") or None,
                 outro_path=config.get("outro_path") or None,
+                keep_segments=clip.get("segments"),
             )
             results.append(result)
             print(f" ✓ {result['file_size_mb']}MB")
