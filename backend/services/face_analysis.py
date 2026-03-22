@@ -124,29 +124,31 @@ def analyze_faces(
     if progress_callback:
         progress_callback(75, "Clustering face positions...")
 
-    # Cluster faces by position
+    # Cluster faces by left/right half split (consistent with _build_speaker_aware_crop)
     target_ratio = 1080 / 1920  # 9:16
     crop_w = int(height * target_ratio)
     positions = np.array([o["face_center_x"] for o in observations])
-    cluster_radius = width * 0.20
+    mid_x = width // 2
+    seam_margin = 20
+
+    left_pos = positions[positions < mid_x]
+    right_pos = positions[positions >= mid_x]
 
     clusters_list = []
-    used = np.zeros(len(positions), dtype=bool)
-    sorted_idx = np.argsort(positions)
-
-    for idx in sorted_idx:
-        if used[idx]:
-            continue
-        mask = (np.abs(positions - positions[idx]) < cluster_radius) & ~used
-        if np.any(mask):
-            cluster_center = int(np.median(positions[mask]))
-            crop_x = max(0, min(cluster_center - crop_w // 2, width - crop_w))
-            clusters_list.append({
-                "center_x": cluster_center,
-                "count": int(np.sum(mask)),
-                "crop_x": crop_x,
-            })
-            used |= mask
+    if len(left_pos) >= 3:
+        cx = int(np.median(left_pos))
+        clusters_list.append({
+            "center_x": cx,
+            "count": len(left_pos),
+            "crop_x": max(0, min(cx - crop_w // 2, mid_x - crop_w - seam_margin)),
+        })
+    if len(right_pos) >= 3:
+        cx = int(np.median(right_pos))
+        clusters_list.append({
+            "center_x": cx,
+            "count": len(right_pos),
+            "crop_x": max(mid_x + seam_margin, min(cx - crop_w // 2, width - crop_w)),
+        })
 
     if not clusters_list:
         return None
@@ -164,16 +166,27 @@ def analyze_faces(
     if progress_callback:
         progress_callback(85, "Mapping speakers to face positions...")
 
-    if is_split_screen and len(clusters_list) >= 2 and len(speakers) == 2:
-        # Split-screen: map by who speaks first → left face
+    if is_split_screen and len(clusters_list) >= 2:
+        # Split-screen: map top-2 speakers by talk time, first-to-speak = left
+        speaker_talk_time = {}
         speaker_first_time = {}
         for seg in speaker_segments:
             sp = seg.get("speaker")
-            if sp and sp not in speaker_first_time:
-                speaker_first_time[sp] = seg["start"]
-        speakers_sorted = sorted(speakers, key=lambda s: speaker_first_time.get(s, float("inf")))
-        speaker_mappings[speakers_sorted[0]] = 0  # left cluster
-        speaker_mappings[speakers_sorted[1]] = 1  # right cluster
+            if sp:
+                speaker_talk_time[sp] = speaker_talk_time.get(sp, 0) + (seg["end"] - seg["start"])
+                if sp not in speaker_first_time:
+                    speaker_first_time[sp] = seg["start"]
+
+        speakers_by_talk = sorted(speakers, key=lambda s: speaker_talk_time.get(s, 0), reverse=True)
+        top_2 = speakers_by_talk[:2]
+        top_2_by_first = sorted(top_2, key=lambda s: speaker_first_time.get(s, float("inf")))
+        speaker_mappings[top_2_by_first[0]] = 0  # left cluster
+        if len(top_2_by_first) > 1:
+            speaker_mappings[top_2_by_first[1]] = 1  # right cluster
+        # Extra speakers → dominant speaker's cluster
+        dominant_idx = speaker_mappings.get(speakers_by_talk[0], 0)
+        for sp in speakers_by_talk[2:]:
+            speaker_mappings[sp] = dominant_idx
     elif len(clusters_list) >= 2 and len(speakers) >= 2:
         # Non-split-screen: vote by which face is visible when speaker talks
         obs_arr = [(o["time"], o["face_center_x"]) for o in observations]
@@ -184,7 +197,7 @@ def analyze_faces(
                 for obs_t, obs_cx in obs_arr:
                     if abs(obs_t - t) < 1.5:
                         for ci, cl in enumerate(clusters_list):
-                            if abs(obs_cx - cl["center_x"]) < cluster_radius:
+                            if abs(obs_cx - cl["center_x"]) < width * 0.15:
                                 votes[ci] += 1
             if any(votes):
                 speaker_mappings[speaker] = int(np.argmax(votes))

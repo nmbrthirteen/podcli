@@ -296,6 +296,9 @@ def cmd_process(args):
             # Save to cache for next run
             _save_cache(video_path, result)
 
+    # Extract face_map before result gets overwritten in clip loop
+    face_map = result.get("face_map")
+
     # Check speaker data availability (needed for smart cropping)
     speakers_in_words = set(w.get("speaker") for w in words if w.get("speaker"))
     diarization_warning = result.get("diarization_warning")
@@ -429,6 +432,7 @@ def cmd_process(args):
                 logo_path=config.get("logo_path") or None,
                 outro_path=config.get("outro_path") or None,
                 keep_segments=clip.get("segments"),
+                face_map=face_map,
             )
             results.append(result)
             print(f" ✓ {result['file_size_mb']}MB")
