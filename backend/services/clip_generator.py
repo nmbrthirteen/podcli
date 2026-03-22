@@ -91,6 +91,74 @@ def _clean_transcript_words(words: list[dict]) -> list[dict]:
     return cleaned
 
 
+def _build_tight_segments(
+    words: list[dict],
+    start_second: float,
+    end_second: float,
+    silence_threshold: float = 1.5,
+) -> list[dict]:
+    """
+    Build tight keep-segments from transcript words, cutting out:
+    - Filler words (um, uh, hmm) that are isolated (not mid-sentence)
+    - Long silences/pauses (> silence_threshold seconds)
+
+    Returns list of {"start": float, "end": float} segments.
+    If no cuts needed, returns a single segment spanning the full range.
+    """
+    # Get words in clip range
+    clip_words = [
+        w for w in words
+        if w["end"] > start_second and w["start"] < end_second
+    ]
+
+    if len(clip_words) < 3:
+        return [{"start": start_second, "end": end_second}]
+
+    # Find gaps and filler words to cut
+    segments = []
+    seg_start = start_second
+
+    for i, w in enumerate(clip_words):
+        text = w.get("word", "").strip()
+        bare = text.lower().strip(".,!?;:-–—'\"")
+        is_filler = bare in _FILLER_WORDS
+
+        # Check gap before this word
+        prev_end = clip_words[i - 1]["end"] if i > 0 else start_second
+        gap = w["start"] - prev_end
+
+        if gap >= silence_threshold:
+            # Long pause — end current segment, start new one
+            if prev_end > seg_start + 0.5:  # Don't create tiny segments
+                segments.append({"start": round(seg_start, 2), "end": round(prev_end, 2)})
+            seg_start = w["start"]
+        elif is_filler and gap >= 0.3:
+            # Isolated filler word with a gap before it — skip it
+            # End segment before the filler, start after it
+            if w["start"] > seg_start + 0.5:
+                segments.append({"start": round(seg_start, 2), "end": round(w["start"], 2)})
+            seg_start = w["end"]
+
+    # Close final segment
+    final_end = min(end_second, clip_words[-1]["end"] + 0.3)
+    if final_end > seg_start + 0.5:
+        segments.append({"start": round(seg_start, 2), "end": round(final_end, 2)})
+
+    if not segments:
+        return [{"start": start_second, "end": end_second}]
+
+    # Only return multi-segment if we actually saved meaningful time
+    original_duration = end_second - start_second
+    kept_duration = sum(s["end"] - s["start"] for s in segments)
+    saved = original_duration - kept_duration
+
+    if saved < 1.5 or len(segments) < 2:
+        # Not worth the cuts — too little saved
+        return [{"start": start_second, "end": end_second}]
+
+    return segments
+
+
 def generate_clip(
     video_path: str,
     start_second: float,
@@ -137,21 +205,33 @@ def generate_clip(
         raise ValueError("end_second must be greater than start_second")
 
     # Multi-segment cutting: if keep_segments provided, use those ranges.
-    # Otherwise fall back to single start→end range with sentence snapping.
+    # Otherwise auto-detect silences/fillers and build tight segments.
     if keep_segments and len(keep_segments) > 0:
-        # Validate segments
+        # Validate segments from Claude
         keep_segments = [s for s in keep_segments if s["end"] > s["start"]]
         keep_segments.sort(key=lambda s: s["start"])
-        # Override start/end to match segments
         start_second = keep_segments[0]["start"]
         end_second = keep_segments[-1]["end"]
         duration = sum(s["end"] - s["start"] for s in keep_segments)
     else:
-        # Snap clip boundaries to sentence endings if transcript is available.
+        # Snap clip boundaries to sentence endings
         if transcript_words:
             end_second = _snap_to_sentence_end(transcript_words, start_second, end_second)
-        keep_segments = None
-        duration = end_second - start_second
+
+        # Auto-build tight segments: cut long pauses and isolated fillers
+        if transcript_words and clean_fillers:
+            auto_segments = _build_tight_segments(
+                transcript_words, start_second, end_second,
+            )
+            if len(auto_segments) > 1:
+                keep_segments = auto_segments
+                duration = sum(s["end"] - s["start"] for s in keep_segments)
+            else:
+                keep_segments = None
+                duration = end_second - start_second
+        else:
+            keep_segments = None
+            duration = end_second - start_second
 
     if duration > 180:
         raise ValueError(f"Clip too long ({duration:.0f}s). Max 180 seconds for shorts.")
