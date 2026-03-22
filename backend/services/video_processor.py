@@ -510,20 +510,34 @@ def _build_speaker_aware_crop(
 
         speaker_to_cluster = {}
 
-        if is_split_screen and len(clusters) >= 2 and len(speakers) == 2:
-            # Split-screen: both faces are always visible, so we can't use
-            # audio-visual correlation (both clusters get equal votes).
-            # Use positional heuristic: whoever speaks first in this clip
-            # is mapped to the LEFT face (standard podcast layout: host left,
-            # host does intro). Sort speakers by first word time, not label.
+        if is_split_screen and len(clusters) >= 2:
+            # Split-screen: both faces are always visible, so audio-visual
+            # correlation won't work (both clusters get equal votes).
+            # Use positional heuristic: map top-2 speakers (by talk time)
+            # to left/right faces. Any extra speakers (pyannote mis-splits)
+            # fall back to the dominant speaker's cluster.
+            speaker_talk_time = {}
+            for w in transcript_words:
+                sp = w.get("speaker")
+                if sp:
+                    speaker_talk_time[sp] = speaker_talk_time.get(sp, 0) + (w["end"] - w["start"])
+            speakers_by_talk = sorted(speakers, key=lambda s: speaker_talk_time.get(s, 0), reverse=True)
+
+            # Map first speaker to left face using first-word heuristic
             speaker_first_word = {}
             for w in transcript_words:
                 sp = w.get("speaker")
                 if sp and sp not in speaker_first_word:
                     speaker_first_word[sp] = w["start"]
-            speakers_by_first_word = sorted(speakers, key=lambda s: speaker_first_word.get(s, float("inf")))
-            speaker_to_cluster[speakers_by_first_word[0]] = clusters[0]  # left
-            speaker_to_cluster[speakers_by_first_word[1]] = clusters[1]  # right
+
+            top_2 = speakers_by_talk[:2]
+            top_2_by_first_word = sorted(top_2, key=lambda s: speaker_first_word.get(s, float("inf")))
+            speaker_to_cluster[top_2_by_first_word[0]] = clusters[0]  # left
+            speaker_to_cluster[top_2_by_first_word[1]] = clusters[1]  # right
+
+            # Map any remaining speakers to the dominant speaker's cluster
+            for sp in speakers_by_talk[2:]:
+                speaker_to_cluster[sp] = speaker_to_cluster[top_2_by_first_word[0]]
         else:
             # Non-split-screen: only one face visible at a time.
             # Map by which face is visible when each speaker talks.
