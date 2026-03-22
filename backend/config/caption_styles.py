@@ -117,10 +117,11 @@ STYLES = {
         "font_size": 72,                        # Slightly smaller for clean 2-line fit
         "primary_color": "&H00FFFFFF",          # White (all words)
         "active_color": "&H00FFFFFF",           # White text on dark box
-        "active_box_color": "&H00101010",       # Near-black pill bg (slightly lighter than pure black)
-        "active_box_padding_x": 20,             # Horizontal padding inside pill
+        "active_box_color": "&H00000000",       # Black pill bg
+        "active_box_alpha": "&H30",             # Pill opacity (00=solid, FF=invisible) — 30 ≈ 81% opaque
+        "active_box_padding_x": 10,             # Horizontal padding inside pill
         "active_box_padding_y": 10,             # Vertical padding inside pill
-        "active_box_rounding": 8,               # Border rounding for pill shape
+        "active_box_rounding": 15,              # Border rounding for pill shape
         "outline_color": "&H00000000",          # Black
         "back_color": "&H00000000",             # Transparent
         "bold": True,

@@ -771,13 +771,15 @@ def _detect_face_offset(
     width: int,
     height: int,
     target_ratio: float,
-) -> Optional[int]:
+) -> Optional[str]:
     """
-    Detect face position across the video and return crop x-offset.
-    Uses DNN-based face detector (more robust than Haar cascades).
-    Strongly favors the largest/closest face and clusters positions
-    to lock onto the dominant speaker when multiple faces are visible.
-    Returns None if no face detected (caller should fall back to center).
+    Continuous face tracking — detects face position over time and returns
+    an FFmpeg expression that smoothly follows the dominant face.
+
+    Samples frames throughout the clip, picks the dominant face cluster,
+    then builds a smoothed panning timeline so the crop follows head movement.
+
+    Returns an FFmpeg crop-x expression string, or None if no face detected.
     """
     try:
         import cv2
@@ -790,17 +792,17 @@ def _detect_face_offset(
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 30
         duration = total_frames / fps
+        crop_w = int(height * target_ratio)
 
-        # Sample more frames across the full clip for better coverage
-        sample_count = 60
+        # Sample ~4 frames/sec for smooth tracking (more than before)
+        sample_count = min(240, max(30, int(duration * 4)))
         sample_times = [i * duration / sample_count for i in range(sample_count)]
 
-        face_positions = []
+        # (time, face_center_x) for each detection
+        timed_positions = []
 
-        # Try DNN detector first (much more robust than Haar cascades)
+        # Load DNN face detector
         dnn_detector = None
-
-        # Look for bundled DNN model first, then fall back to OpenCV's data dir
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         bundled_proto = os.path.join(backend_dir, "models", "deploy.prototxt")
         bundled_model = os.path.join(backend_dir, "models",
@@ -809,14 +811,12 @@ def _detect_face_offset(
                                  "deploy.prototxt")
         cv2_model = os.path.join(os.path.dirname(cv2.__file__), "data",
                                  "res10_300x300_ssd_iter_140000.caffemodel")
-
         proto_path = bundled_proto if os.path.exists(bundled_proto) else cv2_proto
         model_path = bundled_model if os.path.exists(bundled_model) else cv2_model
-
         if os.path.exists(proto_path) and os.path.exists(model_path):
             dnn_detector = cv2.dnn.readNetFromCaffe(proto_path, model_path)
 
-        # Fallback: load multiple Haar cascades for better coverage
+        # Fallback: Haar cascades
         cascades = []
         if dnn_detector is None:
             for cascade_name in [
@@ -837,7 +837,6 @@ def _detect_face_offset(
             h, w = frame.shape[:2]
 
             if dnn_detector is not None:
-                # DNN-based detection: handles frontal, profile, angled faces
                 blob = cv2.dnn.blobFromImage(
                     cv2.resize(frame, (300, 300)), 1.0, (300, 300),
                     (104.0, 177.0, 123.0)
@@ -849,26 +848,23 @@ def _detect_face_offset(
                 best_cx = None
                 for i in range(detections.shape[2]):
                     confidence = detections[0, 0, i, 2]
-                    if confidence > 0.5:  # Higher threshold to reduce false positives
+                    if confidence > 0.5:
                         x1 = int(detections[0, 0, i, 3] * w)
                         y1 = int(detections[0, 0, i, 4] * h)
                         x2 = int(detections[0, 0, i, 5] * w)
                         y2 = int(detections[0, 0, i, 6] * h)
                         face_w = x2 - x1
                         face_h = y2 - y1
-                        # Skip tiny detections (likely false positives)
                         if face_w < w * 0.05 or face_h < h * 0.05:
                             continue
-                        # Quadratic face-size weighting: strongly favor larger/closer faces
                         score = confidence * (face_w ** 2)
                         if score > best_score:
                             best_score = score
                             best_cx = (x1 + x2) // 2
 
                 if best_cx is not None:
-                    face_positions.append(best_cx)
+                    timed_positions.append((t, best_cx))
             else:
-                # Haar cascade fallback: try all loaded cascades
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 for cascade in cascades:
                     faces = cascade.detectMultiScale(
@@ -877,61 +873,135 @@ def _detect_face_offset(
                     if len(faces) > 0:
                         largest = max(faces, key=lambda f: f[2] * f[3])
                         face_center_x = largest[0] + largest[2] // 2
-                        face_positions.append(face_center_x)
-                        break  # found face with this cascade, move to next frame
+                        timed_positions.append((t, face_center_x))
+                        break
 
         cap.release()
 
-        if not face_positions:
+        if len(timed_positions) < 3:
             return None
 
-        # Cluster face positions to find the dominant speaker.
-        # When two speakers are visible, positions will form two groups.
-        # Pick the largest cluster (most frequently detected face).
-        crop_w = int(height * target_ratio)
-        cluster_radius = crop_w * 0.35  # positions within 35% of crop width = same face (allows for head movement)
+        # --- Cluster to find dominant face ---
+        all_cx = np.array([p[1] for p in timed_positions])
+        cluster_radius = crop_w * 0.35
 
-        positions = np.array(face_positions)
-
-        # Find all distinct clusters
         clusters = []
-        used = np.zeros(len(positions), dtype=bool)
-        sorted_idx = np.argsort(positions)
-
-        for idx in sorted_idx:
+        used = np.zeros(len(all_cx), dtype=bool)
+        for idx in np.argsort(all_cx):
             if used[idx]:
                 continue
-            mask = np.abs(positions - positions[idx]) < cluster_radius
-            mask &= ~used
-            cluster = positions[mask]
-            if len(cluster) > 0:
-                clusters.append(cluster)
+            mask = (np.abs(all_cx - all_cx[idx]) < cluster_radius) & ~used
+            if np.any(mask):
+                clusters.append(np.where(mask)[0])
                 used |= mask
 
         if not clusters:
-            clusters = [positions]
+            return None
 
-        # Sort clusters by size (largest first)
+        # Pick largest cluster (dominant face)
         clusters.sort(key=lambda c: len(c), reverse=True)
+        dominant_indices = set(clusters[0])
 
-        # Always pick the largest cluster (most frequently detected face).
-        # This ensures we lock onto the dominant speaker rather than
-        # splitting the crop between two equally-visible speakers.
-        best_cluster = clusters[0]
+        # Filter to only dominant face detections
+        tracked = [(t, cx) for i, (t, cx) in enumerate(timed_positions) if i in dominant_indices]
+        if len(tracked) < 3:
+            # Too few points — use static median
+            median_x = int(np.median([cx for _, cx in tracked]))
+            crop_x = max(0, min(median_x - crop_w // 2, width - crop_w))
+            return str(crop_x)
 
-        avg_face_x = int(np.median(best_cluster))
+        # --- Smooth the positions ---
+        # 1) Convert face_center_x to crop_x (clamped)
+        tracked_times = np.array([t for t, _ in tracked])
+        tracked_crop_x = np.array([
+            max(0, min(cx - crop_w // 2, width - crop_w))
+            for _, cx in tracked
+        ], dtype=float)
 
-        # Calculate crop window centered on face
-        crop_x = avg_face_x - crop_w // 2
+        # 2) Fill gaps: if face wasn't detected for some frames, the tracked
+        #    array has gaps. That's fine — we interpolate between known points.
 
-        # Clamp to valid range
-        crop_x = max(0, min(crop_x, width - crop_w))
+        # 3) Heavy smoothing to prevent jitter. Use a rolling average with a
+        #    window of ~1.5 seconds. This means small head bobs don't move the
+        #    crop, but sustained movement (leaning, shifting) does.
+        if len(tracked_crop_x) > 5:
+            sample_interval = tracked_times[-1] / len(tracked_times) if len(tracked_times) > 1 else 0.25
+            window = max(3, int(1.5 / max(0.05, sample_interval)))
+            # Pad edges so smoothing doesn't pull toward zero
+            padded = np.pad(tracked_crop_x, (window // 2, window // 2), mode="edge")
+            kernel = np.ones(window) / window
+            smoothed = np.convolve(padded, kernel, mode="valid")[:len(tracked_crop_x)]
+        else:
+            smoothed = tracked_crop_x
 
-        return crop_x
+        # 4) Round to ints and clamp
+        smoothed = np.clip(np.round(smoothed), 0, width - crop_w).astype(int)
+
+        # --- Check if tracking is even needed ---
+        # If the face barely moves (range < 3% of frame width), just use static
+        movement_range = int(smoothed.max() - smoothed.min())
+        if movement_range < width * 0.03:
+            return str(int(np.median(smoothed)))
+
+        # --- Build keyframes: only emit when position changes significantly ---
+        # Downsample smoothed track to keyframes at ~1s intervals,
+        # or whenever the crop shifts by more than 20px.
+        keyframes = [(tracked_times[0], int(smoothed[0]))]
+        min_time_gap = 0.8   # Don't place keyframes closer than 0.8s
+        min_px_change = 20   # Ignore movement smaller than 20px
+
+        for i in range(1, len(smoothed)):
+            t = tracked_times[i]
+            x = int(smoothed[i])
+            prev_t, prev_x = keyframes[-1]
+            dt = t - prev_t
+            dx = abs(x - prev_x)
+
+            if dx >= min_px_change and dt >= min_time_gap:
+                keyframes.append((t, x))
+            elif i == len(smoothed) - 1:
+                # Always include last point
+                keyframes.append((t, x))
+
+        if len(keyframes) < 2:
+            return str(keyframes[0][1])
+
+        # --- Build FFmpeg expression ---
+        # Piecewise linear interpolation between keyframes.
+        # if(lt(t, t1), lerp(t0→t1), if(lt(t, t2), lerp(t1→t2), ...))
+        # This is simpler than between() chains and nests one level per segment.
+        expr_parts = []
+        for i in range(len(keyframes) - 1):
+            t0, x0 = keyframes[i]
+            t1, x1 = keyframes[i + 1]
+            dt = max(0.01, t1 - t0)
+            if x0 == x1:
+                # No movement in this segment — constant
+                expr_parts.append(f"if(lt(t\\,{t1:.2f})\\,{x0}\\,")
+            else:
+                # Linear interpolation
+                expr_parts.append(
+                    f"if(lt(t\\,{t1:.2f})\\,"
+                    f"{x0}+(({x1}-{x0})*(t-{t0:.2f})/{dt:.2f})\\,"
+                )
+
+        # Cap nesting depth
+        if len(expr_parts) > 40:
+            # Too many keyframes — subsample
+            step = len(keyframes) // 20
+            keyframes = keyframes[::step] + [keyframes[-1]]
+            # Rebuild (recursive call would be cleaner but let's just return static)
+            print(f"Warning: face tracking produced {len(expr_parts)} keyframes, using static", file=sys.stderr)
+            return str(int(np.median(smoothed)))
+
+        # Final value: last keyframe position
+        last_x = keyframes[-1][1]
+        expr = "".join(expr_parts) + str(last_x) + ")" * len(expr_parts)
+
+        return expr
 
     except ImportError:
-        # OpenCV not installed, fall back to center
         return None
     except Exception as e:
-        print(f"Warning: face detection failed: {e}", file=sys.stderr)
+        print(f"Warning: face tracking failed: {e}", file=sys.stderr)
         return None
