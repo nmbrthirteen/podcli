@@ -13,6 +13,20 @@ import subprocess
 import tempfile
 from typing import Optional, Callable
 
+# Fix torchaudio compatibility — speechbrain calls torchaudio.list_audio_backends()
+# which was removed in torchaudio >= 2.10. Monkey-patch before any import.
+try:
+    import torchaudio
+    if not hasattr(torchaudio, "list_audio_backends"):
+        torchaudio.list_audio_backends = lambda: ["ffmpeg"]
+except ImportError:
+    pass
+
+# Suppress noisy PyTorch warnings (std() degrees of freedom, etc.)
+import warnings
+warnings.filterwarnings("ignore", message="std\\(\\): degrees of freedom")
+warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
+
 
 def extract_audio_wav(video_path: str, output_path: str) -> str:
     """Extract audio as 16kHz mono WAV (required by pyannote)."""
@@ -64,9 +78,15 @@ def run_diarization(
 
     if not token:
         msg = (
-            "HF_TOKEN not set — speaker detection requires a HuggingFace token. "
-            "Get one at https://huggingface.co/settings/tokens and set HF_TOKEN in your .env file. "
-            "You must also accept terms at https://huggingface.co/pyannote/speaker-diarization-3.1"
+            "HF_TOKEN not set — speaker detection requires a HuggingFace token.\n"
+            "\n"
+            "  Setup (one-time):\n"
+            "  1. Create a token at https://huggingface.co/settings/tokens\n"
+            "  2. Accept model terms at ALL THREE:\n"
+            "     → https://huggingface.co/pyannote/speaker-diarization-3.1\n"
+            "     → https://huggingface.co/pyannote/segmentation-3.0\n"
+            "     → https://huggingface.co/pyannote/speaker-diarization-community-1\n"
+            "  3. Add to your .env file: HF_TOKEN=hf_your_token_here"
         )
         if progress_callback:
             progress_callback(0, msg)
@@ -76,27 +96,65 @@ def run_diarization(
         progress_callback(10, "Loading speaker diarization model...")
 
     try:
-        pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=token,
-        )
+        # pyannote >= 3.1 uses 'token', older versions use 'use_auth_token'
+        try:
+            pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                token=token,
+            )
+        except TypeError:
+            pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                use_auth_token=token,
+            )
     except Exception as e:
         err_str = str(e).lower()
         if "token" in err_str or "auth" in err_str or "403" in err_str or "401" in err_str:
             msg = (
-                f"HuggingFace auth failed: {e}. "
-                "Make sure your HF_TOKEN is valid and you accepted the model terms at "
-                "https://huggingface.co/pyannote/speaker-diarization-3.1"
+                f"HuggingFace auth failed: {e}\n"
+                "\n"
+                "  Fix: Accept model terms at ALL THREE (while logged into HuggingFace):\n"
+                "  → https://huggingface.co/pyannote/speaker-diarization-3.1\n"
+                "  → https://huggingface.co/pyannote/segmentation-3.0\n"
+                "  → https://huggingface.co/pyannote/speaker-diarization-community-1\n"
+                "  Then verify your HF_TOKEN is valid."
             )
             if progress_callback:
                 progress_callback(0, msg)
             raise PermissionError(msg) from e
         raise
 
-    if progress_callback:
-        progress_callback(30, "Running speaker diarization...")
+    # Move pipeline to GPU if available (Apple Silicon MPS or CUDA)
+    import torch
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+        pipeline.to(torch.device("cuda"))
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        try:
+            pipeline.to(torch.device("mps"))
+            device = "mps"
+        except Exception:
+            pass  # Some pyannote components don't support MPS, fall back to CPU
 
-    # Run diarization
+    # Estimate duration for progress message
+    import wave
+    try:
+        with wave.open(audio_path, "rb") as wf:
+            audio_dur = wf.getnframes() / wf.getframerate()
+        if device != "cpu":
+            est_min = max(1, int(audio_dur / 600))  # GPU: ~2x faster
+            time_msg = f"Running speaker diarization on {device.upper()} (~{est_min}-{est_min * 2} min)..."
+        else:
+            est_min = max(1, int(audio_dur / 300))
+            time_msg = f"Running speaker diarization on CPU (~{est_min}-{est_min * 2} min for {int(audio_dur / 60)} min audio)..."
+    except Exception:
+        time_msg = f"Running speaker diarization on {device.upper()}..."
+
+    if progress_callback:
+        progress_callback(30, time_msg)
+
+    # Run diarization — this is a blocking call, no progress updates from pyannote
     diarization_params = {}
     if num_speakers:
         diarization_params["num_speakers"] = num_speakers
@@ -108,6 +166,10 @@ def run_diarization(
 
     if progress_callback:
         progress_callback(90, "Processing speaker segments...")
+
+    # pyannote >= 4.0 returns DiarizeOutput; extract the Annotation from it
+    if hasattr(diarization, "speaker_diarization"):
+        diarization = diarization.speaker_diarization
 
     # Convert to simple list format
     speaker_segments = []

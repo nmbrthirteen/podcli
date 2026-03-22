@@ -7,7 +7,15 @@ and writes a JSON result to stdout. Progress events go to stderr.
 """
 
 import json
+import os
 import sys
+
+# Load .env file (for HF_TOKEN, etc.)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
+except ImportError:
+    pass
 import traceback
 
 def emit_progress(task_id: str, stage: str, percent: int, message: str):
@@ -72,6 +80,7 @@ def handle_create_clip(task_id: str, params: dict):
         logo_path=params.get("logo_path"),
         outro_path=params.get("outro_path"),
         clean_fillers=params.get("clean_fillers", True),
+        face_map=params.get("face_map"),
         progress_callback=lambda pct, msg: emit_progress(task_id, "processing", pct, msg),
     )
     emit_result(task_id, "success", data=result)
@@ -105,6 +114,7 @@ def handle_batch_clips(task_id: str, params: dict):
                 logo_path=clip.get("logo_path") or params.get("logo_path"),
                 outro_path=params.get("outro_path"),
                 clean_fillers=params.get("clean_fillers", True),
+                face_map=params.get("face_map"),
                 progress_callback=lambda pct, msg, _i=i: emit_progress(
                     task_id, "batch", int((_i / total) * 100 + pct / total), msg
                 ),

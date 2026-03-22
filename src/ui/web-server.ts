@@ -578,7 +578,7 @@ app.post("/api/batch-clips", async (req, res) => {
   executor
     .execute(
       "batch_clips",
-      { video_path, clips, transcript_words, output_dir: paths.output, logo_path, outro_path },
+      { video_path, clips, transcript_words, output_dir: paths.output, logo_path, outro_path, face_map: (uiState.transcript as any)?.face_map },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
@@ -1489,7 +1489,7 @@ app.post("/api/mcp/export", async (req, res) => {
   executor
     .execute(
       "batch_clips",
-      { video_path: videoPath, clips: styledClips, transcript_words: transcriptWords, output_dir: paths.output, logo_path: logoPath, outro_path: outroPath },
+      { video_path: videoPath, clips: styledClips, transcript_words: transcriptWords, output_dir: paths.output, logo_path: logoPath, outro_path: outroPath, face_map: (uiState.transcript as any)?.face_map },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;

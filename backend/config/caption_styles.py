@@ -114,7 +114,7 @@ STYLES = {
     "branded": {
         "description": "Large bold text, 5-7 words wrapping across 2 lines, dark rounded pill on active word. Clean, no gradient.",
         "font_name": DETECTED_FONT,
-        "font_size": 72,                        # Slightly smaller for clean 2-line fit
+        "font_size": 80,                        # Large bold text for shorts
         "primary_color": "&H00FFFFFF",          # White (all words)
         "active_color": "&H00FFFFFF",           # White text on dark box
         "active_box_color": "&H00000000",       # Black pill bg
@@ -129,7 +129,7 @@ STYLES = {
         "shadow_depth": 1,                      # Subtle shadow for text edge smoothing
         "alignment": 2,                         # Bottom-center
         "margin_v": 500,                        # Position: ~72% from top (natural lower-third)
-        "words_per_chunk": 6,                   # Show 5-7 words across 2 lines
+        "words_per_chunk": 3,                   # Show 3 words at a time — readable on small screens
         "uppercase": False,                     # Mixed case, natural capitalization
         "gradient_overlay": False,              # No gradient — clean direct-on-video
         "gradient_opacity": 0.0,

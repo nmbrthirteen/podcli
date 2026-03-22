@@ -118,6 +118,7 @@ def crop_to_vertical(
     strategy: str = "face",
     transcript_words: list = None,
     clip_start: float = 0,
+    face_map: dict = None,
 ) -> str:
     """
     Crop/scale video to 1080x1920 (9:16 vertical).
@@ -139,33 +140,40 @@ def crop_to_vertical(
     source_ratio = width / height
 
     if strategy in ("face", "speaker"):
-        # Check if we have multi-speaker data — if so, do speaker-aware crop
-        has_speakers = (
-            transcript_words
-            and len(set(w.get("speaker") for w in transcript_words if w.get("speaker"))) > 1
-        )
+        crop_x_expr = None
 
-        if has_speakers:
-            crop_x_expr = _build_speaker_aware_crop(
-                input_path, width, height, target_ratio,
-                transcript_words, clip_start,
+        # Fast path: use pre-computed face_map from transcription
+        # Only use if we have speaker mappings — without them, face_map
+        # can't know which face to follow in a multi-face layout
+        if face_map and face_map.get("clusters") and face_map.get("speaker_mappings"):
+            crop_x_expr = _use_face_map(
+                face_map, transcript_words, clip_start,
+                width, height, target_ratio,
             )
-            if crop_x_expr is not None:
-                crop_h = height
-                crop_w = int(crop_h * target_ratio)
-                # crop_x_expr is either a static int or an FFmpeg expression for dynamic panning
-                vf = f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,scale={target_w}:{target_h}"
+
+        # Slow path: analyze video on-the-fly (no face_map cached)
+        if crop_x_expr is None:
+            has_speakers = (
+                transcript_words
+                and len(set(w.get("speaker") for w in transcript_words if w.get("speaker"))) > 1
+            )
+
+            if has_speakers:
+                crop_x_expr = _build_speaker_aware_crop(
+                    input_path, width, height, target_ratio,
+                    transcript_words, clip_start,
+                )
             else:
-                strategy = "center"
+                # Single speaker: find face and center on it (static crop).
+                # Use _detect_face_center for a stable, centered position.
+                crop_x_expr = _detect_face_center(input_path, width, height, target_ratio)
+
+        if crop_x_expr is not None:
+            crop_h = height
+            crop_w = int(crop_h * target_ratio)
+            vf = f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,scale={target_w}:{target_h}"
         else:
-            # Single speaker or no speaker data — use static face detection
-            crop_x = _detect_face_offset(input_path, width, height, target_ratio)
-            if crop_x is not None:
-                crop_h = height
-                crop_w = int(crop_h * target_ratio)
-                vf = f"crop={crop_w}:{crop_h}:{crop_x}:0,scale={target_w}:{target_h}"
-            else:
-                strategy = "center"
+            strategy = "center"
 
     if strategy == "center":
         if source_ratio > target_ratio:
@@ -197,6 +205,130 @@ def crop_to_vertical(
         output_path=output_path,
         label="crop",
     )
+
+
+def _use_face_map(
+    face_map: dict,
+    transcript_words: list,
+    clip_start: float,
+    width: int,
+    height: int,
+    target_ratio: float,
+) -> Optional[str]:
+    """
+    Use pre-computed face_map from transcription to determine crop position.
+    Much faster than re-scanning the video.
+
+    For multi-speaker clips: builds speaker-aware panning expression.
+    For single-speaker: returns the dominant speaker's crop position.
+    """
+    clusters = face_map.get("clusters", [])
+    speaker_mappings = face_map.get("speaker_mappings", {})
+    dominant = face_map.get("dominant_speaker")
+    crop_w = int(height * target_ratio)
+
+    if not clusters:
+        return None
+
+    # Verify face_map was computed at the same resolution
+    map_w = face_map.get("video_width", width)
+    if map_w != width:
+        # Resolution mismatch — face_map positions don't apply
+        return None
+
+    # Check if clip has multiple speakers
+    speakers_in_clip = set()
+    if transcript_words:
+        speakers_in_clip = set(w.get("speaker") for w in transcript_words if w.get("speaker"))
+
+    if len(speakers_in_clip) < 2 or len(clusters) < 2:
+        # Single speaker — use their cluster or the dominant one
+        for sp in speakers_in_clip:
+            ci = speaker_mappings.get(sp)
+            if ci is not None and ci < len(clusters):
+                return str(clusters[ci]["crop_x"])
+        # Fallback to dominant speaker's position
+        if dominant and dominant in speaker_mappings:
+            ci = speaker_mappings[dominant]
+            if ci < len(clusters):
+                return str(clusters[ci]["crop_x"])
+        return str(clusters[0]["crop_x"])
+
+    # Multi-speaker: build panning expression from speaker segments
+    # Group words into speaker segments
+    segments = []
+    current_speaker = None
+    seg_start = 0
+    clip_end = max(w["end"] for w in transcript_words) if transcript_words else 0
+
+    for w in sorted(transcript_words, key=lambda x: x["start"]):
+        sp = w.get("speaker")
+        t = w["start"] - clip_start
+        if sp != current_speaker and sp is not None:
+            if current_speaker is not None:
+                segments.append((seg_start, t, current_speaker))
+            current_speaker = sp
+            seg_start = t
+
+    if current_speaker is not None:
+        segments.append((seg_start, clip_end - clip_start, current_speaker))
+
+    if not segments:
+        return str(clusters[0]["crop_x"])
+
+    # Merge short segments (<1.0s)
+    merged = []
+    for seg in segments:
+        if merged and seg[2] == merged[-1][2]:
+            merged[-1] = (merged[-1][0], seg[1], seg[2])
+        elif merged and (seg[1] - seg[0]) < 1.0:
+            merged[-1] = (merged[-1][0], seg[1], merged[-1][2])
+        else:
+            merged.append(list(seg))
+    segments = merged
+
+    # Default position
+    default_ci = speaker_mappings.get(dominant, 0)
+    default_x = clusters[min(default_ci, len(clusters) - 1)]["crop_x"]
+
+    # Build keyframes
+    pan_duration = 0.4
+    duration = segments[-1][1] if segments else 1.0
+    keyframes = []
+    prev_x = default_x
+
+    for start_t, end_t, speaker in segments:
+        ci = speaker_mappings.get(speaker)
+        target_x = clusters[ci]["crop_x"] if ci is not None and ci < len(clusters) else default_x
+
+        if target_x != prev_x:
+            keyframes.append((start_t, prev_x))
+            keyframes.append((start_t + pan_duration, target_x))
+        prev_x = target_x
+
+    if not keyframes:
+        return str(default_x)
+
+    # Build FFmpeg expression
+    expr_parts = []
+    for i in range(0, len(keyframes) - 1, 2):
+        t0, x0 = keyframes[i]
+        t1, x1 = keyframes[i + 1]
+        dt = max(0.01, t1 - t0)
+        expr_parts.append(
+            f"if(between(t\\,{t0:.2f}\\,{t1:.2f})\\,"
+            f"{x0}+(({x1}-{x0})*(t-{t0:.2f})/{dt:.2f})\\,"
+        )
+        next_t = keyframes[i + 2][0] if i + 2 < len(keyframes) else duration
+        expr_parts.append(
+            f"if(between(t\\,{t1:.2f}\\,{next_t:.2f})\\,"
+            f"{x1}\\,"
+        )
+
+    if len(expr_parts) > 30:
+        return str(default_x)
+
+    return "".join(expr_parts) + str(default_x) + ")" * len(expr_parts)
 
 
 def _build_speaker_aware_crop(
@@ -778,6 +910,142 @@ def normalize_audio(
     return output_path
 
 
+def _detect_face_center(
+    video_path: str,
+    width: int,
+    height: int,
+    target_ratio: float,
+) -> Optional[str]:
+    """
+    Simple static face detection — finds the dominant face and returns a
+    STATIC crop position that centers the face horizontally. No tracking,
+    no panning. The face stays centered for the entire clip.
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return None
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        duration = total_frames / fps
+        crop_w = int(height * target_ratio)
+
+        # Load DNN face detector
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        proto = os.path.join(backend_dir, "models", "deploy.prototxt")
+        model = os.path.join(backend_dir, "models", "res10_300x300_ssd_iter_140000.caffemodel")
+        if not (os.path.exists(proto) and os.path.exists(model)):
+            cap.release()
+            return None
+
+        detector = cv2.dnn.readNetFromCaffe(proto, model)
+
+        # Sample frames across the clip
+        sample_count = min(40, max(10, int(duration * 2)))
+        face_positions = []
+
+        for i in range(sample_count):
+            t = i * duration / sample_count
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            h, w = frame.shape[:2]
+            blob = cv2.dnn.blobFromImage(
+                cv2.resize(frame, (300, 300)), 1.0, (300, 300),
+                (104.0, 177.0, 123.0)
+            )
+            detector.setInput(blob)
+            detections = detector.forward()
+
+            best_score = 0
+            best_cx = None
+            for j in range(detections.shape[2]):
+                conf = detections[0, 0, j, 2]
+                if conf > 0.5:
+                    x1 = int(detections[0, 0, j, 3] * w)
+                    x2 = int(detections[0, 0, j, 5] * w)
+                    face_w = x2 - x1
+                    if face_w < w * 0.05:
+                        continue
+                    score = conf * (face_w ** 2)
+                    if score > best_score:
+                        best_score = score
+                        best_cx = (x1 + x2) // 2
+
+            if best_cx is not None:
+                face_positions.append(best_cx)
+
+        cap.release()
+
+        if not face_positions:
+            return None
+
+        # Cluster face positions to detect split-screen layouts.
+        # Use a tighter radius (15%) so faces at 25% and 75% don't merge.
+        positions = np.array(face_positions)
+        cluster_radius = width * 0.15
+
+        clusters = []
+        used = np.zeros(len(positions), dtype=bool)
+        sorted_idx = np.argsort(positions)
+
+        for idx in sorted_idx:
+            if used[idx]:
+                continue
+            mask = np.abs(positions - positions[idx]) < cluster_radius
+            mask &= ~used
+            if np.any(mask):
+                cluster_center = int(np.median(positions[mask]))
+                clusters.append({
+                    "center_x": cluster_center,
+                    "count": int(np.sum(mask)),
+                })
+                used |= mask
+
+        if len(clusters) >= 2:
+            # Split-screen: faces in distinct horizontal groups.
+            # Pick the cluster with the most detections, then crop to
+            # that HALF of the frame (not just center on face — centering
+            # still shows the seam between cameras).
+            clusters.sort(key=lambda c: c["count"], reverse=True)
+            best_cx = clusters[0]["center_x"]
+
+            # Snap to the half containing this face
+            if best_cx < width // 2:
+                # Left half: crop starts at 0
+                half_w = width // 2
+                face_x = best_cx  # within the left half
+            else:
+                # Right half: crop starts at midpoint
+                half_w = width - width // 2
+                face_x = best_cx
+
+            crop_x = face_x - crop_w // 2
+            # Clamp to stay within the chosen half
+            if best_cx < width // 2:
+                crop_x = max(0, min(crop_x, half_w - crop_w))
+            else:
+                crop_x = max(width // 2, min(crop_x, width - crop_w))
+        else:
+            face_x = int(np.median(face_positions))
+            crop_x = face_x - crop_w // 2
+            crop_x = max(0, min(crop_x, width - crop_w))
+
+        return str(crop_x)
+
+    except ImportError:
+        return None
+    except Exception as e:
+        print(f"Warning: face center detection failed: {e}", file=sys.stderr)
+        return None
+
+
 def _detect_face_offset(
     video_path: str,
     width: int,
@@ -923,7 +1191,9 @@ def _detect_face_offset(
             return str(crop_x)
 
         # --- Smooth the positions ---
-        # 1) Convert face_center_x to crop_x (clamped)
+        # 1) Convert face_center_x to crop_x (clamped with margin).
+        #    Face should be in the center 70% of crop window, never at edge.
+        margin = int(crop_w * 0.15)  # 15% margin on each side
         tracked_times = np.array([t for t, _ in tracked])
         tracked_crop_x = np.array([
             max(0, min(cx - crop_w // 2, width - crop_w))
@@ -950,17 +1220,18 @@ def _detect_face_offset(
         smoothed = np.clip(np.round(smoothed), 0, width - crop_w).astype(int)
 
         # --- Check if tracking is even needed ---
-        # If the face barely moves (range < 5% of frame width), just use static
+        # If the face barely moves (range < 8% of frame width), just use static.
+        # Most podcast clips have speakers sitting still — tracking should be rare.
         movement_range = int(smoothed.max() - smoothed.min())
-        if movement_range < width * 0.05:
+        if movement_range < width * 0.08:
             return str(int(np.median(smoothed)))
 
-        # --- Build keyframes: only emit when position changes significantly ---
-        # Use conservative thresholds: only pan when the speaker truly shifts
-        # position, not for natural head movement.
+        # --- Build keyframes: only emit on MAJOR position changes ---
+        # Very conservative: only pan when speaker physically moves to a new
+        # position (leans far, switches seats). Normal head movement = static.
         keyframes = [(tracked_times[0], int(smoothed[0]))]
-        min_time_gap = 2.0   # Don't place keyframes closer than 2s
-        min_px_change = 50   # Ignore movement smaller than 50px (~5% of frame)
+        min_time_gap = 3.0   # Don't place keyframes closer than 3s
+        min_px_change = 80   # Ignore movement smaller than 80px (~7% of frame)
 
         for i in range(1, len(smoothed)):
             t = tracked_times[i]

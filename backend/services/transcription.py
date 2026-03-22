@@ -192,8 +192,23 @@ def transcribe_file(
     else:
         diarization_warning = "Speaker detection disabled"
 
+    # Run face analysis on the video (maps speakers to face positions)
+    # Run silently — no progress callbacks to avoid interfering with CLI output
+    face_map = None
+    try:
+        if progress_callback:
+            progress_callback(95, "Analyzing face positions...")
+        from services.face_analysis import analyze_faces
+        face_map = analyze_faces(
+            video_path=file_path,
+            speaker_segments=speaker_segments,
+            duration=duration,
+        )
+    except Exception as e:
+        print(f"Warning: face analysis failed: {e}", file=sys.stderr)
+
     if progress_callback:
-        progress_callback(100, "Transcription complete")
+        progress_callback(100, "Complete")
 
     result_data = {
         "transcript": result.get("text", "").strip(),
@@ -204,6 +219,9 @@ def transcribe_file(
         "speakers": speaker_summary,
         "speaker_segments": speaker_segments,
     }
+
+    if face_map:
+        result_data["face_map"] = face_map
 
     if diarization_warning:
         result_data["diarization_warning"] = diarization_warning

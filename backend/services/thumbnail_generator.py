@@ -722,7 +722,7 @@ def generate_variations(
 def thumbnail_to_video_frame(
     thumbnail_path: str,
     output_path: str,
-    duration: float = 2.0,
+    duration: float = 0.8,
     fade_in: float = 0.3,
     fade_out: float = 0.3,
     width: int = 1080,

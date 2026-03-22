@@ -51,7 +51,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: BrandedNormal,{style["font_name"]},{style["font_size"]},&H00FFFFFF,&H00FFFFFF,&H50000000,&H00000000,-1,0,0,0,100,100,2,0,1,2,1,{style["alignment"]},60,60,{style["margin_v"]},1
+Style: BrandedNormal,{style["font_name"]},{style["font_size"]},&H00FFFFFF,&H00FFFFFF,&H90000000,&H00000000,-1,0,0,0,100,100,2,0,1,1,1,{style["alignment"]},60,60,{style["margin_v"]},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -508,9 +508,11 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
                 text = text[0].upper() + text[1:] if len(text) > 1 else text.upper()
             normalized.append(text)
 
-        # Measure word widths for pill positioning
-        word_widths = _measure_text_widths(normalized, font_name, font_size, is_bold, spacing)
-        space_width = _measure_text_widths([" "], font_name, font_size, is_bold, spacing)[0]
+        # Measure word widths for pill positioning.
+        # Use spacing=0 here — ASS Spacing is handled by libass internally,
+        # but we position words ourselves with \pos so we need pure font metrics.
+        word_widths = _measure_text_widths(normalized, font_name, font_size, is_bold, 0)
+        space_width = _measure_text_widths([" "], font_name, font_size, is_bold, 0)[0]
 
         # Split into visual lines that fit within play_res_x - margins
         max_line_w = play_res_x - 120  # 60px margin each side

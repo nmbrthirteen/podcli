@@ -46,15 +46,16 @@ def _snap_to_sentence_end(
     if not clip_words:
         return end_second
 
-    last_word_text = clip_words[-1].get("word", "").strip()
+    last_clip_word = clip_words[-1]
+    last_word_text = last_clip_word.get("word", "").strip()
 
-    # Already ends on a sentence boundary
+    # Already ends on a sentence boundary — extend to include full word
     if last_word_text and last_word_text[-1] in SENTENCE_ENDINGS:
-        return end_second
+        return max(end_second, last_clip_word["end"])
 
     # Search forward: find next sentence-ending word within max_extension
-    for w in transcript_words:
-        if w["start"] >= end_second and w["end"] <= end_second + max_extension:
+    for w in sorted(transcript_words, key=lambda x: x["start"]):
+        if w["start"] >= last_clip_word["end"] and w["end"] <= end_second + max_extension:
             text = w.get("word", "").strip()
             if text and text[-1] in SENTENCE_ENDINGS:
                 return w["end"]
@@ -98,6 +99,7 @@ def generate_clip(
     transcript_words: list[dict] = None,
     title: str = "clip",
     output_dir: Optional[str] = None,
+    face_map: dict = None,
     logo_path: Optional[str] = None,
     outro_path: Optional[str] = None,
     clean_fillers: bool = True,
@@ -167,6 +169,7 @@ def generate_clip(
             strategy=crop_strategy,
             transcript_words=transcript_words,
             clip_start=start_second,
+            face_map=face_map,
         )
 
         # Step 3: Generate captions + burn (with optional gradient & logo)

@@ -13,6 +13,13 @@ One-command processing:
 import argparse
 import json
 import os
+
+# Load .env file (for HF_TOKEN, etc.)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
+except ImportError:
+    pass
 import sys
 import time
 
@@ -154,6 +161,8 @@ def cmd_process(args):
         config["time_adjust"] = args.time_adjust
     if args.no_energy:
         config["energy_boost"] = False
+    if getattr(args, "no_speakers", False):
+        config["no_speakers"] = True
     if args.quality:
         config["quality"] = args.quality
 
@@ -232,6 +241,7 @@ def cmd_process(args):
         result = transcribe_file(
             file_path=video_path,
             model_size=config.get("whisper_model", "base"),
+            enable_diarization=not config.get("no_speakers", False),
             progress_callback=_transcribe_progress,
         )
         _spin_stop.set()
@@ -242,6 +252,9 @@ def cmd_process(args):
 
     # Check speaker data availability (needed for smart cropping)
     speakers_in_words = set(w.get("speaker") for w in words if w.get("speaker"))
+    diarization_warning = result.get("diarization_warning")
+    if diarization_warning:
+        print(f"         ⚠ {diarization_warning}")
     if len(speakers_in_words) > 1:
         print(f"         Speakers detected: {len(speakers_in_words)} (crop will follow active speaker)")
     elif len(speakers_in_words) == 1:
@@ -550,6 +563,26 @@ Output as clean markdown. No code fences around the whole thing."""
         print(f"\n  {gray}Clips rendered. For titles, descriptions & thumbnails:{reset}")
         print(f"  {gray}Open Claude Code and run {accent}/produce-shorts{reset}")
 
+    # ── What next? ──
+    print(f"  {'─' * 45}")
+    print(f"  {bold}What next?{reset}")
+    print(f"    {accent}1{reset}  Re-run with different settings")
+    print(f"    {accent}2{reset}  Open output folder")
+    print(f"    {accent}q{reset}  Done")
+    print()
+    sys.stdout.write(f"  {accent}▸{reset} ")
+    sys.stdout.flush()
+    try:
+        next_choice = sys.stdin.readline().strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+
+    if next_choice == "1":
+        _interactive_process()
+    elif next_choice == "2":
+        import subprocess as _sp
+        _sp.run(["open", output_dir] if sys.platform == "darwin" else ["xdg-open", output_dir])
     print()
 
 
@@ -1110,6 +1143,7 @@ def print_help():
     print(f"    {green}--outro{reset} {gray}<asset|path>{reset}    Append outro video")
     print(f"    {green}--quality{reset} {gray}<level>{reset}       low | medium | high | max")
     print(f"    {green}--no-energy{reset}            Skip audio energy analysis")
+    print(f"    {green}--no-speakers{reset}          Skip speaker detection (faster)")
     print()
     print(f"  {bold}Examples:{reset}")
     print(f"    {dim}${reset} podcli process episode.mp4")
@@ -1156,6 +1190,7 @@ def main():
     proc.add_argument("--outro", help="Outro video (asset name or path)")
     proc.add_argument("--time-adjust", type=float, help="Timestamp offset in seconds")
     proc.add_argument("--no-energy", action="store_true", help="Skip audio energy analysis")
+    proc.add_argument("--no-speakers", action="store_true", help="Skip speaker detection (faster, uses face detection only)")
     proc.add_argument("--quality", choices=["low", "medium", "high", "max"], help="Output quality (default: high)")
 
     # ── presets ──
@@ -1249,13 +1284,12 @@ def interactive_menu():
     print(f"    {accent}q{reset}  Quit")
     print()
 
-    _flush_stdin()
     try:
-        choice = ""
-        while not choice:
-            choice = input(f"  {gray}>{reset} ").strip()
+        choice = input(f"  {accent}▸{reset} ").strip()
     except (EOFError, KeyboardInterrupt):
         print()
+        return
+    if not choice:
         return
 
     if choice == "1":
@@ -1450,10 +1484,16 @@ def _interactive_process():
     if outro:
         print(f"  {bold}Outro:{reset}      ✓  {dim}{os.path.basename(outro)}{reset}")
     print(f"  {bold}Transcript:{reset} {'auto (Whisper)' if not transcript else os.path.basename(transcript)}")
+    print()
+    sys.stdout.write(f"  {green}Ready!{reset} {bold}Press Enter to start{reset} {dim}(q to cancel){reset} ")
+    sys.stdout.flush()
     try:
-        input(f"\n  {green}Ready!{reset} {bold}Press Enter to start{reset} {dim}(q to cancel){reset} ")
+        confirm = sys.stdin.readline().strip()
     except (EOFError, KeyboardInterrupt):
         print(f"\n  {gray}Cancelled.{reset}")
+        return
+    if confirm.lower() == "q":
+        print(f"  {gray}Cancelled.{reset}")
         return
 
     # Run
@@ -1468,53 +1508,72 @@ def _interactive_process():
     if outro:
         cmd += ["--outro", outro]
 
-    print(f"\n  {green}▶{reset} Starting...\n")
+    # Clear screen before starting processing to avoid prompt artifacts
+    sys.stdout.write("\033[2J\033[H")  # clear screen + move cursor to top
     sys.stdout.flush()
+    print(f"  {green}▶{reset} Starting...\n")
     sys.stderr.flush()
-    os.execv(sys.executable, cmd)
+    # Use subprocess instead of execv to avoid terminal state issues
+    import subprocess as _sp
+    exit_code = _sp.call(cmd)
+    sys.exit(exit_code)
 
 
 def _interactive_assets():
     """Interactive asset management."""
+    from services.asset_store import register, unregister, list_assets
 
     accent = "\033[38;2;212;135;74m"
     gray = "\033[38;5;245m"
     green = "\033[38;2;74;222;128m"
+    red = "\033[38;2;248;113;113m"
     bold = "\033[1m"
     dim = "\033[2m"
     reset = "\033[0m"
 
-    from services.asset_store import register, list_assets
+    # Show current assets first
+    current = list_assets()
+    if current:
+        print(f"\n  {bold}Registered assets:{reset}")
+        for a in current:
+            exists = os.path.exists(a["path"])
+            icon = f"{green}✓{reset}" if exists else f"{red}✗{reset}"
+            print(f"    {icon} {accent}{a['name']}{reset}  {gray}({a['type']}) {os.path.basename(a['path'])}{reset}")
+    else:
+        print(f"\n  {gray}No assets registered yet.{reset}")
 
-    print(f"\n  {bold}Assets{reset}")
-    print(f"    {accent}1{reset}  List registered assets")
-    print(f"    {accent}2{reset}  Add new asset")
+    print(f"\n  {bold}Add asset{reset} {dim}(or press Enter to go back){reset}")
+
+    # Get name
+    sys.stdout.write(f"  Name: ")
+    sys.stdout.flush()
     try:
-        choice = input(f"  {gray}>{reset} ").strip()
+        name = sys.stdin.readline().strip()
     except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if not name:
         return
 
-    if choice == "1":
-        assets = list_assets()
-        if not assets:
-            print(f"\n  {gray}No assets. Choose 2 to add one.{reset}\n")
-            return
+    # Get path
+    sys.stdout.write(f"  Path: ")
+    sys.stdout.flush()
+    try:
+        path = sys.stdin.readline().strip().strip("'\"")
+    except (EOFError, KeyboardInterrupt):
         print()
-        for a in assets:
-            exists = os.path.exists(a["path"])
-            icon = f"{green}✓{reset}" if exists else f"\033[38;2;248;113;113m✗{reset}"
-            print(f"    {icon} {accent}{a['name']}{reset}  {gray}({a['type']}) {os.path.basename(a['path'])}{reset}")
-        print()
+        return
+    if not path:
+        print(f"  {gray}Cancelled.{reset}\n")
+        return
 
-    elif choice == "2":
-        try:
-            name = input(f"\n  {bold}Asset name{reset} {dim}(short, e.g. mylogo){reset}: ").strip()
-            path = input(f"  {bold}File path:{reset} ").strip().strip("'\"")
-            if name and path:
-                asset = register(name, path)
-                print(f"\n  {green}✓{reset} Registered {accent}{name}{reset} ({asset['type']})\n")
-        except (EOFError, KeyboardInterrupt, FileNotFoundError) as e:
-            print(f"\n  {gray}{e}{reset}\n")
+    path = _clean_path(path)
+    try:
+        asset = register(name, path)
+        print(f"\n  {green}✓{reset} Registered {accent}{name}{reset} ({asset['type']})")
+        print(f"    {gray}{asset['path']}{reset}\n")
+    except FileNotFoundError as e:
+        print(f"\n  {red}✗{reset} {e}\n", file=sys.stderr)
 
 
 if __name__ == "__main__":

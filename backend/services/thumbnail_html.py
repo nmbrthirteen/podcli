@@ -500,7 +500,7 @@ def generate_variations(
 def thumbnail_to_video_frame(
     thumbnail_path: str,
     output_path: str,
-    duration: float = 2.0,
+    duration: float = 0.8,
     width: int = 1080,
     height: int = 1920,
 ) -> str:
