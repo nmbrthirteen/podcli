@@ -488,7 +488,7 @@ def _build_speaker_aware_crop(
                     for obs_t, obs_cx, obs_fw in face_observations:
                         if abs(obs_t - t) < 1.0:
                             for ci, cl in enumerate(clusters):
-                                if abs(obs_cx - cl["center_x"]) < cluster_radius:
+                                if abs(obs_cx - cl["center_x"]) < width * 0.15:
                                     cluster_votes[ci] += 1
                 if any(cluster_votes):
                     best = max(range(len(cluster_votes)), key=lambda i: cluster_votes[i])
@@ -537,34 +537,25 @@ def _build_speaker_aware_crop(
         default_cluster = speaker_to_cluster.get(dominant_speaker) or clusters[0]
         default_x = default_cluster["crop_x"]
 
-        # Build a timeline: list of (time, target_x) keyframes with smooth transitions.
-        # Instead of nested if/between (breaks with many segments), use a linear
-        # interpolation chain: lerp between keyframes.
-        pan_duration = 0.4  # 400ms smooth pan (was 300ms, felt jerky)
+        # Build a timeline: list of (time, target_x) keyframes.
+        # Split-screen: instant cut (panning through the center seam looks bad).
+        # Non-split-screen: smooth 400ms pan.
+        pan_duration = 0.0 if is_split_screen else 0.4
 
-        # Build keyframe list: (time, crop_x)
-        # In split-screen, verify target face is visible before panning.
-        # If face isn't detected at that time, stay at current position.
         keyframes = []
         prev_x = default_x
         for start_t, end_t, speaker in segments:
             cl = speaker_to_cluster.get(speaker)
             target_x = cl["crop_x"] if cl else default_x
 
-            # Verify target face is visible at this time (avoid panning to empty space)
-            if is_split_screen and cl:
-                # Check if any face detection near the target cluster exists at segment start
-                face_near_target = any(
-                    abs(obs_t - start_t) < 1.5 and abs(obs_cx - cl["center_x"]) < cluster_radius
-                    for obs_t, obs_cx, obs_fw in face_observations
-                )
-                if not face_near_target:
-                    target_x = prev_x  # Stay at current position
-
             if target_x != prev_x:
-                # Ease into the new position over pan_duration
-                keyframes.append((start_t, prev_x))
-                keyframes.append((start_t + pan_duration, target_x))
+                if pan_duration > 0:
+                    keyframes.append((start_t, prev_x))
+                    keyframes.append((start_t + pan_duration, target_x))
+                else:
+                    # Instant cut — jump at speaker change
+                    keyframes.append((start_t, prev_x))
+                    keyframes.append((start_t + 0.01, target_x))
             prev_x = target_x
 
         if not keyframes:

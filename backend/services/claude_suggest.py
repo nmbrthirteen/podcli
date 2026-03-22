@@ -69,6 +69,15 @@ DURATION RULES (CRITICAL):
 - Minimum: 20 seconds (too short = no value)
 - If a moment runs longer than 50 seconds, find a tighter cut point
 
+CUTTING RULES (CRITICAL):
+- Cut TIGHT. Every second must earn its place.
+- Start at the exact moment the hook hits — no preamble, no "so", no "well"
+- End the INSTANT the point lands — don't let it trail off
+- If the speaker rambles before making a point, start AFTER the ramble
+- If there's filler/tangent in the middle, pick the tighter segment that preserves the core idea
+- The transcript timestamps are your scalpel — use them precisely
+- A 30s clip with zero dead weight beats a 50s clip with 20s of fluff
+
 MOMENT SELECTION:
 - Must start with a strong hook (first 3 seconds grab attention)
 - Must make complete sense standalone — no "as I mentioned" or "going back to"
@@ -76,7 +85,6 @@ MOMENT SELECTION:
 - Single focused idea per clip — one concept, fully delivered
 - Prioritize: surprising facts, bold claims, founder stories, counterintuitive insights, "aha" moments
 - Variety across content types
-- In conversations, include moments where both speakers contribute (back-and-forth exchanges can be powerful shorts)
 
 {f"KNOWLEDGE BASE:{kb_context}" if kb_context else ""}
 

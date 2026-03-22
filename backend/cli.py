@@ -1076,6 +1076,70 @@ def cmd_thumbnails(args):
     print(f"  {gray}Edit .podcli/thumbnail-config.json to customize colors, fonts, layout.{reset}\n")
 
 
+def cmd_cache(args):
+    """Manage transcription cache."""
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "cache")
+
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    green = "\033[38;2;74;222;128m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    action = getattr(args, "cache_action", None) or "status"
+
+    if action == "clear":
+        if os.path.exists(cache_dir):
+            import shutil
+            count = len([f for f in os.listdir(cache_dir) if f.endswith(".json")])
+            shutil.rmtree(cache_dir)
+            print(f"\n  {green}✓{reset} Cleared {count} cached transcription(s)")
+        else:
+            print(f"\n  {gray}Cache is already empty{reset}")
+        print()
+        return
+
+    # Status (default)
+    print(f"\n  {bold}Transcription Cache{reset}")
+    print(f"  {'─' * 35}")
+
+    if not os.path.exists(cache_dir):
+        print(f"  {gray}Empty — no cached transcriptions{reset}\n")
+        return
+
+    files = [f for f in os.listdir(cache_dir) if f.endswith(".json")]
+    if not files:
+        print(f"  {gray}Empty — no cached transcriptions{reset}\n")
+        return
+
+    total_size = 0
+    for fname in files:
+        fpath = os.path.join(cache_dir, fname)
+        size = os.path.getsize(fpath)
+        total_size += size
+
+        # Try to read the cached file to show what video it's for
+        try:
+            with open(fpath) as f:
+                data = json.load(f)
+            n_words = len(data.get("words", []))
+            n_segs = len(data.get("segments", []))
+            lang = data.get("language", "?")
+            mtime = os.path.getmtime(fpath)
+            import datetime
+            age = datetime.datetime.fromtimestamp(mtime).strftime("%b %d %H:%M")
+            print(f"  {accent}•{reset} {n_segs} segments, {n_words} words, {lang}  {gray}({size/1024:.0f}KB, {age}){reset}")
+        except Exception:
+            print(f"  {accent}•{reset} {fname}  {gray}({size/1024:.0f}KB){reset}")
+
+    print(f"  {'─' * 35}")
+    if total_size > 1024 * 1024:
+        print(f"  Total: {bold}{total_size / (1024*1024):.1f}MB{reset}  ({len(files)} file{'s' if len(files) != 1 else ''})")
+    else:
+        print(f"  Total: {bold}{total_size / 1024:.0f}KB{reset}  ({len(files)} file{'s' if len(files) != 1 else ''})")
+    print(f"  {gray}Run {accent}podcli cache clear{reset} {gray}to delete all{reset}\n")
+
+
 def cmd_info(args):
     """Show system info."""
     from services.encoder import get_encoder_info
@@ -1152,10 +1216,17 @@ def print_banner():
 
     print(f"  {bold}podcli{reset} v{VERSION}")
 
+    # Cache info
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "cache")
+    cache_count = 0
+    if os.path.isdir(cache_dir):
+        cache_count = len([f for f in os.listdir(cache_dir) if f.endswith(".json")])
+
     # Status — one line
     claude_tag = f"{green}✓{reset}" if claude_path else f"{yellow}✗{reset}"
     speaker_tag = f"{green}✓{reset}" if speakers_ok else f"{yellow}✗{reset}"
-    print(f"  {gray}Encoder {green}{encoder_label}{reset} {gray}· Claude {claude_tag} {gray}· Speakers {speaker_tag} {gray}· Knowledge {green}{kb_count}{reset}")
+    cache_tag = f"{green}{cache_count}{reset}" if cache_count else f"{gray}0{reset}"
+    print(f"  {gray}Encoder {green}{encoder_label}{reset} {gray}· Claude {claude_tag} {gray}· Speakers {speaker_tag} {gray}· Cache {cache_tag}{reset}")
 
     # Assets — one line if any
     try:
@@ -1201,6 +1272,7 @@ def print_help():
     print(f"    {accent}assets{reset}  {gray}<action>{reset}      Manage logos, intros, outros")
     print(f"    {accent}presets{reset} {gray}<action>{reset}      Save/load rendering presets")
     print(f"    {accent}thumbnails{reset} {gray}<title>{reset}   Generate thumbnail variations")
+    print(f"    {accent}cache{reset}  {gray}[clear]{reset}       Show/clear transcription cache")
     print(f"    {accent}info{reset}                 Show system info (encoder, codecs)")
     print()
     print(f"  {bold}Process options:{reset}")
@@ -1312,6 +1384,12 @@ def main():
     thumb.add_argument("--logo", help="Logo (asset name or path)")
     thumb.add_argument("-n", "--variations", type=int, default=3, help="Number of variations")
 
+    # ── cache ──
+    cache_p = sub.add_parser("cache", help="Manage transcription cache")
+    cache_sub = cache_p.add_subparsers(dest="cache_action")
+    cache_sub.add_parser("status", help="Show cache size and contents")
+    cache_sub.add_parser("clear", help="Delete all cached transcriptions")
+
     # ── info ──
     sub.add_parser("info", help="Show system info (encoder, etc.)")
 
@@ -1331,6 +1409,8 @@ def main():
         cmd_presets(args)
     elif args.command == "assets":
         cmd_assets(args)
+    elif args.command == "cache":
+        cmd_cache(args)
     elif args.command == "info":
         cmd_info(args)
     else:
@@ -1354,6 +1434,7 @@ def interactive_menu():
     print(f"    {accent}1{reset}  Process a video → shorts + content package")
     print(f"    {accent}2{reset}  Open Web UI")
     print(f"    {accent}3{reset}  Manage assets")
+    print(f"    {accent}4{reset}  Cache {gray}(view/clear transcription cache){reset}")
     print(f"    {accent}q{reset}  Quit")
     print()
 
@@ -1371,12 +1452,16 @@ def interactive_menu():
         print(f"\n  {gray}Starting Web UI...{reset}\n")
         import subprocess as sp
         sp.run(["npm", "run", "ui"], cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        interactive_menu()
     elif choice == "3":
         _interactive_assets()
-    elif choice in ("q", "Q", ""):
+        interactive_menu()
+    elif choice == "4":
+        _interactive_cache()
+    elif choice in ("q", "Q"):
         return
     else:
-        print(f"\n  {gray}Unknown option.{reset}\n")
+        interactive_menu()
 
 
 def _clean_path(val):
@@ -1590,6 +1675,28 @@ def _interactive_process():
     import subprocess as _sp
     exit_code = _sp.call(cmd)
     sys.exit(exit_code)
+
+
+def _interactive_cache():
+    """Interactive cache management."""
+    import argparse as _ap
+    # Show status first
+    cmd_cache(_ap.Namespace(cache_action=None))
+
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    reset = "\033[0m"
+
+    try:
+        choice = input(f"  {gray}Clear cache? (y/n/enter=back){reset} {accent}▸{reset} ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return interactive_menu()
+
+    if choice in ("y", "yes"):
+        cmd_cache(_ap.Namespace(cache_action="clear"))
+
+    interactive_menu()
 
 
 def _interactive_assets():
