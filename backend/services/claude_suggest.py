@@ -63,6 +63,9 @@ def _build_prompt(transcript_text: str, segment_count: int, duration_min: float,
 
 IMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences.
 
+TIMESTAMP FORMAT: All timestamps in the transcript are in SECONDS (e.g., [123.4s]).
+All timestamps you return MUST be in SECONDS as numbers (e.g., 123.4), NOT minutes:seconds.
+
 DURATION RULES (CRITICAL):
 - Target: 30-45 seconds per clip (ideal for YouTube Shorts)
 - Maximum: 60 seconds (hard limit — YouTube Shorts cuts off at 60s)
@@ -161,11 +164,10 @@ def suggest_with_claude(
         speaker = seg.get("speaker", "")
         speaker_label = f"[{speaker}] " if speaker else ""
         start = seg.get("start", 0)
-        mins = int(start) // 60
-        secs = int(start) % 60
         text = seg.get("text", "").strip()
         if text:
-            lines.append(f"({mins}:{secs:02d}) {speaker_label}{text}")
+            # Use absolute seconds (not M:SS) so Claude returns seconds too
+            lines.append(f"[{start:.1f}s] {speaker_label}{text}")
 
     transcript_text = "\n".join(lines)
 
@@ -270,6 +272,10 @@ def suggest_with_claude(
 
             # Compute actual kept duration
             kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
+
+            # Reject clips shorter than 15 seconds (Claude returned bad timestamps)
+            if kept_duration < 15:
+                continue
 
             normalized.append({
                 "title": c.get("title", "Untitled")[:55],

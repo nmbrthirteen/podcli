@@ -984,6 +984,12 @@ def normalize_audio(
     except (json.JSONDecodeError, ValueError):
         loudnorm_data = None
 
+    # Check for invalid measurements (e.g., -inf from silence/very short clips)
+    if loudnorm_data:
+        measured_i = str(loudnorm_data.get("input_i", ""))
+        if "inf" in measured_i.lower() or measured_i == "":
+            loudnorm_data = None
+
     if loudnorm_data:
         # Second pass: apply measured correction
         af_filter = (
