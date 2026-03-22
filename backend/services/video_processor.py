@@ -404,11 +404,23 @@ def _build_speaker_aware_crop(
         pan_duration = 0.4  # 400ms smooth pan (was 300ms, felt jerky)
 
         # Build keyframe list: (time, crop_x)
+        # In split-screen, verify target face is visible before panning.
+        # If face isn't detected at that time, stay at current position.
         keyframes = []
         prev_x = default_x
         for start_t, end_t, speaker in segments:
             cl = speaker_to_cluster.get(speaker)
             target_x = cl["crop_x"] if cl else default_x
+
+            # Verify target face is visible at this time (avoid panning to empty space)
+            if is_split_screen and cl:
+                # Check if any face detection near the target cluster exists at segment start
+                face_near_target = any(
+                    abs(obs_t - start_t) < 1.5 and abs(obs_cx - cl["center_x"]) < cluster_radius
+                    for obs_t, obs_cx, obs_fw in face_observations
+                )
+                if not face_near_target:
+                    target_x = prev_x  # Stay at current position
 
             if target_x != prev_x:
                 # Ease into the new position over pan_duration
@@ -921,12 +933,12 @@ def _detect_face_offset(
         # 2) Fill gaps: if face wasn't detected for some frames, the tracked
         #    array has gaps. That's fine — we interpolate between known points.
 
-        # 3) Heavy smoothing to prevent jitter. Use a rolling average with a
-        #    window of ~1.5 seconds. This means small head bobs don't move the
-        #    crop, but sustained movement (leaning, shifting) does.
+        # 3) Heavy smoothing to prevent jitter. Use a 2.5-second rolling average
+        #    so only sustained movement (leaning, shifting) affects the crop.
+        #    Small head bobs and natural sway are averaged out.
         if len(tracked_crop_x) > 5:
             sample_interval = tracked_times[-1] / len(tracked_times) if len(tracked_times) > 1 else 0.25
-            window = max(3, int(1.5 / max(0.05, sample_interval)))
+            window = max(5, int(2.5 / max(0.05, sample_interval)))
             # Pad edges so smoothing doesn't pull toward zero
             padded = np.pad(tracked_crop_x, (window // 2, window // 2), mode="edge")
             kernel = np.ones(window) / window
@@ -938,17 +950,17 @@ def _detect_face_offset(
         smoothed = np.clip(np.round(smoothed), 0, width - crop_w).astype(int)
 
         # --- Check if tracking is even needed ---
-        # If the face barely moves (range < 3% of frame width), just use static
+        # If the face barely moves (range < 5% of frame width), just use static
         movement_range = int(smoothed.max() - smoothed.min())
-        if movement_range < width * 0.03:
+        if movement_range < width * 0.05:
             return str(int(np.median(smoothed)))
 
         # --- Build keyframes: only emit when position changes significantly ---
-        # Downsample smoothed track to keyframes at ~1s intervals,
-        # or whenever the crop shifts by more than 20px.
+        # Use conservative thresholds: only pan when the speaker truly shifts
+        # position, not for natural head movement.
         keyframes = [(tracked_times[0], int(smoothed[0]))]
-        min_time_gap = 0.8   # Don't place keyframes closer than 0.8s
-        min_px_change = 20   # Ignore movement smaller than 20px
+        min_time_gap = 2.0   # Don't place keyframes closer than 2s
+        min_px_change = 50   # Ignore movement smaller than 50px (~5% of frame)
 
         for i in range(1, len(smoothed)):
             t = tracked_times[i]

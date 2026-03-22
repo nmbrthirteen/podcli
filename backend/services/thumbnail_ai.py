@@ -53,6 +53,65 @@ def _frame_sharpness(frame, face_roi=None) -> float:
     return cv2.Laplacian(gray, cv2.CV_64F).var()
 
 
+def _face_expression_quality(frame, x1: int, y1: int, x2: int, y2: int) -> float:
+    """
+    Estimate facial expression quality (0 to 1).
+    Penalizes: closed/squinting eyes, wide open mouth, motion blur.
+    Higher = better thumbnail candidate.
+    """
+    import cv2
+    import numpy as np
+
+    region = frame[y1:y2, x1:x2]
+    h, w = region.shape[:2]
+    if h < 20 or w < 20:
+        return 0.5  # Too small to analyze
+
+    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+
+    # 1) Eye region check (top 25-45% of face)
+    eye_y1 = int(h * 0.25)
+    eye_y2 = int(h * 0.45)
+    eye_region = gray[eye_y1:eye_y2, :]
+    if eye_region.size > 0:
+        eye_sharpness = cv2.Laplacian(eye_region, cv2.CV_64F).var()
+        # Sharp eyes = open eyes (edges around iris/pupil)
+        # Blurry eyes = blinking or closed
+        if eye_sharpness < 10:
+            return 0.3  # Eyes likely closed or blinking
+    else:
+        eye_sharpness = 50  # Can't measure, assume OK
+
+    # 2) Mouth region check (bottom 30% of face)
+    mouth_region = gray[int(h * 0.65):, :]
+    if mouth_region.size > 0:
+        mouth_var = cv2.Laplacian(mouth_region, cv2.CV_64F).var()
+        # Very high variance in mouth = wide open (teeth, tongue visible)
+        # Moderate variance = natural expression
+        mouth_penalty = 0.0
+        if mouth_var > 200:
+            mouth_penalty = 0.3  # Wide open mouth
+        elif mouth_var > 120:
+            mouth_penalty = 0.15  # Slightly open
+    else:
+        mouth_penalty = 0.0
+
+    # 3) Overall face sharpness — catch motion blur
+    face_sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+    if face_sharpness < 20:
+        return 0.35  # Motion blur
+
+    # 4) Face aspect ratio — detect extreme angles or distortion
+    aspect = h / max(1, w)
+    if aspect < 0.6 or aspect > 1.5:
+        return 0.5  # Odd angle
+
+    # Combine scores
+    eye_score = min(1.0, eye_sharpness / 80.0)
+    quality = eye_score * (1.0 - mouth_penalty)
+    return max(0.2, min(1.0, quality))
+
+
 def extract_candidate_frames(
     video_path: str,
     output_dir: str,
@@ -135,10 +194,19 @@ def extract_candidate_frames(
                 # Sharpness of face region (proxy for eyes open, good expression)
                 sharpness = _frame_sharpness(frame, (x1, y1, x2, y2))
 
+                # Skip very blurry faces (motion blur, out of focus)
+                if sharpness < 15:
+                    continue
+
+                # Face expression quality — filter blinking, open mouths
+                expression_quality = _face_expression_quality(frame, x1, y1, x2, y2)
+                if expression_quality < 0.4:
+                    continue  # Bad expression (blinking, mouth wide open, etc.)
+
                 # Face size as fraction of frame
                 face_area_pct = (fw * fh) / (w * h) * 100
 
-                # Score: confidence × sharpness × size_preference
+                # Score: confidence × sharpness × size_preference × expression
                 # Prefer faces that are 5-25% of frame area (natural portrait)
                 # Penalize extreme close-ups (>35%) and tiny faces (<3%)
                 if face_area_pct > 35:
@@ -150,7 +218,7 @@ def extract_candidate_frames(
                 else:
                     size_factor = 1.0  # Sweet spot
 
-                score = (conf ** 2) * (sharpness ** 0.5) * size_factor
+                score = (conf ** 2) * (sharpness ** 0.5) * size_factor * expression_quality
 
                 candidates.append({
                     "frame": frame.copy(),
@@ -474,7 +542,7 @@ def generate_variations(
 def thumbnail_to_video_frame(
     thumbnail_path: str,
     output_path: str,
-    duration: float = 2.0,
+    duration: float = 0.8,
     width: int = 1080,
     height: int = 1920,
 ) -> str:

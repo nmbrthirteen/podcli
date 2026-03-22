@@ -30,6 +30,46 @@ _FILLER_WORDS = frozenset([
 ])
 
 
+def _snap_to_sentence_end(
+    transcript_words: list[dict], start_second: float, end_second: float,
+    max_extension: float = 3.0,
+) -> float:
+    """
+    Snap clip end_second to the nearest sentence boundary (. ! ?).
+    Searches forward up to max_extension seconds. If no boundary found,
+    searches backward within the clip. Returns adjusted end_second.
+    """
+    SENTENCE_ENDINGS = ".!?"
+
+    # Get the last word in the clip range
+    clip_words = [w for w in transcript_words if w["end"] > start_second and w["start"] < end_second]
+    if not clip_words:
+        return end_second
+
+    last_word_text = clip_words[-1].get("word", "").strip()
+
+    # Already ends on a sentence boundary
+    if last_word_text and last_word_text[-1] in SENTENCE_ENDINGS:
+        return end_second
+
+    # Search forward: find next sentence-ending word within max_extension
+    for w in transcript_words:
+        if w["start"] >= end_second and w["end"] <= end_second + max_extension:
+            text = w.get("word", "").strip()
+            if text and text[-1] in SENTENCE_ENDINGS:
+                return w["end"]
+
+    # Search backward: find last sentence-ending word within the clip
+    for w in reversed(clip_words):
+        text = w.get("word", "").strip()
+        if text and text[-1] in SENTENCE_ENDINGS:
+            # Only snap backward if we don't lose more than 30% of the clip
+            if w["end"] > start_second + (end_second - start_second) * 0.7:
+                return w["end"]
+
+    return end_second
+
+
 def _clean_transcript_words(words: list[dict]) -> list[dict]:
     """
     Remove filler words from transcript captions.
@@ -91,6 +131,11 @@ def generate_clip(
 
     if end_second <= start_second:
         raise ValueError("end_second must be greater than start_second")
+
+    # Snap clip boundaries to sentence endings if transcript is available.
+    # Extends up to 3s forward to find a sentence boundary (. ! ?).
+    if transcript_words:
+        end_second = _snap_to_sentence_end(transcript_words, start_second, end_second)
 
     duration = end_second - start_second
     if duration > 180:
