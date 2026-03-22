@@ -535,12 +535,29 @@ def _build_speaker_aware_crop(
                 "crop_x": max(mid_x + seam_margin, min(cx - crop_w // 2, width - crop_w)),
             })
 
+        # Helper: wrap a static crop position with vertical framing
+        def _static_with_y(cx, cy=None):
+            """Return (x_expr, y_expr, adjusted_h) tuple with vertical framing."""
+            if cy is None:
+                cy = int(np.median(y_positions)) if len(y_positions) > 0 else height // 2
+            worst_off = abs(cy - height * 0.33)
+            zf = max(0.60, min(0.78, 1.0 - worst_off / height))
+            adj_h = int(height * zf)
+            adj_w = int(adj_h * target_ratio)
+            # Recompute crop_x for narrower width
+            if cx < mid_x:
+                crop_x = max(0, min(cx - adj_w // 2, mid_x - adj_w - seam_margin))
+            else:
+                crop_x = max(mid_x + seam_margin, min(cx - adj_w // 2, width - adj_w))
+            crop_y = max(0, min(cy - int(adj_h * 0.33), height - adj_h))
+            return str(crop_x), str(crop_y), adj_h
+
         if len(clusters) < 2:
             # Not a clear split-screen — try single cluster from all positions
             if len(positions) >= 3:
                 cx = int(np.median(positions))
-                crop_x = max(0, min(cx - crop_w // 2, width - crop_w))
-                return str(crop_x)
+                cy = int(np.median(y_positions)) if len(y_positions) > 0 else height // 2
+                return _static_with_y(cx, cy)
             return None
 
         # Sort clusters left to right
@@ -550,7 +567,8 @@ def _build_speaker_aware_crop(
         speakers = sorted(set(w.get("speaker") for w in transcript_words if w.get("speaker")))
         if len(speakers) < 2:
             clusters.sort(key=lambda c: c["count"], reverse=True)
-            return str(clusters[0]["crop_x"])
+            best = clusters[0]
+            return _static_with_y(best["center_x"], best.get("center_y"))
 
         # Detect split-screen: if most frames have 2+ faces, it's split-screen
         avg_faces = np.mean(faces_per_frame) if faces_per_frame else 0
@@ -626,7 +644,8 @@ def _build_speaker_aware_crop(
 
         if not segments:
             clusters.sort(key=lambda c: c["count"], reverse=True)
-            return str(clusters[0]["crop_x"])
+            best = clusters[0]
+            return _static_with_y(best["center_x"], best.get("center_y"))
 
         # Merge very short segments (<1.0s) into neighbors to avoid jitter.
         # 0.5s was too aggressive — fast back-and-forth crosstalk caused rapid panning.
