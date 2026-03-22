@@ -194,16 +194,16 @@ def crop_to_vertical(
         crop_y_expr = None
         adjusted_h = None
 
-        # Fast path: use pre-computed face_map from transcription
-        # Only use if we have speaker mappings — without them, face_map
-        # can't know which face to follow in a multi-face layout
-        if face_map and face_map.get("clusters") and face_map.get("speaker_mappings"):
+        # Fast path: use pre-computed face_map for non-split-screen only.
+        # Split-screen needs the slow path for per-speaker vertical framing.
+        is_split = face_map.get("is_split_screen", False) if face_map else False
+        if not is_split and face_map and face_map.get("clusters") and face_map.get("speaker_mappings"):
             crop_x_expr = _use_face_map(
                 face_map, transcript_words, clip_start,
                 width, height, target_ratio,
             )
 
-        # Slow path: analyze video on-the-fly (no face_map cached)
+        # Slow path: analyze video for face positions (x AND y per speaker)
         if crop_x_expr is None:
             has_speakers = (
                 transcript_words
