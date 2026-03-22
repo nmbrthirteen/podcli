@@ -1443,7 +1443,9 @@ def interactive_menu():
         print()
 
         try:
-            choice = input(f"  {accent}▸{reset} ").strip().strip("\r")
+            _flush_stdin()
+            raw = input(f"  {accent}▸{reset} ")
+            choice = "".join(c for c in raw if c.isprintable()).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return
