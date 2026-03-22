@@ -228,24 +228,19 @@ def crop_to_vertical(
             # then vertical zoom to center face. This handles webcams where
             # the person sits low/high in frame.
             face_y = _detect_face_y(input_path, width, height, crop_w, crop_x_expr)
-            if face_y is not None:
-                face_off_center = abs(face_y - height / 2) / height
-                if face_off_center > 0.12:
-                    # Vertical adjustment: crop horizontally first at full height,
-                    # then crop+scale vertically to center face.
-                    # This preserves the crop_x_expr (which may be a dynamic expression).
-                    adjusted_h = int(height * 0.82)
-                    adj_y = face_y - int(adjusted_h * 0.38)
-                    adj_y = max(0, min(adj_y, height - adjusted_h))
-                    adj_w = int(adjusted_h * target_ratio)
-                    # Two-step: crop horizontal column, then crop vertical + scale
-                    vf = (
-                        f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,"
-                        f"crop={adj_w}:{adjusted_h}:(iw-{adj_w})/2:{adj_y},"
-                        f"scale={target_w}:{target_h}"
-                    )
-                else:
-                    vf = f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,scale={target_w}:{target_h}"
+            if face_y is not None and face_y != height // 2:
+                # Place face at ~33% from top (portrait framing standard).
+                # Crop vertically to remove excess background above/below.
+                # Use 78% of frame height for enough zoom without distortion.
+                adjusted_h = int(height * 0.78)
+                adj_y = face_y - int(adjusted_h * 0.33)  # Face at 33% from top
+                adj_y = max(0, min(adj_y, height - adjusted_h))
+                adj_w = int(adjusted_h * target_ratio)
+                vf = (
+                    f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,"
+                    f"crop={adj_w}:{adjusted_h}:(iw-{adj_w})/2:{adj_y},"
+                    f"scale={target_w}:{target_h}"
+                )
             else:
                 vf = f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,scale={target_w}:{target_h}"
         else:
