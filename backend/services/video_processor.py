@@ -191,6 +191,8 @@ def crop_to_vertical(
 
     if strategy in ("face", "speaker"):
         crop_x_expr = None
+        crop_y_expr = None
+        adjusted_h = None
 
         # Fast path: use pre-computed face_map from transcription
         # Only use if we have speaker mappings — without them, face_map
@@ -209,40 +211,39 @@ def crop_to_vertical(
             )
 
             if has_speakers:
-                crop_x_expr = _build_speaker_aware_crop(
+                result = _build_speaker_aware_crop(
                     input_path, width, height, target_ratio,
                     transcript_words, clip_start,
                 )
+                # Returns (x_expr, y_expr, crop_h) tuple or single string
+                if isinstance(result, tuple):
+                    crop_x_expr, crop_y_expr, adjusted_h = result
+                else:
+                    crop_x_expr = result
             else:
-                # Single speaker: find face and center on it (static crop).
-                # Use _detect_face_center for a stable, centered position.
                 crop_x_expr = _detect_face_center(input_path, width, height, target_ratio)
 
         if crop_x_expr is not None:
-            crop_w = int(height * target_ratio)
-            crop_h = height
-            crop_y = 0
-
-            # Detect face Y — if face is significantly off-center vertically,
-            # apply a two-step crop: first horizontal (with speaker tracking),
-            # then vertical zoom to center face. This handles webcams where
-            # the person sits low/high in frame.
-            face_y = _detect_face_y(input_path, width, height, crop_w, crop_x_expr)
-            if face_y is not None and face_y != height // 2:
-                # Place face at ~33% from top (portrait framing standard).
-                # Crop vertically to remove excess background above/below.
-                # Use 78% of frame height for enough zoom without distortion.
-                adjusted_h = int(height * 0.78)
-                adj_y = face_y - int(adjusted_h * 0.33)  # Face at 33% from top
-                adj_y = max(0, min(adj_y, height - adjusted_h))
+            if crop_y_expr is not None:
+                # Per-speaker vertical framing: crop with dynamic x AND y
                 adj_w = int(adjusted_h * target_ratio)
-                vf = (
-                    f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,"
-                    f"crop={adj_w}:{adjusted_h}:(iw-{adj_w})/2:{adj_y},"
-                    f"scale={target_w}:{target_h}"
-                )
+                vf = f"crop={adj_w}:{adjusted_h}:{crop_x_expr}:{crop_y_expr},scale={target_w}:{target_h}"
             else:
-                vf = f"crop={crop_w}:{crop_h}:{crop_x_expr}:0,scale={target_w}:{target_h}"
+                # Static vertical crop with face Y detection
+                crop_w = int(height * target_ratio)
+                face_y = _detect_face_y(input_path, width, height, crop_w, crop_x_expr)
+                if face_y is not None:
+                    adjusted_h = int(height * 0.78)
+                    adj_y = face_y - int(adjusted_h * 0.33)
+                    adj_y = max(0, min(adj_y, height - adjusted_h))
+                    adj_w = int(adjusted_h * target_ratio)
+                    vf = (
+                        f"crop={crop_w}:{height}:{crop_x_expr}:0,"
+                        f"crop={adj_w}:{adjusted_h}:(iw-{adj_w})/2:{adj_y},"
+                        f"scale={target_w}:{target_h}"
+                    )
+                else:
+                    vf = f"crop={crop_w}:{height}:{crop_x_expr}:0,scale={target_w}:{target_h}"
         else:
             strategy = "center"
 
@@ -462,7 +463,7 @@ def _build_speaker_aware_crop(
 
         # Sample frames and detect ALL faces
         sample_count = min(80, max(30, int(duration * 4)))
-        face_observations = []  # (time, face_center_x, face_width)
+        face_observations = []  # (time, face_center_x, face_width, face_center_y)
         faces_per_frame = []    # count of faces per sampled frame
 
         for i in range(sample_count):
@@ -483,11 +484,14 @@ def _build_speaker_aware_crop(
                 if conf > 0.5:
                     x1 = int(detections[0, 0, j, 3] * w)
                     x2 = int(detections[0, 0, j, 5] * w)
+                    y1 = int(detections[0, 0, j, 4] * h)
+                    y2 = int(detections[0, 0, j, 6] * h)
                     fw = x2 - x1
                     if fw < w * 0.04:
                         continue
                     cx = (x1 + x2) // 2
-                    face_observations.append((t, cx, fw))
+                    cy = (y1 + y2) // 2
+                    face_observations.append((t, cx, fw, cy))
                     frame_faces += 1
             faces_per_frame.append(frame_faces)
 
@@ -501,26 +505,32 @@ def _build_speaker_aware_crop(
         # This is more robust than radius-based clustering which can merge
         # faces that are close to the center line.
         positions = np.array([obs[1] for obs in face_observations])
+        y_positions = np.array([obs[3] for obs in face_observations])
         mid_x = width // 2
 
-        left_pos = positions[positions < mid_x]
-        right_pos = positions[positions >= mid_x]
+        left_mask = positions < mid_x
+        right_mask = positions >= mid_x
+        left_pos = positions[left_mask]
+        right_pos = positions[right_mask]
 
         # Seam margin: keep crop at least 20px away from the center line
-        # to avoid showing the split-screen divider at the frame edge
         seam_margin = 20
         clusters = []
         if len(left_pos) >= 3:
             cx = int(np.median(left_pos))
+            cy = int(np.median(y_positions[left_mask]))
             clusters.append({
                 "center_x": cx,
+                "center_y": cy,
                 "count": len(left_pos),
                 "crop_x": max(0, min(cx - crop_w // 2, mid_x - crop_w - seam_margin)),
             })
         if len(right_pos) >= 3:
             cx = int(np.median(right_pos))
+            cy = int(np.median(y_positions[right_mask]))
             clusters.append({
                 "center_x": cx,
+                "center_y": cy,
                 "count": len(right_pos),
                 "crop_x": max(mid_x + seam_margin, min(cx - crop_w // 2, width - crop_w)),
             })
@@ -638,63 +648,81 @@ def _build_speaker_aware_crop(
             speaker_durations[sp] = speaker_durations.get(sp, 0) + (end_t - start_t)
         dominant_speaker = max(speaker_durations, key=speaker_durations.get)
         default_cluster = speaker_to_cluster.get(dominant_speaker) or clusters[0]
-        default_x = default_cluster["crop_x"]
 
-        # Build a timeline: list of (time, target_x) keyframes.
+        # Compute per-cluster vertical framing: crop_y (face at 33% from top)
+        # and recompute crop_x for the narrower adjusted width.
+        # Use adaptive zoom: if face is very low/high, zoom more aggressively.
+        max_face_y = max(cl.get("center_y", height // 2) for cl in clusters)
+        min_face_y = min(cl.get("center_y", height // 2) for cl in clusters)
+        worst_offset = max(abs(max_face_y - height * 0.33), abs(min_face_y - height * 0.33))
+        # Scale zoom: 78% height for centered faces, down to 60% for extreme cases
+        zoom_factor = max(0.60, min(0.78, 1.0 - worst_offset / height))
+        adjusted_h = int(height * zoom_factor)
+        adj_w = int(adjusted_h * target_ratio)
+        for cl in clusters:
+            cy = cl.get("center_y", height // 2)
+            crop_y = cy - int(adjusted_h * 0.33)
+            cl["crop_y"] = max(0, min(crop_y, height - adjusted_h))
+            # Recompute crop_x for the narrower adj_w
+            cx = cl["center_x"]
+            if cx < mid_x:
+                cl["crop_x"] = max(0, min(cx - adj_w // 2, mid_x - adj_w - seam_margin))
+            else:
+                cl["crop_x"] = max(mid_x + seam_margin, min(cx - adj_w // 2, width - adj_w))
+        default_x = default_cluster["crop_x"]
+        default_y = default_cluster.get("crop_y", 0)
+
+        # Build a timeline: list of (time, target_x, target_y) keyframes.
         # Split-screen: instant cut (panning through the center seam looks bad).
         # Non-split-screen: smooth 400ms pan.
         pan_duration = 0.0 if is_split_screen else 0.4
 
-        keyframes = []
+        keyframes = []  # (time, x, y)
         prev_x = default_x
+        prev_y = default_y
         for start_t, end_t, speaker in segments:
             cl = speaker_to_cluster.get(speaker)
             target_x = cl["crop_x"] if cl else default_x
+            target_y = cl.get("crop_y", default_y) if cl else default_y
 
-            if target_x != prev_x:
+            if target_x != prev_x or target_y != prev_y:
                 if pan_duration > 0:
-                    keyframes.append((start_t, prev_x))
-                    keyframes.append((start_t + pan_duration, target_x))
+                    keyframes.append((start_t, prev_x, prev_y))
+                    keyframes.append((start_t + pan_duration, target_x, target_y))
                 else:
-                    # Instant cut — jump at speaker change
-                    keyframes.append((start_t, prev_x))
-                    keyframes.append((start_t + 0.01, target_x))
+                    keyframes.append((start_t, prev_x, prev_y))
+                    keyframes.append((start_t + 0.01, target_x, target_y))
             prev_x = target_x
+            prev_y = target_y
 
         if not keyframes:
-            return str(default_x)
+            return str(default_x), str(default_y), adjusted_h
 
-        # Build FFmpeg expression using chained lerp:
-        # For each keyframe pair, if t is in [t0, t1], lerp from x0 to x1
-        # Otherwise fall through to next pair or default
-        expr_parts = []
-        for i in range(0, len(keyframes) - 1, 2):
-            t0, x0 = keyframes[i]
-            t1, x1 = keyframes[i + 1]
-            # During transition: linear interpolation
-            expr_parts.append(
-                f"if(between(t\\,{t0:.2f}\\,{t1:.2f})\\,"
-                f"{x0}+(({x1}-{x0})*(t-{t0:.2f})/{max(0.01, t1 - t0):.2f})\\,"
-            )
-            # After transition until next one: hold at target
-            if i + 2 < len(keyframes):
-                next_t = keyframes[i + 2][0]
-            else:
-                next_t = duration
-            expr_parts.append(
-                f"if(between(t\\,{t1:.2f}\\,{next_t:.2f})\\,"
-                f"{x1}\\,"
-            )
+        # Build FFmpeg expressions for both X and Y
+        def _build_expr(keyframes_xy, val_idx, default_val):
+            parts = []
+            for i in range(0, len(keyframes_xy) - 1, 2):
+                t0, *vals0 = keyframes_xy[i]
+                t1, *vals1 = keyframes_xy[i + 1]
+                v0, v1 = vals0[val_idx], vals1[val_idx]
+                dt = max(0.01, t1 - t0)
+                parts.append(
+                    f"if(between(t\\,{t0:.2f}\\,{t1:.2f})\\,"
+                    f"{v0}+(({v1}-{v0})*(t-{t0:.2f})/{dt:.2f})\\,"
+                )
+                next_t = keyframes_xy[i + 2][0] if i + 2 < len(keyframes_xy) else duration
+                parts.append(
+                    f"if(between(t\\,{t1:.2f}\\,{next_t:.2f})\\,"
+                    f"{v1}\\,"
+                )
+            if len(parts) > 30:
+                return str(default_val)
+            return "".join(parts) + str(default_val) + ")" * len(parts)
 
-        # Cap nesting depth to avoid FFmpeg expression parser limits
-        if len(expr_parts) > 30:
-            print(f"Warning: {len(expr_parts)} pan segments, simplifying to avoid FFmpeg limits", file=sys.stderr)
-            # Fallback: just use the dominant speaker position
-            return str(default_x)
+        x_expr = _build_expr(keyframes, 0, default_x)
+        y_expr = _build_expr(keyframes, 1, default_y)
 
-        expr = "".join(expr_parts) + str(default_x) + ")" * len(expr_parts)
-
-        return expr
+        return x_expr, y_expr, adjusted_h
 
     except ImportError:
         return None
