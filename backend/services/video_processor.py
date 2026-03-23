@@ -223,6 +223,9 @@ def crop_to_vertical(
             else:
                 crop_x_expr = _detect_face_center(input_path, width, height, target_ratio)
 
+        if crop_x_expr is None:
+            print(f"Warning: all crop paths returned None for {input_path} ({width}x{height})", file=sys.stderr)
+
         if crop_x_expr is not None:
             if crop_y_expr is not None:
                 # Per-speaker vertical framing: crop with dynamic x AND y
@@ -746,7 +749,8 @@ def _build_speaker_aware_crop(
     except ImportError:
         return None
     except Exception as e:
-        print(f"Warning: speaker-aware crop failed: {e}", file=sys.stderr)
+        import traceback
+        print(f"Warning: speaker-aware crop failed: {e}\n{traceback.format_exc()}", file=sys.stderr)
         return None
 
 
