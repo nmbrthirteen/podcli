@@ -792,13 +792,24 @@ def _build_speaker_aware_crop(
                     t0, v0 = kf_list[i]
                     t1, v1 = kf_list[i + 1]
                     dt = max(0.01, t1 - t0)
-                    parts.append(
-                        f"if(between(t\\,{t0:.2f}\\,{t1:.2f})\\,"
-                        f"{v0}+(({v1}-{v0})*(t-{t0:.2f})/{dt:.2f})\\,"
-                    )
+                    if dt > 1.5:
+                        # Large gap: hold previous value, then jump to next
+                        # (no interpolation through unknown territory)
+                        jump_t = t1 - 0.01
+                        parts.append(
+                            f"if(between(t\\,{t0:.2f}\\,{jump_t:.2f})\\,{v0}\\,"
+                        )
+                        parts.append(
+                            f"if(between(t\\,{jump_t:.2f}\\,{t1:.2f})\\,{v1}\\,"
+                        )
+                    else:
+                        # Close keyframes: smooth interpolation
+                        parts.append(
+                            f"if(between(t\\,{t0:.2f}\\,{t1:.2f})\\,"
+                            f"{v0}+(({v1}-{v0})*(t-{t0:.2f})/{dt:.2f})\\,"
+                        )
                 if len(parts) > max_parts:
                     return str(default_val)
-                # After last keyframe, hold last value
                 return "".join(parts) + str(kf_list[-1][1]) + ")" * len(parts)
 
             return str(kf_list[0][1])
