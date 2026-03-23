@@ -194,10 +194,13 @@ def crop_to_vertical(
         crop_y_expr = None
         adjusted_h = None
 
-        # Fast path: use pre-computed face_map for non-split-screen only.
-        # Split-screen needs the slow path for per-speaker vertical framing.
+        # Fast path: use pre-computed face_map for simple layouts only.
+        # Split-screen and mixed layouts (Riverside-style recordings that switch
+        # between split and single-person views) need the slow path for
+        # per-frame adaptive tracking.
         is_split = face_map.get("is_split_screen", False) if face_map else False
-        if not is_split and face_map and face_map.get("clusters") and face_map.get("speaker_mappings"):
+        is_mixed = face_map.get("is_mixed_layout", False) if face_map else False
+        if not is_split and not is_mixed and face_map and face_map.get("clusters") and face_map.get("speaker_mappings"):
             crop_x_expr = _use_face_map(
                 face_map, transcript_words, clip_start,
                 width, height, target_ratio,
@@ -431,15 +434,13 @@ def _build_speaker_aware_crop(
     """
     Build a speaker-aware crop that pans to whoever is speaking.
 
-    Split-screen aware: in a podcast layout where both faces are always
-    visible, we detect left/right face positions, sort speakers by their
-    average word position in the timeline, and map the first speaker to
-    the left face and the second to the right (standard podcast layout).
+    Layout-adaptive: handles Riverside-style recordings that dynamically
+    switch between split-screen (both faces visible) and single-person
+    (one speaker fullscreen) layouts. Instead of static cluster positions,
+    tracks the actual face position per frame and adapts the crop to
+    wherever the active speaker's face actually is.
 
-    For non-split-screen (single face visible at a time), falls back to
-    tracking whichever face is visible when each speaker talks.
-
-    Returns an FFmpeg crop x expression string, or None if detection fails.
+    Returns (x_expr, y_expr, adjusted_h) tuple or None if detection fails.
     """
     try:
         import cv2
@@ -452,7 +453,6 @@ def _build_speaker_aware_crop(
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 30
         duration = total_frames / fps
-        crop_w = int(height * target_ratio)
 
         # Load DNN face detector
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -464,10 +464,18 @@ def _build_speaker_aware_crop(
 
         detector = cv2.dnn.readNetFromCaffe(proto, model)
 
-        # Sample frames and detect ALL faces
+        # Zoom to 75% of frame height for tight face framing
+        adjusted_h = int(height * 0.75)
+        adj_w = int(adjusted_h * target_ratio)
+        mid_x = width // 2
+
+        # ── Phase 1: Dense frame sampling ──────────────────────────────
+        # Record ALL faces per frame, plus per-frame layout classification.
         sample_count = min(150, max(40, int(duration * 6)))
-        face_observations = []  # (time, face_center_x, face_width, face_center_y)
-        faces_per_frame = []    # count of faces per sampled frame
+
+        # Per-frame data: list of (time, faces_list)
+        # Each face: (cx, cy, fw, conf)
+        frame_data = []
 
         for i in range(sample_count):
             t = i * duration / sample_count
@@ -481,7 +489,7 @@ def _build_speaker_aware_crop(
             detector.setInput(blob)
             detections = detector.forward()
 
-            frame_faces = 0
+            faces = []
             for j in range(detections.shape[2]):
                 conf = detections[0, 0, j, 2]
                 if conf > 0.5:
@@ -494,143 +502,32 @@ def _build_speaker_aware_crop(
                         continue
                     cx = (x1 + x2) // 2
                     cy = (y1 + y2) // 2
-                    face_observations.append((t, cx, fw, cy))
-                    frame_faces += 1
-            faces_per_frame.append(frame_faces)
+                    faces.append((cx, cy, fw, float(conf)))
+
+            frame_data.append((t, faces))
 
         cap.release()
 
-        if len(face_observations) < 5:
+        # Count total detections
+        total_faces = sum(len(faces) for _, faces in frame_data)
+        if total_faces < 5:
             return None
 
-        # Cluster faces by position (left vs right).
-        # Simple split: faces in the left half vs right half of the frame.
-        # This is more robust than radius-based clustering which can merge
-        # faces that are close to the center line.
-        positions = np.array([obs[1] for obs in face_observations])
-        y_positions = np.array([obs[3] for obs in face_observations])
-        mid_x = width // 2
+        # ── Phase 2: Establish speaker ↔ side mapping from split frames ─
+        # Only use frames with 2+ faces (split-screen) to determine which
+        # speaker is on which side. Single-face frames can't tell us this.
 
-        left_mask = positions < mid_x
-        right_mask = positions >= mid_x
-        left_pos = positions[left_mask]
-        right_pos = positions[right_mask]
+        split_frames = [(t, faces) for t, faces in frame_data if len(faces) >= 2]
+        single_frames = [(t, faces) for t, faces in frame_data if len(faces) == 1]
+        has_split = len(split_frames) >= 3
+        has_single = len(single_frames) >= 3
+        is_mixed_layout = has_split and has_single
 
-        # Seam margin: keep crop at least 20px away from the center line
-        seam_margin = 20
-        clusters = []
-        if len(left_pos) >= 3:
-            cx = int(np.median(left_pos))
-            cy = int(np.median(y_positions[left_mask]))
-            clusters.append({
-                "center_x": cx,
-                "center_y": cy,
-                "count": len(left_pos),
-                "crop_x": max(0, min(cx - crop_w // 2, mid_x - crop_w - seam_margin)),
-            })
-        if len(right_pos) >= 3:
-            cx = int(np.median(right_pos))
-            cy = int(np.median(y_positions[right_mask]))
-            clusters.append({
-                "center_x": cx,
-                "center_y": cy,
-                "count": len(right_pos),
-                "crop_x": max(mid_x + seam_margin, min(cx - crop_w // 2, width - crop_w)),
-            })
-
-        # Helper: wrap a static crop position with vertical framing
-        def _static_with_y(cx, cy=None):
-            """Return (x_expr, y_expr, adjusted_h) tuple with vertical framing."""
-            if cy is None:
-                cy = int(np.median(y_positions)) if len(y_positions) > 0 else height // 2
-            adj_h = int(height * 0.75)
-            adj_w = int(adj_h * target_ratio)
-            # Recompute crop_x for narrower width
-            if cx < mid_x:
-                crop_x = max(0, min(cx - adj_w // 2, mid_x - adj_w - seam_margin))
-            else:
-                crop_x = max(mid_x + seam_margin, min(cx - adj_w // 2, width - adj_w))
-            crop_y = max(0, min(cy - int(adj_h * 0.33), height - adj_h))
-            return str(crop_x), str(crop_y), adj_h
-
-        if len(clusters) < 2:
-            # Not a clear split-screen — try single cluster from all positions
-            if len(positions) >= 3:
-                cx = int(np.median(positions))
-                cy = int(np.median(y_positions)) if len(y_positions) > 0 else height // 2
-                return _static_with_y(cx, cy)
-            return None
-
-        # Sort clusters left to right
-        clusters.sort(key=lambda c: c["center_x"])
-
-        # Get unique speakers
+        # Get unique speakers and build speaker segments
         speakers = sorted(set(w.get("speaker") for w in transcript_words if w.get("speaker")))
 
-        # Detect split-screen: if most frames have 2+ faces, it's split-screen
-        avg_faces = np.mean(faces_per_frame) if faces_per_frame else 0
-        is_split_screen = avg_faces >= 1.5
-
-        speaker_to_cluster = {}
-
-        if len(speakers) < 2:
-            # Single speaker — map to the cluster with most detections
-            clusters.sort(key=lambda c: c["count"], reverse=True)
-            if speakers:
-                speaker_to_cluster[speakers[0]] = clusters[0]
-            clusters.sort(key=lambda c: c["center_x"])  # restore order
-
-        elif is_split_screen and len(clusters) >= 2:
-            # Split-screen: both faces are always visible, so audio-visual
-            # correlation won't work (both clusters get equal votes).
-            # Use positional heuristic: map top-2 speakers (by talk time)
-            # to left/right faces. Any extra speakers (pyannote mis-splits)
-            # fall back to the dominant speaker's cluster.
-            speaker_talk_time = {}
-            for w in transcript_words:
-                sp = w.get("speaker")
-                if sp:
-                    speaker_talk_time[sp] = speaker_talk_time.get(sp, 0) + (w["end"] - w["start"])
-            speakers_by_talk = sorted(speakers, key=lambda s: speaker_talk_time.get(s, 0), reverse=True)
-
-            # Map first speaker to left face using first-word heuristic
-            speaker_first_word = {}
-            for w in transcript_words:
-                sp = w.get("speaker")
-                if sp and sp not in speaker_first_word:
-                    speaker_first_word[sp] = w["start"]
-
-            top_2 = speakers_by_talk[:2]
-            top_2_by_first_word = sorted(top_2, key=lambda s: speaker_first_word.get(s, float("inf")))
-            speaker_to_cluster[top_2_by_first_word[0]] = clusters[0]  # left
-            speaker_to_cluster[top_2_by_first_word[1]] = clusters[1]  # right
-
-            # Map any remaining speakers to the dominant (most talk time) speaker's cluster
-            dominant = speakers_by_talk[0]
-            for sp in speakers_by_talk[2:]:
-                speaker_to_cluster[sp] = speaker_to_cluster[dominant]
-        else:
-            # Non-split-screen: only one face visible at a time.
-            # Map by which face is visible when each speaker talks.
-            for speaker in speakers:
-                speaker_times = [
-                    w["start"] - clip_start
-                    for w in transcript_words
-                    if w.get("speaker") == speaker
-                ]
-                cluster_votes = [0] * len(clusters)
-                for t in speaker_times:
-                    for obs_t, obs_cx, obs_fw, *_ in face_observations:
-                        if abs(obs_t - t) < 1.0:
-                            for ci, cl in enumerate(clusters):
-                                if abs(obs_cx - cl["center_x"]) < width * 0.15:
-                                    cluster_votes[ci] += 1
-                if any(cluster_votes):
-                    best = max(range(len(cluster_votes)), key=lambda i: cluster_votes[i])
-                    speaker_to_cluster[speaker] = clusters[best]
-
         # Build speaker segments from transcript words
-        segments = []  # (start_time_in_clip, end_time_in_clip, speaker)
+        segments = []
         current_speaker = None
         seg_start = 0
 
@@ -647,120 +544,143 @@ def _build_speaker_aware_crop(
             segments.append((seg_start, duration, current_speaker))
 
         if not segments:
-            clusters.sort(key=lambda c: c["count"], reverse=True)
-            best = clusters[0]
-            return _static_with_y(best["center_x"], best.get("center_y"))
+            # No speaker data — use median of all faces
+            all_cx = [cx for _, faces in frame_data for cx, cy, fw, conf in faces]
+            all_cy = [cy for _, faces in frame_data for cx, cy, fw, conf in faces]
+            if all_cx:
+                mcx = int(np.median(all_cx))
+                mcy = int(np.median(all_cy))
+                crop_x = max(0, min(mcx - adj_w // 2, width - adj_w))
+                crop_y = max(0, min(mcy - int(adjusted_h * 0.33), height - adjusted_h))
+                return str(crop_x), str(crop_y), adjusted_h
+            return None
 
-        # Merge very short segments (<1.0s) into neighbors to avoid jitter.
-        # 0.5s was too aggressive — fast back-and-forth crosstalk caused rapid panning.
+        # Merge very short segments (<1.0s) to avoid jitter
         merged = []
         for seg in segments:
             if merged and seg[2] == merged[-1][2]:
-                # Same speaker: extend previous segment
                 merged[-1] = (merged[-1][0], seg[1], seg[2])
             elif merged and (seg[1] - seg[0]) < 1.0:
-                # Too short to pan — absorb into previous segment
                 merged[-1] = (merged[-1][0], seg[1], merged[-1][2])
             else:
                 merged.append(list(seg))
         segments = merged
 
-        # Default position: whichever speaker talks most
+        # Determine speaker-to-side mapping from split-screen frames
+        # In split-screen: left face belongs to one speaker, right to another
+        speaker_side = {}  # speaker → "left" or "right"
+
+        if has_split and len(speakers) >= 2:
+            # Use first-word heuristic: first speaker to talk → left face
+            speaker_talk_time = {}
+            speaker_first_word = {}
+            for w in transcript_words:
+                sp = w.get("speaker")
+                if sp:
+                    speaker_talk_time[sp] = speaker_talk_time.get(sp, 0) + (w["end"] - w["start"])
+                    if sp not in speaker_first_word:
+                        speaker_first_word[sp] = w["start"]
+
+            speakers_by_talk = sorted(speakers, key=lambda s: speaker_talk_time.get(s, 0), reverse=True)
+            top_2 = speakers_by_talk[:2]
+            top_2_by_first_word = sorted(top_2, key=lambda s: speaker_first_word.get(s, float("inf")))
+            speaker_side[top_2_by_first_word[0]] = "left"
+            speaker_side[top_2_by_first_word[1]] = "right"
+            # Extra speakers inherit dominant speaker's side
+            for sp in speakers_by_talk[2:]:
+                speaker_side[sp] = speaker_side[speakers_by_talk[0]]
+
+        # ── Phase 3: Per-frame face selection for active speaker ───────
+        # For each sampled frame, pick the face belonging to the active
+        # speaker, adapting to whether the frame is split or single-person.
+
+        def _active_speaker_at(t):
+            """Which speaker is active at time t in the clip."""
+            for start_t, end_t, sp in segments:
+                if start_t <= t <= end_t:
+                    return sp
+            return segments[0][2] if segments else None
+
+        def _pick_face_for_speaker(faces, speaker, n_faces):
+            """
+            Select the correct face for a speaker from detected faces.
+
+            Split-screen (2+ faces): pick the face on the speaker's assigned side.
+            Single-person (1 face): always use that face (it's whoever is on-screen).
+            """
+            if not faces:
+                return None
+
+            if n_faces >= 2 and speaker in speaker_side:
+                # Split-screen: pick face on the speaker's side
+                side = speaker_side[speaker]
+                if side == "left":
+                    # Pick the leftmost face
+                    return min(faces, key=lambda f: f[0])
+                else:
+                    # Pick the rightmost face
+                    return max(faces, key=lambda f: f[0])
+
+            # Single face or no side mapping: use the best (most confident) face
+            return max(faces, key=lambda f: f[3])
+
+        def _crop_xy_for_face(cx, cy):
+            """Compute crop_x and crop_y for a face at (cx, cy)."""
+            crop_x = cx - adj_w // 2
+            crop_x = max(0, min(crop_x, width - adj_w))
+            crop_y = cy - int(adjusted_h * 0.33)
+            crop_y = max(0, min(crop_y, height - adjusted_h))
+            return crop_x, crop_y
+
+        # Build per-timestamp crop positions
+        timed_crops = []  # (time, crop_x, crop_y, speaker)
+        for t, faces in frame_data:
+            if not faces:
+                continue
+            speaker = _active_speaker_at(t)
+            face = _pick_face_for_speaker(faces, speaker, len(faces))
+            if face is None:
+                continue
+            cx, cy, fw, conf = face
+            crop_x, crop_y = _crop_xy_for_face(cx, cy)
+            timed_crops.append((t, crop_x, crop_y, speaker))
+
+        if not timed_crops:
+            return None
+
+        # ── Phase 4: Build keyframes per speaker segment ───────────────
+        # Default position: dominant speaker's median
         speaker_durations = {}
         for start_t, end_t, sp in segments:
             speaker_durations[sp] = speaker_durations.get(sp, 0) + (end_t - start_t)
         dominant_speaker = max(speaker_durations, key=speaker_durations.get)
-        default_cluster = speaker_to_cluster.get(dominant_speaker) or clusters[0]
 
-        # Compute per-cluster vertical framing: crop_y (face at 33% from top)
-        # and recompute crop_x for the narrower adjusted width.
-        # Zoom to 75% of frame height — tight enough to fill frame with face
-        # but leaves room for Y tracking to follow head movement.
-        adjusted_h = int(height * 0.75)
-        adj_w = int(adjusted_h * target_ratio)
-
-        # Recompute crop_x for the narrower adj_w
-        for cl in clusters:
-            cx = cl["center_x"]
-            if cx < mid_x:
-                cl["crop_x"] = max(0, min(cx - adj_w // 2, mid_x - adj_w - seam_margin))
-            else:
-                cl["crop_x"] = max(mid_x + seam_margin, min(cx - adj_w // 2, width - adj_w))
-
-        default_x = default_cluster["crop_x"]
-
-        # Build per-cluster face Y tracking from observations.
-        # Group face_y observations by cluster (left/right), then build
-        # smooth Y keyframes that follow head movement over time.
-        def _y_for_cluster(cl):
-            """Get time-series Y positions for faces in this cluster."""
-            cx = cl["center_x"]
-            is_left = cx < mid_x
-            ys = []
-            for obs_t, obs_cx, obs_fw, *rest in face_observations:
-                obs_cy = rest[0] if rest else height // 2
-                # Match by half (left/right) not by radius — the person
-                # may lean/gesture causing face X to shift significantly
-                if (is_left and obs_cx < mid_x) or (not is_left and obs_cx >= mid_x):
-                    crop_y = obs_cy - int(adjusted_h * 0.33)
-                    crop_y = max(0, min(crop_y, height - adjusted_h))
-                    ys.append((obs_t, crop_y))
-            return ys
-
-        cluster_y_series = {}
-        for ci, cl in enumerate(clusters):
-            cluster_y_series[ci] = _y_for_cluster(cl)
-
-        # Default Y: median of dominant cluster
-        dom_ci = clusters.index(default_cluster) if default_cluster in clusters else 0
-        dom_ys = cluster_y_series.get(dom_ci, [])
-        default_y = int(np.median([y for _, y in dom_ys])) if dom_ys else 0
-
-        # Build per-cluster X tracking from observations (same as Y)
-        def _x_for_cluster(cl):
-            """Get time-series X crop positions for faces in this cluster."""
-            is_left = cl["center_x"] < mid_x
-            xs = []
-            for obs_t, obs_cx, obs_fw, *rest in face_observations:
-                if (is_left and obs_cx < mid_x) or (not is_left and obs_cx >= mid_x):
-                    crop_x = obs_cx - adj_w // 2
-                    # Clamp to stay within the correct half with seam margin
-                    if is_left:
-                        crop_x = max(0, min(crop_x, mid_x - adj_w - seam_margin))
-                    else:
-                        crop_x = max(mid_x + seam_margin, min(crop_x, width - adj_w))
-                    xs.append((obs_t, crop_x))
-            return xs
-
-        cluster_x_series = {}
-        for ci, cl in enumerate(clusters):
-            cluster_x_series[ci] = _x_for_cluster(cl)
-
-        # Build keyframes: both X and Y track face per active speaker
-        pan_duration = 0.0 if is_split_screen else 0.4
+        dom_crops = [(cx, cy) for _, cx, cy, sp in timed_crops if sp == dominant_speaker]
+        default_x = int(np.median([cx for cx, cy in dom_crops])) if dom_crops else width // 2 - adj_w // 2
+        default_y = int(np.median([cy for cx, cy in dom_crops])) if dom_crops else 0
 
         x_keyframes = []
         y_keyframes = []
+
         for start_t, end_t, speaker in segments:
-            cl = speaker_to_cluster.get(speaker)
-            ci = clusters.index(cl) if cl in clusters else dom_ci
+            # Get crop positions for frames within this segment
+            seg_crops = [(t, cx, cy) for t, cx, cy, sp in timed_crops if start_t <= t <= end_t]
 
-            # X tracking — use all observations, smoothing handles dedup
-            xs = cluster_x_series.get(ci, [])
-            seg_xs = [(t, x) for t, x in xs if start_t <= t <= end_t]
-            if seg_xs:
-                x_keyframes.extend(seg_xs)
+            if seg_crops:
+                for t, cx, cy in seg_crops:
+                    x_keyframes.append((t, cx))
+                    y_keyframes.append((t, cy))
             else:
-                x_keyframes.append((start_t, cl["crop_x"] if cl else default_x))
-
-            # Y tracking — use all observations
-            ys = cluster_y_series.get(ci, [])
-            seg_ys = [(t, y) for t, y in ys if start_t <= t <= end_t]
-            if seg_ys:
-                y_keyframes.extend(seg_ys)
-            elif ys:
-                med_y = int(np.median([y for _, y in ys]))
-                y_keyframes.append((start_t, med_y))
+                # No frames in segment — use speaker's median from all frames
+                sp_crops = [(cx, cy) for _, cx, cy, sp in timed_crops if sp == speaker]
+                if sp_crops:
+                    med_x = int(np.median([cx for cx, cy in sp_crops]))
+                    med_y = int(np.median([cy for cx, cy in sp_crops]))
+                    x_keyframes.append((start_t, med_x))
+                    y_keyframes.append((start_t, med_y))
+                else:
+                    x_keyframes.append((start_t, default_x))
+                    y_keyframes.append((start_t, default_y))
 
         # Deduplicate and sort both keyframe lists
         def _smooth_keyframes(kf, min_interval=0.5):
@@ -779,22 +699,31 @@ def _build_speaker_aware_crop(
             return str(default_x), str(default_y), adjusted_h
 
         # Build FFmpeg expressions for X and Y independently
-        def _build_expr_1d(kf_list, default_val, max_parts=30):
+        def _build_expr_1d(kf_list, default_val, max_parts=30, jump_threshold=150):
             """Build FFmpeg expression from [(time, value), ...] keyframes.
-            Uses smooth lerp between consecutive keyframes."""
+
+            Uses smooth lerp between consecutive keyframes, but instant-cuts
+            for large jumps (layout changes like split→single in Riverside).
+
+            jump_threshold: if value changes by more than this between adjacent
+            keyframes, use instant cut instead of smooth interpolation to avoid
+            sweeping across the split-screen seam.
+            """
             if not kf_list:
                 return str(default_val)
 
-            # For instant-cut X keyframes (pairs), use the existing pair logic
             if len(kf_list) >= 2:
                 parts = []
                 for i in range(len(kf_list) - 1):
                     t0, v0 = kf_list[i]
                     t1, v1 = kf_list[i + 1]
                     dt = max(0.01, t1 - t0)
-                    if dt > 1.5:
-                        # Large gap: hold previous value, then jump to next
-                        # (no interpolation through unknown territory)
+                    value_jump = abs(v1 - v0)
+
+                    if dt > 1.5 or value_jump > jump_threshold:
+                        # Large time gap OR large value jump (layout change):
+                        # hold previous value, then instant-cut to next.
+                        # Avoids interpolating through the split-screen seam.
                         jump_t = t1 - 0.01
                         parts.append(
                             f"if(between(t\\,{t0:.2f}\\,{jump_t:.2f})\\,{v0}\\,"
@@ -803,7 +732,7 @@ def _build_speaker_aware_crop(
                             f"if(between(t\\,{jump_t:.2f}\\,{t1:.2f})\\,{v1}\\,"
                         )
                     else:
-                        # Close keyframes: smooth interpolation
+                        # Close keyframes with small movement: smooth interpolation
                         parts.append(
                             f"if(between(t\\,{t0:.2f}\\,{t1:.2f})\\,"
                             f"{v0}+(({v1}-{v0})*(t-{t0:.2f})/{dt:.2f})\\,"

@@ -99,13 +99,17 @@ def analyze_faces(
             if conf > 0.5:
                 x1 = int(detections[0, 0, j, 3] * w)
                 x2 = int(detections[0, 0, j, 5] * w)
+                y1 = int(detections[0, 0, j, 4] * h)
+                y2 = int(detections[0, 0, j, 6] * h)
                 fw = x2 - x1
                 if fw < w * 0.04:
                     continue
                 cx = (x1 + x2) // 2
+                cy = (y1 + y2) // 2
                 observations.append({
                     "time": round(t, 3),
                     "face_center_x": cx,
+                    "face_center_y": cy,
                     "face_width": fw,
                     "confidence": round(float(conf), 3),
                 })
@@ -155,9 +159,13 @@ def analyze_faces(
 
     clusters_list.sort(key=lambda c: c["center_x"])
 
-    # Detect split-screen
+    # Detect split-screen and mixed layouts (Riverside-style recordings
+    # that switch between split-screen and single-person views)
     avg_faces = float(np.mean(faces_per_frame)) if faces_per_frame else 0
     is_split_screen = avg_faces >= 1.5 and len(clusters_list) >= 2
+    split_count = sum(1 for f in faces_per_frame if f >= 2)
+    single_count = sum(1 for f in faces_per_frame if f == 1)
+    is_mixed_layout = split_count >= 3 and single_count >= 3
 
     # Map speakers to clusters
     speakers = sorted(set(s.get("speaker", "") for s in speaker_segments if s.get("speaker")))
@@ -220,6 +228,7 @@ def analyze_faces(
         "clusters": clusters_list,
         "speaker_mappings": speaker_mappings,
         "is_split_screen": is_split_screen,
+        "is_mixed_layout": is_mixed_layout,
         "dominant_speaker": dominant_speaker,
         "video_width": width,
         "video_height": height,
