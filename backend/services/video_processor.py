@@ -465,7 +465,7 @@ def _build_speaker_aware_crop(
         detector = cv2.dnn.readNetFromCaffe(proto, model)
 
         # Sample frames and detect ALL faces
-        sample_count = min(80, max(30, int(duration * 4)))
+        sample_count = min(150, max(40, int(duration * 6)))
         face_observations = []  # (time, face_center_x, face_width, face_center_y)
         faces_per_frame = []    # count of faces per sampled frame
 
@@ -716,50 +716,64 @@ def _build_speaker_aware_crop(
         dom_ys = cluster_y_series.get(dom_ci, [])
         default_y = int(np.median([y for _, y in dom_ys])) if dom_ys else 0
 
-        # Build keyframes: X changes on speaker switch, Y tracks face continuously
+        # Build per-cluster X tracking from observations (same as Y)
+        def _x_for_cluster(cl):
+            """Get time-series X crop positions for faces in this cluster."""
+            is_left = cl["center_x"] < mid_x
+            xs = []
+            for obs_t, obs_cx, obs_fw, *rest in face_observations:
+                if (is_left and obs_cx < mid_x) or (not is_left and obs_cx >= mid_x):
+                    crop_x = obs_cx - adj_w // 2
+                    # Clamp to stay within the correct half with seam margin
+                    if is_left:
+                        crop_x = max(0, min(crop_x, mid_x - adj_w - seam_margin))
+                    else:
+                        crop_x = max(mid_x + seam_margin, min(crop_x, width - adj_w))
+                    xs.append((obs_t, crop_x))
+            return xs
+
+        cluster_x_series = {}
+        for ci, cl in enumerate(clusters):
+            cluster_x_series[ci] = _x_for_cluster(cl)
+
+        # Build keyframes: both X and Y track face per active speaker
         pan_duration = 0.0 if is_split_screen else 0.4
 
-        # X keyframes from speaker segments
         x_keyframes = []
-        prev_x = default_x
-        for start_t, end_t, speaker in segments:
-            cl = speaker_to_cluster.get(speaker)
-            target_x = cl["crop_x"] if cl else default_x
-            if target_x != prev_x:
-                if pan_duration > 0:
-                    x_keyframes.append((start_t, prev_x))
-                    x_keyframes.append((start_t + pan_duration, target_x))
-                else:
-                    x_keyframes.append((start_t, prev_x))
-                    x_keyframes.append((start_t + 0.01, target_x))
-            prev_x = target_x
-
-        # Y keyframes: track face Y smoothly over time per active speaker
         y_keyframes = []
         for start_t, end_t, speaker in segments:
             cl = speaker_to_cluster.get(speaker)
             ci = clusters.index(cl) if cl in clusters else dom_ci
+
+            # X tracking — use all observations, smoothing handles dedup
+            xs = cluster_x_series.get(ci, [])
+            seg_xs = [(t, x) for t, x in xs if start_t <= t <= end_t]
+            if seg_xs:
+                x_keyframes.extend(seg_xs)
+            else:
+                x_keyframes.append((start_t, cl["crop_x"] if cl else default_x))
+
+            # Y tracking — use all observations
             ys = cluster_y_series.get(ci, [])
-            # Get Y observations during this segment
             seg_ys = [(t, y) for t, y in ys if start_t <= t <= end_t]
             if seg_ys:
-                # Sample every ~2 seconds for smooth tracking
-                for t, y in seg_ys[::max(1, len(seg_ys) // 5)]:
-                    y_keyframes.append((t, y))
+                y_keyframes.extend(seg_ys)
             elif ys:
-                # No observations in this segment — use cluster median
                 med_y = int(np.median([y for _, y in ys]))
                 y_keyframes.append((start_t, med_y))
 
-        # Deduplicate and sort
-        y_keyframes.sort(key=lambda k: k[0])
-        # Smooth: merge keyframes that are too close
-        smoothed_y = []
-        for t, y in y_keyframes:
-            if smoothed_y and abs(t - smoothed_y[-1][0]) < 1.0:
-                continue
-            smoothed_y.append((t, y))
-        y_keyframes = smoothed_y
+        # Deduplicate and sort both keyframe lists
+        def _smooth_keyframes(kf, min_interval=0.5):
+            kf.sort(key=lambda k: k[0])
+            smoothed = []
+            for t, v in kf:
+                if smoothed and abs(t - smoothed[-1][0]) < min_interval:
+                    continue
+                smoothed.append((t, v))
+            return smoothed
+
+        x_keyframes = _smooth_keyframes(x_keyframes)
+        y_keyframes = _smooth_keyframes(y_keyframes)
 
         if not x_keyframes and not y_keyframes:
             return str(default_x), str(default_y), adjusted_h
@@ -789,8 +803,8 @@ def _build_speaker_aware_crop(
 
             return str(kf_list[0][1])
 
-        x_expr = _build_expr_1d(x_keyframes, default_x)
-        y_expr = _build_expr_1d(y_keyframes, default_y, max_parts=60)
+        x_expr = _build_expr_1d(x_keyframes, default_x, max_parts=120)
+        y_expr = _build_expr_1d(y_keyframes, default_y, max_parts=120)
 
         return x_expr, y_expr, adjusted_h
 
