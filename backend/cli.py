@@ -157,6 +157,16 @@ def cmd_process(args):
         else:
             print(f"  Warning: Outro '{args.outro}' not found (checked assets and filesystem)", file=sys.stderr)
             config["outro_path"] = args.outro
+    elif not config.get("outro_path"):
+        # Auto-detect outro from registered assets
+        try:
+            from services.asset_store import list_assets as _list_assets_auto
+            for a in _list_assets_auto():
+                if a["type"] == "video" and os.path.exists(a["path"]):
+                    config["outro_path"] = a["path"]
+                    break
+        except Exception:
+            pass
     if args.time_adjust is not None:
         config["time_adjust"] = args.time_adjust
     if args.no_energy:
@@ -169,7 +179,7 @@ def cmd_process(args):
         config["quality"] = args.quality
 
     # Set quality env var before importing video_processor
-    quality = config.get("quality", os.environ.get("PODCLI_QUALITY", "high"))
+    quality = config.get("quality", os.environ.get("PODCLI_QUALITY", "max"))
     os.environ["PODCLI_QUALITY"] = quality
 
     # Output directory
