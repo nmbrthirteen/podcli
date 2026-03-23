@@ -712,6 +712,10 @@ def _build_speaker_aware_crop(
             if not kf_list:
                 return str(default_val)
 
+            # Ensure first keyframe is at t=0 so the start of the clip is covered
+            if kf_list[0][0] > 0.1:
+                kf_list = [(0, kf_list[0][1])] + kf_list
+
             if len(kf_list) >= 2:
                 parts = []
                 for i in range(len(kf_list) - 1):
