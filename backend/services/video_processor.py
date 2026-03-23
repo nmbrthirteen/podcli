@@ -619,7 +619,7 @@ def _build_speaker_aware_crop(
                 ]
                 cluster_votes = [0] * len(clusters)
                 for t in speaker_times:
-                    for obs_t, obs_cx, obs_fw in face_observations:
+                    for obs_t, obs_cx, obs_fw, *_ in face_observations:
                         if abs(obs_t - t) < 1.0:
                             for ci, cl in enumerate(clusters):
                                 if abs(obs_cx - cl["center_x"]) < width * 0.15:
