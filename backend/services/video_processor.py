@@ -236,7 +236,7 @@ def crop_to_vertical(
                 crop_w = int(height * target_ratio)
                 face_y = _detect_face_y(input_path, width, height, crop_w, crop_x_expr)
                 if face_y is not None:
-                    adjusted_h = int(height * 0.78)
+                    adjusted_h = int(height * 0.75)
                     adj_y = face_y - int(adjusted_h * 0.33)
                     adj_y = max(0, min(adj_y, height - adjusted_h))
                     adj_w = int(adjusted_h * target_ratio)
@@ -543,9 +543,7 @@ def _build_speaker_aware_crop(
             """Return (x_expr, y_expr, adjusted_h) tuple with vertical framing."""
             if cy is None:
                 cy = int(np.median(y_positions)) if len(y_positions) > 0 else height // 2
-            worst_off = abs(cy - height * 0.33)
-            zf = max(0.60, min(0.78, 1.0 - worst_off / height))
-            adj_h = int(height * zf)
+            adj_h = int(height * 0.75)
             adj_w = int(adj_h * target_ratio)
             # Recompute crop_x for narrower width
             if cx < mid_x:
@@ -568,10 +566,6 @@ def _build_speaker_aware_crop(
 
         # Get unique speakers
         speakers = sorted(set(w.get("speaker") for w in transcript_words if w.get("speaker")))
-        if len(speakers) < 2:
-            clusters.sort(key=lambda c: c["count"], reverse=True)
-            best = clusters[0]
-            return _static_with_y(best["center_x"], best.get("center_y"))
 
         # Detect split-screen: if most frames have 2+ faces, it's split-screen
         avg_faces = np.mean(faces_per_frame) if faces_per_frame else 0
@@ -579,7 +573,14 @@ def _build_speaker_aware_crop(
 
         speaker_to_cluster = {}
 
-        if is_split_screen and len(clusters) >= 2:
+        if len(speakers) < 2:
+            # Single speaker — map to the cluster with most detections
+            clusters.sort(key=lambda c: c["count"], reverse=True)
+            if speakers:
+                speaker_to_cluster[speakers[0]] = clusters[0]
+            clusters.sort(key=lambda c: c["center_x"])  # restore order
+
+        elif is_split_screen and len(clusters) >= 2:
             # Split-screen: both faces are always visible, so audio-visual
             # correlation won't work (both clusters get equal votes).
             # Use positional heuristic: map top-2 speakers (by talk time)
@@ -673,76 +674,123 @@ def _build_speaker_aware_crop(
 
         # Compute per-cluster vertical framing: crop_y (face at 33% from top)
         # and recompute crop_x for the narrower adjusted width.
-        # Use adaptive zoom: if face is very low/high, zoom more aggressively.
-        max_face_y = max(cl.get("center_y", height // 2) for cl in clusters)
-        min_face_y = min(cl.get("center_y", height // 2) for cl in clusters)
-        worst_offset = max(abs(max_face_y - height * 0.33), abs(min_face_y - height * 0.33))
-        # Scale zoom: 78% height for centered faces, down to 60% for extreme cases
-        zoom_factor = max(0.60, min(0.78, 1.0 - worst_offset / height))
-        adjusted_h = int(height * zoom_factor)
+        # Zoom to 75% of frame height — tight enough to fill frame with face
+        # but leaves room for Y tracking to follow head movement.
+        adjusted_h = int(height * 0.75)
         adj_w = int(adjusted_h * target_ratio)
+
+        # Recompute crop_x for the narrower adj_w
         for cl in clusters:
-            cy = cl.get("center_y", height // 2)
-            crop_y = cy - int(adjusted_h * 0.33)
-            cl["crop_y"] = max(0, min(crop_y, height - adjusted_h))
-            # Recompute crop_x for the narrower adj_w
             cx = cl["center_x"]
             if cx < mid_x:
                 cl["crop_x"] = max(0, min(cx - adj_w // 2, mid_x - adj_w - seam_margin))
             else:
                 cl["crop_x"] = max(mid_x + seam_margin, min(cx - adj_w // 2, width - adj_w))
-        default_x = default_cluster["crop_x"]
-        default_y = default_cluster.get("crop_y", 0)
 
-        # Build a timeline: list of (time, target_x, target_y) keyframes.
-        # Split-screen: instant cut (panning through the center seam looks bad).
-        # Non-split-screen: smooth 400ms pan.
+        default_x = default_cluster["crop_x"]
+
+        # Build per-cluster face Y tracking from observations.
+        # Group face_y observations by cluster (left/right), then build
+        # smooth Y keyframes that follow head movement over time.
+        def _y_for_cluster(cl):
+            """Get time-series Y positions for faces in this cluster."""
+            cx = cl["center_x"]
+            is_left = cx < mid_x
+            ys = []
+            for obs_t, obs_cx, obs_fw, *rest in face_observations:
+                obs_cy = rest[0] if rest else height // 2
+                # Match by half (left/right) not by radius — the person
+                # may lean/gesture causing face X to shift significantly
+                if (is_left and obs_cx < mid_x) or (not is_left and obs_cx >= mid_x):
+                    crop_y = obs_cy - int(adjusted_h * 0.33)
+                    crop_y = max(0, min(crop_y, height - adjusted_h))
+                    ys.append((obs_t, crop_y))
+            return ys
+
+        cluster_y_series = {}
+        for ci, cl in enumerate(clusters):
+            cluster_y_series[ci] = _y_for_cluster(cl)
+
+        # Default Y: median of dominant cluster
+        dom_ci = clusters.index(default_cluster) if default_cluster in clusters else 0
+        dom_ys = cluster_y_series.get(dom_ci, [])
+        default_y = int(np.median([y for _, y in dom_ys])) if dom_ys else 0
+
+        # Build keyframes: X changes on speaker switch, Y tracks face continuously
         pan_duration = 0.0 if is_split_screen else 0.4
 
-        keyframes = []  # (time, x, y)
+        # X keyframes from speaker segments
+        x_keyframes = []
         prev_x = default_x
-        prev_y = default_y
         for start_t, end_t, speaker in segments:
             cl = speaker_to_cluster.get(speaker)
             target_x = cl["crop_x"] if cl else default_x
-            target_y = cl.get("crop_y", default_y) if cl else default_y
-
-            if target_x != prev_x or target_y != prev_y:
+            if target_x != prev_x:
                 if pan_duration > 0:
-                    keyframes.append((start_t, prev_x, prev_y))
-                    keyframes.append((start_t + pan_duration, target_x, target_y))
+                    x_keyframes.append((start_t, prev_x))
+                    x_keyframes.append((start_t + pan_duration, target_x))
                 else:
-                    keyframes.append((start_t, prev_x, prev_y))
-                    keyframes.append((start_t + 0.01, target_x, target_y))
+                    x_keyframes.append((start_t, prev_x))
+                    x_keyframes.append((start_t + 0.01, target_x))
             prev_x = target_x
-            prev_y = target_y
 
-        if not keyframes:
+        # Y keyframes: track face Y smoothly over time per active speaker
+        y_keyframes = []
+        for start_t, end_t, speaker in segments:
+            cl = speaker_to_cluster.get(speaker)
+            ci = clusters.index(cl) if cl in clusters else dom_ci
+            ys = cluster_y_series.get(ci, [])
+            # Get Y observations during this segment
+            seg_ys = [(t, y) for t, y in ys if start_t <= t <= end_t]
+            if seg_ys:
+                # Sample every ~2 seconds for smooth tracking
+                for t, y in seg_ys[::max(1, len(seg_ys) // 5)]:
+                    y_keyframes.append((t, y))
+            elif ys:
+                # No observations in this segment — use cluster median
+                med_y = int(np.median([y for _, y in ys]))
+                y_keyframes.append((start_t, med_y))
+
+        # Deduplicate and sort
+        y_keyframes.sort(key=lambda k: k[0])
+        # Smooth: merge keyframes that are too close
+        smoothed_y = []
+        for t, y in y_keyframes:
+            if smoothed_y and abs(t - smoothed_y[-1][0]) < 1.0:
+                continue
+            smoothed_y.append((t, y))
+        y_keyframes = smoothed_y
+
+        if not x_keyframes and not y_keyframes:
             return str(default_x), str(default_y), adjusted_h
 
-        # Build FFmpeg expressions for both X and Y
-        def _build_expr(keyframes_xy, val_idx, default_val):
-            parts = []
-            for i in range(0, len(keyframes_xy) - 1, 2):
-                t0, *vals0 = keyframes_xy[i]
-                t1, *vals1 = keyframes_xy[i + 1]
-                v0, v1 = vals0[val_idx], vals1[val_idx]
-                dt = max(0.01, t1 - t0)
-                parts.append(
-                    f"if(between(t\\,{t0:.2f}\\,{t1:.2f})\\,"
-                    f"{v0}+(({v1}-{v0})*(t-{t0:.2f})/{dt:.2f})\\,"
-                )
-                next_t = keyframes_xy[i + 2][0] if i + 2 < len(keyframes_xy) else duration
-                parts.append(
-                    f"if(between(t\\,{t1:.2f}\\,{next_t:.2f})\\,"
-                    f"{v1}\\,"
-                )
-            if len(parts) > 30:
+        # Build FFmpeg expressions for X and Y independently
+        def _build_expr_1d(kf_list, default_val, max_parts=30):
+            """Build FFmpeg expression from [(time, value), ...] keyframes.
+            Uses smooth lerp between consecutive keyframes."""
+            if not kf_list:
                 return str(default_val)
-            return "".join(parts) + str(default_val) + ")" * len(parts)
 
-        x_expr = _build_expr(keyframes, 0, default_x)
-        y_expr = _build_expr(keyframes, 1, default_y)
+            # For instant-cut X keyframes (pairs), use the existing pair logic
+            if len(kf_list) >= 2:
+                parts = []
+                for i in range(len(kf_list) - 1):
+                    t0, v0 = kf_list[i]
+                    t1, v1 = kf_list[i + 1]
+                    dt = max(0.01, t1 - t0)
+                    parts.append(
+                        f"if(between(t\\,{t0:.2f}\\,{t1:.2f})\\,"
+                        f"{v0}+(({v1}-{v0})*(t-{t0:.2f})/{dt:.2f})\\,"
+                    )
+                if len(parts) > max_parts:
+                    return str(default_val)
+                # After last keyframe, hold last value
+                return "".join(parts) + str(kf_list[-1][1]) + ")" * len(parts)
+
+            return str(kf_list[0][1])
+
+        x_expr = _build_expr_1d(x_keyframes, default_x)
+        y_expr = _build_expr_1d(y_keyframes, default_y, max_parts=60)
 
         return x_expr, y_expr, adjusted_h
 
