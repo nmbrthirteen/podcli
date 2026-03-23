@@ -190,66 +190,25 @@ def crop_to_vertical(
     source_ratio = width / height
 
     if strategy in ("face", "speaker"):
-        crop_x_expr = None
-        crop_y_expr = None
-        adjusted_h = None
+        # Split-screen: cut each speaker segment separately with static crop per half.
+        # Simple, reliable, no complex FFmpeg expressions.
+        is_split = _detect_split_screen(input_path, width, height)
 
-        # Fast path: use pre-computed face_map for simple layouts only.
-        # Split-screen and mixed layouts (Riverside-style recordings that switch
-        # between split and single-person views) need the slow path for
-        # per-frame adaptive tracking.
-        is_split = face_map.get("is_split_screen", False) if face_map else False
-        is_mixed = face_map.get("is_mixed_layout", False) if face_map else False
-        if not is_split and not is_mixed and face_map and face_map.get("clusters") and face_map.get("speaker_mappings"):
-            crop_x_expr = _use_face_map(
-                face_map, transcript_words, clip_start,
-                width, height, target_ratio,
+        if is_split and transcript_words:
+            result = _crop_split_screen(
+                input_path, output_path,
+                width, height, target_w, target_h,
+                transcript_words, clip_start,
             )
+            if result:
+                return result
 
-        # Slow path: analyze video for face positions (x AND y per speaker)
-        if crop_x_expr is None:
-            has_speakers = (
-                transcript_words
-                and len(set(w.get("speaker") for w in transcript_words if w.get("speaker"))) > 1
-            )
+        # Non-split-screen: single static face crop
+        crop_x = _detect_face_center(input_path, width, height, target_ratio)
 
-            if has_speakers:
-                result = _build_speaker_aware_crop(
-                    input_path, width, height, target_ratio,
-                    transcript_words, clip_start,
-                )
-                # Returns (x_expr, y_expr, crop_h) tuple or single string
-                if isinstance(result, tuple):
-                    crop_x_expr, crop_y_expr, adjusted_h = result
-                else:
-                    crop_x_expr = result
-            else:
-                crop_x_expr = _detect_face_center(input_path, width, height, target_ratio)
-
-        if crop_x_expr is None:
-            print(f"Warning: all crop paths returned None for {input_path} ({width}x{height})", file=sys.stderr)
-
-        if crop_x_expr is not None:
-            if crop_y_expr is not None:
-                # Per-speaker vertical framing: crop with dynamic x AND y
-                adj_w = int(adjusted_h * target_ratio)
-                vf = f"crop={adj_w}:{adjusted_h}:{crop_x_expr}:{crop_y_expr},scale={target_w}:{target_h}"
-            else:
-                # Static vertical crop with face Y detection
-                crop_w = int(height * target_ratio)
-                face_y = _detect_face_y(input_path, width, height, crop_w, crop_x_expr)
-                if face_y is not None:
-                    adjusted_h = int(height * 0.75)
-                    adj_y = face_y - int(adjusted_h * 0.33)
-                    adj_y = max(0, min(adj_y, height - adjusted_h))
-                    adj_w = int(adjusted_h * target_ratio)
-                    vf = (
-                        f"crop={crop_w}:{height}:{crop_x_expr}:0,"
-                        f"crop={adj_w}:{adjusted_h}:(iw-{adj_w})/2:{adj_y},"
-                        f"scale={target_w}:{target_h}"
-                    )
-                else:
-                    vf = f"crop={crop_w}:{height}:{crop_x_expr}:0,scale={target_w}:{target_h}"
+        if crop_x is not None:
+            crop_w = int(height * target_ratio)
+            vf = f"crop={crop_w}:{height}:{crop_x}:0,scale={target_w}:{target_h}"
         else:
             strategy = "center"
 
@@ -283,6 +242,306 @@ def crop_to_vertical(
         output_path=output_path,
         label="crop",
     )
+
+
+def _detect_split_screen(video_path: str, width: int, height: int) -> bool:
+    """Quick check: is this a split-screen layout (two side-by-side cameras)?"""
+    try:
+        import cv2
+        import numpy as np
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return False
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total / fps
+
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        proto = os.path.join(backend_dir, "models", "deploy.prototxt")
+        model = os.path.join(backend_dir, "models", "res10_300x300_ssd_iter_140000.caffemodel")
+        if not (os.path.exists(proto) and os.path.exists(model)):
+            cap.release()
+            return False
+
+        detector = cv2.dnn.readNetFromCaffe(proto, model)
+        mid_x = width // 2
+
+        frames_with_two_faces = 0
+        total_sampled = 0
+
+        for i in range(min(20, max(5, int(duration)))):
+            t = (i + 1) * duration / (min(20, max(5, int(duration))) + 1)
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            h, w = frame.shape[:2]
+            blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
+            detector.setInput(blob)
+            dets = detector.forward()
+
+            left = False
+            right = False
+            for j in range(dets.shape[2]):
+                if dets[0, 0, j, 2] > 0.5:
+                    cx = int((dets[0, 0, j, 3] + dets[0, 0, j, 5]) / 2 * w)
+                    if cx < mid_x:
+                        left = True
+                    else:
+                        right = True
+
+            total_sampled += 1
+            if left and right:
+                frames_with_two_faces += 1
+
+        cap.release()
+        return total_sampled > 0 and frames_with_two_faces / total_sampled >= 0.5
+
+    except Exception:
+        return False
+
+
+def _crop_split_screen(
+    input_path: str,
+    output_path: str,
+    width: int,
+    height: int,
+    target_w: int,
+    target_h: int,
+    transcript_words: list,
+    clip_start: float,
+) -> Optional[str]:
+    """
+    Split-screen crop: cut each speaker segment with a static crop on their
+    camera half. No complex expressions — just separate FFmpeg calls + concat.
+
+    This is how production tools (Opus Clip, Descript, etc.) handle it:
+    static crop per speaker, hard cut between segments.
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        target_ratio = target_w / target_h
+        mid_x = width // 2
+
+        # Detect face position in each half
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            return None
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps
+
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        proto = os.path.join(backend_dir, "models", "deploy.prototxt")
+        model = os.path.join(backend_dir, "models", "res10_300x300_ssd_iter_140000.caffemodel")
+        if not (os.path.exists(proto) and os.path.exists(model)):
+            cap.release()
+            return None
+
+        detector = cv2.dnn.readNetFromCaffe(proto, model)
+
+        # Collect face positions per half
+        left_faces = []   # (cx_in_half, cy)
+        right_faces = []  # (cx_in_half, cy)
+
+        sample_count = min(40, max(10, int(duration * 2)))
+        for i in range(sample_count):
+            t = (i + 1) * duration / (sample_count + 1)
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            h, w = frame.shape[:2]
+            blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
+            detector.setInput(blob)
+            dets = detector.forward()
+
+            for j in range(dets.shape[2]):
+                if dets[0, 0, j, 2] > 0.5:
+                    cx = int((dets[0, 0, j, 3] + dets[0, 0, j, 5]) / 2 * w)
+                    cy = int((dets[0, 0, j, 4] + dets[0, 0, j, 6]) / 2 * h)
+                    if cx < mid_x:
+                        left_faces.append((cx, cy))
+                    else:
+                        right_faces.append((cx - mid_x, cy))  # relative to right half
+
+        cap.release()
+
+        if not left_faces and not right_faces:
+            return None
+
+        # Compute static crop for each half
+        # Within a 960x1080 half, we need a 9:16 crop
+        half_w = mid_x
+        crop_w = int(height * target_ratio)  # ~607 for 1080 height
+
+        def _compute_crop(faces, half_offset):
+            """Compute static crop_x, crop_y for one camera half."""
+            if not faces:
+                # No face — center crop within this half
+                return half_offset + (half_w - crop_w) // 2, 0, height
+
+            cx = int(np.median([f[0] for f in faces]))
+            cy = int(np.median([f[1] for f in faces]))
+
+            # Horizontal: center crop on face within this half
+            crop_x = cx - crop_w // 2
+            crop_x = max(0, min(crop_x, half_w - crop_w))
+            crop_x += half_offset  # offset to position within full frame
+
+            # Vertical: place face at ~33% from top with 75% zoom
+            adj_h = int(height * 0.75)
+            crop_y = cy - int(adj_h * 0.33)
+            crop_y = max(0, min(crop_y, height - adj_h))
+
+            return crop_x, crop_y, adj_h
+
+        left_crop_x, left_crop_y, left_h = _compute_crop(left_faces, 0)
+        right_crop_x, right_crop_y, right_h = _compute_crop(right_faces, mid_x)
+
+        left_w = int(left_h * target_ratio)
+        right_w = int(right_h * target_ratio)
+
+        # Map speakers to sides (first speaker by time = left)
+        speakers = sorted(set(w.get("speaker") for w in transcript_words if w.get("speaker")))
+
+        if len(speakers) < 2:
+            # Single speaker — use the side with more face detections
+            if len(left_faces) >= len(right_faces):
+                vf = f"crop={left_w}:{left_h}:{left_crop_x}:{left_crop_y},scale={target_w}:{target_h}"
+            else:
+                vf = f"crop={right_w}:{right_h}:{right_crop_x}:{right_crop_y},scale={target_w}:{target_h}"
+            return _run_ffmpeg_with_fallback(
+                cmd_parts_before_enc=["ffmpeg", "-y", "-i", input_path, "-vf", vf],
+                cmd_parts_after_enc=["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-movflags", "+faststart"],
+                output_path=output_path, label="crop_split",
+            )
+
+        # Map speakers: sort by talk time, first by appearance = left
+        speaker_talk = {}
+        speaker_first = {}
+        for w in transcript_words:
+            sp = w.get("speaker")
+            if sp:
+                speaker_talk[sp] = speaker_talk.get(sp, 0) + (w["end"] - w["start"])
+                if sp not in speaker_first:
+                    speaker_first[sp] = w["start"]
+
+        top_2 = sorted(speakers, key=lambda s: speaker_talk.get(s, 0), reverse=True)[:2]
+        top_2_by_first = sorted(top_2, key=lambda s: speaker_first.get(s, float("inf")))
+
+        speaker_side = {}
+        speaker_side[top_2_by_first[0]] = "left"
+        if len(top_2_by_first) > 1:
+            speaker_side[top_2_by_first[1]] = "right"
+        for sp in speakers:
+            if sp not in speaker_side:
+                speaker_side[sp] = speaker_side.get(top_2_by_first[0], "left")
+
+        # Build speaker segments
+        segments = []
+        cur_speaker = None
+        seg_start = 0
+
+        for w in sorted(transcript_words, key=lambda x: x["start"]):
+            sp = w.get("speaker")
+            t = w["start"] - clip_start
+            if sp != cur_speaker and sp is not None:
+                if cur_speaker is not None:
+                    segments.append((seg_start, t, cur_speaker))
+                cur_speaker = sp
+                seg_start = t
+
+        if cur_speaker:
+            segments.append((seg_start, duration, cur_speaker))
+
+        # Merge short segments (<1s)
+        merged = []
+        for seg in segments:
+            if merged and seg[2] == merged[-1][2]:
+                merged[-1] = (merged[-1][0], seg[1], seg[2])
+            elif merged and (seg[1] - seg[0]) < 1.0:
+                merged[-1] = (merged[-1][0], seg[1], merged[-1][2])
+            else:
+                merged.append(list(seg))
+        segments = merged
+
+        if not segments:
+            return None
+
+        # Cut each segment with its speaker's crop, then concat
+        work_dir = os.path.dirname(output_path) or "."
+        part_paths = []
+
+        try:
+            for i, (start_t, end_t, speaker) in enumerate(segments):
+                side = speaker_side.get(speaker, "left")
+                if side == "left":
+                    cw, ch, cx, cy = left_w, left_h, left_crop_x, left_crop_y
+                else:
+                    cw, ch, cx, cy = right_w, right_h, right_crop_x, right_crop_y
+
+                part_path = os.path.join(work_dir, f"_speaker_part_{i}.mp4")
+                vf = f"crop={cw}:{ch}:{cx}:{cy},scale={target_w}:{target_h}"
+
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", str(start_t), "-t", str(end_t - start_t),
+                    "-i", input_path,
+                    "-vf", vf,
+                    "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-avoid_negative_ts", "make_zero",
+                    part_path,
+                ]
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                if r.returncode != 0:
+                    print(f"Warning: split-screen segment {i} failed: {r.stderr[-200:]}", file=sys.stderr)
+                    continue
+                part_paths.append(part_path)
+
+            if not part_paths:
+                return None
+
+            # Concat all parts
+            concat_file = os.path.join(work_dir, "_speaker_concat.txt")
+            with open(concat_file, "w") as f:
+                for p in part_paths:
+                    f.write(f"file '{os.path.abspath(p)}'\n")
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", concat_file,
+                "-c", "copy",
+                "-movflags", "+faststart",
+                output_path,
+            ]
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode != 0:
+                return None
+
+            return output_path
+
+        finally:
+            for p in part_paths:
+                if os.path.exists(p):
+                    os.remove(p)
+            concat_path = os.path.join(work_dir, "_speaker_concat.txt")
+            if os.path.exists(concat_path):
+                os.remove(concat_path)
+
+    except Exception as e:
+        import traceback
+        print(f"Warning: split-screen crop failed: {e}\n{traceback.format_exc()}", file=sys.stderr)
+        return None
 
 
 def _use_face_map(
