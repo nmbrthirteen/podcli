@@ -191,8 +191,12 @@ def crop_to_vertical(
 
     if strategy in ("face", "speaker"):
         # Split-screen: cut each speaker segment separately with static crop per half.
-        # Simple, reliable, no complex FFmpeg expressions.
-        is_split = _detect_split_screen(input_path, width, height)
+        # Check face_map first (computed from full video), fall back to segment detection.
+        is_split = False
+        if face_map and face_map.get("is_split_screen"):
+            is_split = True
+        else:
+            is_split = _detect_split_screen(input_path, width, height)
 
         if is_split and transcript_words:
             result = _crop_split_screen(
