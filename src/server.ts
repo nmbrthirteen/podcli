@@ -194,8 +194,14 @@ export function createServer(): McpServer {
             title: z.string(),
             start_second: z.number(),
             end_second: z.number(),
+            segments: z
+              .array(z.object({ start: z.number(), end: z.number() }))
+              .optional()
+              .describe("Multi-cut keep-ranges. Omit for a single continuous clip."),
             reasoning: z.string(),
             preview_text: z.string().optional(),
+            content_type: z.string().optional(),
+            score: z.number().optional(),
             suggested_caption_style: z
               .enum(["hormozi", "karaoke", "subtle", "branded"])
               .optional(),
@@ -299,6 +305,7 @@ export function createServer(): McpServer {
         }
 
         // Resolve clip_number from UI state BEFORE routing
+        let keepSegments: Array<{ start: number; end: number }> | null = null;
         if (params.clip_number != null && (params.start_second == null || params.end_second == null)) {
           const uiState = await readUIState();
           const suggestions = (uiState?.suggestions as Array<Record<string, unknown>>) || [];
@@ -323,6 +330,11 @@ export function createServer(): McpServer {
           if (!params.transcript_words) {
             const transcript = uiState?.transcript as Record<string, unknown> | null;
             if (transcript?.words) params.transcript_words = transcript.words as any;
+          }
+          // Pull multi-cut segments from suggestion
+          const segs = suggestion.segments as Array<{ start: number; end: number }> | undefined;
+          if (segs && segs.length > 0) {
+            keepSegments = segs;
           }
         }
 
@@ -358,6 +370,7 @@ export function createServer(): McpServer {
                 title: (params.title || "clip") as string,
                 caption_style: params.caption_style || "hormozi",
                 crop_strategy: params.crop_strategy || "face",
+                ...(keepSegments && { segments: keepSegments }),
               }],
               transcript_words: params.transcript_words,
               logo_path: params.logo_path || null,
@@ -510,6 +523,7 @@ export function createServer(): McpServer {
                 title: s.title || `clip_${i + 1}`,
                 caption_style: (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
                 crop_strategy: settings.cropStrategy || "face",
+                ...(Array.isArray(s.segments) && s.segments.length > 0 && { keep_segments: s.segments }),
               })) as any;
           } else if (params.clip_numbers) {
             resolvedClips = (params.clip_numbers as number[])
@@ -522,6 +536,7 @@ export function createServer(): McpServer {
                   title: s.title || `clip_${n}`,
                   caption_style: (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
                   crop_strategy: settings.cropStrategy || "face",
+                  ...(Array.isArray(s.segments) && s.segments.length > 0 && { keep_segments: s.segments }),
                 };
               }) as any;
           }

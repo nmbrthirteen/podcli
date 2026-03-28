@@ -1253,11 +1253,59 @@ app.post("/api/claude-suggest", async (req, res) => {
   const dur = (uiState.transcript as any)?.duration || 0;
   const durationMin = Math.round(dur / 60);
 
-  const prompt = `You are the clip extraction engine for a podcast. Analyze this transcript and return the ${top_n} best moments for YouTube Shorts.
+  // Load knowledge base files for context
+  const kbDir = join(process.cwd(), ".podcli", "knowledge");
+  let kbContext = "";
+  const kbFiles: [string, number][] = [
+    ["04-shorts-creation-guide.md", 4000],
+    ["05-title-formulas.md", 3000],
+    ["02-voice-and-tone.md", 3000],
+    ["01-brand-identity.md", 1500],
+    ["11-inspiration-channels.md", 2000],
+    ["12-quick-reference.md", 2000],
+  ];
+  for (const [fname, maxChars] of kbFiles) {
+    const fpath = join(kbDir, fname);
+    if (existsSync(fpath)) {
+      try {
+        const content = readFileSync(fpath, "utf-8").trim();
+        if (content.split("[Your Show Name]").length > 3 && content.length < 500) continue;
+        kbContext += `\n--- ${fname} ---\n${content.slice(0, maxChars)}\n`;
+      } catch {}
+    }
+  }
+
+  const prompt = `You are a viral clip editor for TikTok and YouTube Shorts. Find the ${top_n} most scroll-stopping moments in this podcast transcript.
 
 IMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences.
 
-Use the knowledge base in .podcli/knowledge/ for voice rules, moment selection criteria, content types, and existing episodes.
+TIMESTAMP FORMAT: All timestamps in the transcript are in SECONDS (e.g., [123.4s]).
+All timestamps you return MUST be in SECONDS as numbers (e.g., 123.4), NOT minutes:seconds.
+
+DURATION RULES (CRITICAL):
+- Target: 25-40 seconds (this is the viral sweet spot)
+- Maximum: 50 seconds (absolute hard limit — anything longer loses viewers)
+- Minimum: 15 seconds (too short = no payoff)
+- SHORTER IS BETTER. A punchy 25s clip outperforms a 50s clip every time.
+- If a thought takes longer than 40s, use segments to cut the filler in the middle
+
+CUTTING RULES (CRITICAL):
+- Cut TIGHT. Every second must earn its place.
+- Start at the exact moment the hook hits — no preamble, no "so", no "well"
+- End the MOMENT the point lands with a complete thought — don't trail off
+- NEVER cut mid-sentence or mid-thought. The viewer must feel closure.
+- If there's filler/tangent in the middle, use multiple segments to skip it
+
+MOMENT SELECTION (think like a TikTok editor):
+- Would YOU stop scrolling for this? If no, skip it.
+- First 3 seconds must HOOK — a bold claim, shocking number, or provocative question
+- Must make complete sense standalone — no "as I mentioned" or "going back to"
+- Must end on a COMPLETE THOUGHT — sentence boundary, natural pause, or mic-drop moment
+- Single focused idea — one concept, fully delivered, no loose threads
+- Prioritize: controversial takes, surprising numbers, founder war stories, "wait what?" moments, emotional peaks
+- Skip: generic advice, obvious statements, context-dependent references
+
+${kbContext ? `KNOWLEDGE BASE:${kbContext}` : ""}
 
 Score each moment on 4 dimensions (1-5 each):
 - standalone: Makes sense without episode context?
@@ -1267,9 +1315,20 @@ Score each moment on 4 dimensions (1-5 each):
 
 Classify each as: guest_story | technical_insight | market_landscape | business_strategy | hot_take
 
-Return JSON: { "clips": [{ "title": "...", "start_second": N, "end_second": N, "duration": N, "content_type": "...", "scores": {"standalone":N,"hook":N,"relevance":N,"quotability":N}, "total_score": N, "quote": "...", "why": "..." }] }
+Return this exact JSON structure:
+{ "clips": [{ "title": "First strong sentence from the moment", "start_second": 123.4, "end_second": 168.4, "segments": [{"start": 123.4, "end": 140.0}, {"start": 145.2, "end": 168.4}], "duration": 40, "content_type": "guest_story", "scores": {"standalone": 4, "hook": 5, "relevance": 4, "quotability": 3}, "total_score": 16, "quote": "The key quote from this moment", "why": "One sentence on why this works as a short" }] }
 
-Rules: 20-90 seconds, sentence boundaries, standalone, variety.
+SEGMENTS RULES:
+- "segments" is an array of keep-ranges within the clip. Use it to CUT OUT dead weight.
+- If the moment is clean with no filler, use a single segment: [{"start": X, "end": Y}]
+- If there's a ramble/tangent/filler in the middle, split into multiple segments that skip it
+- "duration" = total kept time (sum of all segment lengths), NOT end - start
+
+Rules:
+- Final clip duration (sum of segments) MUST be 15-50 seconds (target 25-40s)
+- Each segment must start and end on COMPLETE SENTENCES
+- Must make sense standalone when stitched together
+- Sort clips by timestamp order
 
 Transcript (${segCount} segments, ~${durationMin} min):
 
@@ -1300,16 +1359,30 @@ ${transcriptText}`;
     }
 
     const data = JSON.parse(result.substring(jsonStart, jsonEnd));
-    const clips = (data.clips || []).map((c: any) => ({
-      title: c.title || "Untitled",
-      start_second: c.start_second || 0,
-      end_second: c.end_second || 0,
-      duration: c.duration || 0,
-      reasoning: c.why || "",
-      content_type: c.content_type || "unknown",
-      scores: c.scores || {},
-      total_score: c.total_score || 0,
-    }));
+    const clips = (data.clips || []).map((c: any) => {
+      // Parse and validate segments
+      const rawSegs = c.segments || [];
+      const segments = rawSegs
+        .filter((s: any) => s.end > s.start)
+        .map((s: any) => ({ start: s.start, end: s.end }));
+      const keptDuration = segments.length > 0
+        ? segments.reduce((sum: number, s: any) => sum + (s.end - s.start), 0)
+        : (c.end_second || 0) - (c.start_second || 0);
+
+      return {
+        title: c.title || "Untitled",
+        start_second: c.start_second || 0,
+        end_second: c.end_second || 0,
+        segments: segments.length > 0 ? segments : [{ start: c.start_second || 0, end: c.end_second || 0 }],
+        duration: Math.round(keptDuration),
+        reasoning: c.why || "",
+        preview_text: (c.quote || "").slice(0, 120),
+        content_type: c.content_type || "unknown",
+        score: c.total_score || 0,
+        scores: c.scores || {},
+        suggested_caption_style: "hormozi",
+      };
+    }).filter((c: any) => c.duration >= 15 && c.duration <= 55);
 
     // Auto-push to UI state as suggestions
     if (clips.length > 0) {
@@ -1318,7 +1391,12 @@ ${transcriptText}`;
         title: c.title,
         start_second: c.start_second,
         end_second: c.end_second,
+        segments: c.segments,
         reasoning: c.reasoning,
+        preview_text: c.preview_text,
+        content_type: c.content_type,
+        score: c.score,
+        suggested_caption_style: c.suggested_caption_style,
       }));
       (uiState as any).phase = "review";
       broadcastSSE("state-sync", uiState);
@@ -1465,6 +1543,8 @@ app.post("/api/mcp/export", async (req, res) => {
     title: (c.title || "clip").slice(0, 40),
     caption_style: c.caption_style || captionStyle,
     crop_strategy: c.crop_strategy || cropStrategy,
+    // Preserve multi-cut segments from suggestions
+    ...(Array.isArray(c.segments) && c.segments.length > 0 && { keep_segments: c.segments }),
   }));
 
   const jobId = uuidv4();

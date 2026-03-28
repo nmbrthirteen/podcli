@@ -21,16 +21,18 @@ def extract_audio_energy(
 
     Returns list of {time, rms, peak} dicts, one per window.
     """
-    # Use ffmpeg astats filter to get per-frame audio stats
+    # Use ffmpeg astats filter on audio only (-vn skips video decoding,
+    # which is the main bottleneck on long podcasts).
     cmd = [
         "ffmpeg",
         "-i", video_path,
+        "-vn",
         "-af", f"astats=metadata=1:reset={int(1/window_sec)},"
                f"ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
         "-f", "null", "-",
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
     # Parse the ametadata output from stdout
     # Format: "frame:N    pts:N    pts_time:N.N\nlavfi.astats.Overall.RMS_level=N.N"
@@ -76,14 +78,15 @@ def _fallback_energy(video_path: str) -> list[dict]:
     except (json.JSONDecodeError, KeyError):
         return []
 
-    # Use ebur128 filter which reliably outputs loudness per second
+    # Use ebur128 filter on audio only (-vn skips slow video decoding)
     cmd = [
         "ffmpeg",
         "-i", video_path,
+        "-vn",
         "-af", "ebur128=peak=true",
         "-f", "null", "-",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
     energy_data = []
     # Parse ebur128 output from stderr: "t: N.N   M: -N.N S: -N.N"

@@ -124,6 +124,8 @@ export async function handleBatchClips(
       (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
     crop_strategy: settings.cropStrategy || "face",
     logo_path: settings.logoPath || null,
+    // Preserve multi-cut segments from suggestion
+    ...(Array.isArray(s.segments) && s.segments.length > 0 && { keep_segments: s.segments }),
   });
 
   if (input.export_selected) {

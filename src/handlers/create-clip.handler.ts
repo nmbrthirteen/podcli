@@ -149,6 +149,10 @@ export async function handleCreateClip(
     (transcript?.words as Array<unknown>) ||
     [];
 
+  // Pull multi-cut segments from suggestion (if available)
+  const keepSegments =
+    (suggestion?.segments as Array<{ start: number; end: number }>) || null;
+
   // Validate required fields
   if (!videoPath) {
     return JSON.stringify({ error: "video_path is required (no video in session state)" });
@@ -171,6 +175,7 @@ export async function handleCreateClip(
     clean_fillers: input.clean_fillers !== false,
     logo_path: logoPath,
     outro_path: outroPath,
+    ...(keepSegments && { keep_segments: keepSegments }),
   });
 
   const data = result.data as unknown as ClipResult;

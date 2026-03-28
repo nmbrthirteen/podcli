@@ -37,6 +37,31 @@ def _find_claude() -> Optional[str]:
     return None
 
 
+def _load_existing_shorts(episodes_path: str) -> list[str]:
+    """Extract existing short titles from episode database to avoid duplicates."""
+    if not os.path.exists(episodes_path):
+        return []
+    try:
+        with open(episodes_path) as f:
+            content = f.read()
+        # Parse lines that look like shorts entries: "1. [title] — [category]"
+        shorts = []
+        for line in content.split("\n"):
+            line = line.strip()
+            if line and (line.startswith("1.") or line.startswith("2.") or
+                         line.startswith("3.") or line.startswith("4.") or
+                         line.startswith("5.") or line.startswith("6.") or
+                         line.startswith("7.") or line.startswith("8.") or
+                         line.startswith("9.")):
+                # Extract title between brackets or after number
+                title = line.split("—")[0].strip().lstrip("0123456789.").strip()
+                if title and title != "[Short title]":
+                    shorts.append(title)
+        return shorts
+    except Exception:
+        return []
+
+
 def _build_prompt(transcript_text: str, segment_count: int, duration_min: float, top_n: int) -> str:
     """Build the prompt for Claude to extract clips.
 
@@ -44,22 +69,40 @@ def _build_prompt(transcript_text: str, segment_count: int, duration_min: float,
     can't read project files.
     """
 
-    # Try to load knowledge base files inline
+    # Load knowledge base files inline — prioritized by relevance to clip selection
     kb_context = ""
     kb_dir = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "..", ".podcli", "knowledge"
     )
-    for fname in ["04-shorts-creation-guide.md", "05-title-formulas.md", "02-voice-and-tone.md"]:
+    # (filename, max_chars) — higher priority files get more budget
+    _kb_files = [
+        ("04-shorts-creation-guide.md", 4000),   # moment selection criteria, content types
+        ("05-title-formulas.md", 3000),           # title rules, shapes, banned openers
+        ("02-voice-and-tone.md", 3000),           # banned words, voice fingerprint, coffee test
+        ("01-brand-identity.md", 1500),           # show context, positioning, audience
+        ("11-inspiration-channels.md", 2000),     # viral hook patterns, reference styles
+        ("12-quick-reference.md", 2000),          # hook bank, title formulas, hashtags
+        ("08-topics-themes.md", 1000),            # topic areas, audience interest map
+        ("00-master-instructions.md", 1500),      # quality gate, auto-detection rules
+    ]
+    for fname, max_chars in _kb_files:
         fpath = os.path.join(kb_dir, fname)
         if os.path.exists(fpath):
             try:
                 with open(fpath) as f:
-                    content = f.read()
-                kb_context += f"\n--- {fname} ---\n{content[:2000]}\n"
+                    content = f.read().strip()
+                # Skip template-only files (uncustomized placeholders)
+                if content.count("[Your Show Name]") > 2 and len(content) < 500:
+                    continue
+                kb_context += f"\n--- {fname} ---\n{content[:max_chars]}\n"
             except Exception:
                 pass
 
-    return f"""You are the clip extraction engine for a podcast. Analyze this transcript and return the {top_n} best moments for YouTube Shorts.
+    # Load existing shorts from episode database for duplicate avoidance
+    episodes_path = os.path.join(kb_dir, "03-episodes-database.md")
+    existing_shorts = _load_existing_shorts(episodes_path)
+
+    return f"""You are a viral clip editor for TikTok and YouTube Shorts. Find the {top_n} most scroll-stopping moments in this podcast transcript.
 
 IMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences.
 
@@ -67,29 +110,33 @@ TIMESTAMP FORMAT: All timestamps in the transcript are in SECONDS (e.g., [123.4s
 All timestamps you return MUST be in SECONDS as numbers (e.g., 123.4), NOT minutes:seconds.
 
 DURATION RULES (CRITICAL):
-- Target: 30-45 seconds per clip (ideal for YouTube Shorts)
-- Maximum: 60 seconds (hard limit — YouTube Shorts cuts off at 60s)
-- Minimum: 20 seconds (too short = no value)
-- If a moment runs longer than 50 seconds, find a tighter cut point
+- Target: 25-40 seconds (this is the viral sweet spot)
+- Maximum: 50 seconds (absolute hard limit — anything longer loses viewers)
+- Minimum: 15 seconds (too short = no payoff)
+- SHORTER IS BETTER. A punchy 25s clip outperforms a 50s clip every time.
+- If a thought takes longer than 40s, use segments to cut the filler in the middle
 
 CUTTING RULES (CRITICAL):
 - Cut TIGHT. Every second must earn its place.
 - Start at the exact moment the hook hits — no preamble, no "so", no "well"
-- End the INSTANT the point lands — don't let it trail off
-- If the speaker rambles before making a point, start AFTER the ramble
-- If there's filler/tangent in the middle, pick the tighter segment that preserves the core idea
-- The transcript timestamps are your scalpel — use them precisely
+- End the MOMENT the point lands with a complete thought — don't trail off
+- NEVER cut mid-sentence or mid-thought. The viewer must feel closure.
+- The last sentence must feel like a natural ending, a punchline, or a mic-drop
+- If there's filler/tangent in the middle, use multiple segments to skip it
 - A 30s clip with zero dead weight beats a 50s clip with 20s of fluff
 
-MOMENT SELECTION:
-- Must start with a strong hook (first 3 seconds grab attention)
+MOMENT SELECTION (think like a TikTok editor):
+- Would YOU stop scrolling for this? If no, skip it.
+- First 3 seconds must HOOK — a bold claim, shocking number, or provocative question
 - Must make complete sense standalone — no "as I mentioned" or "going back to"
-- Must end cleanly on a sentence boundary (not mid-thought)
-- Single focused idea per clip — one concept, fully delivered
-- Prioritize: surprising facts, bold claims, founder stories, counterintuitive insights, "aha" moments
-- Variety across content types
+- Must end on a COMPLETE THOUGHT — sentence boundary, natural pause, or mic-drop moment
+- Single focused idea — one concept, fully delivered, no loose threads
+- Prioritize: controversial takes, surprising numbers, founder war stories, "wait what?" moments, emotional peaks
+- Skip: generic advice, obvious statements, context-dependent references
 
 {f"KNOWLEDGE BASE:{kb_context}" if kb_context else ""}
+
+{f"EXISTING SHORTS (avoid duplicating these moments):{chr(10).join('- ' + s for s in existing_shorts)}" if existing_shorts else ""}
 
 Score each moment on 4 dimensions (1-5 each):
 - standalone: Makes sense without episode context?
@@ -131,8 +178,9 @@ SEGMENTS RULES:
 - Example: speaker makes great point (10s), rambles (8s), delivers punchline (12s) → 2 segments, 22s total
 
 Rules:
-- Final clip duration (sum of segments) MUST be 20-60 seconds (target 30-45s)
-- Each segment must start and end on sentence boundaries
+- Final clip duration (sum of segments) MUST be 15-50 seconds (target 25-40s)
+- Each segment must start and end on COMPLETE SENTENCES — never mid-thought
+- The LAST segment must end on a sentence that feels like a natural conclusion
 - Must make sense standalone when stitched together
 - Sort clips by timestamp order
 
@@ -273,8 +321,8 @@ def suggest_with_claude(
             # Compute actual kept duration
             kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
 
-            # Reject clips shorter than 15 seconds (Claude returned bad timestamps)
-            if kept_duration < 15:
+            # Reject clips outside the target duration range
+            if kept_duration < 15 or kept_duration > 55:
                 continue
 
             normalized.append({
@@ -285,6 +333,11 @@ def suggest_with_claude(
                 "duration": round(kept_duration),
                 "score": total,
                 "content_type": c.get("content_type", "unknown"),
+                # MCP-aligned fields
+                "reasoning": c.get("why", ""),
+                "preview_text": c.get("quote", "")[:120],
+                "suggested_caption_style": "hormozi",
+                # Backwards compat
                 "quote": c.get("quote", ""),
                 "why": c.get("why", ""),
                 "reasons": [c.get("content_type", "")],

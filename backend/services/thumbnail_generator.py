@@ -251,15 +251,14 @@ def extract_face_frame(
         duration = total_frames / fps
 
         # Load face detector
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        proto = os.path.join(backend_dir, "models", "deploy.prototxt")
-        model = os.path.join(backend_dir, "models", "res10_300x300_ssd_iter_140000.caffemodel")
+        from services.face_detector import create_detector, detect_faces
+        src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        detector = create_detector(src_w, src_h)
 
-        if not (os.path.exists(proto) and os.path.exists(model)):
+        if detector is None:
             cap.release()
             return None
-
-        detector = cv2.dnn.readNetFromCaffe(proto, model)
 
         best_frame = None
         best_score = 0
@@ -280,32 +279,25 @@ def extract_face_frame(
                 continue
 
             h, w = frame.shape[:2]
-            blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
-            detector.setInput(blob)
-            detections = detector.forward()
+            faces_detected = detect_faces(detector, frame, src_w, src_h)
 
-            for j in range(detections.shape[2]):
-                conf = detections[0, 0, j, 2]
-                if conf > 0.6:
-                    x1 = int(detections[0, 0, j, 3] * w)
-                    y1 = int(detections[0, 0, j, 4] * h)
-                    x2 = int(detections[0, 0, j, 5] * w)
-                    y2 = int(detections[0, 0, j, 6] * h)
-                    face_w = x2 - x1
-                    face_h = y2 - y1
+            for f in faces_detected:
+                conf = f["confidence"]
+                face_w = f["fw"]
+                face_h = f["fh"]
 
-                    if face_w < w * 0.08:
-                        continue
+                if face_w < w * 0.08:
+                    continue
 
-                    # Score: confidence × face size (prefer larger/closer faces)
-                    score = conf * (face_w * face_h)
-                    if score > best_score:
-                        best_score = score
-                        best_frame = frame.copy()
-                        best_face_cx = (x1 + x2) // 2
-                        best_face_cy = (y1 + y2) // 2
-                        best_face_w = face_w
-                        best_face_h = face_h
+                # Score: confidence × face size (prefer larger/closer faces)
+                score = conf * (face_w * face_h)
+                if score > best_score:
+                    best_score = score
+                    best_frame = frame.copy()
+                    best_face_cx = f["cx"]
+                    best_face_cy = f["cy"]
+                    best_face_w = face_w
+                    best_face_h = face_h
 
         cap.release()
 

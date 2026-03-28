@@ -43,6 +43,7 @@ def analyze_faces(
     try:
         import cv2
         import numpy as np
+        from services.face_detector import create_detector, detect_faces
     except ImportError:
         print("Warning: OpenCV not available, skipping face analysis", file=sys.stderr)
         return None
@@ -58,17 +59,12 @@ def analyze_faces(
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
 
-    # Load DNN face detector
-    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    proto = os.path.join(backend_dir, "models", "deploy.prototxt")
-    model = os.path.join(backend_dir, "models", "res10_300x300_ssd_iter_140000.caffemodel")
-
-    if not (os.path.exists(proto) and os.path.exists(model)):
+    # Create YuNet detector
+    detector = create_detector(width, height)
+    if detector is None:
         cap.release()
         print("Warning: Face detection model not found, skipping", file=sys.stderr)
         return None
-
-    detector = cv2.dnn.readNetFromCaffe(proto, model)
 
     # Sample ~2 frames per second across the full video (enough for analysis)
     sample_count = min(300, max(20, int(duration * 2)))
@@ -85,35 +81,18 @@ def analyze_faces(
         if not ret:
             continue
 
-        h, w = frame.shape[:2]
-        blob = cv2.dnn.blobFromImage(
-            cv2.resize(frame, (300, 300)), 1.0, (300, 300),
-            (104.0, 177.0, 123.0)
-        )
-        detector.setInput(blob)
-        detections = detector.forward()
+        faces = detect_faces(detector, frame, width, height)
 
         frame_faces = 0
-        for j in range(detections.shape[2]):
-            conf = detections[0, 0, j, 2]
-            if conf > 0.5:
-                x1 = int(detections[0, 0, j, 3] * w)
-                x2 = int(detections[0, 0, j, 5] * w)
-                y1 = int(detections[0, 0, j, 4] * h)
-                y2 = int(detections[0, 0, j, 6] * h)
-                fw = x2 - x1
-                if fw < w * 0.04:
-                    continue
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
-                observations.append({
-                    "time": round(t, 3),
-                    "face_center_x": cx,
-                    "face_center_y": cy,
-                    "face_width": fw,
-                    "confidence": round(float(conf), 3),
-                })
-                frame_faces += 1
+        for f in faces:
+            observations.append({
+                "time": round(t, 3),
+                "face_center_x": f["cx"],
+                "face_center_y": f["cy"],
+                "face_width": f["fw"],
+                "confidence": f["confidence"],
+            })
+            frame_faces += 1
         faces_per_frame.append(frame_faces)
 
         if progress_callback and i % 20 == 0:

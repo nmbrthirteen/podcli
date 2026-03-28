@@ -38,6 +38,20 @@ export const suggestClipsToolDef = {
               type: "number",
               description: "End timestamp in seconds",
             },
+            segments: {
+              type: "array",
+              description:
+                "Multi-cut keep-ranges within the clip. Use to cut out filler/tangents " +
+                "in the middle. If omitted, the full start→end range is used.",
+              items: {
+                type: "object",
+                properties: {
+                  start: { type: "number" },
+                  end: { type: "number" },
+                },
+                required: ["start", "end"],
+              },
+            },
             reasoning: {
               type: "string",
               description: "Why this moment is viral-worthy",
@@ -45,6 +59,15 @@ export const suggestClipsToolDef = {
             preview_text: {
               type: "string",
               description: "Brief text preview of what's said",
+            },
+            content_type: {
+              type: "string",
+              description:
+                "Content classification: guest_story, technical_insight, market_landscape, business_strategy, hot_take",
+            },
+            score: {
+              type: "number",
+              description: "Virality score (0-20). Sum of standalone + hook + relevance + quotability (each 1-5).",
             },
             suggested_caption_style: {
               type: "string",
@@ -67,24 +90,38 @@ export async function handleSuggestClips(
     title: string;
     start_second: number;
     end_second: number;
+    segments?: Array<{ start: number; end: number }>;
     reasoning: string;
     preview_text?: string;
+    content_type?: string;
+    score?: number;
     suggested_caption_style?: string;
   }>;
 
   // Validate and enrich suggestions
-  const enriched = suggestions.map((s, i) => ({
-    clip_number: i + 1,
-    clip_id: randomUUID(),
-    title: s.title,
-    start_second: s.start_second,
-    end_second: s.end_second,
-    duration: Math.round((s.end_second - s.start_second) * 10) / 10,
-    reasoning: s.reasoning,
-    preview_text: s.preview_text || "",
-    suggested_caption_style: s.suggested_caption_style || "hormozi",
-    timestamp_display: `${formatTime(s.start_second)} → ${formatTime(s.end_second)}`,
-  }));
+  const enriched = suggestions.map((s, i) => {
+    // Compute duration from segments if available, otherwise from start/end
+    const segments = s.segments?.filter((seg) => seg.end > seg.start) || [];
+    const keptDuration = segments.length > 0
+      ? segments.reduce((sum, seg) => sum + (seg.end - seg.start), 0)
+      : s.end_second - s.start_second;
+
+    return {
+      clip_number: i + 1,
+      clip_id: randomUUID(),
+      title: s.title,
+      start_second: s.start_second,
+      end_second: s.end_second,
+      segments: segments.length > 0 ? segments : [{ start: s.start_second, end: s.end_second }],
+      duration: Math.round(keptDuration * 10) / 10,
+      reasoning: s.reasoning,
+      preview_text: s.preview_text || "",
+      content_type: s.content_type || "unknown",
+      score: s.score || 0,
+      suggested_caption_style: s.suggested_caption_style || "hormozi",
+      timestamp_display: `${formatTime(s.start_second)} → ${formatTime(s.end_second)}`,
+    };
+  });
 
   return JSON.stringify({
     clip_count: enriched.length,

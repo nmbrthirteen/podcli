@@ -158,15 +158,13 @@ def extract_candidate_frames(
     is_portrait = src_h > src_w  # Already 9:16 or similar
 
     # Load face detector
-    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    proto = os.path.join(backend_dir, "models", "deploy.prototxt")
-    model = os.path.join(backend_dir, "models", "res10_300x300_ssd_iter_140000.caffemodel")
+    from services.face_detector import create_detector, detect_faces
+    detector = create_detector(src_w, src_h)
 
-    if not (os.path.exists(proto) and os.path.exists(model)):
+    if detector is None:
         cap.release()
         return []
 
-    detector = cv2.dnn.readNetFromCaffe(proto, model)
     os.makedirs(output_dir, exist_ok=True)
 
     # Sample more frames for better candidates
@@ -183,22 +181,19 @@ def extract_candidate_frames(
             continue
 
         h, w = frame.shape[:2]
-        blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
-        detector.setInput(blob)
-        detections = detector.forward()
+        faces_detected = detect_faces(detector, frame, src_w, src_h)
 
-        for j in range(detections.shape[2]):
-            conf = detections[0, 0, j, 2]
-            if conf > 0.6:
-                x1 = max(0, int(detections[0, 0, j, 3] * w))
-                y1 = max(0, int(detections[0, 0, j, 4] * h))
-                x2 = min(w, int(detections[0, 0, j, 5] * w))
-                y2 = min(h, int(detections[0, 0, j, 6] * h))
-                fw = x2 - x1
-                fh = y2 - y1
+        for f in faces_detected:
+            conf = f["confidence"]
+            x1 = max(0, f["cx"] - f["fw"] // 2)
+            y1 = max(0, f["cy"] - f["fh"] // 2)
+            x2 = min(w, f["cx"] + f["fw"] // 2)
+            y2 = min(h, f["cy"] + f["fh"] // 2)
+            fw = f["fw"]
+            fh = f["fh"]
 
-                if fw < w * 0.08:
-                    continue
+            if fw < w * 0.08:
+                continue
 
                 # Split-screen check — only for landscape sources where
                 # a small centered face likely means a multi-cam layout.

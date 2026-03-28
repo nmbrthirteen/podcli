@@ -95,7 +95,7 @@ def _build_tight_segments(
     words: list[dict],
     start_second: float,
     end_second: float,
-    silence_threshold: float = 1.5,
+    silence_threshold: float = 0.8,
 ) -> list[dict]:
     """
     Build tight keep-segments from transcript words, cutting out:
@@ -152,7 +152,7 @@ def _build_tight_segments(
     kept_duration = sum(s["end"] - s["start"] for s in segments)
     saved = original_duration - kept_duration
 
-    if saved < 1.5 or len(segments) < 2:
+    if saved < 0.8 or len(segments) < 2:
         # Not worth the cuts — too little saved
         return [{"start": start_second, "end": end_second}]
 
@@ -212,6 +212,16 @@ def generate_clip(
         keep_segments.sort(key=lambda s: s["start"])
         start_second = keep_segments[0]["start"]
         end_second = keep_segments[-1]["end"]
+
+        # If Claude returned a single segment, still auto-trim pauses within it.
+        # Multiple segments means Claude made deliberate editorial cuts — trust those.
+        if len(keep_segments) == 1 and transcript_words and clean_fillers:
+            auto_segments = _build_tight_segments(
+                transcript_words, start_second, end_second,
+            )
+            if len(auto_segments) > 1:
+                keep_segments = auto_segments
+
         duration = sum(s["end"] - s["start"] for s in keep_segments)
     else:
         # Snap clip boundaries to sentence endings
@@ -233,8 +243,8 @@ def generate_clip(
             keep_segments = None
             duration = end_second - start_second
 
-    if duration > 180:
-        raise ValueError(f"Clip too long ({duration:.0f}s). Max 180 seconds for shorts.")
+    if duration > 60:
+        raise ValueError(f"Clip too long ({duration:.0f}s). Max 60 seconds for shorts.")
 
     # Load style config for branded-specific settings
     style_config = get_style(caption_style)
@@ -284,7 +294,11 @@ def generate_clip(
             crop_clip_start = 0
             caption_time_offset = 0
         else:
-            crop_words = transcript_words
+            # Filter words to just this clip's time range
+            crop_words = [
+                w for w in transcript_words
+                if w["end"] > start_second and w["start"] < end_second
+            ] if transcript_words else transcript_words
             crop_clip_start = start_second
             caption_time_offset = start_second
 
