@@ -216,6 +216,54 @@ def handle_presets(task_id: str, params: dict):
         emit_result(task_id, "error", error=f"Unknown presets action: {action}")
 
 
+def handle_suggest_clips(task_id: str, params: dict):
+    """AI-powered clip suggestion using Claude/Codex and PodStack knowledge base."""
+    from services.claude_suggest import suggest_with_claude
+
+    segments = params.get("segments", [])
+    top_n = params.get("top_n", 5)
+
+    if not segments:
+        emit_result(task_id, "error", error="segments is required")
+        return
+
+    clips = suggest_with_claude(
+        segments=segments,
+        top_n=top_n,
+        progress_callback=lambda pct, msg: emit_progress(task_id, "suggesting", pct, msg),
+    )
+
+    if clips is None:
+        emit_result(task_id, "error", error="No AI CLI available (install Claude Code or Codex)")
+        return
+
+    emit_result(task_id, "success", data={"clips": clips})
+
+
+def handle_generate_content(task_id: str, params: dict):
+    """Generate titles, descriptions, tags for a clip using PodStack knowledge base."""
+    from services.content_generator import generate_clip_content
+
+    clip = params.get("clip", {})
+    transcript_segments = params.get("transcript_segments", [])
+
+    if not clip:
+        emit_result(task_id, "error", error="clip is required")
+        return
+
+    result = generate_clip_content(
+        clip=clip,
+        transcript_segments=transcript_segments,
+        progress_callback=lambda pct, msg: emit_progress(task_id, "generating", pct, msg),
+    )
+
+    if result is None:
+        emit_result(task_id, "error", error="No AI CLI available (install Claude Code or Codex)")
+        return
+
+    emit_result(task_id, "success", data=result)
+
+
 TASK_HANDLERS = {
     "ping": handle_ping,
     "transcribe": handle_transcribe,
@@ -225,6 +273,8 @@ TASK_HANDLERS = {
     "analyze_energy": handle_analyze_energy,
     "detect_encoder": handle_detect_encoder,
     "presets": handle_presets,
+    "suggest_clips": handle_suggest_clips,
+    "generate_content": handle_generate_content,
 }
 
 

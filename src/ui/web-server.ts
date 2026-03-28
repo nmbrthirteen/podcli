@@ -1203,36 +1203,10 @@ app.post("/api/generate-prompt", (req, res) => {
   res.json({ prompt, action, context: ctx });
 });
 
-// --- AI-powered clip suggestion (Claude Code or Codex) ---
+// --- AI-powered clip suggestion (delegates to Python backend) ---
 
 app.post("/api/claude-suggest", async (req, res) => {
   const { top_n = 5 } = req.body;
-
-  // Find AI CLI: prefer Claude, fall back to Codex
-  const homedir = require("os").homedir();
-  const claudeCandidates = [
-    join(homedir, ".local", "bin", "claude"),
-    "/usr/local/bin/claude",
-    "/opt/homebrew/bin/claude",
-  ];
-  const codexCandidates = [
-    "/usr/local/bin/codex",
-    "/opt/homebrew/bin/codex",
-  ];
-  const claudePath = claudeCandidates.find((p) => existsSync(p));
-  const codexPath = !claudePath ? codexCandidates.find((p) => existsSync(p)) : undefined;
-  const aiPath = claudePath || codexPath;
-  const engine: "claude" | "codex" = claudePath ? "claude" : "codex";
-
-  if (!aiPath) {
-    res.json({
-      error: "No AI CLI found (Claude Code or Codex)",
-      message: "Install Claude Code (https://docs.anthropic.com/en/docs/claude-code) or Codex (https://openai.com/index/introducing-codex/)",
-      fallback: "clipboard",
-      clips: [],
-    });
-    return;
-  }
 
   // Need transcript in state
   if (!uiState.transcript && !uiState.rawTranscriptText) {
@@ -1240,163 +1214,20 @@ app.post("/api/claude-suggest", async (req, res) => {
     return;
   }
 
-  // Build transcript text from state
-  let transcriptText = "";
   const segs = (uiState.transcript as any)?.segments;
-  if (segs && Array.isArray(segs)) {
-    transcriptText = segs
-      .map((s: any) => {
-        const sp = s.speaker ? `[${s.speaker}] ` : "";
-        const mins = Math.floor(s.start / 60);
-        const secs = Math.floor(s.start % 60);
-        return `(${mins}:${String(secs).padStart(2, "0")}) ${sp}${s.text}`;
-      })
-      .join("\n");
-  } else if (uiState.rawTranscriptText) {
-    transcriptText = uiState.rawTranscriptText as string;
+  if (!segs || !Array.isArray(segs) || segs.length === 0) {
+    res.status(400).json({ error: "No transcript segments available." });
+    return;
   }
-
-  const segCount = segs?.length || 0;
-  const dur = (uiState.transcript as any)?.duration || 0;
-  const durationMin = Math.round(dur / 60);
-
-  // Load knowledge base files for context
-  const kbDir = join(process.cwd(), ".podcli", "knowledge");
-  let kbContext = "";
-  const kbFiles: [string, number][] = [
-    ["04-shorts-creation-guide.md", 4000],
-    ["05-title-formulas.md", 3000],
-    ["02-voice-and-tone.md", 3000],
-    ["01-brand-identity.md", 1500],
-    ["11-inspiration-channels.md", 2000],
-    ["12-quick-reference.md", 2000],
-  ];
-  for (const [fname, maxChars] of kbFiles) {
-    const fpath = join(kbDir, fname);
-    if (existsSync(fpath)) {
-      try {
-        const content = readFileSync(fpath, "utf-8").trim();
-        if (content.split("[Your Show Name]").length > 3 && content.length < 500) continue;
-        kbContext += `\n--- ${fname} ---\n${content.slice(0, maxChars)}\n`;
-      } catch {}
-    }
-  }
-
-  const prompt = `You are a viral clip editor for TikTok and YouTube Shorts. Find the ${top_n} most scroll-stopping moments in this podcast transcript.
-
-IMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences.
-
-TIMESTAMP FORMAT: All timestamps in the transcript are in SECONDS (e.g., [123.4s]).
-All timestamps you return MUST be in SECONDS as numbers (e.g., 123.4), NOT minutes:seconds.
-
-DURATION RULES (CRITICAL):
-- Target: 25-40 seconds (this is the viral sweet spot)
-- Maximum: 50 seconds (absolute hard limit — anything longer loses viewers)
-- Minimum: 15 seconds (too short = no payoff)
-- SHORTER IS BETTER. A punchy 25s clip outperforms a 50s clip every time.
-- If a thought takes longer than 40s, use segments to cut the filler in the middle
-
-CUTTING RULES (CRITICAL):
-- Cut TIGHT. Every second must earn its place.
-- Start at the exact moment the hook hits — no preamble, no "so", no "well"
-- End the MOMENT the point lands with a complete thought — don't trail off
-- NEVER cut mid-sentence or mid-thought. The viewer must feel closure.
-- If there's filler/tangent in the middle, use multiple segments to skip it
-
-MOMENT SELECTION (think like a TikTok editor):
-- Would YOU stop scrolling for this? If no, skip it.
-- First 3 seconds must HOOK — a bold claim, shocking number, or provocative question
-- Must make complete sense standalone — no "as I mentioned" or "going back to"
-- Must end on a COMPLETE THOUGHT — sentence boundary, natural pause, or mic-drop moment
-- Single focused idea — one concept, fully delivered, no loose threads
-- Prioritize: controversial takes, surprising numbers, founder war stories, "wait what?" moments, emotional peaks
-- Skip: generic advice, obvious statements, context-dependent references
-
-${kbContext ? `KNOWLEDGE BASE:${kbContext}` : ""}
-
-Score each moment on 4 dimensions (1-5 each):
-- standalone: Makes sense without episode context?
-- hook: Grabs attention in first 3 seconds?
-- relevance: Matters to target audience?
-- quotability: Memorable, shareable phrasing?
-
-Classify each as: guest_story | technical_insight | market_landscape | business_strategy | hot_take
-
-Return this exact JSON structure:
-{ "clips": [{ "title": "First strong sentence from the moment", "start_second": 123.4, "end_second": 168.4, "segments": [{"start": 123.4, "end": 140.0}, {"start": 145.2, "end": 168.4}], "duration": 40, "content_type": "guest_story", "scores": {"standalone": 4, "hook": 5, "relevance": 4, "quotability": 3}, "total_score": 16, "quote": "The key quote from this moment", "why": "One sentence on why this works as a short" }] }
-
-SEGMENTS RULES:
-- "segments" is an array of keep-ranges within the clip. Use it to CUT OUT dead weight.
-- If the moment is clean with no filler, use a single segment: [{"start": X, "end": Y}]
-- If there's a ramble/tangent/filler in the middle, split into multiple segments that skip it
-- "duration" = total kept time (sum of all segment lengths), NOT end - start
-
-Rules:
-- Final clip duration (sum of segments) MUST be 15-50 seconds (target 25-40s)
-- Each segment must start and end on COMPLETE SENTENCES
-- Must make sense standalone when stitched together
-- Sort clips by timestamp order
-
-Transcript (${segCount} segments, ~${durationMin} min):
-
-${transcriptText}`;
-
-  // Write prompt to temp file
-  const tmpFile = join(process.cwd(), `.tmp-claude-prompt-${Date.now()}.txt`);
-  writeFileSync(tmpFile, prompt);
 
   try {
-    const { execSync } = require("child_process");
-    let result: string;
+    const result = await executor.execute(
+      "suggest_clips",
+      { segments: segs, top_n },
+      (event) => broadcastSSE("job-update", { progress: event.percent, message: event.message }),
+    );
 
-    if (engine === "codex") {
-      const outFile = tmpFile + ".out";
-      execSync(
-        `"${aiPath}" exec --full-auto -o "${outFile}" "$(cat "${tmpFile}")"`,
-        { cwd: process.cwd(), timeout: 300_000, maxBuffer: 10 * 1024 * 1024, encoding: "utf-8" }
-      );
-      result = existsSync(outFile) ? readFileSync(outFile, "utf-8") : "";
-      try { require("fs").unlinkSync(outFile); } catch {}
-    } else {
-      result = execSync(
-        `cat "${tmpFile}" | "${aiPath}" --print -p -`,
-        { cwd: process.cwd(), timeout: 300_000, maxBuffer: 10 * 1024 * 1024, encoding: "utf-8" }
-      );
-    }
-
-    // Parse JSON from response
-    const jsonStart = result.indexOf("{");
-    const jsonEnd = result.lastIndexOf("}") + 1;
-    if (jsonStart < 0 || jsonEnd <= jsonStart) {
-      res.status(500).json({ error: `${engine === "claude" ? "Claude" : "Codex"} did not return valid JSON` });
-      return;
-    }
-
-    const data = JSON.parse(result.substring(jsonStart, jsonEnd));
-    const clips = (data.clips || []).map((c: any) => {
-      // Parse and validate segments
-      const rawSegs = c.segments || [];
-      const segments = rawSegs
-        .filter((s: any) => s.end > s.start)
-        .map((s: any) => ({ start: s.start, end: s.end }));
-      const keptDuration = segments.length > 0
-        ? segments.reduce((sum: number, s: any) => sum + (s.end - s.start), 0)
-        : (c.end_second || 0) - (c.start_second || 0);
-
-      return {
-        title: c.title || "Untitled",
-        start_second: c.start_second || 0,
-        end_second: c.end_second || 0,
-        segments: segments.length > 0 ? segments : [{ start: c.start_second || 0, end: c.end_second || 0 }],
-        duration: Math.round(keptDuration),
-        reasoning: c.why || "",
-        preview_text: (c.quote || "").slice(0, 120),
-        content_type: c.content_type || "unknown",
-        score: c.total_score || 0,
-        scores: c.scores || {},
-        suggested_caption_style: "hormozi",
-      };
-    }).filter((c: any) => c.duration >= 15 && c.duration <= 55);
+    const clips = (result.data as any)?.clips || [];
 
     // Auto-push to UI state as suggestions
     if (clips.length > 0) {
@@ -1410,18 +1241,41 @@ ${transcriptText}`;
         preview_text: c.preview_text,
         content_type: c.content_type,
         score: c.score,
-        suggested_caption_style: c.suggested_caption_style,
+        suggested_caption_style: c.suggested_caption_style || "hormozi",
       }));
       (uiState as any).phase = "review";
       broadcastSSE("state-sync", uiState);
     }
 
-    res.json({ clips, source: engine });
+    res.json({ clips, source: "python" });
   } catch (err: any) {
-    const label = engine === "claude" ? "Claude" : "Codex";
-    res.status(500).json({ error: `${label} failed: ${err.message?.substring(0, 200)}` });
-  } finally {
-    try { require("fs").unlinkSync(tmpFile); } catch {}
+    res.status(500).json({ error: `Suggestion failed: ${err.message?.substring(0, 200)}` });
+  }
+});
+
+// --- Per-clip content generation (titles, descriptions, tags) ---
+
+app.post("/api/generate-content", async (req, res) => {
+  const { clip, transcript_segments } = req.body;
+
+  if (!clip) {
+    res.status(400).json({ error: "clip is required" });
+    return;
+  }
+
+  // Use transcript segments from request or fall back to UI state
+  const segs = transcript_segments || (uiState.transcript as any)?.segments || [];
+
+  try {
+    const result = await executor.execute(
+      "generate_content",
+      { clip, transcript_segments: segs },
+      (event) => broadcastSSE("job-update", { progress: event.percent, message: event.message }),
+    );
+
+    res.json(result.data);
+  } catch (err: any) {
+    res.status(500).json({ error: `Content generation failed: ${err.message?.substring(0, 200)}` });
   }
 });
 

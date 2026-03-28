@@ -231,7 +231,7 @@ def cmd_process(args):
             pass
 
     if args.transcript:
-        print("  [1/5] Loading transcript...")
+        print("  [1/4] Loading transcript...")
         with open(args.transcript, "r") as f:
             raw_text = f.read()
 
@@ -259,13 +259,13 @@ def cmd_process(args):
         # Check cache first
         cached = _load_cache(video_path)
         if cached and not config.get("no_cache", False):
-            print("  [1/5] Loaded from cache (instant)")
+            print("  [1/4] Loaded from cache (instant)")
             words = cached["words"]
             segments = cached["segments"]
             result = cached
             print(f"         {len(segments)} segments, {len(words)} words")
         else:
-            print("  [1/5] Transcribing with Whisper...")
+            print("  [1/4] Transcribing with Whisper...")
             _ensure_ssl_certs()
             import warnings
             warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
@@ -328,7 +328,7 @@ def cmd_process(args):
     # ── Step 2: Analyze audio energy ──
     energy_scores = None
     if config.get("energy_boost", True):
-        print("  [2/5] Analyzing audio energy...")
+        print("  [2/4] Analyzing audio energy...")
         try:
             profile = get_energy_profile(video_path, segments)
             energy_scores = profile["segment_scores"]
@@ -336,31 +336,31 @@ def cmd_process(args):
         except Exception as e:
             print(f"         Skipped (error: {e})")
     else:
-        print("  [2/5] Audio analysis skipped (--no-energy)")
+        print("  [2/4] Audio analysis skipped (--no-energy)")
 
     # ── Step 3: Score and select clips ──
     top_n = config.get("top_clips", 5)
     clips = None
 
     # Try Claude first (uses PodStack knowledge base for intelligent selection)
-    from services.claude_suggest import suggest_with_claude, _find_claude
+    from services.claude_suggest import suggest_with_claude, _find_ai_cli
 
-    claude_path = _find_claude()
-    if claude_path:
-        print(f"  [3/5] Selecting moments with Claude (PodStack)...")
+    ai_path, ai_engine = _find_ai_cli()
+    if ai_path:
+        ai_label = "Claude" if ai_engine == "claude" else "Codex"
+        print(f"  [3/4] Selecting moments with {ai_label} (PodStack)...")
         clips = suggest_with_claude(
             segments=segments,
             top_n=top_n,
             progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
         )
         if clips:
-            print(f"         ✓ Claude selected {len(clips)} clips")
+            print(f"         ✓ {ai_label} selected {len(clips)} clips")
         else:
-            print(f"         ⚠ Claude unavailable, falling back to heuristics")
+            print(f"         ⚠ {ai_label} unavailable, falling back to heuristics")
     else:
-        print(f"  [3/5] Scoring clips (heuristic mode)...")
-        print(f"         ℹ Install Claude Code for smarter selection:")
-        print(f"           https://docs.anthropic.com/en/docs/claude-code")
+        print(f"  [3/4] Scoring clips (heuristic mode)...")
+        print(f"         ℹ Install Claude Code or Codex for smarter selection")
 
     # Fallback to heuristic algorithm
     if not clips:
@@ -402,6 +402,10 @@ def cmd_process(args):
         except Exception:
             pass
 
+    # Check if AI CLI is available for per-clip content generation
+    from services.claude_suggest import _find_ai_cli
+    _ai_cli_path, _ai_engine = _find_ai_cli()
+
     # Pre-load thumbnail tools if enabled
     _thumb_gen = None
     _thumb_to_video = None
@@ -423,7 +427,8 @@ def cmd_process(args):
         except Exception:
             _thumb_enabled = False
 
-    print(f"\n  [4/5] Exporting {len(clips)} clips to {output_dir}/")
+    _ai_label = f" (+ titles via {'Claude' if _ai_engine == 'claude' else 'Codex'})" if _ai_cli_path else ""
+    print(f"\n  [4/4] Exporting {len(clips)} clips{_ai_label} to {output_dir}/")
     results = []
     t0 = time.time()
 
@@ -473,6 +478,47 @@ def cmd_process(args):
             except Exception as e:
                 print(f"                 ⚠ thumbnail: {e}")
 
+        # Generate titles, descriptions, tags for this clip immediately
+        if _ai_cli_path and result.get("output_path"):
+            try:
+                from services.content_generator import generate_clip_content
+                content_result = generate_clip_content(
+                    clip=clip,
+                    transcript_segments=segments,
+                )
+                if content_result and content_result.get("raw_text"):
+                    # Save per-clip content to file
+                    _content_path = result["output_path"].replace(".mp4", "_content.md")
+                    with open(_content_path, "w") as _cf:
+                        _cf.write(f"# {clip.get('title', 'Clip')}\n\n{content_result['raw_text']}")
+
+                    # Pretty-print in terminal
+                    _accent = "\033[38;2;212;135;74m"
+                    _bold = "\033[1m"
+                    _dim = "\033[2m"
+                    _yellow = "\033[33m"
+                    _reset = "\033[0m"
+
+                    print(f"\n  {'─' * 45}")
+                    print(f"  {_bold}📋 Clip {i+1}: {clip['title'][:45]}{_reset}")
+                    print(f"  {'─' * 45}")
+                    for line in content_result["raw_text"].split("\n"):
+                        stripped = line.strip()
+                        if not stripped:
+                            continue
+                        if stripped.startswith("TITLES") or stripped.startswith("DESCRIPTION") or stripped.startswith("TAGS") or stripped.startswith("HASHTAGS") or stripped.startswith("TOP PICK"):
+                            print(f"  {_bold}{stripped}{_reset}")
+                        elif stripped[0:1].isdigit() and ". " in stripped[:4]:
+                            print(f"  {_accent}{stripped}{_reset}")
+                        elif stripped.startswith("#"):
+                            print(f"  {_yellow}{stripped}{_reset}")
+                        else:
+                            print(f"  {_dim}{stripped}{_reset}")
+                    print(f"  {_dim}Saved: {os.path.basename(_content_path)}{_reset}")
+                    print()
+            except Exception as e:
+                print(f"                 ⚠ content: {e}")
+
     elapsed = time.time() - t0
     success = sum(1 for r in results if "output_path" in r)
     print(f"\n         {success}/{len(clips)} clips exported in {elapsed:.1f}s")
@@ -481,175 +527,13 @@ def cmd_process(args):
 
     print(f"\n  Output: {output_dir}/")
 
-    # ── Step 5: Content generation via Claude (with PodStack knowledge base) ──
-    from services.claude_suggest import _find_claude
-    claude_path = _find_claude()
-
     accent = "\033[38;2;212;135;74m"
     gray = "\033[38;5;245m"
-    green = "\033[38;2;74;222;128m"
     bold = "\033[1m"
     reset = "\033[0m"
 
-    if claude_path:
-        print(f"\n  {bold}[5/5] Generating content package...{reset}")
-
-        # Load PodStack knowledge base files inline
-        kb_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "knowledge")
-        kb_sections = {}
-        for fname in [
-            "02-voice-and-tone.md",
-            "05-title-formulas.md",
-            "06-descriptions-template.md",
-            "07-thumbnail-guide.md",
-            "12-quick-reference.md",
-        ]:
-            fpath = os.path.join(kb_dir, fname)
-            if os.path.exists(fpath):
-                try:
-                    with open(fpath) as kf:
-                        kb_sections[fname] = kf.read()
-                except Exception:
-                    pass
-
-        kb_context = ""
-        for fname, content in kb_sections.items():
-            kb_context += f"\n\n--- {fname} ---\n{content[:3000]}"
-
-        # Build transcript text for Claude
-        transcript_lines = []
-        for seg in segments:
-            sp = seg.get("speaker", "")
-            sp_label = f"[{sp}] " if sp else ""
-            start = seg.get("start", 0)
-            mins = int(start) // 60
-            secs = int(start) % 60
-            text = seg.get("text", "").strip()
-            if text:
-                transcript_lines.append(f"({mins}:{secs:02d}) {sp_label}{text}")
-
-        # Build clip summary for context
-        clip_summary = "\n".join(
-            f"- Short {i+1}: \"{c['title']}\" ({c['start_second']}s-{c['end_second']}s, {c['end_second']-c['start_second']:.0f}s) [{c.get('content_type', '')}]"
-            for i, c in enumerate(clips)
-        )
-
-        prompt = f"""You are the content production team for a podcast. Generate a complete publish-ready content package for these clips.
-
-KNOWLEDGE BASE (follow these specs exactly):
-{kb_context}
-
----
-
-VIDEO: {os.path.basename(video_path)}
-CLIPS RENDERED: {success}
-OUTPUT DIR: {output_dir}/
-
-SELECTED CLIPS:
-{clip_summary}
-
-TRANSCRIPT (for context):
-{chr(10).join(transcript_lines[:500])}
-
----
-
-GENERATE FOR EACH CLIP:
-
-## 1. TITLES (8 per clip)
-Follow the title spec exactly:
-- 40-60 chars target, 70 max
-- 5-11 words, keyword in first 3 words
-- 4 shapes: topic+tension, result+cause, X vs Y, number+noun
-- Generate: 2 guest/decision, 2 insight/technical, 1-2 market/hot take, 1-2 safe/descriptive
-- Verify each: Coffee Test, banned words check, hook alignment
-- Flag top 2 picks with reasoning
-
-## 2. DESCRIPTIONS (per clip)
-- Short description: hook line + guest attribution + hashtags (under 150 chars)
-- Use the description template from the knowledge base
-
-## 3. THUMBNAIL TEXT (per clip)
-- Line 1 (top): 2-3 words, setup/topic
-- Line 2 (bottom): 2-3 words, payoff/hook (appears on teal highlight)
-- Format as: "LINE 1 / LINE 2"
-
-## 4. POSTING SCHEDULE
-- Recommend optimal posting times and order
-
-## 5. PUBLISH CHECKLIST
-- Pre-publish, post-publish, and day 3-4 optimization steps
-
-Output as clean markdown. No code fences around the whole thing."""
-
-        import tempfile, subprocess as sp
-        project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=project_dir) as f:
-            f.write(prompt)
-            prompt_file = f.name
-
-        try:
-            print(f"         {gray}Claude is generating titles, descriptions, thumbnails...{reset}")
-            claude_result = sp.run(
-                f'cat "{prompt_file}" | "{claude_path}" --print -p -',
-                capture_output=True, text=True, cwd=project_dir,
-                timeout=300, shell=True,
-            )
-            if claude_result.returncode == 0 and claude_result.stdout.strip():
-                # Save content package
-                import re
-                guest = "episode"
-                for seg in segments[:10]:
-                    text = seg.get("text", "")
-                    if text and len(text) > 20:
-                        guest = re.sub(r'[^a-zA-Z0-9]', '-', text[:30]).strip('-').lower()
-                        break
-
-                episodes_dir = os.path.join(project_dir, "episodes")
-                os.makedirs(episodes_dir, exist_ok=True)
-                pkg_path = os.path.join(episodes_dir, f"content-package-{guest[:20]}.md")
-                with open(pkg_path, "w") as f:
-                    f.write(claude_result.stdout)
-
-                print(f"         {green}✓{reset} Saved to {accent}episodes/{os.path.basename(pkg_path)}{reset}")
-                print()
-
-                # Print content package in terminal
-                dim = "\033[2m"
-                cyan = "\033[36m"
-                yellow = "\033[33m"
-                pkg_text = claude_result.stdout.strip()
-                print(f"  {'━' * 50}")
-                print(f"  {bold}📋 CONTENT PACKAGE{reset}")
-                print(f"  {'━' * 50}")
-                for line in pkg_text.split("\n"):
-                    stripped = line.strip()
-                    if stripped.startswith("# "):
-                        print(f"\n  {bold}{cyan}{stripped}{reset}")
-                    elif stripped.startswith("## "):
-                        print(f"\n  {bold}{stripped[3:]}{reset}")
-                    elif stripped.startswith("### "):
-                        print(f"  {yellow}{stripped[4:]}{reset}")
-                    elif stripped.startswith("- ⭐") or stripped.startswith("- **⭐") or "TOP PICK" in stripped.upper():
-                        print(f"  {green}{stripped}{reset}")
-                    elif stripped.startswith("- "):
-                        print(f"  {stripped}")
-                    elif stripped:
-                        print(f"  {dim}{stripped}{reset}")
-                print(f"\n  {'━' * 50}")
-            else:
-                print(f"         {gray}⚠ Claude returned no content. Run {accent}/produce-shorts{reset} {gray}in Claude Code manually.{reset}")
-        except Exception as e:
-            print(f"         {gray}⚠ Content generation skipped: {e}{reset}")
-            print(f"         {gray}Run {accent}/produce-shorts{reset} {gray}in Claude Code for titles + descriptions.{reset}")
-        finally:
-            try:
-                os.unlink(prompt_file)
-            except Exception:
-                pass
-    else:
-        print(f"\n  {gray}Clips rendered. For titles, descriptions & thumbnails:{reset}")
-        print(f"  {gray}Open Claude Code and run {accent}/produce-shorts{reset}")
+    if not _ai_cli_path:
+        print(f"\n  {gray}For titles, descriptions & tags: install Claude Code or Codex CLI{reset}")
 
     # ── What next? ──
     print(f"  {'─' * 45}")
@@ -1160,13 +1044,36 @@ def cmd_cache(args):
 def cmd_info(args):
     """Show system info."""
     from services.encoder import get_encoder_info
+    from services.claude_suggest import _find_ai_cli
+
+    green = "\033[38;2;74;222;128m"
+    yellow = "\033[38;2;250;204;21m"
+    gray = "\033[38;5;245m"
+    reset = "\033[0m"
 
     info = get_encoder_info()
+    ai_path, ai_engine = _find_ai_cli()
+
+    # Check HF_TOKEN
+    hf_token = os.environ.get("HF_TOKEN", "")
+    if not hf_token:
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+        if os.path.exists(env_path):
+            try:
+                with open(env_path) as f:
+                    for line in f:
+                        if line.strip().startswith("HF_TOKEN=") and line.strip().split("=", 1)[1].strip():
+                            hf_token = line.strip().split("=", 1)[1].strip()
+                            break
+            except Exception:
+                pass
+
     print(f"\n  podcli system info\n")
-    print(f"    Platform:   {info['system']}")
-    print(f"    Encoder:    {info['best']}")
-    print(f"    Available:  {', '.join(info['available'])}")
-    print(f"    Flags:      {' '.join(info['best_flags'])}")
+    print(f"    Platform:     {info['system']}")
+    print(f"    Encoder:      {info['best']}")
+    print(f"    Available:    {', '.join(info['available'])}")
+    print(f"    AI CLI:       {green}{('Claude' if ai_engine == 'claude' else 'Codex') + ' (' + ai_path + ')' if ai_path else f'{yellow}not found — install Claude Code or Codex'}{reset}")
+    print(f"    Speakers:     {green + '✓ configured' if hf_token else yellow + '✗ set HF_TOKEN in .env'}{reset}")
     print()
 
 
@@ -1227,9 +1134,9 @@ def print_banner():
 
     speakers_ok = bool(hf_token)
 
-    # Check Claude Code
-    from services.claude_suggest import _find_claude
-    claude_path = _find_claude()
+    # Check AI CLI (Claude Code or Codex)
+    from services.claude_suggest import _find_ai_cli
+    ai_path, ai_engine = _find_ai_cli()
 
     print(f"  {bold}podcli{reset} v{VERSION}")
 
@@ -1240,10 +1147,11 @@ def print_banner():
         cache_count = len([f for f in os.listdir(cache_dir) if f.endswith(".json")])
 
     # Status — one line
-    claude_tag = f"{green}✓{reset}" if claude_path else f"{yellow}✗{reset}"
+    ai_label = ("Claude" if ai_engine == "claude" else "Codex") if ai_path else "AI CLI"
+    ai_tag = f"{green}✓ {ai_label}{reset}" if ai_path else f"{yellow}✗{reset}"
     speaker_tag = f"{green}✓{reset}" if speakers_ok else f"{yellow}✗{reset}"
     cache_tag = f"{green}{cache_count}{reset}" if cache_count else f"{gray}0{reset}"
-    print(f"  {gray}Encoder {green}{encoder_label}{reset} {gray}· Claude {claude_tag} {gray}· Speakers {speaker_tag} {gray}· Cache {cache_tag}{reset}")
+    print(f"  {gray}Encoder {green}{encoder_label}{reset} {gray}· {ai_tag} {gray}· Speakers {speaker_tag} {gray}· Cache {cache_tag}{reset}")
 
     # Assets — one line if any
     try:

@@ -371,8 +371,8 @@ def ask_claude_for_layout(
 
     Returns dict with line1, line2, box_y, photo_object_position, etc.
     """
-    from services.claude_suggest import _find_claude
-    claude_path = _find_claude()
+    from services.claude_suggest import _find_ai_cli
+    claude_path, _engine = _find_ai_cli()
     if not claude_path:
         return None
 
