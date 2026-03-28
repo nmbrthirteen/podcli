@@ -3,6 +3,9 @@ Preset/template system for podcli.
 
 Save and load named configurations so you don't reconfigure settings
 for every episode. Stored as JSON in .podcli/presets/
+
+A preset is a complete show config: video path, rendering options,
+corrections, output dir — everything needed to run `podcli process --preset myshow`.
 """
 
 import os
@@ -21,12 +24,19 @@ DEFAULT_PRESET = {
     "crop_strategy": "face",
     "time_adjust": -1.0,
     "logo_path": "",
+    "outro_path": "",
+    "video_path": "",
+    "transcript_path": "",
+    "output_dir": "",
     "whisper_model": "base",
     "top_clips": 5,
     "max_clip_duration": 90,
     "min_clip_duration": 20,
     "target_lufs": -14.0,
     "energy_boost": True,
+    "quality": "max",
+    "no_speakers": False,
+    "corrections": {},
 }
 
 
@@ -66,15 +76,16 @@ def get_preset(name: str) -> dict:
 
 
 def save_preset(name: str, config: dict) -> str:
-    """Save a preset to disk."""
+    """Save a preset to disk. Saves all provided keys."""
     os.makedirs(PRESETS_DIR, exist_ok=True)
     path = os.path.join(PRESETS_DIR, f"{name}.json")
 
-    # Only save keys that differ from or match the default schema
+    # Save all keys that are provided (not just DEFAULT_PRESET keys)
     to_save = {}
-    for key in DEFAULT_PRESET:
-        if key in config:
-            to_save[key] = config[key]
+    for key, val in config.items():
+        if key == "name":
+            continue  # don't store the name inside the file
+        to_save[key] = val
 
     with open(path, "w") as f:
         json.dump(to_save, f, indent=2)

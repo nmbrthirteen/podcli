@@ -118,11 +118,6 @@ def cmd_process(args):
     from services.encoder import get_encoder_info
     from presets import get_preset, DEFAULT_PRESET
 
-    video_path = _clean_path(args.video)
-    if not os.path.exists(video_path):
-        print(f"Error: Video not found: {video_path}", file=sys.stderr)
-        sys.exit(1)
-
     # Load preset or defaults
     if args.preset:
         try:
@@ -133,6 +128,31 @@ def cmd_process(args):
             sys.exit(1)
     else:
         config = {**DEFAULT_PRESET}
+
+    # Resolve video path: CLI arg > preset > error
+    if args.video:
+        video_path = _clean_path(args.video)
+    elif config.get("video_path"):
+        video_path = _clean_path(config["video_path"])
+    else:
+        print(f"Error: No video specified. Provide a path or use a preset with video_path.", file=sys.stderr)
+        sys.exit(1)
+
+    if not os.path.exists(video_path):
+        print(f"Error: Video not found: {video_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Resolve transcript from preset if not given on CLI
+    if not args.transcript and config.get("transcript_path"):
+        args.transcript = config["transcript_path"]
+
+    # Apply preset corrections (merged with global corrections)
+    if config.get("corrections"):
+        from services.corrections import get_corrections, save_corrections
+        global_corr = get_corrections()
+        merged = {**global_corr, **config["corrections"]}
+        if merged != global_corr:
+            save_corrections(merged)
 
     # CLI overrides
     if args.caption_style:
@@ -182,8 +202,8 @@ def cmd_process(args):
     quality = config.get("quality", os.environ.get("PODCLI_QUALITY", "max"))
     os.environ["PODCLI_QUALITY"] = quality
 
-    # Output directory
-    output_dir = args.output or os.path.join(os.path.dirname(video_path), "clips")
+    # Output directory: CLI arg > preset > default
+    output_dir = args.output or config.get("output_dir") or os.path.join(os.path.dirname(video_path), "clips")
     os.makedirs(output_dir, exist_ok=True)
 
     enc_info = get_encoder_info()
@@ -305,6 +325,10 @@ def cmd_process(args):
 
             # Save to cache for next run
             _save_cache(video_path, result)
+
+    # Apply word corrections (Whisper misheard proper nouns, brand names)
+    from services.corrections import apply_corrections
+    apply_corrections(words, segments)
 
     # Extract face_map before result gets overwritten in clip loop
     face_map = result.get("face_map")
@@ -829,32 +853,89 @@ def cmd_presets(args):
     """Manage presets."""
     from presets import list_presets, get_preset, save_preset, delete_preset
 
+    accent = "\033[38;2;212;135;74m"
+    green = "\033[38;2;74;222;128m"
+    gray = "\033[38;5;245m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
     if args.presets_action == "list":
         presets = list_presets()
         if not presets:
-            print("  No saved presets. Create one with: podcli presets save <name>")
+            print(f"\n  No saved presets. Create one:")
+            print(f"    {accent}podcli presets save myshow --video ep.mp4 --caption-style branded --logo mylogo{reset}\n")
             return
-        print(f"\n  Saved presets ({len(presets)}):\n")
+        print(f"\n  {bold}Presets ({len(presets)}){reset}\n")
         for p in presets:
-            print(f"    {p['name']}")
-            print(f"      caption: {p.get('caption_style', '?')} | crop: {p.get('crop_strategy', '?')} | top: {p.get('top_clips', '?')}")
+            video_tag = f" · {gray}{os.path.basename(p['video_path'])}{reset}" if p.get("video_path") else ""
+            corr_tag = f" · {gray}{len(p['corrections'])} corrections{reset}" if p.get("corrections") else ""
+            print(f"    {accent}{p['name']}{reset}{video_tag}{corr_tag}")
+            parts = []
+            if p.get("caption_style"):
+                parts.append(p["caption_style"])
+            if p.get("crop_strategy"):
+                parts.append(p["crop_strategy"])
+            if p.get("logo_path"):
+                parts.append(f"logo: {os.path.basename(p['logo_path'])}")
+            if p.get("quality"):
+                parts.append(p["quality"])
+            if parts:
+                print(f"      {gray}{' · '.join(parts)}{reset}")
         print()
 
     elif args.presets_action == "save":
-        config = {}
+        # Load existing preset to merge (so you can update one field at a time)
+        try:
+            existing = get_preset(args.name)
+            existing.pop("name", None)
+        except FileNotFoundError:
+            existing = {}
+
+        config = {**existing}
+        if args.video:
+            config["video_path"] = _clean_path(args.video)
+        if args.transcript:
+            config["transcript_path"] = _clean_path(args.transcript)
+        if args.output:
+            config["output_dir"] = _clean_path(args.output)
         if args.caption_style:
             config["caption_style"] = args.caption_style
         if args.crop:
             config["crop_strategy"] = args.crop
         if args.logo:
-            config["logo_path"] = args.logo
+            from services.asset_store import resolve as _resolve_logo
+            config["logo_path"] = _resolve_logo(args.logo) or args.logo
+        if args.outro:
+            from services.asset_store import resolve as _resolve_outro
+            config["outro_path"] = _resolve_outro(args.outro) or args.outro
         if args.top:
             config["top_clips"] = args.top
         if args.time_adjust is not None:
             config["time_adjust"] = args.time_adjust
+        if args.quality:
+            config["quality"] = args.quality
+        if args.no_energy:
+            config["energy_boost"] = False
+        if args.no_speakers:
+            config["no_speakers"] = True
+        if args.with_corrections:
+            from services.corrections import get_corrections
+            config["corrections"] = get_corrections()
 
         path = save_preset(args.name, config)
-        print(f"  Preset '{args.name}' saved to {path}")
+        print(f"\n  {green}✓{reset} Preset '{accent}{args.name}{reset}' saved")
+        # Show summary
+        if config.get("video_path"):
+            print(f"    video:   {gray}{config['video_path']}{reset}")
+        if config.get("caption_style"):
+            print(f"    caption: {gray}{config['caption_style']}{reset}")
+        if config.get("logo_path"):
+            print(f"    logo:    {gray}{config['logo_path']}{reset}")
+        if config.get("outro_path"):
+            print(f"    outro:   {gray}{config['outro_path']}{reset}")
+        if config.get("corrections"):
+            print(f"    corrections: {gray}{len(config['corrections'])} words{reset}")
+        print()
 
     elif args.presets_action == "delete":
         if delete_preset(args.name):
@@ -865,10 +946,16 @@ def cmd_presets(args):
     elif args.presets_action == "show":
         try:
             p = get_preset(args.name)
-            print(f"\n  Preset: {args.name}\n")
-            for k, v in p.items():
-                if k != "name":
-                    print(f"    {k}: {v}")
+            print(f"\n  {bold}Preset: {accent}{args.name}{reset}\n")
+            for k, v in sorted(p.items()):
+                if k == "name" or v == "" or v == {} or v is None:
+                    continue
+                if k == "corrections" and isinstance(v, dict):
+                    print(f"    {gray}{k}:{reset} {len(v)} words")
+                    for wrong, correct in v.items():
+                        print(f"      {gray}{wrong}{reset} → {green}{correct}{reset}")
+                else:
+                    print(f"    {gray}{k}:{reset} {v}")
             print()
         except FileNotFoundError:
             print(f"  Preset '{args.name}' not found")
@@ -975,6 +1062,47 @@ def cmd_thumbnails(args):
 
     print(f"\n  {gray}Open the folder to preview and pick the best one.{reset}")
     print(f"  {gray}Edit .podcli/thumbnail-config.json to customize colors, fonts, layout.{reset}\n")
+
+
+def cmd_corrections(args):
+    """Manage transcript word corrections."""
+    from services.corrections import get_corrections, save_corrections
+
+    accent = "\033[38;2;212;135;74m"
+    green = "\033[38;2;74;222;128m"
+    gray = "\033[38;5;245m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    action = getattr(args, "corrections_action", None) or "list"
+
+    if action == "list":
+        corrections = get_corrections()
+        if not corrections:
+            print(f"\n  {gray}No corrections set. Add one:{reset}")
+            print(f"  {accent}podcli corrections add \"Boxel\" \"Voxel\"{reset}\n")
+            return
+        print(f"\n  {bold}Transcript corrections{reset} ({len(corrections)}):\n")
+        for wrong, correct in sorted(corrections.items()):
+            print(f"    {gray}{wrong}{reset} → {green}{correct}{reset}")
+        print()
+    elif action == "add":
+        wrong = args.wrong
+        correct = args.correct
+        corrections = get_corrections()
+        corrections[wrong] = correct
+        save_corrections(corrections)
+        print(f"\n  {green}✓{reset} Added: {gray}{wrong}{reset} → {green}{correct}{reset}")
+        print(f"  {gray}({len(corrections)} total corrections){reset}\n")
+    elif action == "remove":
+        wrong = args.wrong
+        corrections = get_corrections()
+        if wrong in corrections:
+            del corrections[wrong]
+            save_corrections(corrections)
+            print(f"\n  {green}✓{reset} Removed: {gray}{wrong}{reset}\n")
+        else:
+            print(f"\n  {gray}Not found: {wrong}{reset}\n")
 
 
 def cmd_cache(args):
@@ -1168,6 +1296,30 @@ def print_banner():
     except Exception:
         pass
 
+    # Presets
+    try:
+        from presets import list_presets
+        presets = list_presets()
+        if presets:
+            names = []
+            for p in presets:
+                tag = p["name"]
+                if p.get("video_path") and os.path.exists(p["video_path"]):
+                    tag += f" {dim}({os.path.basename(p['video_path'])}){reset}{gray}"
+                names.append(tag)
+            print(f"  {gray}Presets{reset} {gray}{' · '.join(names)}{reset}")
+    except Exception:
+        pass
+
+    # Corrections count
+    try:
+        from services.corrections import get_corrections
+        corr = get_corrections()
+        if corr:
+            print(f"  {gray}Corrections{reset} {green}{len(corr)}{reset} {gray}words{reset}")
+    except Exception:
+        pass
+
     print()
 
     if not speakers_ok:
@@ -1197,6 +1349,7 @@ def print_help():
     print(f"    {accent}assets{reset}  {gray}<action>{reset}      Manage logos, intros, outros")
     print(f"    {accent}presets{reset} {gray}<action>{reset}      Save/load rendering presets")
     print(f"    {accent}thumbnails{reset} {gray}<title>{reset}   Generate thumbnail variations")
+    print(f"    {accent}corrections{reset} {gray}<action>{reset}  Fix Whisper misheard words (Boxel→Voxel)")
     print(f"    {accent}cache{reset}  {gray}[clear]{reset}       Show/clear transcription cache")
     print(f"    {accent}info{reset}                 Show system info (encoder, codecs)")
     print()
@@ -1248,7 +1401,7 @@ def main():
 
     # ── process ──
     proc = sub.add_parser("process", help="Process a video into clips")
-    proc.add_argument("video", help="Path to podcast video file")
+    proc.add_argument("video", nargs="?", default=None, help="Path to podcast video file (optional if preset has video_path)")
     proc.add_argument("-t", "--transcript", help="Path to transcript file (.txt or .json)")
     proc.add_argument("-n", "--top", type=int, help="Number of top clips to export (default: 5)")
     proc.add_argument("-o", "--output", help="Output directory (default: ./clips)")
@@ -1271,11 +1424,19 @@ def main():
 
     pre_save = pre_sub.add_parser("save", help="Save a preset")
     pre_save.add_argument("name", help="Preset name")
+    pre_save.add_argument("--video", help="Default video path")
+    pre_save.add_argument("--transcript", help="Default transcript path")
+    pre_save.add_argument("--output", help="Default output directory")
     pre_save.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
     pre_save.add_argument("--crop", choices=["center", "face"])
-    pre_save.add_argument("--logo", help="Logo path")
+    pre_save.add_argument("--logo", help="Logo (asset name or path)")
+    pre_save.add_argument("--outro", help="Outro (asset name or path)")
     pre_save.add_argument("--top", type=int, help="Default top clips count")
     pre_save.add_argument("--time-adjust", type=float)
+    pre_save.add_argument("--quality", choices=["low", "medium", "high", "max"])
+    pre_save.add_argument("--no-energy", action="store_true", help="Skip audio energy analysis")
+    pre_save.add_argument("--no-speakers", action="store_true", help="Skip speaker detection")
+    pre_save.add_argument("--with-corrections", action="store_true", help="Include current global corrections in preset")
 
     pre_show = pre_sub.add_parser("show", help="Show a preset")
     pre_show.add_argument("name")
@@ -1309,6 +1470,16 @@ def main():
     thumb.add_argument("--logo", help="Logo (asset name or path)")
     thumb.add_argument("-n", "--variations", type=int, default=3, help="Number of variations")
 
+    # ── corrections ──
+    corr = sub.add_parser("corrections", help="Manage transcript word corrections (Whisper fixes)")
+    corr_sub = corr.add_subparsers(dest="corrections_action")
+    corr_sub.add_parser("list", help="Show all corrections")
+    corr_add = corr_sub.add_parser("add", help="Add a correction")
+    corr_add.add_argument("wrong", help="Misheard word/phrase")
+    corr_add.add_argument("correct", help="Correct replacement")
+    corr_rm = corr_sub.add_parser("remove", help="Remove a correction")
+    corr_rm.add_argument("wrong", help="Word to remove from corrections")
+
     # ── cache ──
     cache_p = sub.add_parser("cache", help="Manage transcription cache")
     cache_sub = cache_p.add_subparsers(dest="cache_action")
@@ -1334,6 +1505,8 @@ def main():
         cmd_presets(args)
     elif args.command == "assets":
         cmd_assets(args)
+    elif args.command == "corrections":
+        cmd_corrections(args)
     elif args.command == "cache":
         cmd_cache(args)
     elif args.command == "info":
@@ -1361,37 +1534,59 @@ def interactive_menu():
     except Exception:
         pass
 
+    import questionary
+    from questionary import Style
+
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
     while True:
-        print(f"  {bold}Quick start:{reset}")
-        print(f"    {accent}1{reset}  Process a video → shorts + content package")
-        print(f"    {accent}2{reset}  Open Web UI")
-        print(f"    {accent}3{reset}  Manage assets")
-        print(f"    {accent}4{reset}  Cache {gray}(view/clear transcription cache){reset}")
-        print(f"    {accent}q{reset}  Quit")
-        print()
+        choice = questionary.select(
+            "What do you want to do?",
+            choices=[
+                questionary.Choice("Process a video → shorts + content package", value="process"),
+                questionary.Choice("Open Web UI", value="webui"),
+                questionary.Choice("Manage assets", value="assets"),
+                questionary.Choice("Manage presets", value="presets"),
+                questionary.Choice("Word corrections (fix Whisper misheard words)", value="corrections"),
+                questionary.Choice("Thumbnails (generate variations)", value="thumbnails"),
+                questionary.Choice("Cache (view/clear transcription cache)", value="cache"),
+                questionary.Choice("System info (encoder, codecs, AI CLI)", value="info"),
+                questionary.Separator(),
+                questionary.Choice("Quit", value="quit"),
+            ],
+            style=qstyle,
+            instruction="(↑↓ to move, enter to select)",
+        ).ask()
 
-        try:
-            raw = input(f"  {accent}▸{reset} ")
-            choice = "".join(c for c in raw if c.isprintable()).strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
+        if choice is None or choice == "quit":
             return
-        if not choice:
-            continue
-
-        if choice == "1":
+        elif choice == "process":
             _interactive_process()
             return
-        elif choice == "2":
+        elif choice == "webui":
             print(f"\n  {gray}Starting Web UI...{reset}\n")
             import subprocess as sp
             sp.run(["npm", "run", "ui"], cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-        elif choice == "3":
+        elif choice == "assets":
             _interactive_assets()
-        elif choice == "4":
+        elif choice == "presets":
+            _interactive_presets()
+        elif choice == "corrections":
+            _interactive_corrections()
+        elif choice == "thumbnails":
+            _interactive_thumbnails()
+        elif choice == "cache":
             _interactive_cache()
-        elif choice in ("q", "Q"):
-            return
+        elif choice == "info":
+            _interactive_info()
 
 
 def _clean_path(val):
@@ -1443,140 +1638,155 @@ def _ask(prompt, default=None, validate=None, required=False, is_path=False):
 
 
 def _interactive_process():
-    """Interactive video processing wizard. Simple input() calls, no abstraction."""
+    """Interactive video processing wizard using questionary."""
+    import questionary
+    from questionary import Style
 
-    accent = "\033[38;2;212;135;74m"
-    gray = "\033[38;5;245m"
     green = "\033[38;2;74;222;128m"
-    red = "\033[38;2;248;113;113m"
-    bold = "\033[1m"
+    gray = "\033[38;5;245m"
     dim = "\033[2m"
     reset = "\033[0m"
 
-    def _prompt(msg, default=None):
-        """Simple prompt. Returns stripped input or default."""
-        try:
-            val = input(msg).strip().strip("'\"")
-            if not val:
-                return default
-            return _clean_path(val) if ("/" in val or "\\" in val) else val
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return default
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
 
-    # 1. Video
-    print(f"\n  {bold}Drag your episode video here or paste the path:{reset}")
-    video = None
-    while not video:
-        v = _prompt(f"  {accent}▸{reset} ")
-        if v is None:
+    # Check for presets first
+    from presets import list_presets, get_preset
+    presets = list_presets()
+    preset_choices = [p for p in presets if p.get("video_path")]
+
+    use_preset = None
+    if preset_choices:
+        preset_options = [
+            questionary.Choice(
+                f"{p['name']} — {os.path.basename(p['video_path'])}",
+                value=p["name"]
+            ) for p in preset_choices
+        ]
+        preset_options.append(questionary.Choice("New video (manual setup)", value="_new"))
+        use_preset = questionary.select(
+            "Use a preset or set up manually?",
+            choices=preset_options,
+            style=qstyle,
+        ).ask()
+        if use_preset is None:
             return
-        if not v:
-            continue
-        if os.path.exists(v):
-            video = v
-            print(f"  {green}✓{reset} {os.path.basename(video)}")
-        else:
-            print(f"  {red}✗{reset} File not found, try again")
 
-    # 2. Transcript
-    print(f"\n  {bold}Transcript{reset} {dim}(drag file here, or just press Enter to auto-transcribe):{reset}")
-    t = _prompt(f"  {accent}▸{reset} ", default="")
-    transcript = t if t and os.path.exists(t) else None
-    if transcript:
-        print(f"  {green}✓{reset} {os.path.basename(transcript)}")
-    else:
+    if use_preset and use_preset != "_new":
+        # Run with preset
+        config = get_preset(use_preset)
+        video = config["video_path"]
+        if not os.path.exists(video):
+            print(f"\n  Video not found: {video}")
+            return
+
+        if questionary.confirm(
+            f"Process {os.path.basename(video)} with preset '{use_preset}'?",
+            default=True, style=qstyle,
+        ).ask():
+            cmd = [sys.executable, os.path.abspath(__file__), "process", "--preset", use_preset]
+            sys.stdout.write("\033[2J\033[H")
+            sys.stdout.flush()
+            print(f"  {green}▶{reset} Starting with preset '{use_preset}'...\n")
+            import subprocess as _sp
+            sys.exit(_sp.call(cmd))
+        return
+
+    # Manual setup
+    video = questionary.path(
+        "Video file:",
+        style=qstyle,
+        validate=lambda v: True if os.path.exists(_clean_path(v)) else "File not found",
+    ).ask()
+    if not video:
+        return
+    video = _clean_path(video)
+
+    transcript = questionary.path(
+        "Transcript (Enter to auto-transcribe):",
+        style=qstyle,
+        default="",
+    ).ask()
+    transcript = _clean_path(transcript) if transcript and os.path.exists(_clean_path(transcript)) else None
+    if not transcript:
         print(f"  {gray}→ Will auto-transcribe with Whisper{reset}")
 
-    # 3. Caption style
-    print(f"\n  {bold}Caption style{reset} {dim}(1-4, default 1):{reset}")
-    print(f"  {accent}1{reset} branded  {dim}dark pill on active word + logo{reset}")
-    print(f"  {accent}2{reset} hormozi  {dim}bold uppercase, yellow highlight{reset}")
-    print(f"  {accent}3{reset} karaoke  {dim}sentence visible, words light up{reset}")
-    print(f"  {accent}4{reset} subtle   {dim}clean small text at bottom{reset}")
-    styles = {"1": "branded", "2": "hormozi", "3": "karaoke", "4": "subtle"}
-    caption_style = styles.get(_prompt(f"  {accent}▸{reset} ", default="1") or "1", "branded")
-    print(f"  {green}✓{reset} {caption_style}")
+    caption_style = questionary.select(
+        "Caption style:",
+        choices=[
+            questionary.Choice("branded — dark pill on active word + logo", value="branded"),
+            questionary.Choice("hormozi — bold uppercase, yellow highlight", value="hormozi"),
+            questionary.Choice("karaoke — sentence visible, words light up", value="karaoke"),
+            questionary.Choice("subtle — clean small text at bottom", value="subtle"),
+        ],
+        default="branded",
+        style=qstyle,
+    ).ask()
+    if caption_style is None:
+        return
 
-    # 4. Quality
-    print(f"\n  {bold}Quality{reset} {dim}(1-4, default 3):{reset}  {dim}1 low · 2 medium · 3 high · 4 max{reset}")
-    qualities = {"1": "low", "2": "medium", "3": "high", "4": "max"}
-    quality = qualities.get(_prompt(f"  {accent}▸{reset} ", default="3") or "3", "high")
-    print(f"  {green}✓{reset} {quality}")
+    quality = questionary.select(
+        "Quality:",
+        choices=["low", "medium", "high", "max"],
+        default="max",
+        style=qstyle,
+    ).ask()
+    if quality is None:
+        return
 
-    # 5. Number of clips
-    print(f"\n  {bold}How many clips?{reset} {dim}(default 5):{reset}")
-    try:
-        top_n = int(_prompt(f"  {accent}▸{reset} ", default="5") or "5")
-    except ValueError:
-        top_n = 5
-    print(f"  {green}✓{reset} {top_n} clips")
+    top_n = questionary.text(
+        "How many clips?",
+        default="5",
+        style=qstyle,
+        validate=lambda v: True if v.isdigit() and int(v) > 0 else "Enter a number",
+    ).ask()
+    if top_n is None:
+        return
+    top_n = int(top_n)
 
-    # 6. Logo
+    # Logo
     logo = None
     try:
         from services.asset_store import list_assets
         logos = [a for a in list_assets() if a["type"] == "logo" and os.path.exists(a["path"])]
         if logos:
-            print(f"\n  {bold}Logo{reset} {dim}(default 1):{reset}")
-            for i, a in enumerate(logos):
-                print(f"  {accent}{i+1}{reset} {a['name']}  {dim}{os.path.basename(a['path'])}{reset}")
-            print(f"  {accent}0{reset} none")
-            lc = _prompt(f"  {accent}▸{reset} ", default="1") or "1"
-            if lc != "0":
-                idx = int(lc) - 1
-                if 0 <= idx < len(logos):
-                    logo = logos[idx]["path"]
-                    print(f"  {green}✓{reset} {logos[idx]['name']}")
+            logo_choices = [questionary.Choice(f"{a['name']} ({os.path.basename(a['path'])})", value=a["path"]) for a in logos]
+            logo_choices.append(questionary.Choice("None", value=None))
+            logo = questionary.select("Logo:", choices=logo_choices, default=logo_choices[0], style=qstyle).ask()
     except Exception:
         pass
 
-    # 7. Outro
+    # Outro
     outro = None
     try:
-        from services.asset_store import list_assets as list_assets_outro
-        outros = [a for a in list_assets_outro() if a["type"] == "video" and os.path.exists(a["path"])]
+        from services.asset_store import list_assets as list_assets_o
+        outros = [a for a in list_assets_o() if a["type"] == "video" and os.path.exists(a["path"])]
         if outros:
-            print(f"\n  {bold}Outro{reset} {dim}(default 0 = none):{reset}")
-            for i, a in enumerate(outros):
-                print(f"  {accent}{i+1}{reset} {a['name']}  {dim}{os.path.basename(a['path'])}{reset}")
-            print(f"  {accent}0{reset} none")
-            oc = _prompt(f"  {accent}▸{reset} ", default="0") or "0"
-            if oc != "0":
-                idx = int(oc) - 1
-                if 0 <= idx < len(outros):
-                    outro = outros[idx]["path"]
-                    print(f"  {green}✓{reset} {outros[idx]['name']}")
-        else:
-            print(f"\n  {bold}Outro:{reset} {dim}(drag video or press Enter to skip):{reset}")
-            o = _prompt(f"  {accent}▸{reset} ", default="")
-            if o:
-                o = _clean_path(o)
-                if os.path.exists(o):
-                    outro = o
-                    print(f"  {green}✓{reset} {os.path.basename(outro)}")
+            outro_choices = [questionary.Choice("None", value=None)]
+            outro_choices += [questionary.Choice(f"{a['name']} ({os.path.basename(a['path'])})", value=a["path"]) for a in outros]
+            outro = questionary.select("Outro:", choices=outro_choices, style=qstyle).ask()
     except Exception:
         pass
 
-    # Summary + confirm
+    # Confirm
     print(f"\n  {'─' * 45}")
-    print(f"  {bold}Video:{reset}      {os.path.basename(video)}")
-    print(f"  {bold}Style:{reset}      {caption_style}  ·  Quality: {quality}  ·  Clips: {top_n}")
+    print(f"  Video:      {os.path.basename(video)}")
+    print(f"  Style:      {caption_style}  ·  Quality: {quality}  ·  Clips: {top_n}")
     if logo:
-        print(f"  {bold}Logo:{reset}       ✓")
+        print(f"  Logo:       ✓")
     if outro:
-        print(f"  {bold}Outro:{reset}      ✓  {dim}{os.path.basename(outro)}{reset}")
-    print(f"  {bold}Transcript:{reset} {'auto (Whisper)' if not transcript else os.path.basename(transcript)}")
+        print(f"  Outro:      ✓  {dim}{os.path.basename(outro)}{reset}")
+    print(f"  Transcript: {'auto (Whisper)' if not transcript else os.path.basename(transcript)}")
     print()
-    sys.stdout.write(f"  {green}Ready!{reset} {bold}Press Enter to start{reset} {dim}(q to cancel){reset} ")
-    sys.stdout.flush()
-    try:
-        confirm = sys.stdin.readline().strip()
-    except (EOFError, KeyboardInterrupt):
-        print(f"\n  {gray}Cancelled.{reset}")
-        return
-    if confirm.lower() == "q":
-        print(f"  {gray}Cancelled.{reset}")
+
+    if not questionary.confirm("Start processing?", default=True, style=qstyle).ask():
         return
 
     # Run
@@ -1591,92 +1801,355 @@ def _interactive_process():
     if outro:
         cmd += ["--outro", outro]
 
-    # Clear screen before starting processing to avoid prompt artifacts
-    sys.stdout.write("\033[2J\033[H")  # clear screen + move cursor to top
+    sys.stdout.write("\033[2J\033[H")
     sys.stdout.flush()
     print(f"  {green}▶{reset} Starting...\n")
     sys.stderr.flush()
-    # Use subprocess instead of execv to avoid terminal state issues
     import subprocess as _sp
-    exit_code = _sp.call(cmd)
-    sys.exit(exit_code)
+    sys.exit(_sp.call(cmd))
 
 
 def _interactive_cache():
-    """Interactive cache management."""
+    """Interactive cache management using questionary."""
     import argparse as _ap
-    # Show status first
+    import questionary
+    from questionary import Style
+
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
     cmd_cache(_ap.Namespace(cache_action=None))
 
-    accent = "\033[38;2;212;135;74m"
-    gray = "\033[38;5;245m"
-    reset = "\033[0m"
-
-    try:
-        choice = input(f"  {gray}Clear cache? (y/n/enter=back){reset} {accent}▸{reset} ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
-
-    if choice in ("y", "yes"):
+    if questionary.confirm("Clear cache?", default=False, style=qstyle).ask():
         cmd_cache(_ap.Namespace(cache_action="clear"))
 
 
 def _interactive_assets():
-    """Interactive asset management."""
+    """Interactive asset management using questionary."""
+    import questionary
+    from questionary import Style
     from services.asset_store import register, unregister, list_assets
 
-    accent = "\033[38;2;212;135;74m"
-    gray = "\033[38;5;245m"
     green = "\033[38;2;74;222;128m"
+    gray = "\033[38;5;245m"
     red = "\033[38;2;248;113;113m"
-    bold = "\033[1m"
-    dim = "\033[2m"
+    accent = "\033[38;2;212;135;74m"
     reset = "\033[0m"
 
-    # Show current assets first
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
     current = list_assets()
     if current:
-        print(f"\n  {bold}Registered assets:{reset}")
+        print(f"\n  Registered assets:")
         for a in current:
             exists = os.path.exists(a["path"])
             icon = f"{green}✓{reset}" if exists else f"{red}✗{reset}"
             print(f"    {icon} {accent}{a['name']}{reset}  {gray}({a['type']}) {os.path.basename(a['path'])}{reset}")
+        print()
+
+    actions = [questionary.Choice("Add asset", value="add")]
+    if current:
+        actions.append(questionary.Choice("Remove asset", value="remove"))
+    actions.append(questionary.Choice("← Back", value="_back"))
+
+    action = questionary.select("Assets:", choices=actions, style=qstyle).ask()
+    if action is None or action == "_back":
+        return
+
+    if action == "add":
+        name = questionary.text("Asset name (e.g. mylogo, outro):", style=qstyle).ask()
+        if not name:
+            return
+        path = questionary.path("File path:", style=qstyle).ask()
+        if not path:
+            return
+        path = _clean_path(path)
+        try:
+            asset = register(name, path)
+            print(f"\n  {green}✓{reset} Registered {accent}{name}{reset} ({asset['type']})")
+            print(f"    {gray}{asset['path']}{reset}\n")
+        except FileNotFoundError as e:
+            print(f"\n  {red}✗{reset} {e}\n", file=sys.stderr)
+
+    elif action == "remove":
+        choices = [questionary.Choice(f"{a['name']} ({a['type']})", value=a["name"]) for a in current]
+        to_remove = questionary.select("Remove which?", choices=choices, style=qstyle).ask()
+        if to_remove:
+            unregister(to_remove)
+            print(f"\n  {green}✓{reset} Removed '{to_remove}'\n")
+
+
+def _interactive_presets():
+    """Interactive preset management using questionary."""
+    import questionary
+    from questionary import Style
+    from presets import list_presets, get_preset, save_preset, delete_preset
+
+    green = "\033[38;2;74;222;128m"
+    accent = "\033[38;2;212;135;74m"
+    reset = "\033[0m"
+
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
+    presets = list_presets()
+
+    # Action menu
+    actions = [questionary.Choice("Create new preset", value="_new")]
+    if presets:
+        for p in presets:
+            label = p["name"]
+            if p.get("video_path"):
+                label += f" — {os.path.basename(p['video_path'])}"
+            actions.append(questionary.Choice(f"Edit: {label}", value=f"edit:{p['name']}"))
+        for p in presets:
+            actions.append(questionary.Choice(f"Delete: {p['name']}", value=f"del:{p['name']}"))
+    actions.append(questionary.Choice("← Back", value="_back"))
+
+    action = questionary.select("Presets:", choices=actions, style=qstyle).ask()
+    if action is None or action == "_back":
+        return
+
+    if action.startswith("del:"):
+        name = action[4:]
+        if questionary.confirm(f"Delete preset '{name}'?", default=False, style=qstyle).ask():
+            delete_preset(name)
+            print(f"  {green}✓{reset} Deleted '{name}'\n")
+        return
+
+    # Create or edit
+    if action == "_new":
+        name = questionary.text("Preset name:", style=qstyle).ask()
+        if not name:
+            return
+        existing = {}
     else:
-        print(f"\n  {gray}No assets registered yet.{reset}")
+        name = action[5:]  # strip "edit:"
+        try:
+            existing = get_preset(name)
+            existing.pop("name", None)
+        except FileNotFoundError:
+            existing = {}
 
-    print(f"\n  {bold}Add asset{reset} {dim}(or press Enter to go back){reset}")
+    config = {**existing}
 
-    # Get name
-    sys.stdout.write(f"  Name: ")
-    sys.stdout.flush()
+    # Video path
+    video = questionary.path(
+        "Video path (Enter to skip):",
+        default=config.get("video_path") or "",
+        style=qstyle,
+    ).ask()
+    if video is None:
+        return
+    if video:
+        config["video_path"] = _clean_path(video)
+
+    # Caption style
+    caption_style = questionary.select(
+        "Caption style:",
+        choices=["branded", "hormozi", "karaoke", "subtle"],
+        default=config.get("caption_style", "branded"),
+        style=qstyle,
+    ).ask()
+    if caption_style:
+        config["caption_style"] = caption_style
+
+    # Crop strategy
+    crop = questionary.select(
+        "Crop strategy:",
+        choices=["face", "center"],
+        default=config.get("crop_strategy", "face"),
+        style=qstyle,
+    ).ask()
+    if crop:
+        config["crop_strategy"] = crop
+
+    # Logo from assets
     try:
-        name = sys.stdin.readline().strip()
-    except (EOFError, KeyboardInterrupt):
+        from services.asset_store import list_assets
+        logos = [a for a in list_assets() if a["type"] == "logo" and os.path.exists(a["path"])]
+        if logos:
+            logo_choices = [questionary.Choice(f"{a['name']} ({os.path.basename(a['path'])})", value=a["path"]) for a in logos]
+            logo_choices.append(questionary.Choice("None", value=""))
+            current_logo = config.get("logo_path", "")
+            logo = questionary.select("Logo:", choices=logo_choices, default=current_logo or logo_choices[0], style=qstyle).ask()
+            if logo is not None:
+                config["logo_path"] = logo
+    except Exception:
+        pass
+
+    # Outro from assets
+    try:
+        from services.asset_store import list_assets as list_assets_o
+        outros = [a for a in list_assets_o() if a["type"] == "video" and os.path.exists(a["path"])]
+        if outros:
+            outro_choices = [questionary.Choice("None", value="")]
+            outro_choices += [questionary.Choice(f"{a['name']} ({os.path.basename(a['path'])})", value=a["path"]) for a in outros]
+            current_outro = config.get("outro_path", "")
+            outro = questionary.select("Outro:", choices=outro_choices, default=current_outro or outro_choices[0], style=qstyle).ask()
+            if outro is not None:
+                config["outro_path"] = outro
+    except Exception:
+        pass
+
+    # Quality
+    quality = questionary.select(
+        "Quality:",
+        choices=["low", "medium", "high", "max"],
+        default=config.get("quality", "max"),
+        style=qstyle,
+    ).ask()
+    if quality:
+        config["quality"] = quality
+
+    # Top clips
+    top = questionary.text(
+        "Top clips:",
+        default=str(config.get("top_clips", 5)),
+        style=qstyle,
+        validate=lambda v: True if v.isdigit() and int(v) > 0 else "Enter a number",
+    ).ask()
+    if top:
+        config["top_clips"] = int(top)
+
+    # Corrections
+    if questionary.confirm("Include current word corrections?", default=bool(config.get("corrections")), style=qstyle).ask():
+        from services.corrections import get_corrections
+        config["corrections"] = get_corrections()
+
+    save_preset(name, config)
+    print(f"\n  {green}✓{reset} Preset '{accent}{name}{reset}' saved\n")
+
+
+def _interactive_corrections():
+    """Interactive corrections management using questionary."""
+    import questionary
+    from questionary import Style
+    from services.corrections import get_corrections, save_corrections
+
+    green = "\033[38;2;74;222;128m"
+    gray = "\033[38;5;245m"
+    reset = "\033[0m"
+
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
+    corrections = get_corrections()
+    if corrections:
+        print(f"\n  Word corrections ({len(corrections)}):")
+        for wrong, correct in sorted(corrections.items()):
+            print(f"    {gray}{wrong}{reset} → {green}{correct}{reset}")
         print()
-        return
-    if not name:
+
+    actions = [questionary.Choice("Add a correction", value="add")]
+    if corrections:
+        actions.append(questionary.Choice("Remove a correction", value="remove"))
+    actions.append(questionary.Choice("← Back", value="_back"))
+
+    action = questionary.select("Corrections:", choices=actions, style=qstyle).ask()
+    if action is None or action == "_back":
         return
 
-    # Get path
-    sys.stdout.write(f"  Path: ")
-    sys.stdout.flush()
-    try:
-        path = sys.stdin.readline().strip().strip("'\"")
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
-    if not path:
-        print(f"  {gray}Cancelled.{reset}\n")
+    if action == "add":
+        wrong = questionary.text("Wrong word (what Whisper hears):", style=qstyle).ask()
+        if not wrong:
+            return
+        correct = questionary.text("Correct word:", style=qstyle).ask()
+        if not correct:
+            return
+        corrections[wrong] = correct
+        save_corrections(corrections)
+        print(f"\n  {green}✓{reset} Added: {gray}{wrong}{reset} → {green}{correct}{reset}")
+        print(f"  {gray}({len(corrections)} total corrections){reset}\n")
+
+    elif action == "remove":
+        choices = [questionary.Choice(f"{w} → {c}", value=w) for w, c in sorted(corrections.items())]
+        to_remove = questionary.select("Remove which?", choices=choices, style=qstyle).ask()
+        if to_remove:
+            del corrections[to_remove]
+            save_corrections(corrections)
+            print(f"\n  {green}✓{reset} Removed: {gray}{to_remove}{reset}\n")
+
+
+def _interactive_thumbnails():
+    """Interactive thumbnail generation using questionary."""
+    import questionary
+    from questionary import Style
+
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
+    title = questionary.text("Title text:", style=qstyle).ask()
+    if not title:
         return
 
-    path = _clean_path(path)
-    try:
-        asset = register(name, path)
-        print(f"\n  {green}✓{reset} Registered {accent}{name}{reset} ({asset['type']})")
-        print(f"    {gray}{asset['path']}{reset}\n")
-    except FileNotFoundError as e:
-        print(f"\n  {red}✗{reset} {e}\n", file=sys.stderr)
+    video = questionary.path(
+        "Video path (Enter to skip):",
+        default="",
+        style=qstyle,
+    ).ask()
+    if video:
+        video = _clean_path(video)
+
+    args_ns = _Namespace(
+        title=title,
+        video=video or None,
+        logo=None,
+        variations=3,
+    )
+    cmd_thumbnails(args_ns)
+
+
+def _interactive_info():
+    """Show system info."""
+    args_ns = _Namespace()
+    cmd_info(args_ns)
+
+
+class _Namespace:
+    """Minimal namespace for interactive commands."""
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def __getattr__(self, name):
+        return None
 
 
 if __name__ == "__main__":

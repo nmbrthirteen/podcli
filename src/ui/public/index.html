@@ -242,9 +242,14 @@
       const [encoderInfo, setEncoderInfo] = useState(null);
       const [speakerStatus, setSpeakerStatus] = useState(null);
       const [generateCopied, setGenerateCopied] = useState(false);
+      const [corrections, setCorrections] = useState({});
+      const [correctionWord, setCorrectionWord] = useState('');
+      const [correctionFix, setCorrectionFix] = useState('');
+      const [correctionsOpen, setCorrectionsOpen] = useState(false);
       useEffect(() => {
         api('/encoder-info').then(d => { if (d.best) setEncoderInfo(d); }).catch(() => { });
         api('/speaker-status').then(d => setSpeakerStatus(d)).catch(() => { });
+        api('/corrections').then(d => { if (d && typeof d === 'object') setCorrections(d); }).catch(() => { });
       }, []);
 
       // Fetch clip history on mount and after exports
@@ -778,6 +783,54 @@
                   <input ref={outroRef} type="file" accept=".mp4,.mov,.mkv,.webm" style={{ display: 'none' }}
                     onChange={e => e.target.files[0] && handleOutroUpload(e.target.files[0])} />
                 </div>
+              </div>
+
+              {/* Word Corrections */}
+              <div className="section">
+                <div className="section-label" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setCorrectionsOpen(!correctionsOpen)}>
+                  <span style={{ fontSize: 10, transition: 'transform 0.15s', transform: correctionsOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-block' }}>▶</span>
+                  Word Corrections
+                  {Object.keys(corrections).length > 0 && (
+                    <span style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 400 }}>({Object.keys(corrections).length})</span>
+                  )}
+                </div>
+                {correctionsOpen && (
+                  <div className="fade-in" style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8, lineHeight: 1.4 }}>
+                      Fix Whisper misheard words. Applied automatically to all transcripts.
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                      <input value={correctionWord} onChange={e => setCorrectionWord(e.target.value)}
+                        placeholder="Wrong (e.g. Boxel)" style={{ flex: 1, fontSize: 12 }} />
+                      <span style={{ color: 'var(--text3)', alignSelf: 'center', fontSize: 12 }}>→</span>
+                      <input value={correctionFix} onChange={e => setCorrectionFix(e.target.value)}
+                        placeholder="Correct (e.g. Voxel)" style={{ flex: 1, fontSize: 12 }}
+                        onKeyDown={e => { if (e.key === 'Enter' && correctionWord.trim() && correctionFix.trim()) {
+                          api('/corrections/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wrong: correctionWord.trim(), correct: correctionFix.trim() }) })
+                            .then(d => { if (d.corrections) { setCorrections(d.corrections); setCorrectionWord(''); setCorrectionFix(''); } });
+                        }}} />
+                      <button className="btn btn-sm" disabled={!correctionWord.trim() || !correctionFix.trim()} onClick={() => {
+                        api('/corrections/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wrong: correctionWord.trim(), correct: correctionFix.trim() }) })
+                          .then(d => { if (d.corrections) { setCorrections(d.corrections); setCorrectionWord(''); setCorrectionFix(''); } });
+                      }} style={{ fontSize: 11, padding: '4px 10px' }}>Add</button>
+                    </div>
+                    {Object.keys(corrections).length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {Object.entries(corrections).map(([wrong, correct]) => (
+                          <div key={wrong} className="asset-pill" style={{ fontSize: 11 }}>
+                            <span style={{ color: 'var(--text3)', textDecoration: 'line-through' }}>{wrong}</span>
+                            <span style={{ color: 'var(--text3)', margin: '0 2px' }}>→</span>
+                            <span style={{ color: 'var(--green)' }}>{correct}</span>
+                            <button className="asset-pill-x" onClick={() => {
+                              fetch(`/api/corrections/${encodeURIComponent(wrong)}`, { method: 'DELETE' })
+                                .then(r => r.json()).then(d => { if (d.corrections) setCorrections(d.corrections); });
+                            }}>{'\u00D7'}</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Error */}

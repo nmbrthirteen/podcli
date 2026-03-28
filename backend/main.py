@@ -50,6 +50,7 @@ def handle_ping(task_id: str, params: dict):
 def handle_transcribe(task_id: str, params: dict):
     """Transcribe a podcast video/audio file with speaker detection."""
     from services.transcription import transcribe_file
+    from services.corrections import apply_corrections
 
     emit_progress(task_id, "transcribing", 0, "Starting transcription...")
     result = transcribe_file(
@@ -60,6 +61,8 @@ def handle_transcribe(task_id: str, params: dict):
         num_speakers=params.get("num_speakers"),
         progress_callback=lambda pct, msg: emit_progress(task_id, "transcribing", pct, msg),
     )
+    # Apply word corrections (Whisper misheard proper nouns)
+    apply_corrections(result.get("words", []), result.get("segments", []))
     emit_result(task_id, "success", data=result)
 
 
@@ -145,6 +148,7 @@ def handle_batch_clips(task_id: str, params: dict):
 def handle_parse_transcript(task_id: str, params: dict):
     """Parse a speaker-labeled transcript into word-level timestamps."""
     from services.transcript_parser import detect_and_parse
+    from services.corrections import apply_corrections
 
     raw_text = params.get("raw_text", "")
     total_duration = params.get("total_duration")
@@ -160,6 +164,9 @@ def handle_parse_transcript(task_id: str, params: dict):
     if "error" in result:
         emit_result(task_id, "error", error=result["error"])
         return
+
+    # Apply word corrections (proper nouns, brand names)
+    apply_corrections(result.get("words", []), result.get("segments", []))
 
     emit_progress(task_id, "parsing", 100, "Transcript parsed!")
     emit_result(task_id, "success", data=result)
@@ -214,6 +221,38 @@ def handle_presets(task_id: str, params: dict):
         emit_result(task_id, "success", data={"deleted": ok})
     else:
         emit_result(task_id, "error", error=f"Unknown presets action: {action}")
+
+
+def handle_corrections(task_id: str, params: dict):
+    """Manage transcript word corrections (get, set, add, remove)."""
+    from services.corrections import get_corrections, save_corrections
+
+    action = params.get("action", "get")
+
+    if action == "get":
+        emit_result(task_id, "success", data={"corrections": get_corrections()})
+    elif action == "set":
+        corrections = params.get("corrections", {})
+        path = save_corrections(corrections)
+        emit_result(task_id, "success", data={"corrections": corrections, "path": path})
+    elif action == "add":
+        wrong = params.get("wrong", "")
+        correct = params.get("correct", "")
+        if not wrong or not correct:
+            emit_result(task_id, "error", error="'wrong' and 'correct' are required")
+            return
+        current = get_corrections()
+        current[wrong] = correct
+        save_corrections(current)
+        emit_result(task_id, "success", data={"corrections": current})
+    elif action == "remove":
+        wrong = params.get("wrong", "")
+        current = get_corrections()
+        current.pop(wrong, None)
+        save_corrections(current)
+        emit_result(task_id, "success", data={"corrections": current})
+    else:
+        emit_result(task_id, "error", error=f"Unknown corrections action: {action}")
 
 
 def handle_suggest_clips(task_id: str, params: dict):
@@ -273,6 +312,7 @@ TASK_HANDLERS = {
     "analyze_energy": handle_analyze_energy,
     "detect_encoder": handle_detect_encoder,
     "presets": handle_presets,
+    "corrections": handle_corrections,
     "suggest_clips": handle_suggest_clips,
     "generate_content": handle_generate_content,
 }

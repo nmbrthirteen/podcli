@@ -1007,6 +1007,65 @@ app.get("/api/history/check", async (req, res) => {
   }
 });
 
+// --- Transcript Corrections ---
+
+const correctionsPath = join(process.cwd(), ".podcli", "corrections.json");
+
+app.get("/api/corrections", (_req, res) => {
+  try {
+    if (existsSync(correctionsPath)) {
+      res.json(JSON.parse(readFileSync(correctionsPath, "utf-8")));
+    } else {
+      res.json({});
+    }
+  } catch {
+    res.json({});
+  }
+});
+
+app.put("/api/corrections", express.json(), (req, res) => {
+  try {
+    const corrections = req.body || {};
+    writeFileSync(correctionsPath, JSON.stringify(corrections, null, 2));
+    res.json({ ok: true, corrections });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/corrections/add", express.json(), (req, res) => {
+  const { wrong, correct } = req.body;
+  if (!wrong || !correct) {
+    res.status(400).json({ error: "'wrong' and 'correct' are required" });
+    return;
+  }
+  try {
+    let corrections: Record<string, string> = {};
+    if (existsSync(correctionsPath)) {
+      corrections = JSON.parse(readFileSync(correctionsPath, "utf-8"));
+    }
+    corrections[wrong] = correct;
+    writeFileSync(correctionsPath, JSON.stringify(corrections, null, 2));
+    res.json({ ok: true, corrections });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/corrections/:wrong", (req, res) => {
+  try {
+    let corrections: Record<string, string> = {};
+    if (existsSync(correctionsPath)) {
+      corrections = JSON.parse(readFileSync(correctionsPath, "utf-8"));
+    }
+    delete corrections[req.params.wrong];
+    writeFileSync(correctionsPath, JSON.stringify(corrections, null, 2));
+    res.json({ ok: true, corrections });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Knowledge Base ---
 app.get("/api/knowledge", async (_req, res) => {
   try {

@@ -2,7 +2,7 @@
 
 export interface TaskRequest {
   task_id: string;
-  task_type: "transcribe" | "parse_transcript" | "create_clip" | "batch_clips" | "analyze_energy" | "detect_encoder" | "presets" | "ping" | "suggest_clips" | "generate_content";
+  task_type: "transcribe" | "parse_transcript" | "create_clip" | "batch_clips" | "analyze_energy" | "detect_encoder" | "presets" | "ping" | "suggest_clips" | "generate_content" | "corrections";
   params: Record<string, unknown>;
 }
 
