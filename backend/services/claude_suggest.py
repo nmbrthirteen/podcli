@@ -1,10 +1,10 @@
 """
-Clip suggestion via Claude Code.
+Clip suggestion via AI CLI (Claude Code or Codex).
 
-Delegates moment selection to Claude, which uses the PodStack knowledge base
+Delegates moment selection to an AI CLI, which uses the PodStack knowledge base
 (.podcli/knowledge/) and CLAUDE.md for context-aware clip extraction.
 
-Falls back to heuristic scoring if Claude is unavailable.
+Priority: Claude Code → Codex → heuristic fallback.
 """
 
 import json
@@ -15,26 +15,45 @@ import tempfile
 from typing import Optional, Callable
 
 
-def _find_claude() -> Optional[str]:
-    """Find the claude CLI binary."""
-    # Check common locations
-    for path in [
-        os.path.expanduser("~/.local/bin/claude"),
-        "/usr/local/bin/claude",
-        "/opt/homebrew/bin/claude",
-    ]:
+def _find_cli(name: str, extra_paths: list[str] = None) -> Optional[str]:
+    """Find a CLI binary by name. Checks extra_paths first, then PATH."""
+    for path in (extra_paths or []):
         if os.path.exists(path):
             return path
-
-    # Check PATH
     try:
-        result = subprocess.run(["which", "claude"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(["which", name], capture_output=True, text=True, timeout=5)
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception:
         pass
-
     return None
+
+
+def _find_ai_cli() -> tuple[Optional[str], str]:
+    """
+    Find the best available AI CLI.
+
+    Returns (path, engine) where engine is "claude" or "codex".
+    Returns (None, "") if neither is available.
+    """
+    # Prefer Claude Code
+    claude = _find_cli("claude", [
+        os.path.expanduser("~/.local/bin/claude"),
+        "/usr/local/bin/claude",
+        "/opt/homebrew/bin/claude",
+    ])
+    if claude:
+        return claude, "claude"
+
+    # Fall back to Codex
+    codex = _find_cli("codex", [
+        "/usr/local/bin/codex",
+        "/opt/homebrew/bin/codex",
+    ])
+    if codex:
+        return codex, "codex"
+
+    return None, ""
 
 
 def _load_existing_shorts(episodes_path: str) -> list[str]:
@@ -195,16 +214,18 @@ def suggest_with_claude(
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> Optional[list[dict]]:
     """
-    Use Claude Code to extract the best clip moments from transcript segments.
+    Use an AI CLI (Claude Code or Codex) to extract the best clip moments.
 
-    Returns list of clip dicts or None if Claude is unavailable.
+    Tries Claude Code first, falls back to Codex. Returns None if neither
+    is available.
     """
-    claude_path = _find_claude()
-    if not claude_path:
+    cli_path, engine = _find_ai_cli()
+    if not cli_path:
         return None
 
     if progress_callback:
-        progress_callback(0, "Preparing transcript for Claude...")
+        label = "Claude" if engine == "claude" else "Codex"
+        progress_callback(0, f"Preparing transcript for {label}...")
 
     # Build transcript text from segments
     lines = []
@@ -234,27 +255,57 @@ def suggest_with_claude(
         prompt_file = f.name
 
     if progress_callback:
-        progress_callback(20, "Asking Claude to analyze transcript...")
+        label = "Claude" if engine == "claude" else "Codex"
+        progress_callback(20, f"Asking {label} to analyze transcript...")
 
     try:
-        # Pipe prompt via stdin — avoids shell escaping and arg size limits
-        # Run from the podcli project dir so it picks up CLAUDE.md + knowledge base
-        result = subprocess.run(
-            f'cat "{prompt_file}" | "{claude_path}" --print -p -',
-            capture_output=True,
-            text=True,
-            cwd=project_dir,
-            timeout=300,  # 5 min max
-            shell=True,
-        )
+        # Run the AI CLI to analyze the transcript
+        if engine == "codex":
+            # Codex: use `codex exec` with --output-last-message to capture response
+            output_file = prompt_file + ".out"
+            result = subprocess.run(
+                [
+                    cli_path, "exec",
+                    "--full-auto",
+                    "-o", output_file,
+                    prompt,
+                ],
+                capture_output=True,
+                text=True,
+                cwd=project_dir,
+                timeout=300,
+            )
+            # Read response from output file
+            if os.path.exists(output_file):
+                with open(output_file) as f:
+                    result = subprocess.CompletedProcess(
+                        args=result.args,
+                        returncode=result.returncode,
+                        stdout=f.read(),
+                        stderr=result.stderr,
+                    )
+                try:
+                    os.unlink(output_file)
+                except Exception:
+                    pass
+        else:
+            # Claude: pipe prompt via stdin with --print mode
+            result = subprocess.run(
+                f'cat "{prompt_file}" | "{cli_path}" --print -p -',
+                capture_output=True,
+                text=True,
+                cwd=project_dir,
+                timeout=300,
+                shell=True,
+            )
 
         if result.returncode != 0:
             if progress_callback:
-                progress_callback(0, f"Claude returned error: {result.stderr[:200]}")
+                progress_callback(0, f"{label} returned error: {result.stderr[:200]}")
             return None
 
         if progress_callback:
-            progress_callback(80, "Parsing Claude's suggestions...")
+            progress_callback(80, f"Parsing {label}'s suggestions...")
 
         # Parse JSON from Claude's response
         response = result.stdout.strip()
@@ -348,21 +399,21 @@ def suggest_with_claude(
         normalized.sort(key=lambda x: x["start_second"])
 
         if progress_callback:
-            progress_callback(100, f"Claude suggested {len(normalized)} clips")
+            progress_callback(100, f"{label} suggested {len(normalized)} clips")
 
         return normalized
 
     except json.JSONDecodeError as e:
         if progress_callback:
-            progress_callback(0, f"Could not parse Claude's response as JSON: {e}")
+            progress_callback(0, f"Could not parse {label}'s response as JSON: {e}")
         return None
     except subprocess.TimeoutExpired:
         if progress_callback:
-            progress_callback(0, "Claude timed out (5 min limit)")
+            progress_callback(0, f"{label} timed out (5 min limit)")
         return None
     except Exception as e:
         if progress_callback:
-            progress_callback(0, f"Claude error: {e}")
+            progress_callback(0, f"{label} error: {e}")
         return None
     finally:
         # Clean up temp file

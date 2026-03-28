@@ -27,7 +27,7 @@ Publish with optimization checklist                                  ← PodStac
 Review performance                                                   ← PodStack
 ```
 
-The first half is **video processing** — podcli's core engine. The second half is **content workflow** — powered by [PodStack](https://github.com/nmbrthirteen/podstack), a set of Claude Code slash commands that ship with podcli.
+The first half is **video processing** — podcli's core engine. The second half is **content workflow** — powered by [PodStack](https://github.com/nmbrthirteen/podstack), a set of Claude Code slash commands that ship with podcli. Both halves are deeply integrated: the clip suggestion engine reads from your PodStack knowledge base, uses your title formulas and voice rules, checks the episode database for duplicates, and outputs MCP-aligned fields that flow through to export.
 
 ---
 
@@ -80,7 +80,7 @@ Run `/publish-checklist` when uploading. A week later, run `/retro-episode` with
 | | Video Engine (podcli core) | Content Workflow (PodStack) |
 |---|---|---|
 | **What** | Transcription, clip detection, rendering | Titles, descriptions, thumbnails, publishing |
-| **How** | Python + FFmpeg + Whisper + OpenCV + Claude | Claude Code slash commands |
+| **How** | Python + FFmpeg + Whisper + OpenCV + Claude/Codex | Claude Code slash commands |
 | **Interface** | Web UI, CLI, MCP tools | `/slash-commands` in Claude Code |
 | **Output** | `.mp4` files ready to upload | Content packages ready to paste into YouTube |
 
@@ -91,7 +91,7 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 ## Features
 
 ### Video Processing
-- **AI clip suggestion** — Claude-powered moment detection with knowledge base context, multi-cut segments, 4-dimension scoring
+- **AI clip suggestion** — Claude/Codex-powered moment detection with knowledge base context, multi-cut segments, 4-dimension scoring
 - **Face tracking** — YuNet face detection, exponential-smoothing camera, split-screen support, speaker-aware tracking with snap cooldown
 - **Burned-in captions** — 4 styles: branded, hormozi, karaoke, subtle
 - **Hardware-accelerated encoding** — VideoToolbox (Mac), NVENC (NVIDIA), VAAPI, CPU fallback
@@ -129,6 +129,7 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 | **Python** >= 3.10 | [python.org](https://python.org) |
 | **FFmpeg** | `brew install ffmpeg` / `sudo apt install ffmpeg` |
 | **Claude Code** (optional) | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) — needed for PodStack slash commands |
+| **Codex** (optional) | [openai.com/codex](https://openai.com/index/introducing-codex/) — alternative AI engine for clip suggestion (auto-detected if Claude is unavailable) |
 
 ## Quick Start
 
@@ -225,7 +226,7 @@ Or just paste a transcript — Claude auto-detects the input and runs the right 
 
 ## Knowledge Base
 
-The knowledge base is what makes podcli understand *your* show. Drop `.md` files into `.podcli/knowledge/` and both the video engine and content workflow use them.
+The knowledge base is what makes podcli understand *your* show. Drop `.md` files into `.podcli/knowledge/` and both the video engine and content workflow use them. The clip suggestion engine reads 8 of these files (prioritized by relevance), checks the episode database for duplicate avoidance, and applies your voice rules and title formulas when generating suggestions.
 
 PodStack ships with **13 starter templates** that you fill in with your show's details:
 

@@ -1203,24 +1203,31 @@ app.post("/api/generate-prompt", (req, res) => {
   res.json({ prompt, action, context: ctx });
 });
 
-// --- Claude-powered clip suggestion (same as CLI) ---
+// --- AI-powered clip suggestion (Claude Code or Codex) ---
 
 app.post("/api/claude-suggest", async (req, res) => {
   const { top_n = 5 } = req.body;
 
-  // Find claude binary
+  // Find AI CLI: prefer Claude, fall back to Codex
   const homedir = require("os").homedir();
   const claudeCandidates = [
     join(homedir, ".local", "bin", "claude"),
     "/usr/local/bin/claude",
     "/opt/homebrew/bin/claude",
   ];
+  const codexCandidates = [
+    "/usr/local/bin/codex",
+    "/opt/homebrew/bin/codex",
+  ];
   const claudePath = claudeCandidates.find((p) => existsSync(p));
+  const codexPath = !claudePath ? codexCandidates.find((p) => existsSync(p)) : undefined;
+  const aiPath = claudePath || codexPath;
+  const engine: "claude" | "codex" = claudePath ? "claude" : "codex";
 
-  if (!claudePath) {
+  if (!aiPath) {
     res.json({
-      error: "Claude Code not found",
-      message: "Install Claude Code: https://docs.anthropic.com/en/docs/claude-code",
+      error: "No AI CLI found (Claude Code or Codex)",
+      message: "Install Claude Code (https://docs.anthropic.com/en/docs/claude-code) or Codex (https://openai.com/index/introducing-codex/)",
       fallback: "clipboard",
       clips: [],
     });
@@ -1340,21 +1347,28 @@ ${transcriptText}`;
 
   try {
     const { execSync } = require("child_process");
-    const result = execSync(
-      `cat "${tmpFile}" | "${claudePath}" --print -p -`,
-      {
-        cwd: process.cwd(),
-        timeout: 300_000,
-        maxBuffer: 10 * 1024 * 1024,
-        encoding: "utf-8",
-      }
-    );
+    let result: string;
+
+    if (engine === "codex") {
+      const outFile = tmpFile + ".out";
+      execSync(
+        `"${aiPath}" exec --full-auto -o "${outFile}" "$(cat "${tmpFile}")"`,
+        { cwd: process.cwd(), timeout: 300_000, maxBuffer: 10 * 1024 * 1024, encoding: "utf-8" }
+      );
+      result = existsSync(outFile) ? readFileSync(outFile, "utf-8") : "";
+      try { require("fs").unlinkSync(outFile); } catch {}
+    } else {
+      result = execSync(
+        `cat "${tmpFile}" | "${aiPath}" --print -p -`,
+        { cwd: process.cwd(), timeout: 300_000, maxBuffer: 10 * 1024 * 1024, encoding: "utf-8" }
+      );
+    }
 
     // Parse JSON from response
     const jsonStart = result.indexOf("{");
     const jsonEnd = result.lastIndexOf("}") + 1;
     if (jsonStart < 0 || jsonEnd <= jsonStart) {
-      res.status(500).json({ error: "Claude did not return valid JSON" });
+      res.status(500).json({ error: `${engine === "claude" ? "Claude" : "Codex"} did not return valid JSON` });
       return;
     }
 
@@ -1402,9 +1416,10 @@ ${transcriptText}`;
       broadcastSSE("state-sync", uiState);
     }
 
-    res.json({ clips, source: "claude" });
+    res.json({ clips, source: engine });
   } catch (err: any) {
-    res.status(500).json({ error: `Claude failed: ${err.message?.substring(0, 200)}` });
+    const label = engine === "claude" ? "Claude" : "Codex";
+    res.status(500).json({ error: `${label} failed: ${err.message?.substring(0, 200)}` });
   } finally {
     try { require("fs").unlinkSync(tmpFile); } catch {}
   }
