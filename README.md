@@ -16,7 +16,7 @@ Record episode
     ↓
 Transcribe (Whisper, speaker detection)
     ↓
-Find viral moments (audio energy + text heuristics)
+Find viral moments (Claude AI + audio energy + knowledge base)
     ↓
 Render clips (9:16, captions, smart crop, normalized audio)
     ↓
@@ -48,7 +48,7 @@ Drag your video into the Web UI, or use the CLI:
 
 ### 2. Get clips automatically
 
-podcli analyzes your transcript + audio energy to find the best moments. It scores each one, suggests clips, and lets you toggle them on/off before rendering.
+podcli uses Claude to analyze your transcript against your show's knowledge base, finding the most viral moments. It scores each one on 4 dimensions, suggests clips with multi-cut segments (cutting out filler), and lets you toggle them on/off before rendering.
 
 Clips come out as **upload-ready Shorts**: 1080x1920, 9:16 vertical, with burned-in captions, normalized audio, and your logo.
 
@@ -80,7 +80,7 @@ Run `/publish-checklist` when uploading. A week later, run `/retro-episode` with
 | | Video Engine (podcli core) | Content Workflow (PodStack) |
 |---|---|---|
 | **What** | Transcription, clip detection, rendering | Titles, descriptions, thumbnails, publishing |
-| **How** | Python + FFmpeg + Whisper + OpenCV | Claude Code slash commands |
+| **How** | Python + FFmpeg + Whisper + OpenCV + Claude | Claude Code slash commands |
 | **Interface** | Web UI, CLI, MCP tools | `/slash-commands` in Claude Code |
 | **Output** | `.mp4` files ready to upload | Content packages ready to paste into YouTube |
 
@@ -91,10 +91,12 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 ## Features
 
 ### Video Processing
-- **Auto clip suggestion** — text heuristics + audio energy analysis
+- **AI clip suggestion** — Claude-powered moment detection with knowledge base context, multi-cut segments, 4-dimension scoring
+- **Face tracking** — YuNet face detection, exponential-smoothing camera, split-screen support, speaker-aware tracking with snap cooldown
 - **Burned-in captions** — 4 styles: branded, hormozi, karaoke, subtle
 - **Hardware-accelerated encoding** — VideoToolbox (Mac), NVENC (NVIDIA), VAAPI, CPU fallback
-- **Smart cropping** — center crop or face detection (OpenCV)
+- **Smart cropping** — center crop or face tracking (handles split-screen, Riverside-style mixed layouts)
+- **Multi-segment clips** — automatically cuts out filler, long pauses, and tangents
 - **Whisper transcription** — auto-transcribe with speaker detection (tiny → large)
 - **Transcript import** — paste `Speaker (MM:SS)`, JSON, drag-drop `.txt` / `.srt` / `.vtt`
 
@@ -113,7 +115,7 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 - **Asset management** — register logos and videos for quick reuse
 - **Clip history** — tracks everything to avoid duplicates
 - **Preset system** — save named configurations per show
-- **MCP server** — 7 tools for Claude Desktop / Claude Code integration
+- **MCP server** — 17 tools for Claude Desktop / Claude Code integration
 - **Web UI** — single-page flow at `localhost:3847`
 - **CLI** — one-command processing: `./podcli process video.mp4 --top 5`
 
@@ -351,7 +353,11 @@ podcli/
 │   ├── cli.py                # CLI entry point
 │   ├── presets.py
 │   ├── requirements.txt
-│   ├── services/             # Whisper, FFmpeg, captions, etc.
+│   ├── models/               # ML model files
+│   │   └── face_detection_yunet_2023mar.onnx
+│   ├── services/             # Whisper, FFmpeg, captions, face tracking, etc.
+│   │   ├── face_detector.py  # shared YuNet face detector
+│   │   └── ...
 │   └── config/
 │       └── caption_styles.py
 │
