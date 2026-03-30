@@ -159,6 +159,84 @@ def _build_tight_segments(
     return segments
 
 
+def _render_with_remotion(
+    video_path: str,
+    words: list[dict],
+    caption_style: str,
+    output_path: str,
+    time_offset: float = 0.0,
+    logo_path: Optional[str] = None,
+) -> bool:
+    """
+    Render captions using Remotion. Returns True on success, False to fall back to ASS.
+    """
+    import subprocess
+    import json
+
+    # Find the render script
+    project_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    render_script = os.path.join(project_root, "remotion", "render.mjs")
+    if not os.path.exists(render_script):
+        return False
+
+    # Check node is available
+    node_path = shutil.which("node")
+    if not node_path:
+        return False
+
+    # Prepare words JSON (adjust timestamps by offset)
+    adjusted_words = []
+    for w in words:
+        adjusted_words.append({
+            "word": w.get("word", ""),
+            "start": round(w["start"] - time_offset, 3),
+            "end": round(w["end"] - time_offset, 3),
+        })
+
+    words_file = output_path + ".words.json"
+    try:
+        with open(words_file, "w") as f:
+            json.dump(adjusted_words, f)
+
+        cmd = [
+            node_path, render_script,
+            "--video", os.path.abspath(video_path),
+            "--words", os.path.abspath(words_file),
+            "--style", caption_style,
+            "--output", os.path.abspath(output_path),
+        ]
+        if logo_path and os.path.exists(logo_path):
+            cmd.extend(["--logo", os.path.abspath(logo_path)])
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            cwd=project_root,
+        )
+
+        if result.returncode == 0 and os.path.exists(output_path):
+            return True
+
+        # Log error but don't crash — will fall back to ASS
+        if result.stderr:
+            print(f"  Remotion: {result.stderr[:200]}", flush=True)
+        return False
+
+    except subprocess.TimeoutExpired:
+        print("  Remotion: timed out (10 min), falling back to ASS", flush=True)
+        return False
+    except Exception as e:
+        print(f"  Remotion: {e}, falling back to ASS", flush=True)
+        return False
+    finally:
+        try:
+            os.unlink(words_file)
+        except Exception:
+            pass
+
+
 def generate_clip(
     video_path: str,
     start_second: float,
@@ -315,7 +393,7 @@ def generate_clip(
             face_map=face_map,
         )
 
-        # Step 3: Generate captions + burn (with optional gradient & logo)
+        # Step 3: Render captions (Remotion or ASS fallback)
         if transcript_words:
             if progress_callback:
                 progress_callback(50, f"Adding {caption_style} captions (3/{total_steps})")
@@ -333,37 +411,46 @@ def generate_clip(
                 clip_words = _clean_transcript_words(clip_words)
 
             if clip_words:
-                # Generate ASS subtitle file
-                ass_path = os.path.join(work_dir, "captions.ass")
-                render_captions(
-                    words=clip_words,
-                    caption_style=caption_style,
-                    output_path=ass_path,
-                    time_offset=caption_time_offset,
-                )
-
-                # Burn captions into video
                 if progress_callback:
                     progress_callback(65, f"Rendering captions into video (3/{total_steps})")
 
                 captioned_path = os.path.join(work_dir, "captioned.mp4")
 
-                # Branded style: add gradient overlay + logo
-                use_gradient = style_config.get("gradient_overlay", False)
-                gradient_opacity = style_config.get("gradient_opacity", 0.6)
-                use_logo = style_config.get("logo_support", False) and logo_path
-
-                burn_captions(
-                    input_path=cropped_path,
-                    ass_path=ass_path,
+                # Try Remotion first, fall back to ASS
+                remotion_ok = _render_with_remotion(
+                    video_path=cropped_path,
+                    words=clip_words,
+                    caption_style=caption_style,
                     output_path=captioned_path,
-                    gradient_overlay=use_gradient,
-                    gradient_opacity=gradient_opacity,
-                    logo_path=logo_path if use_logo else None,
-                    logo_height=style_config.get("logo_height", 80),
-                    logo_margin_x=style_config.get("logo_margin_x", 30),
-                    logo_margin_y=style_config.get("logo_margin_y", 40),
+                    time_offset=caption_time_offset,
+                    logo_path=logo_path if (style_config.get("logo_support", False) and logo_path) else None,
                 )
+
+                if not remotion_ok:
+                    # Fallback: ASS subtitle burn-in
+                    ass_path = os.path.join(work_dir, "captions.ass")
+                    render_captions(
+                        words=clip_words,
+                        caption_style=caption_style,
+                        output_path=ass_path,
+                        time_offset=caption_time_offset,
+                    )
+
+                    use_gradient = style_config.get("gradient_overlay", False)
+                    gradient_opacity = style_config.get("gradient_opacity", 0.6)
+                    use_logo = style_config.get("logo_support", False) and logo_path
+
+                    burn_captions(
+                        input_path=cropped_path,
+                        ass_path=ass_path,
+                        output_path=captioned_path,
+                        gradient_overlay=use_gradient,
+                        gradient_opacity=gradient_opacity,
+                        logo_path=logo_path if use_logo else None,
+                        logo_height=style_config.get("logo_height", 80),
+                        logo_margin_x=style_config.get("logo_margin_x", 30),
+                        logo_margin_y=style_config.get("logo_margin_y", 40),
+                    )
             else:
                 captioned_path = cropped_path
         else:

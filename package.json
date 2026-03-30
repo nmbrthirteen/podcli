@@ -29,13 +29,20 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "ui": "tsx src/ui/web-server.ts",
-    "ui:prod": "node dist/ui/web-server.js"
+    "ui:prod": "node dist/ui/web-server.js",
+    "remotion:prebundle": "node remotion/render.mjs --prebundle",
+    "remotion:studio": "npx remotion studio remotion/src/index.ts"
   },
   "dependencies": {
+    "@fontsource/dm-sans": "^5.2.8",
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "@remotion/bundler": "^4.0.441",
+    "@remotion/cli": "^4.0.441",
+    "@remotion/renderer": "^4.0.441",
     "dotenv": "^16.4.7",
     "express": "^4.21.0",
     "multer": "^1.4.5-lts.1",
+    "remotion": "^4.0.441",
     "uuid": "^11.1.0",
     "winston": "^3.17.0",
     "zod": "^3.24.2"
