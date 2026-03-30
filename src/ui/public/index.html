@@ -204,7 +204,7 @@
 
     function App() {
       const [videoPath, setVideoPath] = useState('');
-      const [transcriptMode, setTranscriptMode] = useState('import');
+      const [transcriptMode, setTranscriptMode] = useState('whisper');
       const [transcriptText, setTranscriptText] = useState('');
       const [timeAdjust, setTimeAdjust] = useState(-1);
       const [whisperModel, setWhisperModel] = useState('base');
@@ -246,11 +246,188 @@
       const [correctionWord, setCorrectionWord] = useState('');
       const [correctionFix, setCorrectionFix] = useState('');
       const [correctionsOpen, setCorrectionsOpen] = useState(false);
+
+      // Presets
+      const [presets, setPresets] = useState([]);
+      const [activePreset, setActivePreset] = useState('');
+      const [showPresetSave, setShowPresetSave] = useState(false);
+      const [presetName, setPresetName] = useState('');
+      const [presetSaving, setPresetSaving] = useState(false);
+
+      // Advanced settings
+      const [advancedOpen, setAdvancedOpen] = useState(false);
+      const [cleanFillers, setCleanFillers] = useState(false);
+      const [quality, setQuality] = useState('max');
+      const [topClips, setTopClips] = useState(8);
+      const [minDuration, setMinDuration] = useState(20);
+      const [maxDuration, setMaxDuration] = useState(90);
+      const [energyBoost, setEnergyBoost] = useState(true);
+
+      // Clip editing
+      const [editingClip, setEditingClip] = useState(null); // index
+      const [editForm, setEditForm] = useState({ title: '', start: 0, end: 0 });
+
+      // Energy analysis
+      const [energyData, setEnergyData] = useState({}); // clip_id → { peak, avg, level }
+      const [analyzingEnergy, setAnalyzingEnergy] = useState(false);
+
+      // Auto-transcribe + cache
+      const [transcribing, setTranscribing] = useState(false);
+      const [transcribeJobId, setTranscribeJobId] = useState(null);
+      const transcribeStream = useJob(transcribeJobId);
+      const [cachedTranscript, setCachedTranscript] = useState(false);
       useEffect(() => {
         api('/encoder-info').then(d => { if (d.best) setEncoderInfo(d); }).catch(() => { });
         api('/speaker-status').then(d => setSpeakerStatus(d)).catch(() => { });
         api('/corrections').then(d => { if (d && typeof d === 'object') setCorrections(d); }).catch(() => { });
       }, []);
+
+      // Fetch presets on mount
+      const fetchPresets = () => { api('/presets').then(d => { if (d.presets) setPresets(d.presets); }).catch(() => {}); };
+      useEffect(fetchPresets, []);
+
+      const loadPreset = async (name) => {
+        if (!name) { setActivePreset(''); return; }
+        try {
+          const d = await api('/presets', { method: 'POST', body: JSON.stringify({ action: 'get', name }) });
+          // Backend returns the preset config directly (not nested under .config)
+          if (d.caption_style) setCaptionStyle(d.caption_style);
+          if (d.crop_strategy) setCropStrategy(d.crop_strategy);
+          if (d.logo_path !== undefined) setLogoPath(d.logo_path || '');
+          if (d.outro_path !== undefined) setOutroPath(d.outro_path || '');
+          if (d.clean_fillers !== undefined) setCleanFillers(d.clean_fillers);
+          if (d.quality) setQuality(d.quality);
+          if (d.top_clips) setTopClips(d.top_clips);
+          if (d.min_clip_duration) setMinDuration(d.min_clip_duration);
+          if (d.max_clip_duration) setMaxDuration(d.max_clip_duration);
+          if (d.energy_boost !== undefined) setEnergyBoost(d.energy_boost);
+          setActivePreset(name);
+        } catch {}
+      };
+
+      const savePreset = async () => {
+        if (!presetName.trim()) return;
+        setPresetSaving(true);
+        try {
+          await api('/presets', { method: 'POST', body: JSON.stringify({
+            action: 'save', name: presetName.trim(),
+            config: { caption_style: captionStyle, crop_strategy: cropStrategy, logo_path: logoPath, outro_path: outroPath, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
+          })});
+          setActivePreset(presetName.trim());
+          setPresetName(''); setShowPresetSave(false);
+          fetchPresets();
+        } catch {}
+        finally { setPresetSaving(false); }
+      };
+
+      const deletePreset = async (name) => {
+        try {
+          await api('/presets', { method: 'POST', body: JSON.stringify({ action: 'delete', name }) });
+          if (activePreset === name) setActivePreset('');
+          fetchPresets();
+        } catch {}
+      };
+
+      // Clip editing
+      const openClipEdit = (idx, e) => {
+        e.stopPropagation();
+        const clip = suggestions[idx];
+        setEditingClip(idx);
+        setEditForm({ title: clip.title, start: clip.start_second, end: clip.end_second });
+      };
+
+      const saveClipEdit = () => {
+        if (editingClip === null) return;
+        setSuggestions(prev => {
+          const next = [...prev];
+          next[editingClip] = { ...next[editingClip], title: editForm.title, start_second: editForm.start, end_second: editForm.end, duration: Math.round(editForm.end - editForm.start) };
+          return next;
+        });
+        setEditingClip(null);
+      };
+
+      const deleteClipEdit = () => {
+        if (editingClip === null) return;
+        setSuggestions(prev => prev.filter((_, i) => i !== editingClip));
+        setDeselected(prev => {
+          const next = new Set();
+          for (const idx of prev) {
+            if (idx < editingClip) next.add(idx);
+            else if (idx > editingClip) next.add(idx - 1);
+          }
+          return next;
+        });
+        setEditingClip(null);
+      };
+
+      // Energy analysis
+      const analyzeEnergy = async () => {
+        setAnalyzingEnergy(true);
+        try {
+          const segments = suggestions.map(c => ({ start: c.start_second, end: c.end_second }));
+          const vp = file?.file_path || videoPath.trim();
+          const d = await api('/analyze-energy', { method: 'POST', body: JSON.stringify({ video_path: vp, segments }) });
+          // Backend returns { segment_scores: [0-10, ...], peak_times: [...] }
+          if (d.segment_scores && Array.isArray(d.segment_scores)) {
+            const map = {};
+            d.segment_scores.forEach((score, i) => {
+              if (suggestions[i]) {
+                const level = score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low';
+                map[i] = { score: score, level };
+              }
+            });
+            setEnergyData(map);
+          }
+        } catch {}
+        finally { setAnalyzingEnergy(false); }
+      };
+
+      // Auto-transcribe when video is set and in whisper mode with no transcript
+      const autoTranscribe = async (vp) => {
+        if (!vp || transcribing || transcript) return;
+        setTranscribing(true);
+        setCachedTranscript(false);
+        try {
+          const fileData = await api('/select-file', { method: 'POST', body: JSON.stringify({ file_path: vp }) });
+          if (fileData.error) { setTranscribing(false); return; }
+          setFile(fileData);
+          const data = await api('/transcribe', { method: 'POST', body: JSON.stringify({ file_path: vp, model_size: whisperModel, enable_diarization: speakerStatus?.configured || false }) });
+          if (data.cached && data.data) {
+            // Instant cache hit
+            setTranscript(data.data);
+            setCachedTranscript(true);
+            setTranscribing(false);
+          } else if (data.job_id) {
+            setTranscribeJobId(data.job_id);
+          } else {
+            setTranscribing(false);
+          }
+        } catch { setTranscribing(false); }
+      };
+
+      // Watch transcribe job completion
+      useEffect(() => {
+        if (!transcribeStream) return;
+        if (transcribeStream.status === 'done') {
+          setTranscript(transcribeStream.result);
+          setTranscribing(false);
+          setTranscribeJobId(null);
+        } else if (transcribeStream.status === 'error') {
+          setError('Transcription failed: ' + (transcribeStream.error || 'Unknown error'));
+          setTranscribing(false);
+          setTranscribeJobId(null);
+        }
+      }, [transcribeStream?.status]);
+
+      // Auto-trigger transcribe when video path is set and mode is whisper
+      const autoTranscribeRef = useRef('');
+      useEffect(() => {
+        const vp = videoPath.trim();
+        if (transcriptMode === 'whisper' && vp && !transcript && !transcribing && vp !== autoTranscribeRef.current) {
+          autoTranscribeRef.current = vp;
+          autoTranscribe(vp);
+        }
+      }, [videoPath, transcriptMode, transcript, transcribing]);
 
       // Fetch clip history on mount and after exports
       const fetchHistory = () => { fetch('/api/history?limit=50').then(r => r.json()).then(d => { if (Array.isArray(d)) setClipHistory(d); }).catch(() => { }); };
@@ -308,12 +485,12 @@
 
         if (sseEvent.type === 'state-sync' || sseEvent.type === 'state') {
           const d = sseEvent.data;
-          if (d.suggestions) setSuggestions(d.suggestions);
+          if (d.suggestions) { setSuggestions(d.suggestions); setEnergyData({}); }
           if (d.deselectedIndices !== undefined) setDeselected(new Set(d.deselectedIndices));
           else if (d.suggestions && !d.deselectedIndices) setDeselected(new Set());
           if (d.phase) setPhase(d.phase);
           if (d.videoPath !== undefined) setVideoPath(d.videoPath);
-          if (d.transcript) setTranscript(d.transcript);
+          if (d.transcript) { setTranscript(d.transcript); if (d.videoPath) autoTranscribeRef.current = d.videoPath; }
           if (d.rawTranscriptText && !transcript) setTranscriptText(d.rawTranscriptText);
           if (d.settings) {
             if (d.settings.captionStyle) setCaptionStyle(d.settings.captionStyle);
@@ -406,7 +583,7 @@
           method: 'POST', body: JSON.stringify({
             video_path: vp,
             clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy })),
-            transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined,
+            transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, clean_fillers: cleanFillers || undefined,
           })
         });
         setBatchJobId(data.job_id);
@@ -425,7 +602,7 @@
           method: 'POST', body: JSON.stringify({
             video_path: vp, start_second: c.start_second, end_second: c.end_second,
             title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy,
-            transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined,
+            transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, clean_fillers: cleanFillers || undefined,
           })
         });
         setRetryJobId(data.job_id);
@@ -526,7 +703,7 @@
           const res = await fetch('/api/claude-suggest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ top_n: 8 }),
+            body: JSON.stringify({ top_n: topClips, min_duration: minDuration, max_duration: maxDuration }),
           });
           const data = await res.json();
 
@@ -538,8 +715,10 @@
               start_second: c.start_second,
               end_second: c.end_second,
               reasoning: c.reasoning || c.content_type || '',
+              duration: Math.round((c.end_second || 0) - (c.start_second || 0)),
             }));
             setSuggestions(mapped);
+            setEnergyData({});
             setPhase('review');
           } else if (data.fallback === 'clipboard') {
             // Claude not installed — fall back to clipboard copy
@@ -571,7 +750,7 @@
         }
       };
 
-      const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting';
+      const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || transcribing;
       const selectedClips = suggestions.filter((_, i) => !deselected.has(i));
 
       const getExportStatus = (resultIdx) => {
@@ -721,20 +900,98 @@
                   </div>
                 )}
                 {transcriptMode === 'whisper' && (
-                  <div className="fade-in"><div className="row"><div>
-                    <label className="field-label">Model</label>
-                    <select value={whisperModel} onChange={e => setWhisperModel(e.target.value)} disabled={isProcessing}>
-                      <option value="tiny">Tiny (fastest)</option><option value="base">Base</option>
-                      <option value="small">Small</option><option value="medium">Medium</option>
-                      <option value="large">Large (best)</option>
-                    </select>
-                  </div></div></div>
+                  <div className="fade-in">
+                    <div className="row" style={{ marginBottom: 10 }}><div>
+                      <label className="field-label">Model</label>
+                      <select value={whisperModel} onChange={e => setWhisperModel(e.target.value)} disabled={isProcessing || transcribing}>
+                        <option value="tiny">Tiny (fastest)</option><option value="base">Base</option>
+                        <option value="small">Small</option><option value="medium">Medium</option>
+                        <option value="large">Large (best)</option>
+                      </select>
+                    </div></div>
+
+                    {/* Transcription progress */}
+                    {transcribing && !cachedTranscript && (
+                      <div className="fade-in" style={{ padding: '12px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                        <div className="status-line" style={{ fontSize: 12 }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div className="spinner sm" />
+                            {transcribeStream?.message || 'Starting transcription\u2026'}
+                          </span>
+                          {transcribeStream?.progress > 0 && (
+                            <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{transcribeStream.progress}%</span>
+                          )}
+                        </div>
+                        {transcribeStream?.progress > 0 && (
+                          <div className="progress-track" style={{ marginTop: 6 }}>
+                            <div className="progress-fill" style={{ width: `${transcribeStream.progress}%` }} />
+                          </div>
+                        )}
+                        {!transcribeStream?.progress && (
+                          <div className="progress-track" style={{ marginTop: 6 }}><div className="progress-fill indeterminate" /></div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Transcript ready indicator */}
+                    {transcript && transcriptMode === 'whisper' && (
+                      <div className="file-badge fade-in">
+                        <div className="dot" />
+                        <div className="name">Transcript ready</div>
+                        <div className="meta">
+                          {transcript.words?.length || 0} words
+                          {transcript.duration && <span> {'\u00B7'} {fmt(transcript.duration)}</span>}
+                        </div>
+                        {cachedTranscript && (
+                          <span className="pill" style={{ fontSize: 10, background: 'var(--blue-subtle)', color: 'var(--blue)', border: '1px solid var(--blue-border)' }}>cached</span>
+                        )}
+                        <button className="btn btn-ghost btn-sm" onClick={() => { setTranscript(null); setCachedTranscript(false); autoTranscribeRef.current = ''; }} style={{ padding: '4px 10px', fontSize: 11 }}>Re-transcribe</button>
+                      </div>
+                    )}
+
+                    {!transcript && !transcribing && videoPath.trim() && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => { autoTranscribeRef.current = ''; autoTranscribe(videoPath.trim()); }} style={{ marginTop: 4 }}>
+                        Transcribe now
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
               {/* Settings */}
               <div className="section">
                 <div className="section-label">Settings</div>
+
+                {/* Presets */}
+                {presets.length > 0 && (
+                  <div className="preset-bar">
+                    <select value={activePreset} onChange={e => loadPreset(e.target.value)} disabled={isProcessing} style={{ fontSize: 12 }}>
+                      <option value="">Load preset…</option>
+                      {presets.map(p => <option key={p.name || p} value={p.name || p}>{p.name || p}</option>)}
+                    </select>
+                    {activePreset && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => deletePreset(activePreset)} title="Delete preset" style={{ padding: '6px 8px', color: 'var(--red)' }}>{'\u00D7'}</button>
+                    )}
+                  </div>
+                )}
+                {showPresetSave ? (
+                  <div className="preset-save-row">
+                    <input type="text" placeholder="Preset name" value={presetName} onChange={e => setPresetName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') savePreset(); if (e.key === 'Escape') setShowPresetSave(false); }}
+                      autoFocus disabled={presetSaving} />
+                    <button className="btn btn-primary btn-sm" onClick={savePreset} disabled={!presetName.trim() || presetSaving}>
+                      {presetSaving ? <div className="spinner sm" /> : 'Save'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setShowPresetSave(false)}>Cancel</button>
+                  </div>
+                ) : (
+                  <div style={{ marginBottom: 14 }}>
+                    <button className="asset-add" onClick={() => setShowPresetSave(true)} disabled={isProcessing}>
+                      + Save as preset
+                    </button>
+                  </div>
+                )}
+
                 <div className="settings-grid">
                   <div>
                     <label className="field-label">Caption Style</label>
@@ -783,6 +1040,54 @@
                   <input ref={outroRef} type="file" accept=".mp4,.mov,.mkv,.webm" style={{ display: 'none' }}
                     onChange={e => e.target.files[0] && handleOutroUpload(e.target.files[0])} />
                 </div>
+
+                {/* Advanced Settings */}
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: '0.8px', color: 'var(--text2)', textTransform: 'uppercase' }}
+                    onClick={() => setAdvancedOpen(!advancedOpen)}>
+                    <span style={{ fontSize: 10, transition: 'transform 0.15s', transform: advancedOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-block' }}>▶</span>
+                    Advanced
+                  </div>
+                  {advancedOpen && (
+                    <div className="advanced-grid fade-in">
+                      <div className="field">
+                        <label className="field-label">Quality</label>
+                        <select value={quality} onChange={e => setQuality(e.target.value)} disabled={isProcessing} style={{ fontSize: 12, padding: '8px 12px' }}>
+                          <option value="max">Max</option><option value="high">High</option><option value="fast">Fast</option>
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label className="field-label">Top clips</label>
+                        <div className="field-row">
+                          <input type="range" min="3" max="15" value={topClips} onChange={e => setTopClips(parseInt(e.target.value))} />
+                          <span className="range-value">{topClips}</span>
+                        </div>
+                      </div>
+                      <div className="field">
+                        <label className="field-label">Min duration</label>
+                        <div className="field-row">
+                          <input type="range" min="10" max="60" step="5" value={minDuration} onChange={e => setMinDuration(parseInt(e.target.value))} />
+                          <span className="range-value">{minDuration}s</span>
+                        </div>
+                      </div>
+                      <div className="field">
+                        <label className="field-label">Max duration</label>
+                        <div className="field-row">
+                          <input type="range" min="30" max="180" step="5" value={maxDuration} onChange={e => setMaxDuration(parseInt(e.target.value))} />
+                          <span className="range-value">{maxDuration}s</span>
+                        </div>
+                      </div>
+                      <div className="toggle-row" style={{ gridColumn: '1 / -1' }}>
+                        <span className="toggle-label">Clean filler words (um, uh, hmm)</span>
+                        <div className={`toggle ${cleanFillers ? 'on' : ''}`} onClick={() => setCleanFillers(!cleanFillers)} />
+                      </div>
+                      <div className="toggle-row" style={{ gridColumn: '1 / -1', paddingTop: 0 }}>
+                        <span className="toggle-label">Energy boost (normalize loud moments)</span>
+                        <div className={`toggle ${energyBoost ? 'on' : ''}`} onClick={() => setEnergyBoost(!energyBoost)} />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Word Corrections */}
@@ -799,20 +1104,20 @@
                     <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8, lineHeight: 1.4 }}>
                       Fix Whisper misheard words. Applied automatically to all transcripts.
                     </div>
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
                       <input value={correctionWord} onChange={e => setCorrectionWord(e.target.value)}
-                        placeholder="Wrong (e.g. Boxel)" style={{ flex: 1, fontSize: 12 }} />
-                      <span style={{ color: 'var(--text3)', alignSelf: 'center', fontSize: 12 }}>→</span>
+                        placeholder="Wrong (e.g. Boxel)" style={{ flex: 1, fontSize: 12, padding: '8px 12px', background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }} />
+                      <span style={{ color: 'var(--text3)', fontSize: 12, flexShrink: 0 }}>{'\u2192'}</span>
                       <input value={correctionFix} onChange={e => setCorrectionFix(e.target.value)}
-                        placeholder="Correct (e.g. Voxel)" style={{ flex: 1, fontSize: 12 }}
+                        placeholder="Correct (e.g. Voxel)" style={{ flex: 1, fontSize: 12, padding: '8px 12px', background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}
                         onKeyDown={e => { if (e.key === 'Enter' && correctionWord.trim() && correctionFix.trim()) {
                           api('/corrections/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wrong: correctionWord.trim(), correct: correctionFix.trim() }) })
                             .then(d => { if (d.corrections) { setCorrections(d.corrections); setCorrectionWord(''); setCorrectionFix(''); } });
                         }}} />
-                      <button className="btn btn-sm" disabled={!correctionWord.trim() || !correctionFix.trim()} onClick={() => {
+                      <button className="btn btn-ghost btn-sm" disabled={!correctionWord.trim() || !correctionFix.trim()} onClick={() => {
                         api('/corrections/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wrong: correctionWord.trim(), correct: correctionFix.trim() }) })
                           .then(d => { if (d.corrections) { setCorrections(d.corrections); setCorrectionWord(''); setCorrectionFix(''); } });
-                      }} style={{ fontSize: 11, padding: '4px 10px' }}>Add</button>
+                      }} style={{ fontSize: 11, padding: '6px 12px' }}>Add</button>
                     </div>
                     {Object.keys(corrections).length > 0 && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -845,7 +1150,7 @@
               {phase === 'idle' && (
                 <div>
                   <button className="btn btn-go"
-                    disabled={!videoPath.trim() || (transcriptMode === 'import' && !transcriptText.trim()) || browsing}
+                    disabled={!videoPath.trim() || (transcriptMode === 'import' && !transcriptText.trim()) || (transcriptMode === 'whisper' && !transcript) || browsing || transcribing}
                     onClick={copyGeneratePrompt}
                     style={generateCopied ? { background: 'var(--green)', transition: 'background 0.2s' } : {}}>
                     {phase === 'suggesting' ? 'Claude is analyzing...' : generateCopied ? 'Copied — paste in Claude' : 'Find Best Moments'}
@@ -883,6 +1188,11 @@
                         : phase === 'review' ? `Clips \u00B7 ${selectedCount} selected` : 'Clips'}
                     </div>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      {phase === 'review' && videoPath && (
+                        <button className="energy-btn" onClick={analyzeEnergy} disabled={analyzingEnergy || suggestions.length === 0} title="Analyze audio energy levels">
+                          {analyzingEnergy ? <><div className="spinner sm" /> Analyzing…</> : '⚡ Energy'}
+                        </button>
+                      )}
                       {phase === 'review' && (
                         <button className="btn btn-primary btn-sm" disabled={selectedCount === 0} onClick={startExport}>
                           Export {selectedCount} clip{selectedCount !== 1 ? 's' : ''}
@@ -939,11 +1249,20 @@
                           <div className="clip-title">{clip.title}</div>
                           <div className="clip-meta">
                             {fmt(clip.start_second)} {'\u2192'} {fmt(clip.end_second)} {'\u00B7'} {clip.duration}s
+                            {energyData[i] && (
+                              <span className={`energy-badge ${energyData[i].level}`} title={`Energy: ${energyData[i].score}/10`}>
+                                {energyData[i].level === 'high' ? '⚡' : energyData[i].level === 'medium' ? '~' : '○'} {energyData[i].score.toFixed(1)}
+                              </span>
+                            )}
                             {r && !failed && <span> {'\u00B7'} {r.file_size_mb}MB</span>}
                             {failed && <span className="err"> {'\u00B7'} {r.error?.slice(0, 60)}</span>}
                             {exportStatus === 'rendering' && <span style={{ color: 'var(--accent)' }}> {'\u00B7'} rendering{'\u2026'}</span>}
                           </div>
                         </div>
+
+                        {phase === 'review' && (
+                          <button className="btn btn-ghost btn-sm clip-edit-btn" onClick={(e) => openClipEdit(i, e)} title="Edit clip">✎</button>
+                        )}
 
                         {phase === 'done' && !off && r && !failed && outputFile && (
                           <div className="clip-actions" onClick={e => e.stopPropagation()}>
@@ -984,7 +1303,7 @@
                   {(phase === 'done' || phase === 'review' || phase === 'exporting') && (
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 24 }}>
                       <button className="btn btn-ghost" onClick={() => {
-                        setPhase('idle'); setResults([]); setSuggestions([]); setBatchJobId(null); setFile(null); setTranscript(null); setActiveClipIdx(null); setPreviewSrc(null);
+                        setPhase('idle'); setResults([]); setSuggestions([]); setBatchJobId(null); setFile(null); setTranscript(null); setActiveClipIdx(null); setPreviewSrc(null); setEnergyData({}); setCachedTranscript(false); autoTranscribeRef.current = '';
                         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', phase: 'idle', suggestions: [], deselectedIndices: [] }) }).catch(() => { });
                       }}>Start Over</button>
                       {phase === 'done' && <button className="btn btn-ghost" onClick={() => { setPhase('review'); setResults([]); setBatchJobId(null); }}>Re-export</button>}
@@ -1110,10 +1429,58 @@
                       Outro {'\u00B7'} <strong>{outroPath.split('/').pop()}</strong>
                     </div>
                   )}
+                  {activePreset && (
+                    <div className="preview-tag" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(212,135,74,0.2)' }}>
+                      Preset {'\u00B7'} <strong>{activePreset}</strong>
+                    </div>
+                  )}
+                  {cleanFillers && (
+                    <div className="preview-tag">
+                      Clean fillers {'\u00B7'} <strong>on</strong>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
+
+          {/* Clip Edit Modal */}
+          {editingClip !== null && suggestions[editingClip] && (
+            <div className="clip-edit-overlay" onClick={() => setEditingClip(null)}>
+              <div className="clip-edit-panel" onClick={e => e.stopPropagation()}>
+                <h3>Edit Clip #{editingClip + 1}</h3>
+                <div className="edit-field">
+                  <label>Title</label>
+                  <input type="text" value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') saveClipEdit(); }} autoFocus />
+                </div>
+                <div className="edit-field">
+                  <label>Time Range</label>
+                  <div className="time-row">
+                    <div>
+                      <input type="number" step="0.5" value={editForm.start} onChange={e => setEditForm(f => ({ ...f, start: parseFloat(e.target.value) || 0 }))}
+                        style={{ textAlign: 'center' }} />
+                      <div style={{ fontSize: 10, color: 'var(--text3)', textAlign: 'center', marginTop: 2 }}>{fmt(editForm.start)}</div>
+                    </div>
+                    <div className="arrow">{'\u2192'}</div>
+                    <div>
+                      <input type="number" step="0.5" value={editForm.end} onChange={e => setEditForm(f => ({ ...f, end: parseFloat(e.target.value) || 0 }))}
+                        style={{ textAlign: 'center' }} />
+                      <div style={{ fontSize: 10, color: 'var(--text3)', textAlign: 'center', marginTop: 2 }}>{fmt(editForm.end)}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6, textAlign: 'center' }}>
+                    Duration: {Math.round(editForm.end - editForm.start)}s
+                  </div>
+                </div>
+                <div className="clip-edit-actions">
+                  <button className="btn btn-ghost btn-sm" onClick={deleteClipEdit} style={{ color: 'var(--red)', marginRight: 'auto' }}>Delete clip</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setEditingClip(null)}>Cancel</button>
+                  <button className="btn btn-primary btn-sm" onClick={saveClipEdit} disabled={!editForm.title.trim() || editForm.end <= editForm.start}>Save</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Modal (mobile fallback) */}
           {previewFile && (

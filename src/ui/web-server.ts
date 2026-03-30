@@ -416,6 +416,7 @@ app.post("/api/create-clip", async (req, res) => {
     title = "clip",
     logo_path = null,
     outro_path = null,
+    clean_fillers = false,
   } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
@@ -485,6 +486,7 @@ app.post("/api/create-clip", async (req, res) => {
         output_dir: paths.output,
         logo_path,
         outro_path,
+        clean_fillers,
       },
       (event) => {
         job.progress = event.percent;
@@ -523,7 +525,7 @@ app.post("/api/create-clip", async (req, res) => {
  * POST /api/batch-clips — Create multiple clips
  */
 app.post("/api/batch-clips", async (req, res) => {
-  const { video_path, clips, transcript_words = [], logo_path = null, outro_path = null } = req.body;
+  const { video_path, clips, transcript_words = [], logo_path = null, outro_path = null, clean_fillers = false } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
     res.status(400).json({ error: "Video file not found" });
@@ -578,7 +580,7 @@ app.post("/api/batch-clips", async (req, res) => {
   executor
     .execute(
       "batch_clips",
-      { video_path, clips, transcript_words, output_dir: paths.output, logo_path, outro_path, face_map: (uiState.transcript as any)?.face_map },
+      { video_path, clips, transcript_words, output_dir: paths.output, logo_path, outro_path, clean_fillers, face_map: (uiState.transcript as any)?.face_map },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
@@ -1265,7 +1267,7 @@ app.post("/api/generate-prompt", (req, res) => {
 // --- AI-powered clip suggestion (delegates to Python backend) ---
 
 app.post("/api/claude-suggest", async (req, res) => {
-  const { top_n = 5 } = req.body;
+  const { top_n = 5, min_duration, max_duration } = req.body;
 
   // Need transcript in state
   if (!uiState.transcript && !uiState.rawTranscriptText) {
@@ -1280,9 +1282,12 @@ app.post("/api/claude-suggest", async (req, res) => {
   }
 
   try {
+    const params: Record<string, unknown> = { segments: segs, top_n };
+    if (min_duration) params.min_duration = min_duration;
+    if (max_duration) params.max_duration = max_duration;
     const result = await executor.execute(
       "suggest_clips",
-      { segments: segs, top_n },
+      params,
       (event) => broadcastSSE("job-update", { progress: event.percent, message: event.message }),
     );
 
