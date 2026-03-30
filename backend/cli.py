@@ -400,19 +400,12 @@ def cmd_process(args):
         print("  No clips found. Try a longer transcript or lower --min-duration.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"\n         Selected {len(clips)} clips:")
-    for i, c in enumerate(clips):
-        m_s = int(c["start_second"]) // 60
-        s_s = int(c["start_second"]) % 60
-        ctype = c.get("content_type", "")
-        score_val = c.get("score", 0)
-        score_str = f"({score_val}/20)" if isinstance(score_val, int) and score_val <= 20 else f"({score_val:.0f}pts)"
-        type_tag = f" [{ctype}]" if ctype and ctype != "unknown" else ""
-        n_segs = len(c.get("segments", [])) if c.get("segments") else 1
-        cuts_tag = f" ({n_segs} cuts)" if n_segs > 1 else ""
-        print(f"           {i+1}. [{m_s}:{s_s:02d} → +{c['duration']}s] {score_str}{type_tag}{cuts_tag} {c['title'][:50]}")
-        if c.get("why"):
-            print(f"              {c['why'][:70]}")
+    # ── Step 3.5: Interactive review ──
+    clips = _review_clips(clips, segments, energy_scores, config)
+
+    if not clips:
+        print("\n  No clips selected. Exiting.")
+        return
 
     # ── Step 4: Export ──
     # Check if thumbnail generation is enabled
@@ -559,26 +552,546 @@ def cmd_process(args):
     if not _ai_cli_path:
         print(f"\n  {gray}For titles, descriptions & tags: install Claude Code or Codex CLI{reset}")
 
-    # ── What next? ──
-    print(f"  {'─' * 45}")
-    print(f"  {bold}What next?{reset}")
-    print(f"    {accent}1{reset}  Re-run with different settings")
-    print(f"    {accent}2{reset}  Open output folder")
-    print(f"    {accent}q{reset}  Done")
-    print()
-    sys.stdout.write(f"  {accent}▸{reset} ")
-    sys.stdout.flush()
-    try:
-        next_choice = sys.stdin.readline().strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
+    # ── Post-render iteration ──
+    _post_render_loop(
+        clips=clips,
+        results=results,
+        segments=segments,
+        words=words,
+        config=config,
+        video_path=video_path,
+        output_dir=output_dir,
+        face_map=face_map,
+        energy_scores=energy_scores,
+    )
 
-    if next_choice == "1":
-        _interactive_process()
-    elif next_choice == "2":
-        import subprocess as _sp
-        _sp.run(["open", output_dir] if sys.platform == "darwin" else ["xdg-open", output_dir])
+
+def _print_clips(clips: list):
+    """Print clip list in the standard format."""
+    for i, c in enumerate(clips):
+        m_s = int(c["start_second"]) // 60
+        s_s = int(c["start_second"]) % 60
+        ctype = c.get("content_type", "")
+        score_val = c.get("score", 0)
+        score_str = f"({score_val}/20)" if isinstance(score_val, int) and score_val <= 20 else f"({score_val:.0f}pts)"
+        type_tag = f" [{ctype}]" if ctype and ctype != "unknown" else ""
+        n_segs = len(c.get("segments", [])) if c.get("segments") else 1
+        cuts_tag = f" ({n_segs} cuts)" if n_segs > 1 else ""
+        selected = c.get("_selected", True)
+        marker = "  ✓" if selected else "  ✗"
+        print(f"        {marker} {i+1}. [{m_s}:{s_s:02d} → +{c['duration']}s] {score_str}{type_tag}{cuts_tag} {c['title'][:50]}")
+        if c.get("why"):
+            print(f"              {c['why'][:70]}")
+
+
+def _find_moment_with_claude(description: str, segments: list, existing_clips: list) -> list:
+    """Use Claude to find a specific moment described by the user."""
+    from services.claude_suggest import _find_ai_cli
+
+    cli_path, engine = _find_ai_cli()
+    if not cli_path:
+        print("         ⚠ No AI CLI available for moment search")
+        return []
+
+    # Build transcript text
+    lines = []
+    for seg in segments:
+        speaker = seg.get("speaker", "")
+        speaker_label = f"[{speaker}] " if speaker else ""
+        start = seg.get("start", 0)
+        text = seg.get("text", "").strip()
+        if text:
+            lines.append(f"[{start:.1f}s] {speaker_label}{text}")
+    transcript_text = "\n".join(lines)
+
+    # Build list of existing clip timestamps to avoid
+    existing_desc = ""
+    if existing_clips:
+        existing_desc = "\n\nALREADY SELECTED (do not re-suggest these):\n"
+        for c in existing_clips:
+            existing_desc += f"- {c['start_second']}s-{c['end_second']}s: {c['title']}\n"
+
+    import tempfile, subprocess, json as _json
+
+    prompt = f"""Find the moment the user is describing in this podcast transcript. Return ONLY valid JSON.
+
+USER WANTS: "{description}"
+{existing_desc}
+RULES:
+- Find the EXACT moment matching the user's description
+- Return 1-3 matching moments (best match first)
+- All timestamps in SECONDS as numbers
+- Duration target: 25-40 seconds, max 50 seconds
+- Cut tight: start at the hook, end when the point lands
+- Use segments to cut filler if needed
+
+Return this JSON:
+{{
+  "clips": [
+    {{
+      "title": "First sentence of the moment",
+      "start_second": 123.4,
+      "end_second": 158.4,
+      "segments": [{{"start": 123.4, "end": 158.4}}],
+      "duration": 35,
+      "content_type": "guest_story",
+      "scores": {{"standalone": 4, "hook": 5, "relevance": 4, "quotability": 3}},
+      "total_score": 16,
+      "quote": "The key quote",
+      "why": "Why this matches what the user asked for"
+    }}
+  ]
+}}
+
+Transcript:
+{transcript_text}"""
+
+    project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=project_dir) as f:
+        f.write(prompt)
+        prompt_file = f.name
+
+    try:
+        if engine == "codex":
+            output_file = prompt_file + ".out"
+            result = subprocess.run(
+                [cli_path, "exec", "--full-auto", "-o", output_file, prompt],
+                capture_output=True, text=True, cwd=project_dir, timeout=300,
+            )
+            if os.path.exists(output_file):
+                with open(output_file) as fh:
+                    result = subprocess.CompletedProcess(
+                        args=result.args, returncode=result.returncode,
+                        stdout=fh.read(), stderr=result.stderr,
+                    )
+                try:
+                    os.unlink(output_file)
+                except Exception:
+                    pass
+        else:
+            result = subprocess.run(
+                f'cat "{prompt_file}" | "{cli_path}" --print -p -',
+                capture_output=True, text=True, cwd=project_dir, timeout=300, shell=True,
+            )
+
+        if result.returncode != 0:
+            return []
+
+        response = result.stdout.strip()
+        if "```" in response:
+            import re
+            fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", response, re.DOTALL)
+            if fence_match:
+                response = fence_match.group(1).strip()
+
+        json_start = response.find("{")
+        if json_start >= 0:
+            decoder = _json.JSONDecoder()
+            data, _ = decoder.raw_decode(response, json_start)
+        else:
+            data = _json.loads(response)
+
+        found = []
+        for c in data.get("clips", []):
+            scores = c.get("scores", {})
+            total = sum(scores.values()) if scores else c.get("total_score", 0)
+            raw_segments = c.get("segments", [])
+            keep_segments = []
+            for seg in raw_segments:
+                s = round(float(seg.get("start", 0)), 1)
+                e = round(float(seg.get("end", 0)), 1)
+                if e > s:
+                    keep_segments.append({"start": s, "end": e})
+
+            start_sec = round(float(c.get("start_second", 0)), 1)
+            end_sec = round(float(c.get("end_second", 0)), 1)
+            if not keep_segments and end_sec > start_sec:
+                keep_segments = [{"start": start_sec, "end": end_sec}]
+
+            kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
+            if kept_duration < 10 or kept_duration > 90:
+                continue
+
+            found.append({
+                "title": c.get("title", "Untitled")[:55],
+                "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
+                "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
+                "segments": keep_segments,
+                "duration": round(kept_duration),
+                "score": total,
+                "content_type": c.get("content_type", "unknown"),
+                "reasoning": c.get("why", ""),
+                "preview_text": c.get("quote", "")[:120],
+                "suggested_caption_style": "hormozi",
+                "quote": c.get("quote", ""),
+                "why": c.get("why", ""),
+                "reasons": [c.get("content_type", "")],
+                "preview": c.get("quote", "")[:120],
+            })
+        return found
+
+    except Exception as e:
+        print(f"         ⚠ Search error: {e}")
+        return []
+    finally:
+        try:
+            os.unlink(prompt_file)
+        except Exception:
+            pass
+
+
+def _review_clips(clips: list, segments: list, energy_scores: list | None, config: dict) -> list:
+    """Interactive clip review — user can select/deselect, ask for more, or find specific moments."""
+    import questionary
+    from questionary import Style
+
+    accent = "\033[38;2;212;135;74m"
+    bold = "\033[1m"
+    dim = "\033[2m"
+    reset = "\033[0m"
+
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
+    # Mark all clips as selected initially
+    for c in clips:
+        c["_selected"] = True
+
+    while True:
+        selected = [c for c in clips if c.get("_selected", True)]
+        print(f"\n         {bold}{len(selected)}/{len(clips)} clips selected:{reset}")
+        _print_clips(clips)
+
+        choices = [
+            questionary.Choice(f"Render {len(selected)} clips", value="render"),
+            questionary.Choice("Toggle clips on/off", value="toggle"),
+            questionary.Choice("Find a specific moment", value="find"),
+            questionary.Choice("Get more suggestions from Claude", value="more"),
+            questionary.Choice("Quit", value="quit"),
+        ]
+
+        action = questionary.select(
+            "",
+            choices=choices,
+            style=qstyle,
+            instruction="",
+        ).ask()
+
+        if action is None or action == "quit":
+            return []
+
+        if action == "render":
+            return [c for c in clips if c.get("_selected", True)]
+
+        if action == "toggle":
+            toggle_choices = [
+                questionary.Choice(
+                    f"{'✓' if c.get('_selected', True) else '✗'} {i+1}. {c['title'][:45]} (+{c['duration']}s)",
+                    value=i,
+                    checked=c.get("_selected", True),
+                )
+                for i, c in enumerate(clips)
+            ]
+            picked = questionary.checkbox(
+                "Select clips to render:",
+                choices=toggle_choices,
+                style=qstyle,
+            ).ask()
+            if picked is not None:
+                for i, c in enumerate(clips):
+                    c["_selected"] = i in picked
+
+        elif action == "find":
+            description = questionary.text(
+                "Describe the moment:",
+                style=qstyle,
+            ).ask()
+            if description and description.strip():
+                print(f"\n         Searching transcript...")
+                found = _find_moment_with_claude(description.strip(), segments, clips)
+                if found:
+                    for f_clip in found:
+                        print(f"\n         {bold}Found:{reset} {f_clip['title']}")
+                        m_s = int(f_clip["start_second"]) // 60
+                        s_s = int(f_clip["start_second"]) % 60
+                        print(f"         [{m_s}:{s_s:02d} → +{f_clip['duration']}s]")
+                        if f_clip.get("quote"):
+                            print(f"         {dim}\"{f_clip['quote'][:80]}\"{reset}")
+                        if f_clip.get("why"):
+                            print(f"         {dim}{f_clip['why'][:80]}{reset}")
+
+                    add = questionary.confirm(
+                        f"Add {len(found)} found clip{'s' if len(found) > 1 else ''} to the list?",
+                        default=True,
+                        style=qstyle,
+                    ).ask()
+                    if add:
+                        for f_clip in found:
+                            f_clip["_selected"] = True
+                            clips.append(f_clip)
+                else:
+                    print(f"         Couldn't find that moment. Try describing it differently.")
+
+        elif action == "more":
+            top_n = config.get("top_clips", 5)
+            print(f"\n         Asking Claude for {top_n} more suggestions...")
+            from services.claude_suggest import suggest_with_claude
+            more_clips = suggest_with_claude(
+                segments=segments,
+                top_n=top_n,
+                progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
+            )
+            if more_clips:
+                # Filter out duplicates (overlapping timestamps)
+                new_count = 0
+                for mc in more_clips:
+                    is_dup = False
+                    for existing in clips:
+                        # Check if timestamps overlap significantly
+                        overlap_start = max(mc["start_second"], existing["start_second"])
+                        overlap_end = min(mc["end_second"], existing["end_second"])
+                        if overlap_end - overlap_start > 5:
+                            is_dup = True
+                            break
+                    if not is_dup:
+                        mc["_selected"] = True
+                        clips.append(mc)
+                        new_count += 1
+                print(f"         Added {new_count} new suggestions ({len(more_clips) - new_count} duplicates skipped)")
+            else:
+                print(f"         No additional suggestions found.")
+
+
+def _post_render_loop(
+    clips: list, results: list, segments: list, words: list,
+    config: dict, video_path: str, output_dir: str, face_map, energy_scores,
+):
+    """Post-render iteration — user can re-render clips with changes or add new ones."""
+    import questionary
+    from questionary import Style
+    from services.clip_generator import generate_clip
+
+    accent = "\033[38;2;212;135;74m"
+    bold = "\033[1m"
+    dim = "\033[2m"
+    reset = "\033[0m"
+
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
+    # Build clip-to-result mapping
+    rendered = []
+    for i, (clip, result) in enumerate(zip(clips, results)):
+        if "output_path" in result:
+            rendered.append({"clip": clip, "result": result, "index": i})
+
+    while True:
+        print(f"\n  {'─' * 45}")
+        choices = [
+            questionary.Choice("Done — open output folder", value="done"),
+            questionary.Choice("Re-render a clip (change style/timing)", value="rerender"),
+            questionary.Choice("Find another moment to clip", value="find"),
+            questionary.Choice("Get more suggestions from Claude", value="more"),
+        ]
+
+        action = questionary.select(
+            f"{len(rendered)} clips rendered",
+            choices=choices,
+            style=qstyle,
+        ).ask()
+
+        if action is None or action == "done":
+            import subprocess as _sp
+            _sp.run(["open", output_dir] if sys.platform == "darwin" else ["xdg-open", output_dir])
+            break
+
+        if action == "rerender":
+            clip_choices = [
+                questionary.Choice(
+                    f"{i+1}. {r['clip']['title'][:40]} (+{r['clip']['duration']}s)",
+                    value=idx,
+                )
+                for idx, (i, r) in enumerate([(r["index"], r) for r in rendered])
+            ]
+            pick = questionary.select("Which clip?", choices=clip_choices, style=qstyle).ask()
+            if pick is None:
+                continue
+
+            r = rendered[pick]
+            clip = r["clip"]
+
+            # What to change?
+            change_choices = [
+                questionary.Choice("Caption style", value="style"),
+                questionary.Choice("Make shorter (trim end)", value="shorter"),
+                questionary.Choice("Make longer (extend end)", value="longer"),
+                questionary.Choice("Shift start earlier", value="earlier"),
+                questionary.Choice("Shift start later", value="later"),
+            ]
+            change = questionary.select("What to change?", choices=change_choices, style=qstyle).ask()
+            if change is None:
+                continue
+
+            if change == "style":
+                style_choices = [
+                    questionary.Choice("hormozi — bold uppercase, yellow highlight", value="hormozi"),
+                    questionary.Choice("branded — dark pill on active word + logo", value="branded"),
+                    questionary.Choice("karaoke — sentence visible, words light up", value="karaoke"),
+                    questionary.Choice("subtle — clean small text at bottom", value="subtle"),
+                ]
+                new_style = questionary.select("Style:", choices=style_choices, style=qstyle).ask()
+                if new_style:
+                    config["caption_style"] = new_style
+            elif change == "shorter":
+                clip["end_second"] = clip["end_second"] - 5
+                clip["duration"] = max(10, clip["duration"] - 5)
+            elif change == "longer":
+                clip["end_second"] = clip["end_second"] + 5
+                clip["duration"] = clip["duration"] + 5
+            elif change == "earlier":
+                clip["start_second"] = max(0, clip["start_second"] - 5)
+            elif change == "later":
+                clip["start_second"] = clip["start_second"] + 3
+
+            # Re-render
+            print(f"\n         Re-rendering: {clip['title'][:40]}...", end="", flush=True)
+            try:
+                new_result = generate_clip(
+                    video_path=video_path,
+                    start_second=clip["start_second"],
+                    end_second=clip["end_second"],
+                    caption_style=config.get("caption_style", "branded"),
+                    crop_strategy=config.get("crop_strategy", "face"),
+                    transcript_words=words,
+                    title=clip.get("title", "clip"),
+                    output_dir=output_dir,
+                    logo_path=config.get("logo_path") or None,
+                    outro_path=config.get("outro_path") or None,
+                    keep_segments=clip.get("segments"),
+                    face_map=face_map,
+                )
+                r["result"] = new_result
+                print(f" ✓ {new_result['file_size_mb']}MB")
+            except Exception as e:
+                print(f" ✗ {e}")
+
+        elif action == "find":
+            description = questionary.text("Describe the moment:", style=qstyle).ask()
+            if description and description.strip():
+                print(f"\n         Searching transcript...")
+                found = _find_moment_with_claude(description.strip(), segments, clips)
+                if found:
+                    for f_clip in found:
+                        print(f"\n         {bold}Found:{reset} {f_clip['title']}")
+                        m_s = int(f_clip["start_second"]) // 60
+                        s_s = int(f_clip["start_second"]) % 60
+                        print(f"         [{m_s}:{s_s:02d} → +{f_clip['duration']}s]")
+                        if f_clip.get("quote"):
+                            print(f"         {dim}\"{f_clip['quote'][:80]}\"{reset}")
+
+                    render_it = questionary.confirm(
+                        f"Render {len(found)} clip{'s' if len(found) > 1 else ''}?",
+                        default=True, style=qstyle,
+                    ).ask()
+                    if render_it:
+                        for f_clip in found:
+                            print(f"         Rendering: {f_clip['title'][:40]}...", end="", flush=True)
+                            try:
+                                new_result = generate_clip(
+                                    video_path=video_path,
+                                    start_second=f_clip["start_second"],
+                                    end_second=f_clip["end_second"],
+                                    caption_style=config.get("caption_style", "branded"),
+                                    crop_strategy=config.get("crop_strategy", "face"),
+                                    transcript_words=words,
+                                    title=f_clip.get("title", "clip"),
+                                    output_dir=output_dir,
+                                    logo_path=config.get("logo_path") or None,
+                                    outro_path=config.get("outro_path") or None,
+                                    keep_segments=f_clip.get("segments"),
+                                    face_map=face_map,
+                                )
+                                rendered.append({"clip": f_clip, "result": new_result, "index": len(clips)})
+                                clips.append(f_clip)
+                                print(f" ✓ {new_result['file_size_mb']}MB")
+                            except Exception as e:
+                                print(f" ✗ {e}")
+                else:
+                    print(f"         Couldn't find that moment. Try describing it differently.")
+
+        elif action == "more":
+            top_n = config.get("top_clips", 5)
+            print(f"\n         Asking Claude for more suggestions...")
+            from services.claude_suggest import suggest_with_claude
+            more_clips = suggest_with_claude(
+                segments=segments,
+                top_n=top_n,
+                progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
+            )
+            if more_clips:
+                new_clips = []
+                for mc in more_clips:
+                    is_dup = False
+                    for existing in clips:
+                        overlap_start = max(mc["start_second"], existing["start_second"])
+                        overlap_end = min(mc["end_second"], existing["end_second"])
+                        if overlap_end - overlap_start > 5:
+                            is_dup = True
+                            break
+                    if not is_dup:
+                        new_clips.append(mc)
+
+                if new_clips:
+                    for nc in new_clips:
+                        nc["_selected"] = True
+                    print(f"         Found {len(new_clips)} new moments:")
+                    _print_clips(new_clips)
+                    render_them = questionary.confirm(
+                        f"Render {len(new_clips)} clips?",
+                        default=True, style=qstyle,
+                    ).ask()
+                    if render_them:
+                        for nc in new_clips:
+                            print(f"         Rendering: {nc['title'][:40]}...", end="", flush=True)
+                            try:
+                                new_result = generate_clip(
+                                    video_path=video_path,
+                                    start_second=nc["start_second"],
+                                    end_second=nc["end_second"],
+                                    caption_style=config.get("caption_style", "branded"),
+                                    crop_strategy=config.get("crop_strategy", "face"),
+                                    transcript_words=words,
+                                    title=nc.get("title", "clip"),
+                                    output_dir=output_dir,
+                                    logo_path=config.get("logo_path") or None,
+                                    outro_path=config.get("outro_path") or None,
+                                    keep_segments=nc.get("segments"),
+                                    face_map=face_map,
+                                )
+                                rendered.append({"clip": nc, "result": new_result, "index": len(clips)})
+                                clips.append(nc)
+                                print(f" ✓ {new_result['file_size_mb']}MB")
+                            except Exception as e:
+                                print(f" ✗ {e}")
+                else:
+                    print(f"         No new moments found (all duplicates of existing).")
+            else:
+                print(f"         No suggestions returned.")
+
     print()
 
 
@@ -1105,6 +1618,98 @@ def cmd_corrections(args):
             print(f"\n  {gray}Not found: {wrong}{reset}\n")
 
 
+def cmd_knowledge(args):
+    """Manage knowledge base files (.podcli/knowledge/)."""
+    kb_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "knowledge")
+
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    green = "\033[38;2;74;222;128m"
+    red = "\033[38;2;248;113;113m"
+    bold = "\033[1m"
+    dim = "\033[2m"
+    reset = "\033[0m"
+
+    action = getattr(args, "knowledge_action", None) or "list"
+
+    if action == "list":
+        print(f"\n  {bold}Knowledge Base{reset}")
+        print(f"  {'─' * 45}")
+        if not os.path.isdir(kb_dir):
+            print(f"  {gray}Empty — no knowledge files{reset}\n")
+            return
+        files = sorted(f for f in os.listdir(kb_dir) if f.endswith(".md"))
+        if not files:
+            print(f"  {gray}Empty — no knowledge files{reset}\n")
+            return
+        for fname in files:
+            fpath = os.path.join(kb_dir, fname)
+            size = os.path.getsize(fpath)
+            # Read first non-empty, non-header line as preview
+            preview = ""
+            try:
+                with open(fpath) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and not line.startswith("---"):
+                            preview = line[:60]
+                            break
+            except Exception:
+                pass
+            print(f"  {accent}•{reset} {bold}{fname}{reset}  {gray}({size/1024:.1f}KB){reset}")
+            if preview:
+                print(f"    {dim}{preview}{'…' if len(preview) >= 60 else ''}{reset}")
+        print(f"  {'─' * 45}")
+        print(f"  {gray}{len(files)} files in {kb_dir}{reset}\n")
+
+    elif action == "read":
+        name = getattr(args, "filename", None)
+        if not name:
+            print(f"  {red}✗{reset} Specify a filename", file=sys.stderr)
+            return
+        if not name.endswith(".md"):
+            name += ".md"
+        fpath = os.path.join(kb_dir, name)
+        if not os.path.exists(fpath):
+            print(f"  {red}✗{reset} Not found: {name}", file=sys.stderr)
+            return
+        with open(fpath) as f:
+            print(f.read())
+
+    elif action == "edit":
+        name = getattr(args, "filename", None)
+        content = getattr(args, "content", None)
+        if not name:
+            print(f"  {red}✗{reset} Specify a filename", file=sys.stderr)
+            return
+        if not name.endswith(".md"):
+            name += ".md"
+        os.makedirs(kb_dir, exist_ok=True)
+        fpath = os.path.join(kb_dir, name)
+        if content:
+            with open(fpath, "w") as f:
+                f.write(content)
+            print(f"  {green}✓{reset} Written: {name}")
+        else:
+            # Open in $EDITOR
+            editor = os.environ.get("EDITOR", "nano")
+            os.system(f'{editor} "{fpath}"')
+
+    elif action == "delete":
+        name = getattr(args, "filename", None)
+        if not name:
+            print(f"  {red}✗{reset} Specify a filename", file=sys.stderr)
+            return
+        if not name.endswith(".md"):
+            name += ".md"
+        fpath = os.path.join(kb_dir, name)
+        if os.path.exists(fpath):
+            os.remove(fpath)
+            print(f"  {green}✓{reset} Deleted: {name}")
+        else:
+            print(f"  {red}✗{reset} Not found: {name}", file=sys.stderr)
+
+
 def cmd_cache(args):
     """Manage transcription cache."""
     cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "cache")
@@ -1349,6 +1954,7 @@ def print_help():
     print(f"    {accent}assets{reset}  {gray}<action>{reset}      Manage logos, intros, outros")
     print(f"    {accent}presets{reset} {gray}<action>{reset}      Save/load rendering presets")
     print(f"    {accent}thumbnails{reset} {gray}<title>{reset}   Generate thumbnail variations")
+    print(f"    {accent}knowledge{reset} {gray}<action>{reset}    Manage knowledge base (.podcli/knowledge/)")
     print(f"    {accent}corrections{reset} {gray}<action>{reset}  Fix Whisper misheard words (Boxel→Voxel)")
     print(f"    {accent}cache{reset}  {gray}[clear]{reset}       Show/clear transcription cache")
     print(f"    {accent}info{reset}                 Show system info (encoder, codecs)")
@@ -1480,6 +2086,18 @@ def main():
     corr_rm = corr_sub.add_parser("remove", help="Remove a correction")
     corr_rm.add_argument("wrong", help="Word to remove from corrections")
 
+    # ── knowledge ──
+    kb = sub.add_parser("knowledge", help="Manage knowledge base files")
+    kb_sub = kb.add_subparsers(dest="knowledge_action")
+    kb_sub.add_parser("list", help="List all knowledge files")
+    kb_read = kb_sub.add_parser("read", help="Print a knowledge file")
+    kb_read.add_argument("filename", help="File name (e.g. 01-brand-identity)")
+    kb_edit = kb_sub.add_parser("edit", help="Edit/create a knowledge file")
+    kb_edit.add_argument("filename", help="File name (e.g. 01-brand-identity)")
+    kb_edit.add_argument("--content", help="Content to write (opens $EDITOR if omitted)")
+    kb_del = kb_sub.add_parser("delete", help="Delete a knowledge file")
+    kb_del.add_argument("filename", help="File name to delete")
+
     # ── cache ──
     cache_p = sub.add_parser("cache", help="Manage transcription cache")
     cache_sub = cache_p.add_subparsers(dest="cache_action")
@@ -1507,6 +2125,8 @@ def main():
         cmd_assets(args)
     elif args.command == "corrections":
         cmd_corrections(args)
+    elif args.command == "knowledge":
+        cmd_knowledge(args)
     elif args.command == "cache":
         cmd_cache(args)
     elif args.command == "info":
@@ -1551,19 +2171,22 @@ def interactive_menu():
         choice = questionary.select(
             "What do you want to do?",
             choices=[
-                questionary.Choice("Process a video → shorts + content package", value="process"),
+                questionary.Choice("Process a video → shorts", value="process"),
                 questionary.Choice("Open Web UI", value="webui"),
-                questionary.Choice("Manage assets", value="assets"),
-                questionary.Choice("Manage presets", value="presets"),
-                questionary.Choice("Word corrections (fix Whisper misheard words)", value="corrections"),
-                questionary.Choice("Thumbnails (generate variations)", value="thumbnails"),
-                questionary.Choice("Cache (view/clear transcription cache)", value="cache"),
-                questionary.Choice("System info (encoder, codecs, AI CLI)", value="info"),
+                questionary.Separator(),
+                questionary.Choice("Presets", value="presets"),
+                questionary.Choice("Assets", value="assets"),
+                questionary.Choice("Knowledge base", value="knowledge"),
+                questionary.Choice("Corrections", value="corrections"),
+                questionary.Separator(),
+                questionary.Choice("Thumbnails", value="thumbnails"),
+                questionary.Choice("Cache", value="cache"),
+                questionary.Choice("Info", value="info"),
                 questionary.Separator(),
                 questionary.Choice("Quit", value="quit"),
             ],
             style=qstyle,
-            instruction="(↑↓ to move, enter to select)",
+            instruction="",
         ).ask()
 
         if choice is None or choice == "quit":
@@ -1579,6 +2202,8 @@ def interactive_menu():
             _interactive_assets()
         elif choice == "presets":
             _interactive_presets()
+        elif choice == "knowledge":
+            _interactive_knowledge()
         elif choice == "corrections":
             _interactive_corrections()
         elif choice == "thumbnails":
@@ -2041,6 +2666,72 @@ def _interactive_presets():
 
     save_preset(name, config)
     print(f"\n  {green}✓{reset} Preset '{accent}{name}{reset}' saved\n")
+
+
+def _interactive_knowledge():
+    """Interactive knowledge base management using questionary."""
+    import questionary
+    from questionary import Style
+    import argparse as _ap
+
+    green = "\033[38;2;74;222;128m"
+    gray = "\033[38;5;245m"
+    accent = "\033[38;2;212;135;74m"
+    reset = "\033[0m"
+
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
+    kb_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "knowledge")
+    files = sorted(f for f in os.listdir(kb_dir) if f.endswith(".md")) if os.path.isdir(kb_dir) else []
+
+    # Show current files
+    cmd_knowledge(_ap.Namespace(knowledge_action="list"))
+
+    actions = [
+        questionary.Choice("Edit a file", value="edit"),
+        questionary.Choice("Create new file", value="new"),
+    ]
+    if files:
+        actions.insert(1, questionary.Choice("Read a file", value="read"))
+        actions.append(questionary.Choice("Delete a file", value="delete"))
+    actions.append(questionary.Choice("← Back", value="_back"))
+
+    action = questionary.select("Knowledge base:", choices=actions, style=qstyle).ask()
+    if action is None or action == "_back":
+        return
+
+    if action == "read":
+        choice = questionary.select("Which file?", choices=files, style=qstyle).ask()
+        if choice:
+            cmd_knowledge(_ap.Namespace(knowledge_action="read", filename=choice))
+
+    elif action == "edit":
+        if not files:
+            print(f"  {gray}No files to edit — create one first{reset}")
+            return
+        choice = questionary.select("Which file?", choices=files, style=qstyle).ask()
+        if choice:
+            cmd_knowledge(_ap.Namespace(knowledge_action="edit", filename=choice, content=None))
+
+    elif action == "new":
+        name = questionary.text("File name (e.g. my-notes):", style=qstyle).ask()
+        if name:
+            if not name.endswith(".md"):
+                name += ".md"
+            cmd_knowledge(_ap.Namespace(knowledge_action="edit", filename=name, content=None))
+
+    elif action == "delete":
+        choice = questionary.select("Delete which file?", choices=files, style=qstyle).ask()
+        if choice and questionary.confirm(f"Delete {choice}?", default=False, style=qstyle).ask():
+            cmd_knowledge(_ap.Namespace(knowledge_action="delete", filename=choice))
 
 
 def _interactive_corrections():
