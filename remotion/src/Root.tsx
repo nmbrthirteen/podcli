@@ -11,6 +11,7 @@ const inputProps = getInputProps() as {
   words?: Word[];
   styleName?: string;
   logoSrc?: string;
+  faceY?: number | null;
   durationInFrames?: number;
   fps?: number;
 };
@@ -33,6 +34,7 @@ export const RemotionRoot: React.FC = () => {
           words: inputProps.words || [],
           style: STYLES[inputProps.styleName || "branded"],
           logoSrc: inputProps.logoSrc,
+          faceY: inputProps.faceY ?? null,
         }}
       />
     </>

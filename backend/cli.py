@@ -448,6 +448,7 @@ def cmd_process(args):
     print(f"\n  [4/4] Exporting {len(clips)} clips{_ai_label} to {output_dir}/")
     results = []
     t0 = time.time()
+    _skip_review = False
 
     for i, clip in enumerate(clips):
         ok = False
@@ -539,6 +540,150 @@ def cmd_process(args):
                     print()
             except Exception as e:
                 print(f"                 ⚠ content: {e}")
+
+        # ── Per-clip review: open video, ask for feedback ──
+        if ok and not _skip_review and result.get("output_path") and os.path.exists(result["output_path"]):
+            import subprocess as _review_sp
+            _review_sp.Popen(["open", result["output_path"]] if sys.platform == "darwin" else ["xdg-open", result["output_path"]])
+
+            while True:
+                import questionary as _rq
+                from questionary import Style as _RS
+                _rstyle = _RS([
+                    ("qmark", "fg:#d4874a bold"), ("question", "bold"),
+                    ("answer", "fg:#4ade80"), ("pointer", "fg:#d4874a bold"),
+                    ("highlighted", "fg:#d4874a bold"), ("selected", "fg:#4ade80"),
+                ])
+                _raction = _rq.select(
+                    f"Clip {i+1}/{len(clips)}: {clip['title'][:40]}",
+                    choices=[
+                        _rq.Choice("Looks good — next clip", value="next"),
+                        _rq.Choice("Change caption style", value="style"),
+                        _rq.Choice("Make shorter (trim 5s from end)", value="shorter"),
+                        _rq.Choice("Make longer (extend 5s)", value="longer"),
+                        _rq.Choice("Start earlier (5s)", value="earlier"),
+                        _rq.Choice("Start later (3s)", value="later"),
+                        _rq.Choice("Tell me what to change", value="custom"),
+                        _rq.Choice("Render the rest without asking", value="skip_review"),
+                    ],
+                    style=_rstyle,
+                    instruction="",
+                ).ask()
+
+                if _raction is None or _raction == "next":
+                    break
+
+                if _raction == "skip_review":
+                    _skip_review = True
+                    break
+
+                if _raction == "custom":
+                    _feedback = _rq.text(
+                        "What should I change?",
+                        style=_rstyle,
+                    ).ask()
+                    if _feedback and _feedback.strip():
+                        fb = _feedback.strip().lower()
+                        # Parse common requests
+                        if any(w in fb for w in ["shorter", "trim", "cut"]):
+                            secs = 5
+                            for word in fb.split():
+                                try:
+                                    secs = int(word)
+                                    break
+                                except ValueError:
+                                    pass
+                            clip["end_second"] -= secs
+                            clip["duration"] = max(10, clip["duration"] - secs)
+                            print(f"         Trimming {secs}s from end")
+                        elif any(w in fb for w in ["longer", "extend", "more"]):
+                            secs = 5
+                            for word in fb.split():
+                                try:
+                                    secs = int(word)
+                                    break
+                                except ValueError:
+                                    pass
+                            clip["end_second"] += secs
+                            clip["duration"] += secs
+                            print(f"         Extending {secs}s")
+                        elif any(w in fb for w in ["earlier", "before", "back"]):
+                            secs = 5
+                            for word in fb.split():
+                                try:
+                                    secs = int(word)
+                                    break
+                                except ValueError:
+                                    pass
+                            clip["start_second"] = max(0, clip["start_second"] - secs)
+                            print(f"         Starting {secs}s earlier")
+                        elif any(w in fb for w in ["later", "forward", "skip"]):
+                            secs = 3
+                            for word in fb.split():
+                                try:
+                                    secs = int(word)
+                                    break
+                                except ValueError:
+                                    pass
+                            clip["start_second"] += secs
+                            print(f"         Starting {secs}s later")
+                        elif any(w in fb for w in ["hormozi", "karaoke", "subtle", "branded"]):
+                            for s in ["hormozi", "karaoke", "subtle", "branded"]:
+                                if s in fb:
+                                    config["caption_style"] = s
+                                    print(f"         Changing to {s} style")
+                                    break
+                        else:
+                            print(f"         Couldn't parse that. Try: 'shorter', 'longer 10', 'start 3s earlier', 'hormozi style'")
+                            continue
+                    else:
+                        continue
+
+                # Apply change
+                if _raction == "style":
+                    _new_style = _rq.select("Style:", choices=[
+                        _rq.Choice("branded", value="branded"),
+                        _rq.Choice("hormozi", value="hormozi"),
+                        _rq.Choice("karaoke", value="karaoke"),
+                        _rq.Choice("subtle", value="subtle"),
+                    ], style=_rstyle).ask()
+                    if _new_style:
+                        config["caption_style"] = _new_style
+                elif _raction == "shorter":
+                    clip["end_second"] -= 5
+                    clip["duration"] = max(10, clip["duration"] - 5)
+                elif _raction == "longer":
+                    clip["end_second"] += 5
+                    clip["duration"] += 5
+                elif _raction == "earlier":
+                    clip["start_second"] = max(0, clip["start_second"] - 5)
+                elif _raction == "later":
+                    clip["start_second"] += 3
+
+                # Re-render
+                with _Spinner(f"Re-rendering clip {i+1}..."):
+                    try:
+                        result = generate_clip(
+                            video_path=video_path,
+                            start_second=clip["start_second"],
+                            end_second=clip["end_second"],
+                            caption_style=config.get("caption_style", "branded"),
+                            crop_strategy=config.get("crop_strategy", "face"),
+                            transcript_words=words,
+                            title=clip.get("title", f"clip_{i+1}"),
+                            output_dir=output_dir,
+                            logo_path=config.get("logo_path") or None,
+                            outro_path=config.get("outro_path") or None,
+                            keep_segments=clip.get("segments"),
+                            face_map=face_map,
+                        )
+                        results[-1] = result
+                        print(f"         ✓ Re-rendered: {result['file_size_mb']}MB")
+                        # Open new version
+                        _review_sp.Popen(["open", result["output_path"]] if sys.platform == "darwin" else ["xdg-open", result["output_path"]])
+                    except Exception as _re:
+                        print(f"         ✗ {_re}")
+                        break
 
     elapsed = time.time() - t0
     success = sum(1 for r in results if "output_path" in r)

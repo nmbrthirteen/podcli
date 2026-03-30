@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, OffthreadVideo, staticFile } from "remotion";
+import { AbsoluteFill } from "remotion";
 import { HormoziCaptions } from "./components/HormoziCaptions";
 import { KaraokeCaptions } from "./components/KaraokeCaptions";
 import { SubtleCaptions } from "./components/SubtleCaptions";
@@ -11,13 +11,14 @@ export interface CaptionedClipProps {
   words: Word[];
   style: CaptionStyle;
   logoSrc?: string;
+  faceY?: number | null;
 }
 
 export const CaptionedClip: React.FC<CaptionedClipProps> = ({
-  videoSrc,
   words,
   style,
   logoSrc,
+  faceY,
 }) => {
   const CaptionComponent = {
     hormozi: HormoziCaptions,
@@ -26,12 +27,10 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
     branded: BrandedCaptions,
   }[style.name];
 
-  // Render captions only (transparent bg) — FFmpeg composites onto video later
-  // This is 10x faster than decoding video through Chrome
   return (
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
       {style.name === "branded" ? (
-        <BrandedCaptions words={words} style={style} logoSrc={logoSrc} />
+        <BrandedCaptions words={words} style={style} logoSrc={logoSrc} faceY={faceY} />
       ) : (
         <CaptionComponent words={words} style={style} />
       )}

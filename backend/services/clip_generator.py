@@ -220,10 +220,53 @@ def _render_with_remotion(
             "end": round(w["end"] - time_offset, 3),
         })
 
+    # Extract face Y positions so captions can avoid overlapping faces
+    # Probe video dimensions
+    face_y_norm = None  # normalized 0-1 (0=top, 1=bottom)
+    try:
+        probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                     "-show_entries", "stream=height", "-of", "csv=p=0",
+                     os.path.abspath(video_path)]
+        vid_h = int(subprocess.run(probe_cmd, capture_output=True, text=True, timeout=5).stdout.strip())
+
+        # Get face center Y from the cropped video's face detection
+        # Use a quick sample at the middle of the clip
+        try:
+            import cv2
+            sys.path.insert(0, os.path.join(project_root, "backend"))
+            from services.face_detector import create_detector, detect_faces
+            cap = cv2.VideoCapture(os.path.abspath(video_path))
+            if cap.isOpened():
+                vid_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                vid_h_actual = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                dur = cap.get(cv2.CAP_PROP_FRAME_COUNT) / (cap.get(cv2.CAP_PROP_FPS) or 30)
+                detector = create_detector(vid_w, vid_h_actual)
+                if detector:
+                    # Sample 5 frames
+                    ys = []
+                    for t in [dur * f for f in [0.1, 0.3, 0.5, 0.7, 0.9]]:
+                        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+                        ret, frame = cap.read()
+                        if ret:
+                            faces = detect_faces(detector, frame, vid_w, vid_h_actual)
+                            for f in faces:
+                                ys.append(f["cy"] / vid_h_actual)
+                    if ys:
+                        face_y_norm = sum(ys) / len(ys)
+                cap.release()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
     words_file = output_path + ".words.json"
     try:
+        payload = {
+            "words": adjusted_words,
+            "faceY": face_y_norm,  # normalized face center Y (0-1), null if unknown
+        }
         with open(words_file, "w") as f:
-            json.dump(adjusted_words, f)
+            json.dump(payload, f)
 
         cmd = [
             node_path, render_script,

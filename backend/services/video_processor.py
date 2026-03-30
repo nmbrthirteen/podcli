@@ -591,8 +591,10 @@ def _track_and_crop(
         )
 
         if force_snap or abs(diff) > snap_distance:
-            # Teleport — speaker switch or very large jump
-            cam_x = target_x
+            # Smooth 2-second pan to the other speaker instead of instant snap
+            # Rate 1.5 with dt~0.1 gives alpha~0.14 per step → reaches 95% in ~2s
+            pan_alpha = 1.0 - math.exp(-1.5 * dt)
+            cam_x += diff * pan_alpha
             if force_snap:
                 last_snap_t = t
         elif abs(diff) > dead_zone:

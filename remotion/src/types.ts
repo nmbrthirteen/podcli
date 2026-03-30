@@ -25,6 +25,7 @@ export interface CaptionProps {
   durationInFrames: number;
   videoSrc: string;
   logoSrc?: string;
+  faceY?: number | null; // normalized 0-1 (0=top, 1=bottom)
 }
 
 const FONT = "'DM Sans', sans-serif";

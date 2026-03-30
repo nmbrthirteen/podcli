@@ -116,7 +116,10 @@ async function main() {
     process.exit(1);
   }
 
-  const words = JSON.parse(fs.readFileSync(opts.words, "utf-8"));
+  const wordsData = JSON.parse(fs.readFileSync(opts.words, "utf-8"));
+  // Support both old format (array) and new format ({words, faceY})
+  const words = Array.isArray(wordsData) ? wordsData : wordsData.words || [];
+  const faceY = Array.isArray(wordsData) ? null : wordsData.faceY ?? null;
   const styleName = opts.style || "branded";
   const fps = parseInt(opts.fps || "30", 10);
 
@@ -185,6 +188,7 @@ async function main() {
     words,
     styleName,
     logoSrc,
+    faceY,
     durationInFrames,
     fps,
   };

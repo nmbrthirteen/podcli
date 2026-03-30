@@ -12,6 +12,7 @@ interface Props {
   words: Word[];
   style: CaptionStyle;
   logoSrc?: string;
+  faceY?: number | null; // normalized 0-1 (0=top, 1=bottom)
 }
 
 interface Chunk {
@@ -139,15 +140,28 @@ export const BrandedCaptions: React.FC<Props> = ({
   words,
   style,
   logoSrc,
+  faceY,
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, height } = useVideoConfig();
   const currentTime = frame / fps;
 
   const chunks = buildChunks(words, style.wordsPerChunk);
   const activeChunk = chunks.find(
     (c) => currentTime >= c.start && currentTime < c.end
   );
+
+  // Dynamic margin: if face is in the lower portion, push captions further down
+  // faceY is normalized 0-1 (0=top, 1=bottom)
+  // Default margin is style.marginBottom. If face center is below 0.55, reduce margin.
+  let dynamicMargin = style.marginBottom;
+  if (faceY != null && faceY > 0.55) {
+    // Face is low — push captions to the very bottom
+    dynamicMargin = Math.max(80, style.marginBottom - Math.round((faceY - 0.55) * height * 0.6));
+  } else if (faceY != null && faceY < 0.35) {
+    // Face is high — can bring captions up a bit
+    dynamicMargin = style.marginBottom + 60;
+  }
 
   return (
     <>
@@ -172,7 +186,7 @@ export const BrandedCaptions: React.FC<Props> = ({
           <div
             style={{
               position: "absolute",
-              bottom: style.marginBottom,
+              bottom: dynamicMargin,
               left: 60,
               right: 60,
               display: "flex",
