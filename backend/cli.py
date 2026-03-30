@@ -450,28 +450,32 @@ def cmd_process(args):
     t0 = time.time()
 
     for i, clip in enumerate(clips):
-        print(f"         Clip {i+1}/{len(clips)}: {clip['title'][:40]}...", end="", flush=True)
-        try:
-            result = generate_clip(
-                video_path=video_path,
-                start_second=clip["start_second"],
-                end_second=clip["end_second"],
-                caption_style=config.get("caption_style", "branded"),
-                crop_strategy=config.get("crop_strategy", "face"),
-                transcript_words=words,
-                title=clip.get("title", f"clip_{i+1}"),
-                output_dir=output_dir,
-                logo_path=config.get("logo_path") or None,
-                outro_path=config.get("outro_path") or None,
-                keep_segments=clip.get("segments"),
-                face_map=face_map,
-            )
-            results.append(result)
-            print(f" ✓ {result['file_size_mb']}MB")
-        except Exception as e:
-            print(f" ✗ {e}")
-            results.append({"status": "error", "error": str(e)})
-            continue
+        ok = False
+        result = None
+        with _Spinner(f"Clip {i+1}/{len(clips)}: {clip['title'][:40]}...") as sp:
+            try:
+                result = generate_clip(
+                    video_path=video_path,
+                    start_second=clip["start_second"],
+                    end_second=clip["end_second"],
+                    caption_style=config.get("caption_style", "branded"),
+                    crop_strategy=config.get("crop_strategy", "face"),
+                    transcript_words=words,
+                    title=clip.get("title", f"clip_{i+1}"),
+                    output_dir=output_dir,
+                    logo_path=config.get("logo_path") or None,
+                    outro_path=config.get("outro_path") or None,
+                    keep_segments=clip.get("segments"),
+                    face_map=face_map,
+                )
+                results.append(result)
+                ok = True
+            except Exception as e:
+                print(f"\n         ✗ {e}")
+                results.append({"status": "error", "error": str(e)})
+                continue
+        if ok:
+            print(f"         ✓ Clip {i+1}/{len(clips)}: {result['file_size_mb']}MB")
 
         # Generate thumbnail and append to clip immediately
         if _thumb_enabled and _thumb_gen and result.get("output_path"):
@@ -564,6 +568,42 @@ def cmd_process(args):
         face_map=face_map,
         energy_scores=energy_scores,
     )
+
+
+class _Spinner:
+    """Reusable terminal spinner for long-running operations."""
+
+    def __init__(self, message: str, indent: str = "         "):
+        import threading
+        self._msg = message
+        self._indent = indent
+        self._stop = threading.Event()
+        self._thread = None
+
+    def __enter__(self):
+        import threading
+        self._stop.clear()
+
+        def _run():
+            frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+            i = 0
+            while not self._stop.is_set():
+                print(f"\r{self._indent}{frames[i % len(frames)]}  {self._msg[:55]:<55}", end="", flush=True)
+                i += 1
+                self._stop.wait(0.1)
+
+        self._thread = threading.Thread(target=_run, daemon=True)
+        self._thread.start()
+        return self
+
+    def update(self, message: str):
+        self._msg = message
+
+    def __exit__(self, *args):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1)
+        print(f"\r{self._indent}{'':60}\r", end="")
 
 
 def _print_clips(clips: list):
@@ -814,8 +854,8 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
                 style=qstyle,
             ).ask()
             if description and description.strip():
-                print(f"\n         Searching transcript...")
-                found = _find_moment_with_claude(description.strip(), segments, clips)
+                with _Spinner("Searching transcript..."):
+                    found = _find_moment_with_claude(description.strip(), segments, clips)
                 if found:
                     for f_clip in found:
                         print(f"\n         {bold}Found:{reset} {f_clip['title']}")
@@ -841,13 +881,13 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
 
         elif action == "more":
             top_n = config.get("top_clips", 5)
-            print(f"\n         Asking Claude for {top_n} more suggestions...")
             from services.claude_suggest import suggest_with_claude
-            more_clips = suggest_with_claude(
-                segments=segments,
-                top_n=top_n,
-                progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
-            )
+            with _Spinner(f"Asking Claude for {top_n} more suggestions...") as sp:
+                more_clips = suggest_with_claude(
+                    segments=segments,
+                    top_n=top_n,
+                    progress_callback=lambda pct, msg: sp.update(msg) if msg else None,
+                )
             if more_clips:
                 # Filter out duplicates (overlapping timestamps)
                 new_count = 0
@@ -899,17 +939,118 @@ def _post_render_loop(
         if "output_path" in result:
             rendered.append({"clip": clip, "result": result, "index": i})
 
+    def _open_clip(r):
+        """Open a rendered clip for preview."""
+        import subprocess as _sp
+        out = r["result"].get("output_path", "")
+        if out and os.path.exists(out):
+            _sp.Popen(["open", out] if sys.platform == "darwin" else ["xdg-open", out])
+
+    def _rerender_clip(r):
+        """Re-render a clip with current config."""
+        clip = r["clip"]
+        ok = False
+        with _Spinner(f"Rendering: {clip['title'][:40]}..."):
+            try:
+                new_result = generate_clip(
+                    video_path=video_path,
+                    start_second=clip["start_second"],
+                    end_second=clip["end_second"],
+                    caption_style=config.get("caption_style", "branded"),
+                    crop_strategy=config.get("crop_strategy", "face"),
+                    transcript_words=words,
+                    title=clip.get("title", "clip"),
+                    output_dir=output_dir,
+                    logo_path=config.get("logo_path") or None,
+                    outro_path=config.get("outro_path") or None,
+                    keep_segments=clip.get("segments"),
+                    face_map=face_map,
+                )
+                r["result"] = new_result
+                ok = True
+            except Exception as e:
+                print(f"\n         ✗ {e}")
+        if ok:
+            print(f"         ✓ {new_result['file_size_mb']}MB")
+        return ok
+
+    # Review each clip one by one — open for preview, ask for feedback
+    print(f"\n  {'─' * 45}")
+    print(f"  {bold}Review clips{reset}")
+
+    for idx, r in enumerate(rendered):
+        clip = r["clip"]
+        print(f"\n  {accent}Clip {idx+1}/{len(rendered)}:{reset} {clip['title'][:50]}")
+        _open_clip(r)
+
+        while True:
+            action = questionary.select(
+                "",
+                choices=[
+                    questionary.Choice("Looks good — next", value="next"),
+                    questionary.Choice("Change caption style", value="style"),
+                    questionary.Choice("Make shorter (trim end)", value="shorter"),
+                    questionary.Choice("Make longer (extend end)", value="longer"),
+                    questionary.Choice("Shift start earlier", value="earlier"),
+                    questionary.Choice("Shift start later", value="later"),
+                    questionary.Choice("Skip this clip (delete)", value="skip"),
+                ],
+                style=qstyle,
+                instruction="",
+            ).ask()
+
+            if action is None or action == "next":
+                break
+
+            if action == "skip":
+                # Remove the output file
+                out = r["result"].get("output_path", "")
+                if out and os.path.exists(out):
+                    os.remove(out)
+                    print(f"         Removed: {os.path.basename(out)}")
+                r["_skipped"] = True
+                break
+
+            if action == "style":
+                new_style = questionary.select("Style:", choices=[
+                    questionary.Choice("hormozi — bold uppercase, yellow highlight", value="hormozi"),
+                    questionary.Choice("branded — dark pill on active word + logo", value="branded"),
+                    questionary.Choice("karaoke — sentence visible, words light up", value="karaoke"),
+                    questionary.Choice("subtle — clean small text at bottom", value="subtle"),
+                ], style=qstyle).ask()
+                if new_style:
+                    config["caption_style"] = new_style
+            elif action == "shorter":
+                clip["end_second"] = clip["end_second"] - 5
+                clip["duration"] = max(10, clip["duration"] - 5)
+            elif action == "longer":
+                clip["end_second"] = clip["end_second"] + 5
+                clip["duration"] = clip["duration"] + 5
+            elif action == "earlier":
+                clip["start_second"] = max(0, clip["start_second"] - 5)
+            elif action == "later":
+                clip["start_second"] = clip["start_second"] + 3
+
+            # Re-render and open again
+            if _rerender_clip(r):
+                _open_clip(r)
+
+    rendered = [r for r in rendered if not r.get("_skipped")]
+    kept = len(rendered)
+    print(f"\n  {bold}{kept} clips kept{reset}")
+
+    # Continue with additional actions
     while True:
         print(f"\n  {'─' * 45}")
         choices = [
             questionary.Choice("Done — open output folder", value="done"),
-            questionary.Choice("Re-render a clip (change style/timing)", value="rerender"),
+            questionary.Choice("Re-review a clip", value="rerender"),
             questionary.Choice("Find another moment to clip", value="find"),
             questionary.Choice("Get more suggestions from Claude", value="more"),
         ]
 
         action = questionary.select(
-            f"{len(rendered)} clips rendered",
+            f"{len(rendered)} clips",
             choices=choices,
             style=qstyle,
         ).ask()
@@ -932,68 +1073,50 @@ def _post_render_loop(
                 continue
 
             r = rendered[pick]
-            clip = r["clip"]
+            _open_clip(r)
 
-            # What to change?
-            change_choices = [
-                questionary.Choice("Caption style", value="style"),
-                questionary.Choice("Make shorter (trim end)", value="shorter"),
-                questionary.Choice("Make longer (extend end)", value="longer"),
-                questionary.Choice("Shift start earlier", value="earlier"),
-                questionary.Choice("Shift start later", value="later"),
-            ]
-            change = questionary.select("What to change?", choices=change_choices, style=qstyle).ask()
-            if change is None:
-                continue
+            while True:
+                change = questionary.select("", choices=[
+                    questionary.Choice("Looks good", value="done"),
+                    questionary.Choice("Change caption style", value="style"),
+                    questionary.Choice("Make shorter", value="shorter"),
+                    questionary.Choice("Make longer", value="longer"),
+                    questionary.Choice("Shift start earlier", value="earlier"),
+                    questionary.Choice("Shift start later", value="later"),
+                ], style=qstyle, instruction="").ask()
 
-            if change == "style":
-                style_choices = [
-                    questionary.Choice("hormozi — bold uppercase, yellow highlight", value="hormozi"),
-                    questionary.Choice("branded — dark pill on active word + logo", value="branded"),
-                    questionary.Choice("karaoke — sentence visible, words light up", value="karaoke"),
-                    questionary.Choice("subtle — clean small text at bottom", value="subtle"),
-                ]
-                new_style = questionary.select("Style:", choices=style_choices, style=qstyle).ask()
-                if new_style:
-                    config["caption_style"] = new_style
-            elif change == "shorter":
-                clip["end_second"] = clip["end_second"] - 5
-                clip["duration"] = max(10, clip["duration"] - 5)
-            elif change == "longer":
-                clip["end_second"] = clip["end_second"] + 5
-                clip["duration"] = clip["duration"] + 5
-            elif change == "earlier":
-                clip["start_second"] = max(0, clip["start_second"] - 5)
-            elif change == "later":
-                clip["start_second"] = clip["start_second"] + 3
+                if change is None or change == "done":
+                    break
 
-            # Re-render
-            print(f"\n         Re-rendering: {clip['title'][:40]}...", end="", flush=True)
-            try:
-                new_result = generate_clip(
-                    video_path=video_path,
-                    start_second=clip["start_second"],
-                    end_second=clip["end_second"],
-                    caption_style=config.get("caption_style", "branded"),
-                    crop_strategy=config.get("crop_strategy", "face"),
-                    transcript_words=words,
-                    title=clip.get("title", "clip"),
-                    output_dir=output_dir,
-                    logo_path=config.get("logo_path") or None,
-                    outro_path=config.get("outro_path") or None,
-                    keep_segments=clip.get("segments"),
-                    face_map=face_map,
-                )
-                r["result"] = new_result
-                print(f" ✓ {new_result['file_size_mb']}MB")
-            except Exception as e:
-                print(f" ✗ {e}")
+                clip = r["clip"]
+                if change == "style":
+                    new_style = questionary.select("Style:", choices=[
+                        questionary.Choice("hormozi", value="hormozi"),
+                        questionary.Choice("branded", value="branded"),
+                        questionary.Choice("karaoke", value="karaoke"),
+                        questionary.Choice("subtle", value="subtle"),
+                    ], style=qstyle).ask()
+                    if new_style:
+                        config["caption_style"] = new_style
+                elif change == "shorter":
+                    clip["end_second"] -= 5
+                    clip["duration"] = max(10, clip["duration"] - 5)
+                elif change == "longer":
+                    clip["end_second"] += 5
+                    clip["duration"] += 5
+                elif change == "earlier":
+                    clip["start_second"] = max(0, clip["start_second"] - 5)
+                elif change == "later":
+                    clip["start_second"] += 3
+
+                if _rerender_clip(r):
+                    _open_clip(r)
 
         elif action == "find":
             description = questionary.text("Describe the moment:", style=qstyle).ask()
             if description and description.strip():
-                print(f"\n         Searching transcript...")
-                found = _find_moment_with_claude(description.strip(), segments, clips)
+                with _Spinner("Searching transcript..."):
+                    found = _find_moment_with_claude(description.strip(), segments, clips)
                 if found:
                     for f_clip in found:
                         print(f"\n         {bold}Found:{reset} {f_clip['title']}")
@@ -1009,27 +1132,30 @@ def _post_render_loop(
                     ).ask()
                     if render_it:
                         for f_clip in found:
-                            print(f"         Rendering: {f_clip['title'][:40]}...", end="", flush=True)
-                            try:
-                                new_result = generate_clip(
-                                    video_path=video_path,
-                                    start_second=f_clip["start_second"],
-                                    end_second=f_clip["end_second"],
-                                    caption_style=config.get("caption_style", "branded"),
-                                    crop_strategy=config.get("crop_strategy", "face"),
-                                    transcript_words=words,
-                                    title=f_clip.get("title", "clip"),
-                                    output_dir=output_dir,
-                                    logo_path=config.get("logo_path") or None,
-                                    outro_path=config.get("outro_path") or None,
-                                    keep_segments=f_clip.get("segments"),
-                                    face_map=face_map,
-                                )
-                                rendered.append({"clip": f_clip, "result": new_result, "index": len(clips)})
-                                clips.append(f_clip)
-                                print(f" ✓ {new_result['file_size_mb']}MB")
-                            except Exception as e:
-                                print(f" ✗ {e}")
+                            ok = False
+                            with _Spinner(f"Rendering: {f_clip['title'][:40]}..."):
+                                try:
+                                    new_result = generate_clip(
+                                        video_path=video_path,
+                                        start_second=f_clip["start_second"],
+                                        end_second=f_clip["end_second"],
+                                        caption_style=config.get("caption_style", "branded"),
+                                        crop_strategy=config.get("crop_strategy", "face"),
+                                        transcript_words=words,
+                                        title=f_clip.get("title", "clip"),
+                                        output_dir=output_dir,
+                                        logo_path=config.get("logo_path") or None,
+                                        outro_path=config.get("outro_path") or None,
+                                        keep_segments=f_clip.get("segments"),
+                                        face_map=face_map,
+                                    )
+                                    rendered.append({"clip": f_clip, "result": new_result, "index": len(clips)})
+                                    clips.append(f_clip)
+                                    ok = True
+                                except Exception as e:
+                                    print(f"\n         ✗ {e}")
+                            if ok:
+                                print(f"         ✓ {new_result['file_size_mb']}MB")
                 else:
                     print(f"         Couldn't find that moment. Try describing it differently.")
 
@@ -1066,27 +1192,30 @@ def _post_render_loop(
                     ).ask()
                     if render_them:
                         for nc in new_clips:
-                            print(f"         Rendering: {nc['title'][:40]}...", end="", flush=True)
-                            try:
-                                new_result = generate_clip(
-                                    video_path=video_path,
-                                    start_second=nc["start_second"],
-                                    end_second=nc["end_second"],
-                                    caption_style=config.get("caption_style", "branded"),
-                                    crop_strategy=config.get("crop_strategy", "face"),
-                                    transcript_words=words,
-                                    title=nc.get("title", "clip"),
-                                    output_dir=output_dir,
-                                    logo_path=config.get("logo_path") or None,
-                                    outro_path=config.get("outro_path") or None,
-                                    keep_segments=nc.get("segments"),
-                                    face_map=face_map,
-                                )
-                                rendered.append({"clip": nc, "result": new_result, "index": len(clips)})
-                                clips.append(nc)
-                                print(f" ✓ {new_result['file_size_mb']}MB")
-                            except Exception as e:
-                                print(f" ✗ {e}")
+                            ok = False
+                            with _Spinner(f"Rendering: {nc['title'][:40]}..."):
+                                try:
+                                    new_result = generate_clip(
+                                        video_path=video_path,
+                                        start_second=nc["start_second"],
+                                        end_second=nc["end_second"],
+                                        caption_style=config.get("caption_style", "branded"),
+                                        crop_strategy=config.get("crop_strategy", "face"),
+                                        transcript_words=words,
+                                        title=nc.get("title", "clip"),
+                                        output_dir=output_dir,
+                                        logo_path=config.get("logo_path") or None,
+                                        outro_path=config.get("outro_path") or None,
+                                        keep_segments=nc.get("segments"),
+                                        face_map=face_map,
+                                    )
+                                    rendered.append({"clip": nc, "result": new_result, "index": len(clips)})
+                                    clips.append(nc)
+                                    ok = True
+                                except Exception as e:
+                                    print(f"\n         ✗ {e}")
+                            if ok:
+                                print(f"         ✓ {new_result['file_size_mb']}MB")
                 else:
                     print(f"         No new moments found (all duplicates of existing).")
             else:

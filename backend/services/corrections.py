@@ -94,13 +94,21 @@ def apply_corrections(
 
     replacer = lambda m: _replace_match(m, corrections)
 
-    # Fix individual words
+    # Fix individual words (strip punctuation for matching, preserve it in output)
     for w in words:
         word_text = w.get("word", "")
         if word_text:
+            # Try regex match on full text first
             new_text = pattern.sub(replacer, word_text)
             if new_text != word_text:
                 w["word"] = new_text
+            else:
+                # Strip trailing/leading punctuation and try again
+                stripped = word_text.strip(".,!?;:\"'()-")
+                if stripped and stripped != word_text:
+                    new_stripped = pattern.sub(replacer, stripped)
+                    if new_stripped != stripped:
+                        w["word"] = word_text.replace(stripped, new_stripped)
 
     # Fix segment text (may contain multi-word corrections like "open AI" → "OpenAI")
     for seg in segments:

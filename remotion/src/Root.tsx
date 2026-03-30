@@ -26,8 +26,8 @@ export const RemotionRoot: React.FC = () => {
         component={CaptionedClip}
         durationInFrames={durationInFrames}
         fps={fps}
-        width={2160}
-        height={3840}
+        width={1080}
+        height={1920}
         defaultProps={{
           videoSrc: inputProps.videoSrc || "",
           words: inputProps.words || [],

@@ -159,6 +159,9 @@ def _build_tight_segments(
     return segments
 
 
+_remotion_available = None  # True/False/None — auto-detected on first render
+
+
 def _render_with_remotion(
     video_path: str,
     words: list[dict],
@@ -170,19 +173,43 @@ def _render_with_remotion(
     """
     Render captions using Remotion. Returns True on success, False to fall back to ASS.
     """
+    global _remotion_available
     import subprocess
     import json
+
+    # Quick bail if Remotion already failed this session
+    if _remotion_available is False:
+        return False
 
     # Find the render script
     project_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
     render_script = os.path.join(project_root, "remotion", "render.mjs")
     if not os.path.exists(render_script):
+        _remotion_available = False
         return False
 
     # Check node is available
     node_path = shutil.which("node")
     if not node_path:
+        _remotion_available = False
         return False
+
+    # Pre-check: ensure bundle exists (prebundle if not)
+    cache_dir = os.path.join(project_root, ".podcli", "cache", "remotion-bundle")
+    bundle_index = os.path.join(cache_dir, "index.html")
+    if not os.path.exists(bundle_index):
+        # Try a quick prebundle
+        try:
+            r = subprocess.run(
+                [node_path, render_script, "--prebundle"],
+                capture_output=True, text=True, timeout=30, cwd=project_root,
+            )
+            if r.returncode != 0 or not os.path.exists(bundle_index):
+                _remotion_available = False
+                return False
+        except Exception:
+            _remotion_available = False
+            return False
 
     # Prepare words JSON (adjust timestamps by offset)
     adjusted_words = []
@@ -208,27 +235,38 @@ def _render_with_remotion(
         if logo_path and os.path.exists(logo_path):
             cmd.extend(["--logo", os.path.abspath(logo_path)])
 
+        # Stream stderr to terminal for progress
         result = subprocess.run(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=None,
             text=True,
             timeout=600,
             cwd=project_root,
         )
 
         if result.returncode == 0 and os.path.exists(output_path):
+            _remotion_available = True
             return True
 
-        # Log error but don't crash — will fall back to ASS
-        if result.stderr:
-            print(f"  Remotion: {result.stderr[:200]}", flush=True)
+        # Log errors
+        stdout = result.stdout or ""
+        if stdout:
+            lines = [l.strip() for l in stdout.strip().split("\n") if l.strip()]
+            if lines:
+                print(f"  Remotion: {lines[-1][:120]}", flush=True)
+
+        # Failed — disable for rest of session
+        if "Error" in stdout:
+            _remotion_available = False
         return False
 
     except subprocess.TimeoutExpired:
-        print("  Remotion: timed out (10 min), falling back to ASS", flush=True)
+        print("  Remotion: timed out, using ASS for this session", flush=True)
+        _remotion_available = False
         return False
     except Exception as e:
-        print(f"  Remotion: {e}, falling back to ASS", flush=True)
+        _remotion_available = False
         return False
     finally:
         try:

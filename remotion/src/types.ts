@@ -65,13 +65,13 @@ export const STYLES: Record<string, CaptionStyle> = {
   },
   branded: {
     name: "branded",
-    fontSize: 200,
+    fontSize: 100,
     fontFamily: FONT,
     color: "#FFFFFF",
     activeColor: "#FFFFFF",
     uppercase: false,
-    wordsPerChunk: 5,
+    wordsPerChunk: 4,
     position: "lower-third",
-    marginBottom: 850,
+    marginBottom: 420,
   },
 };

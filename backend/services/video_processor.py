@@ -1064,8 +1064,8 @@ def _use_face_map(
                 keyframes.append((start_t, prev_x))
                 keyframes.append((start_t + pan_duration, target_x))
             else:
-                keyframes.append((start_t, prev_x))
-                keyframes.append((start_t + 0.01, target_x))
+                # Instant snap — single keyframe at new position, no transition frames
+                keyframes.append((start_t, target_x))
         prev_x = target_x
 
     if not keyframes:

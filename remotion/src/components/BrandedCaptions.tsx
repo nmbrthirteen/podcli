@@ -79,13 +79,13 @@ const WordWithPill: React.FC<{
       <span
         style={{
           position: "absolute",
-          top: -8,
-          left: -32,
-          right: -32,
-          bottom: -8,
+          top: -4,
+          left: -16,
+          right: -16,
+          bottom: -4,
           backgroundColor: "rgba(0, 0, 0, 0.85)",
-          borderRadius: 36,
-          boxShadow: "0 8px 40px rgba(0, 0, 0, 0.5)",
+          borderRadius: 18,
+          boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
           opacity: pillOpacity,
           pointerEvents: "none",
         }}
@@ -111,7 +111,7 @@ const CaptionLine: React.FC<{
         fontSize: style.fontSize,
         fontWeight: 400,
         color: style.color,
-        textShadow: "0 0 80px rgba(0, 0, 0, 0.15), 0 0 160px rgba(0, 0, 0, 0.1), 0 0 300px rgba(0, 0, 0, 0.08)",
+        textShadow: "0 0 40px rgba(0, 0, 0, 0.15), 0 0 80px rgba(0, 0, 0, 0.1), 0 0 150px rgba(0, 0, 0, 0.08)",
         lineHeight: 1.25,
       }}
     >
@@ -156,10 +156,10 @@ export const BrandedCaptions: React.FC<Props> = ({
           src={logoSrc.startsWith("http") ? logoSrc : staticFile(logoSrc)}
           style={{
             position: "absolute",
-            top: 361,
-            left: 216,
-            width: 510,
-            height: 252,
+            top: 180,
+            left: 108,
+            width: 255,
+            height: 126,
             objectFit: "contain",
           }}
         />
@@ -173,8 +173,8 @@ export const BrandedCaptions: React.FC<Props> = ({
             style={{
               position: "absolute",
               bottom: style.marginBottom,
-              left: 120,
-              right: 120,
+              left: 60,
+              right: 60,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",

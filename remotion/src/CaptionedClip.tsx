@@ -26,14 +26,10 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
     branded: BrandedCaptions,
   }[style.name];
 
+  // Render captions only (transparent bg) — FFmpeg composites onto video later
+  // This is 10x faster than decoding video through Chrome
   return (
-    <AbsoluteFill style={{ backgroundColor: "black" }}>
-      {videoSrc ? (
-        <OffthreadVideo
-          src={videoSrc.startsWith("http") ? videoSrc : staticFile(videoSrc)}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-      ) : null}
+    <AbsoluteFill style={{ backgroundColor: "transparent" }}>
       {style.name === "branded" ? (
         <BrandedCaptions words={words} style={style} logoSrc={logoSrc} />
       ) : (

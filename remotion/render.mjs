@@ -21,6 +21,7 @@ import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
 
@@ -119,11 +120,6 @@ async function main() {
   const styleName = opts.style || "branded";
   const fps = parseInt(opts.fps || "30", 10);
 
-  // Calculate duration from video words
-  const lastWord = words[words.length - 1];
-  const durationSec = lastWord ? lastWord.end + 0.5 : 30;
-  const durationInFrames = Math.ceil(durationSec * fps);
-
   // Get cached bundle first (needed to copy assets into it)
   const t0 = Date.now();
   const bundleLocation = await getCachedBundle();
@@ -132,23 +128,57 @@ async function main() {
     console.log(`  bundled in ${(bundleMs / 1000).toFixed(1)}s`);
   }
 
-  // Symlink video into bundle's public dir so Remotion's server can serve it
-  const publicDir = path.join(bundleLocation, "public");
-  fs.mkdirSync(publicDir, { recursive: true });
+  // Serve video and logo via a tiny local HTTP server
+  // (Remotion's bundled server can't serve dynamically added files)
+  const http = await import("http");
+  const assetServer = http.createServer((req, res) => {
+    let filePath = null;
+    if (req.url === "/clip.mp4") filePath = path.resolve(opts.video);
+    else if (req.url === "/logo.png" && opts.logo) filePath = path.resolve(opts.logo);
 
-  const videoExt = path.extname(opts.video);
-  const videoDest = path.join(publicDir, `clip${videoExt}`);
-  try { fs.unlinkSync(videoDest); } catch {}
-  fs.symlinkSync(path.resolve(opts.video), videoDest);
-  const videoSrc = `clip${videoExt}`;
+    if (filePath && fs.existsSync(filePath)) {
+      const stat = fs.statSync(filePath);
+      const ext = path.extname(filePath).slice(1);
+      const mime = { mp4: "video/mp4", png: "image/png", jpg: "image/jpeg", webp: "image/webp" }[ext] || "application/octet-stream";
+      res.writeHead(200, { "Content-Type": mime, "Content-Length": stat.size, "Access-Control-Allow-Origin": "*" });
+      fs.createReadStream(filePath).pipe(res);
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  await new Promise((resolve) => assetServer.listen(0, "127.0.0.1", resolve));
+  const assetPort = assetServer.address().port;
 
-  // Copy logo into bundle's public dir
-  let logoSrc;
-  if (opts.logo && fs.existsSync(opts.logo)) {
-    const logoExt = path.extname(opts.logo);
-    fs.copyFileSync(path.resolve(opts.logo), path.join(publicDir, `logo${logoExt}`));
-    logoSrc = `logo${logoExt}`;
-  }
+  const videoSrc = `http://127.0.0.1:${assetPort}/clip.mp4`;
+  const logoSrc = opts.logo ? `http://127.0.0.1:${assetPort}/logo.png` : undefined;
+
+  // Probe video dimensions and duration
+  let renderW = 1080;
+  let renderH = 1920;
+  let videoDuration = null;
+  try {
+    const { execSync } = await import("child_process");
+    const probe = execSync(
+      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${path.resolve(opts.video)}"`,
+      { encoding: "utf-8", timeout: 5000 }
+    ).trim();
+    const [w, h] = probe.split("x").map(Number);
+    if (w > 0 && h > 0) {
+      renderW = w;
+      renderH = h;
+    }
+    const durStr = execSync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${path.resolve(opts.video)}"`,
+      { encoding: "utf-8", timeout: 5000 }
+    ).trim();
+    videoDuration = parseFloat(durStr);
+  } catch {}
+
+  // Calculate duration from video or word timing
+  const lastWord = words[words.length - 1];
+  const durationSec = videoDuration || (lastWord ? lastWord.end + 0.5 : 30);
+  const durationInFrames = Math.ceil(durationSec * fps);
 
   const inputProps = {
     videoSrc,
@@ -160,7 +190,7 @@ async function main() {
   };
 
   console.log(
-    `Remotion: ${words.length} words, ${styleName}, ${durationInFrames}f @ ${fps}fps`
+    `Remotion: ${words.length} words, ${styleName}, ${renderW}x${renderH}, ${durationInFrames}f`
   );
 
   // Select composition
@@ -170,27 +200,54 @@ async function main() {
     inputProps,
   });
 
-  // Render
+  // Render captions as transparent WebM overlay (no video = 10x faster)
+  const cpus = os.cpus().length;
+  const concurrency = Math.max(2, Math.min(cpus, 8));
+  // Store overlay in /tmp to survive temp dir cleanup
+  const overlayId = path.basename(opts.output, ".mp4");
+  const captionOverlay = path.join(os.tmpdir(), `remotion_overlay_${overlayId}.mov`);
+
+  let lastPct = -1;
   await renderMedia({
     composition: {
       ...composition,
       durationInFrames,
       fps,
-      width: 2160,
-      height: 3840,
+      width: renderW,
+      height: renderH,
     },
     serveUrl: bundleLocation,
-    codec: "h264",
-    outputLocation: opts.output,
+    codec: "prores",
+    proResProfile: "4444",
+    pixelFormat: "yuva444p10le",
+    imageFormat: "png",
+    outputLocation: captionOverlay,
     inputProps,
+    concurrency,
     onProgress: ({ progress }) => {
-      process.stderr.write(
-        `  rendering: ${Math.round(progress * 100)}%\r`
-      );
+      const pct = Math.round(progress * 100);
+      if (pct > lastPct + 9) {
+        lastPct = pct;
+        process.stderr.write(`  captions: ${pct}%\n`);
+      }
     },
   });
 
-  console.log(`\nDone: ${opts.output}`);
+  assetServer.close();
+
+  // Composite: overlay transparent captions (ProRes 4444 with alpha) onto video
+  const { execSync } = await import("child_process");
+  process.stderr.write("  compositing...\n");
+  execSync(
+    `ffmpeg -y -i "${path.resolve(opts.video)}" -i "${captionOverlay}" ` +
+    `-filter_complex "[0:v][1:v]overlay=0:0:shortest=1" ` +
+    `-c:v libx264 -crf 18 -preset fast -map 0:a -c:a copy "${opts.output}"`,
+    { stdio: ["pipe", "pipe", "inherit"], timeout: 300000 }
+  );
+
+  // Clean up overlay
+  try { fs.unlinkSync(captionOverlay); } catch {}
+  console.log(`Done: ${opts.output}`);
 }
 
 main().catch((err) => {
