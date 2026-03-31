@@ -563,6 +563,7 @@ def cmd_process(args):
                         _rq.Choice("Make longer (extend 5s)", value="longer"),
                         _rq.Choice("Start earlier (5s)", value="earlier"),
                         _rq.Choice("Start later (3s)", value="later"),
+                        _rq.Choice("Swap speaker (camera on wrong person)", value="swap"),
                         _rq.Choice("Tell me what to change", value="custom"),
                         _rq.Choice("Render the rest without asking", value="skip_review"),
                     ],
@@ -576,6 +577,25 @@ def cmd_process(args):
                 if _raction == "skip_review":
                     _skip_review = True
                     break
+
+                if _raction == "swap":
+                    # Swap speaker labels in the words for this clip's time range
+                    # so the camera follows the other person
+                    clip_speakers = sorted(set(
+                        w.get("speaker") for w in words
+                        if w.get("speaker") and w["start"] >= clip["start_second"] and w["end"] <= clip["end_second"]
+                    ))
+                    if len(clip_speakers) >= 2:
+                        swap_map = {clip_speakers[0]: clip_speakers[1], clip_speakers[1]: clip_speakers[0]}
+                        for w in words:
+                            if w["start"] >= clip["start_second"] and w["end"] <= clip["end_second"]:
+                                sp = w.get("speaker")
+                                if sp in swap_map:
+                                    w["speaker"] = swap_map[sp]
+                        print(f"         Swapped speakers: {clip_speakers[0]} ↔ {clip_speakers[1]}")
+                    else:
+                        print(f"         Only one speaker detected in this clip")
+                        continue
 
                 if _raction == "custom":
                     _feedback = _rq.text(
@@ -633,8 +653,26 @@ def cmd_process(args):
                                     config["caption_style"] = s
                                     print(f"         Changing to {s} style")
                                     break
+                        elif any(w in fb for w in ["wrong person", "swap", "other speaker", "other face", "wrong face", "wrong speaker"]):
+                            _raction = "swap"
+                            # Will hit the swap handler on next iteration
+                            clip_speakers = sorted(set(
+                                w.get("speaker") for w in words
+                                if w.get("speaker") and w["start"] >= clip["start_second"] and w["end"] <= clip["end_second"]
+                            ))
+                            if len(clip_speakers) >= 2:
+                                swap_map = {clip_speakers[0]: clip_speakers[1], clip_speakers[1]: clip_speakers[0]}
+                                for w in words:
+                                    if w["start"] >= clip["start_second"] and w["end"] <= clip["end_second"]:
+                                        sp = w.get("speaker")
+                                        if sp in swap_map:
+                                            w["speaker"] = swap_map[sp]
+                                print(f"         Swapped speakers: {clip_speakers[0]} ↔ {clip_speakers[1]}")
+                            else:
+                                print(f"         Only one speaker in this clip")
+                                continue
                         else:
-                            print(f"         Couldn't parse that. Try: 'shorter', 'longer 10', 'start 3s earlier', 'hormozi style'")
+                            print(f"         Couldn't parse that. Try: 'shorter', 'longer 10', 'start 3s earlier', 'hormozi style', 'wrong person'")
                             continue
                     else:
                         continue

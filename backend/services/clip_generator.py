@@ -278,11 +278,13 @@ def _render_with_remotion(
         if logo_path and os.path.exists(logo_path):
             cmd.extend(["--logo", os.path.abspath(logo_path)])
 
-        # Stream stderr to terminal for progress
+        # Redirect stderr to devnull to suppress Chrome/FFmpeg noise
+        # (avoids buffer deadlock and terminal spam)
+        _devnull = open(os.devnull, 'w')
         result = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=None,
+            stderr=_devnull,
             text=True,
             timeout=600,
             cwd=project_root,

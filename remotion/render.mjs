@@ -243,10 +243,10 @@ async function main() {
   const { execSync } = await import("child_process");
   process.stderr.write("  compositing...\n");
   execSync(
-    `ffmpeg -y -i "${path.resolve(opts.video)}" -i "${captionOverlay}" ` +
+    `ffmpeg -y -hide_banner -loglevel warning -i "${path.resolve(opts.video)}" -i "${captionOverlay}" ` +
     `-filter_complex "[0:v][1:v]overlay=0:0:shortest=1" ` +
     `-c:v libx264 -crf 18 -preset fast -map 0:a -c:a copy "${opts.output}"`,
-    { stdio: ["pipe", "pipe", "inherit"], timeout: 300000 }
+    { stdio: ["pipe", "pipe", "pipe"], timeout: 300000 }
   );
 
   // Clean up overlay
