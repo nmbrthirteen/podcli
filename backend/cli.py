@@ -604,80 +604,31 @@ def cmd_process(args):
                     ).ask()
                     if _feedback and _feedback.strip():
                         fb = _feedback.strip().lower()
-                        # Parse common requests
+                        # Parse into a known action
                         if any(w in fb for w in ["shorter", "trim", "cut"]):
-                            secs = 5
-                            for word in fb.split():
-                                try:
-                                    secs = int(word)
-                                    break
-                                except ValueError:
-                                    pass
-                            clip["end_second"] -= secs
-                            clip["duration"] = max(10, clip["duration"] - secs)
-                            print(f"         Trimming {secs}s from end")
+                            _raction = "shorter"
                         elif any(w in fb for w in ["longer", "extend", "more"]):
-                            secs = 5
-                            for word in fb.split():
-                                try:
-                                    secs = int(word)
-                                    break
-                                except ValueError:
-                                    pass
-                            clip["end_second"] += secs
-                            clip["duration"] += secs
-                            print(f"         Extending {secs}s")
+                            _raction = "longer"
                         elif any(w in fb for w in ["earlier", "before", "back"]):
-                            secs = 5
-                            for word in fb.split():
-                                try:
-                                    secs = int(word)
-                                    break
-                                except ValueError:
-                                    pass
-                            clip["start_second"] = max(0, clip["start_second"] - secs)
-                            print(f"         Starting {secs}s earlier")
-                        elif any(w in fb for w in ["later", "forward", "skip"]):
-                            secs = 3
-                            for word in fb.split():
-                                try:
-                                    secs = int(word)
-                                    break
-                                except ValueError:
-                                    pass
-                            clip["start_second"] += secs
-                            print(f"         Starting {secs}s later")
+                            _raction = "earlier"
+                        elif any(w in fb for w in ["later", "forward"]):
+                            _raction = "later"
                         elif any(w in fb for w in ["hormozi", "karaoke", "subtle", "branded"]):
+                            _raction = "style"
                             for s in ["hormozi", "karaoke", "subtle", "branded"]:
                                 if s in fb:
                                     config["caption_style"] = s
-                                    print(f"         Changing to {s} style")
                                     break
                         elif any(w in fb for w in ["wrong person", "swap", "other speaker", "other face", "wrong face", "wrong speaker"]):
                             _raction = "swap"
-                            # Will hit the swap handler on next iteration
-                            clip_speakers = sorted(set(
-                                w.get("speaker") for w in words
-                                if w.get("speaker") and w["start"] >= clip["start_second"] and w["end"] <= clip["end_second"]
-                            ))
-                            if len(clip_speakers) >= 2:
-                                swap_map = {clip_speakers[0]: clip_speakers[1], clip_speakers[1]: clip_speakers[0]}
-                                for w in words:
-                                    if w["start"] >= clip["start_second"] and w["end"] <= clip["end_second"]:
-                                        sp = w.get("speaker")
-                                        if sp in swap_map:
-                                            w["speaker"] = swap_map[sp]
-                                print(f"         Swapped speakers: {clip_speakers[0]} ↔ {clip_speakers[1]}")
-                            else:
-                                print(f"         Only one speaker in this clip")
-                                continue
                         else:
-                            print(f"         Couldn't parse that. Try: 'shorter', 'longer 10', 'start 3s earlier', 'hormozi style', 'wrong person'")
+                            print(f"         Couldn't parse that. Try: 'shorter', 'longer 10', 'start earlier', 'hormozi style', 'wrong person'")
                             continue
                     else:
                         continue
 
                 # Apply change
+                _adj = 5  # default seconds for timing adjustments
                 if _raction == "style":
                     _new_style = _rq.select("Style:", choices=[
                         _rq.Choice("branded", value="branded"),
@@ -688,15 +639,19 @@ def cmd_process(args):
                     if _new_style:
                         config["caption_style"] = _new_style
                 elif _raction == "shorter":
-                    clip["end_second"] -= 5
-                    clip["duration"] = max(10, clip["duration"] - 5)
+                    clip["end_second"] -= _adj
+                    clip["duration"] = max(10, clip["duration"] - _adj)
+                    print(f"         Trimming {_adj}s from end")
                 elif _raction == "longer":
-                    clip["end_second"] += 5
-                    clip["duration"] += 5
+                    clip["end_second"] += _adj
+                    clip["duration"] += _adj
+                    print(f"         Extending {_adj}s")
                 elif _raction == "earlier":
-                    clip["start_second"] = max(0, clip["start_second"] - 5)
+                    clip["start_second"] = max(0, clip["start_second"] - _adj)
+                    print(f"         Starting {_adj}s earlier")
                 elif _raction == "later":
                     clip["start_second"] += 3
+                    print(f"         Starting 3s later")
 
                 # Re-render
                 with _Spinner(f"Re-rendering clip {i+1}..."):
