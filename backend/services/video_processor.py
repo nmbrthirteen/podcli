@@ -481,30 +481,54 @@ def _build_motion_blur_filter(
     min_jump: int = 60,
     max_window_duration: float = 0.5,
     max_windows: int = 16,
-    sigma: float = 5.4,
-    steps: int = 2,
-    pad_before: float = 0.03,
-    pad_after: float = 0.05,
+    core_sigma: float = 3.8,
+    core_steps: int = 2,
+    core_pad_before: float = 0.02,
+    core_pad_after: float = 0.05,
+    outer_sigma: float = 1.6,
+    outer_steps: int = 1,
+    outer_pad_before: float = 0.05,
+    outer_pad_after: float = 0.08,
 ) -> str:
     """
-    Add a stronger full-frame blur only while the camera is actively reframing.
+    Add a layered full-frame blur while the camera is actively reframing.
 
-    The goal is to hide the crop move, not just soften it slightly.
+    A soft outer blur eases the transition in and out, while a tighter core
+    blur covers the actual crop move. This reads less like an abrupt on/off
+    effect than a single blur window.
     """
-    windows = _expand_motion_windows(_motion_windows_from_keyframes(
+    base_windows = _motion_windows_from_keyframes(
         keyframes=keyframes,
         min_jump=min_jump,
         max_window_duration=max_window_duration,
         max_windows=max_windows,
-    ), pad_before=pad_before, pad_after=pad_after)
-    if not windows:
+    )
+    if not base_windows:
         return ""
 
-    enable_expr = "+".join(
-        f"between(t\\,{t0:.3f}\\,{t1:.3f})"
-        for t0, t1 in windows
+    outer_windows = _expand_motion_windows(
+        base_windows,
+        pad_before=outer_pad_before,
+        pad_after=outer_pad_after,
     )
-    return f",gblur=sigma={sigma:.1f}:steps={steps}:enable='{enable_expr}'"
+    core_windows = _expand_motion_windows(
+        base_windows,
+        pad_before=core_pad_before,
+        pad_after=core_pad_after,
+    )
+
+    outer_enable = "+".join(
+        f"between(t\\,{t0:.3f}\\,{t1:.3f})"
+        for t0, t1 in outer_windows
+    )
+    core_enable = "+".join(
+        f"between(t\\,{t0:.3f}\\,{t1:.3f})"
+        for t0, t1 in core_windows
+    )
+    return (
+        f",gblur=sigma={outer_sigma:.1f}:steps={outer_steps}:enable='{outer_enable}'"
+        f",gblur=sigma={core_sigma:.1f}:steps={core_steps}:enable='{core_enable}'"
+    )
 
 
 def _build_motion_zoom_filter(
@@ -682,6 +706,8 @@ def _choose_segment_tracks(
     learned_anchor_x = dict(speaker_anchor_x or {})
     learned_side = dict(speaker_side or {})
     last_track_for_speaker = {}
+    unique_speakers = {speaker for _, _, speaker in segments if speaker is not None}
+    allow_opposite_side_inference = len(unique_speakers) == 2
 
     for start_t, end_t, speaker in segments:
         candidates = {}
@@ -715,7 +741,7 @@ def _choose_segment_tracks(
         side_hint_strength = 1.1
         anchor_hint_penalty = 1.8
 
-        if hint_side is None:
+        if hint_side is None and allow_opposite_side_inference:
             other_sides = {sp: side for sp, side in learned_side.items() if sp != speaker}
             if len(other_sides) == 1:
                 only_side = next(iter(other_sides.values()))

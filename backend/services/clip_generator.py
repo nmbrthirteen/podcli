@@ -159,7 +159,7 @@ def _build_tight_segments(
     return segments
 
 
-_remotion_available = None  # True/False/None — auto-detected on first render
+_remotion_available = None  # True/False/None — environment availability, not per-clip success
 
 
 def _render_with_remotion(
@@ -177,7 +177,8 @@ def _render_with_remotion(
     import subprocess
     import json
 
-    # Quick bail if Remotion already failed this session
+    # Quick bail only if the environment is known unavailable for this session.
+    # Transient per-clip render failures should not poison the rest of the batch.
     if _remotion_available is False:
         return False
 
@@ -280,15 +281,15 @@ def _render_with_remotion(
 
         # Redirect stderr to devnull to suppress Chrome/FFmpeg noise
         # (avoids buffer deadlock and terminal spam)
-        _devnull = open(os.devnull, 'w')
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=_devnull,
-            text=True,
-            timeout=600,
-            cwd=project_root,
-        )
+        with open(os.devnull, "w") as _devnull:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=_devnull,
+                text=True,
+                timeout=600,
+                cwd=project_root,
+            )
 
         if result.returncode == 0 and os.path.exists(output_path):
             _remotion_available = True
@@ -301,17 +302,14 @@ def _render_with_remotion(
             if lines:
                 print(f"  Remotion: {lines[-1][:120]}", flush=True)
 
-        # Failed — disable for rest of session
-        if "Error" in stdout:
-            _remotion_available = False
+        print("  Remotion: falling back to ASS for this clip", flush=True)
         return False
 
     except subprocess.TimeoutExpired:
-        print("  Remotion: timed out, using ASS for this session", flush=True)
-        _remotion_available = False
+        print("  Remotion: timed out, using ASS for this clip", flush=True)
         return False
     except Exception as e:
-        _remotion_available = False
+        print("  Remotion: render error, using ASS for this clip", flush=True)
         return False
     finally:
         try:

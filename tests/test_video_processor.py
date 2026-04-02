@@ -124,6 +124,31 @@ class VideoProcessorTests(unittest.TestCase):
         self.assertEqual(segment_tracks[1][3], 1)
         self.assertEqual(sides["SPEAKER_01"], "right")
 
+    def test_choose_segment_tracks_does_not_infer_opposite_side_for_third_speaker(self):
+        tracked_detections = [
+            (0.0, [{"cx": 520, "fw": 350, "track_id": 0}]),
+            (0.4, [{"cx": 540, "fw": 346, "track_id": 0}]),
+            (1.4, [{"cx": 560, "fw": 220, "track_id": 2}]),
+            (1.8, [{"cx": 572, "fw": 222, "track_id": 2}, {"cx": 1495, "fw": 350, "track_id": 3}]),
+            (2.2, [{"cx": 580, "fw": 226, "track_id": 2}, {"cx": 1484, "fw": 352, "track_id": 3}]),
+        ]
+
+        segment_tracks, anchors, sides = vp._choose_segment_tracks(
+            segments=[
+                (0.0, 0.8, "SPEAKER_00"),
+                (0.8, 1.2, "SPEAKER_01"),
+                (1.2, 2.4, "SPEAKER_02"),
+            ],
+            tracked_detections=tracked_detections,
+            speaker_side={},
+            speaker_anchor_x={},
+            width=1920,
+        )
+
+        self.assertEqual(segment_tracks[2][3], 2)
+        self.assertLess(anchors["SPEAKER_02"], 960)
+        self.assertEqual(sides["SPEAKER_02"], "left")
+
     def test_choose_track_segment_targets_picks_one_stable_target_per_turn(self):
         targets = vp._choose_track_segment_targets(
             segment_tracks=[
@@ -467,7 +492,7 @@ class VideoProcessorTests(unittest.TestCase):
 
         self.assertEqual(
             blur,
-            ",gblur=sigma=5.4:steps=2:enable='between(t\\,0.000\\,0.230)'",
+            ",gblur=sigma=1.6:steps=1:enable='between(t\\,0.000\\,0.260)',gblur=sigma=3.8:steps=2:enable='between(t\\,0.000\\,0.230)'",
         )
 
     def test_build_motion_zoom_filter_targets_only_short_reframes(self):

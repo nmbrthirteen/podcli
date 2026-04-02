@@ -153,6 +153,11 @@ async function main() {
   await new Promise((resolve) => assetServer.listen(0, "127.0.0.1", resolve));
   const assetPort = assetServer.address().port;
 
+  // Ensure the asset server is closed on any exit path
+  const closeAssetServer = () => { try { assetServer.close(); } catch {} };
+  process.on("SIGINT", () => { closeAssetServer(); process.exit(1); });
+  process.on("SIGTERM", () => { closeAssetServer(); process.exit(1); });
+
   const videoSrc = `http://127.0.0.1:${assetPort}/clip.mp4`;
   const logoSrc = opts.logo ? `http://127.0.0.1:${assetPort}/logo.png` : undefined;
 
@@ -197,61 +202,63 @@ async function main() {
     `Remotion: ${words.length} words, ${styleName}, ${renderW}x${renderH}, ${durationInFrames}f`
   );
 
-  // Select composition
-  const composition = await selectComposition({
-    serveUrl: bundleLocation,
-    id: "CaptionedClip",
-    inputProps,
-  });
+  try {
+    // Select composition
+    const composition = await selectComposition({
+      serveUrl: bundleLocation,
+      id: "CaptionedClip",
+      inputProps,
+    });
 
-  // Render captions as transparent WebM overlay (no video = 10x faster)
-  const cpus = os.cpus().length;
-  const concurrency = Math.max(2, Math.min(cpus, 8));
-  // Store overlay in /tmp to survive temp dir cleanup
-  const overlayId = path.basename(opts.output, ".mp4");
-  const captionOverlay = path.join(os.tmpdir(), `remotion_overlay_${overlayId}.mov`);
+    // Render captions as transparent WebM overlay (no video = 10x faster)
+    const cpus = os.cpus().length;
+    const concurrency = Math.max(2, Math.min(cpus, 8));
+    // Store overlay in /tmp to survive temp dir cleanup
+    const overlayId = path.basename(opts.output, ".mp4");
+    const captionOverlay = path.join(os.tmpdir(), `remotion_overlay_${overlayId}.mov`);
 
-  let lastPct = -1;
-  await renderMedia({
-    composition: {
-      ...composition,
-      durationInFrames,
-      fps,
-      width: renderW,
-      height: renderH,
-    },
-    serveUrl: bundleLocation,
-    codec: "prores",
-    proResProfile: "4444",
-    pixelFormat: "yuva444p10le",
-    imageFormat: "png",
-    outputLocation: captionOverlay,
-    inputProps,
-    concurrency,
-    onProgress: ({ progress }) => {
-      const pct = Math.round(progress * 100);
-      if (pct > lastPct + 9) {
-        lastPct = pct;
-        process.stderr.write(`  captions: ${pct}%\n`);
-      }
-    },
-  });
+    let lastPct = -1;
+    await renderMedia({
+      composition: {
+        ...composition,
+        durationInFrames,
+        fps,
+        width: renderW,
+        height: renderH,
+      },
+      serveUrl: bundleLocation,
+      codec: "prores",
+      proResProfile: "4444",
+      pixelFormat: "yuva444p10le",
+      imageFormat: "png",
+      outputLocation: captionOverlay,
+      inputProps,
+      concurrency,
+      onProgress: ({ progress }) => {
+        const pct = Math.round(progress * 100);
+        if (pct > lastPct + 9) {
+          lastPct = pct;
+          process.stderr.write(`  captions: ${pct}%\n`);
+        }
+      },
+    });
 
-  assetServer.close();
+    // Composite: overlay transparent captions (ProRes 4444 with alpha) onto video
+    const { execSync } = await import("child_process");
+    process.stderr.write("  compositing...\n");
+    execSync(
+      `ffmpeg -y -hide_banner -loglevel warning -i "${path.resolve(opts.video)}" -i "${captionOverlay}" ` +
+      `-filter_complex "[0:v][1:v]overlay=0:0:shortest=1" ` +
+      `-c:v libx264 -crf 18 -preset fast -map 0:a -c:a copy "${opts.output}"`,
+      { stdio: ["pipe", "pipe", "pipe"], timeout: 300000 }
+    );
 
-  // Composite: overlay transparent captions (ProRes 4444 with alpha) onto video
-  const { execSync } = await import("child_process");
-  process.stderr.write("  compositing...\n");
-  execSync(
-    `ffmpeg -y -hide_banner -loglevel warning -i "${path.resolve(opts.video)}" -i "${captionOverlay}" ` +
-    `-filter_complex "[0:v][1:v]overlay=0:0:shortest=1" ` +
-    `-c:v libx264 -crf 18 -preset fast -map 0:a -c:a copy "${opts.output}"`,
-    { stdio: ["pipe", "pipe", "pipe"], timeout: 300000 }
-  );
-
-  // Clean up overlay
-  try { fs.unlinkSync(captionOverlay); } catch {}
-  console.log(`Done: ${opts.output}`);
+    // Clean up overlay
+    try { fs.unlinkSync(captionOverlay); } catch {}
+    console.log(`Done: ${opts.output}`);
+  } finally {
+    closeAssetServer();
+  }
 }
 
 main().catch((err) => {

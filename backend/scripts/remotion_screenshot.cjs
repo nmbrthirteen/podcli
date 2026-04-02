@@ -47,6 +47,9 @@ const waitForAssets = async (page) => {
 
 (async () => {
   const browser = await openBrowser("chrome", {logLevel: "error"});
+  const closeBrowser = () => { try { browser.close({silent: true}); } catch {} };
+  process.on("SIGINT", () => { closeBrowser(); process.exit(1); });
+  process.on("SIGTERM", () => { closeBrowser(); process.exit(1); });
   try {
     const page = await browser.newPage({
       context: () => null,
