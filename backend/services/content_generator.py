@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from typing import Optional, Callable
 
-from services.claude_suggest import _find_ai_cli
+from services.claude_suggest import _engine_label, _find_ai_cli_candidates, _run_ai_command
 
 
 def _load_kb_context() -> str:
@@ -56,11 +56,11 @@ def generate_clip_content(
     Returns:
         dict with raw_text, titles, description, tags, hashtags, or None if AI unavailable
     """
-    cli_path, engine = _find_ai_cli()
-    if not cli_path:
+    candidates = _find_ai_cli_candidates()
+    if not candidates:
         return None
 
-    label = "Claude" if engine == "claude" else "Codex"
+    label = _engine_label(candidates[0][1])
     if progress_callback:
         progress_callback(0, f"Generating content via {label}...")
 
@@ -119,94 +119,87 @@ HASHTAGS:
         prompt_file = f.name
 
     try:
-        if progress_callback:
-            progress_callback(30, f"Asking {label} for titles & descriptions...")
+        for idx, (cli_path, engine) in enumerate(candidates):
+            label = _engine_label(engine)
+            if progress_callback:
+                if idx > 0:
+                    progress_callback(0, f"Retrying content generation with {label}...")
+                progress_callback(30, f"Asking {label} for titles & descriptions...")
 
-        if engine == "codex":
-            out_file = prompt_file + ".out"
-            cr = subprocess.run(
-                [cli_path, "exec", "--full-auto", "-o", out_file, prompt[:4000]],
-                capture_output=True, text=True, cwd=project_dir, timeout=120,
-            )
-            if os.path.exists(out_file):
-                with open(out_file) as of:
-                    cr = subprocess.CompletedProcess(
-                        args=cr.args, returncode=cr.returncode,
-                        stdout=of.read(), stderr=cr.stderr,
-                    )
-                try:
-                    os.unlink(out_file)
-                except Exception:
-                    pass
-        else:
-            cr = subprocess.run(
-                f'cat "{prompt_file}" | "{cli_path}" --print -p -',
-                capture_output=True, text=True, cwd=project_dir,
-                timeout=120, shell=True,
-            )
-
-        if cr.returncode != 0 or not cr.stdout.strip():
-            return None
-
-        raw_text = cr.stdout.strip()
-
-        if progress_callback:
-            progress_callback(90, "Parsing content...")
-
-        # Parse structured sections from the response
-        result = {
-            "raw_text": raw_text,
-            "titles": [],
-            "top_pick": "",
-            "description": "",
-            "tags": "",
-            "hashtags": "",
-            "engine": engine,
-        }
-
-        lines = raw_text.split("\n")
-        section = ""
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
+            try:
+                cr = _run_ai_command(
+                    cli_path=cli_path,
+                    engine=engine,
+                    prompt=prompt[:4000] if engine == "codex" else prompt,
+                    prompt_file=prompt_file,
+                    project_dir=project_dir,
+                    timeout=120,
+                )
+            except subprocess.TimeoutExpired:
                 continue
-            upper = stripped.upper()
-            if upper.startswith("TITLES"):
-                section = "titles"
-                continue
-            elif upper.startswith("TOP PICK"):
-                result["top_pick"] = stripped
-                section = ""
-                continue
-            elif upper.startswith("DESCRIPTION"):
-                section = "description"
-                continue
-            elif upper.startswith("TAGS"):
-                section = "tags"
-                continue
-            elif upper.startswith("HASHTAGS"):
-                section = "hashtags"
+            except Exception:
                 continue
 
-            if section == "titles" and stripped[0:1].isdigit() and ". " in stripped[:4]:
-                result["titles"].append(stripped)
-            elif section == "description":
-                result["description"] += stripped + "\n"
-            elif section == "tags":
-                result["tags"] = stripped
-            elif section == "hashtags":
-                result["hashtags"] = stripped
+            if cr.returncode != 0 or not cr.stdout.strip():
+                continue
 
-        result["description"] = result["description"].strip()
+            raw_text = cr.stdout.strip()
 
-        if progress_callback:
-            progress_callback(100, f"Content ready ({len(result['titles'])} titles)")
+            if progress_callback:
+                progress_callback(90, "Parsing content...")
 
-        return result
+            result = {
+                "raw_text": raw_text,
+                "titles": [],
+                "top_pick": "",
+                "description": "",
+                "tags": "",
+                "hashtags": "",
+                "engine": engine,
+            }
 
-    except subprocess.TimeoutExpired:
-        return None
-    except Exception:
+            lines = raw_text.split("\n")
+            section = ""
+            for line in lines:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                upper = stripped.upper()
+                if upper.startswith("TITLES"):
+                    section = "titles"
+                    continue
+                elif upper.startswith("TOP PICK"):
+                    result["top_pick"] = stripped
+                    section = ""
+                    continue
+                elif upper.startswith("DESCRIPTION"):
+                    section = "description"
+                    continue
+                elif upper.startswith("TAGS"):
+                    section = "tags"
+                    continue
+                elif upper.startswith("HASHTAGS"):
+                    section = "hashtags"
+                    continue
+
+                if section == "titles" and stripped[0:1].isdigit() and ". " in stripped[:4]:
+                    result["titles"].append(stripped)
+                elif section == "description":
+                    result["description"] += stripped + "\n"
+                elif section == "tags":
+                    result["tags"] = stripped
+                elif section == "hashtags":
+                    result["hashtags"] = stripped
+
+            result["description"] = result["description"].strip()
+            if not result["titles"] and not result["description"]:
+                continue
+
+            if progress_callback:
+                progress_callback(100, f"Content ready ({len(result['titles'])} titles)")
+
+            return result
+
         return None
     finally:
         try:

@@ -1,5 +1,5 @@
 """
-Thumbnail generator using HTML/CSS + Playwright screenshot.
+Thumbnail generator using HTML/CSS + headless browser screenshot.
 
 Renders thumbnails via a headless browser for pixel-perfect CSS control
 over fonts, letter-spacing, line-height, and highlight styling.
@@ -10,10 +10,23 @@ brand-specific values live in .podcli/thumbnail-config.json.
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from typing import Optional
+
+
+_THUMBNAIL_LEADING_FILLERS = {
+    "a", "an", "the", "we", "i", "they", "he", "she", "it", "there", "this", "that",
+    "these", "those", "our", "your", "their", "my", "so", "well", "and", "but",
+}
+_THUMBNAIL_LINE_STOPWORDS = {
+    "a", "an", "and", "as", "at", "for", "from", "in", "into", "of", "on",
+    "or", "that", "the", "to", "with",
+}
+_THUMBNAIL_SPLIT_SEPARATORS = (" / ", " — ", " – ", " - ", ": ", "; ", ", ")
 
 
 def _load_config() -> dict:
@@ -92,6 +105,8 @@ def _load_config() -> dict:
         "variations": 3,
         "variation_offset_up": "3%",
         "variation_offset_down": "2%",
+        "playwright_wait_ms": 1500,
+        "playwright_timeout_ms": 150000,
     }
 
     config_path = os.path.join(
@@ -105,6 +120,194 @@ def _load_config() -> dict:
         except Exception:
             pass
     return defaults
+
+
+def _playwright_cli_candidates() -> list[list[str]]:
+    """Return Playwright CLI commands in preference order."""
+    repo_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    local_bin = os.path.join(repo_root, "node_modules", ".bin", "playwright")
+
+    candidates = []
+    if os.path.exists(local_bin):
+        candidates.append([local_bin])
+
+    global_bin = shutil.which("playwright")
+    if global_bin:
+        candidates.append([global_bin])
+
+    npx_bin = shutil.which("npx")
+    if npx_bin:
+        candidates.append([npx_bin, "--no-install", "playwright"])
+        candidates.append([npx_bin, "playwright"])
+
+    deduped = []
+    seen = set()
+    for cmd in candidates:
+        key = tuple(cmd)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(cmd)
+    return deduped
+
+
+def _remotion_screenshot_script_path() -> str:
+    """Return the local Remotion screenshot helper script path."""
+    return os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "scripts",
+        "remotion_screenshot.cjs",
+    )
+
+
+def _build_remotion_screenshot_command(
+    script_path: str,
+    html_path: str,
+    output_path: str,
+    width: int,
+    height: int,
+    wait_ms: int,
+) -> Optional[list[str]]:
+    """Build a Remotion-backed screenshot command if the repo can run it."""
+    node_bin = shutil.which("node")
+    repo_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    renderer_pkg = os.path.join(repo_root, "node_modules", "@remotion", "renderer", "package.json")
+    if not node_bin or not os.path.exists(script_path) or not os.path.exists(renderer_pkg):
+        return None
+
+    return [
+        node_bin,
+        script_path,
+        html_path,
+        output_path,
+        str(width),
+        str(height),
+        str(wait_ms),
+    ]
+
+
+def _build_playwright_screenshot_command(
+    cli_cmd: list[str],
+    html_path: str,
+    output_path: str,
+    width: int,
+    height: int,
+    wait_ms: int,
+) -> list[str]:
+    """Build one Playwright screenshot command."""
+    return [
+        *cli_cmd,
+        "screenshot",
+        "--viewport-size", f"{width}, {height}",
+        "--wait-for-timeout", str(wait_ms),
+        f"file://{html_path}",
+        output_path,
+    ]
+
+
+def _compact_thumbnail_title(title: str, max_words: int = 7, max_chars: int = 42) -> str:
+    """Turn transcript-like title text into compact thumbnail copy."""
+    text = re.sub(r"\s+", " ", (title or "")).strip().strip("/").strip()
+    if not text:
+        return ""
+
+    replacements = [
+        (r"(?i)\b(\d+)\s+megawatts?\b", r"\1MW"),
+        (r"(?i)\b(\d+)\s+gigawatts?\b", r"\1GW"),
+        (r"(?i)\b(\d+)\s+kilowatts?\b", r"\1kW"),
+        (r"(?i)\b(\d+)\s+million\b", r"\1M"),
+        (r"(?i)\b(\d+)\s+billion\b", r"\1B"),
+        (r"(?i)\b(\d+)\s+trillion\b", r"\1T"),
+    ]
+    for pattern, repl in replacements:
+        text = re.sub(pattern, repl, text)
+
+    if len(text) > max_chars:
+        for sep in _THUMBNAIL_SPLIT_SEPARATORS[1:]:
+            if sep in text:
+                head = text.split(sep, 1)[0].strip()
+                if len(head.split()) >= 3:
+                    text = head
+                    break
+
+    words = text.split()
+    while len(words) > 4 and words and words[0].lower().strip(".,!?") in _THUMBNAIL_LEADING_FILLERS:
+        words = words[1:]
+
+    if len(words) > max_words:
+        words = words[:max_words]
+
+    compact = " ".join(words).strip(" -—–,:;.!?")
+    if len(compact) > max_chars:
+        compact = compact[:max_chars].rsplit(" ", 1)[0].strip(" -—–,:;.!?")
+    return compact
+
+
+def _split_thumbnail_title(title: str, max_line_chars: int = 24) -> tuple[str, str]:
+    """Split compact thumbnail copy into two punchy lines."""
+    text = _compact_thumbnail_title(title)
+    if not text:
+        return "", ""
+
+    for sep in _THUMBNAIL_SPLIT_SEPARATORS:
+        if sep in text:
+            left, right = [part.strip() for part in text.split(sep, 1)]
+            if left and right:
+                return left, right
+
+    words = text.split()
+    if len(words) <= 2:
+        return words[0] if words else "", " ".join(words[1:])
+
+    best_split = 1
+    best_score = float("inf")
+    for i in range(1, len(words)):
+        left_words = words[:i]
+        right_words = words[i:]
+        left = " ".join(left_words)
+        right = " ".join(right_words)
+        score = 0.0
+
+        score += max(0, len(left) - max_line_chars) * 5
+        score += max(0, len(right) - max_line_chars) * 5
+        score += abs(len(left_words) - 3) * 2.5
+        score += abs(len(right_words) - 4) * 2.0
+        score += abs(len(left) - len(right)) * 0.35
+        if left_words[-1].lower().strip(".,!?") in _THUMBNAIL_LINE_STOPWORDS:
+            score += 8
+        if right_words[0].lower().strip(".,!?") in _THUMBNAIL_LINE_STOPWORDS:
+            score += 8
+
+        if score < best_score:
+            best_score = score
+            best_split = i
+
+    return " ".join(words[:best_split]), " ".join(words[best_split:])
+
+
+def _prepare_thumbnail_lines(
+    title: str,
+    line1: Optional[str] = None,
+    line2: Optional[str] = None,
+    max_line_chars: int = 24,
+) -> tuple[str, str]:
+    """Normalize AI or fallback title text into compact thumbnail lines."""
+    raw_line1 = re.sub(r"\s+", " ", (line1 or "")).strip().strip("/").strip()
+    raw_line2 = re.sub(r"\s+", " ", (line2 or "")).strip().strip("/").strip()
+
+    if raw_line1 and raw_line2:
+        total_words = len((raw_line1 + " " + raw_line2).split())
+        if (
+            len(raw_line1) <= max_line_chars
+            and len(raw_line2) <= max_line_chars
+            and total_words <= 8
+        ):
+            return raw_line1, raw_line2
+        title = f"{raw_line1} / {raw_line2}"
+    elif raw_line1:
+        title = raw_line1
+
+    return _split_thumbnail_title(title, max_line_chars=max_line_chars)
 
 
 def _build_html(
@@ -402,7 +605,7 @@ def generate_thumbnail(
     variation: int = 0,
     face_info: Optional[dict] = None,
 ) -> str:
-    """Generate a single thumbnail via HTML + Playwright screenshot."""
+    """Generate a single thumbnail via HTML + headless browser screenshot."""
     cfg = _load_config()
     if config:
         cfg.update(config)
@@ -419,22 +622,57 @@ def generate_thumbnail(
     try:
         w = cfg["width"]
         h = cfg["height"]
+        wait_ms = int(cfg.get("playwright_wait_ms", 1500))
+        timeout_s = max(30, int(cfg.get("playwright_timeout_ms", 150000)) // 1000)
+        errors = []
+        commands: list[list[str]] = []
 
-        result = subprocess.run(
-            [
-                "npx", "playwright", "screenshot",
-                "--viewport-size", f"{w}, {h}",
-                "--wait-for-timeout", "1500",
-                f"file://{tmp_html.name}",
-                output_path,
-            ],
-            capture_output=True, text=True, timeout=60,
+        remotion_cmd = _build_remotion_screenshot_command(
+            script_path=_remotion_screenshot_script_path(),
+            html_path=tmp_html.name,
+            output_path=output_path,
+            width=w,
+            height=h,
+            wait_ms=wait_ms,
         )
+        if remotion_cmd:
+            commands.append(remotion_cmd)
 
-        if result.returncode != 0:
-            raise RuntimeError(f"Screenshot failed: {result.stderr[:300]}")
+        for cli_cmd in _playwright_cli_candidates():
+            commands.append(
+                _build_playwright_screenshot_command(
+                    cli_cmd=cli_cmd,
+                    html_path=tmp_html.name,
+                    output_path=output_path,
+                    width=w,
+                    height=h,
+                    wait_ms=wait_ms,
+                )
+            )
 
-        return output_path
+        if not commands:
+            raise RuntimeError("No browser screenshot command available")
+
+        for cmd in commands:
+            cmd_label = " ".join(cmd[:3]) if len(cmd) > 3 else " ".join(cmd)
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_s,
+                )
+            except subprocess.TimeoutExpired:
+                errors.append(f"{cmd_label} timed out after {timeout_s} seconds")
+                continue
+
+            if result.returncode == 0:
+                return output_path
+
+            detail = (result.stderr or result.stdout or "unknown error").strip()[:300]
+            errors.append(f"{cmd_label} failed: {detail}")
+
+        raise RuntimeError("Screenshot failed: " + " | ".join(errors))
     finally:
         os.unlink(tmp_html.name)
 
@@ -468,28 +706,7 @@ def generate_variations(
         except Exception:
             pass
 
-    # Title split — if title contains " / " use that as the split point
-    # (PodStack /plan-thumbnails outputs "LINE 1 / LINE 2" format)
-    if " / " in title:
-        parts = title.split(" / ", 1)
-        line1 = parts[0].strip()
-        line2 = parts[1].strip()
-    else:
-        # Auto-split: balance character count across two lines
-        words = title.split()
-        if len(words) <= 2:
-            line1 = words[0] if words else ""
-            line2 = " ".join(words[1:])
-        else:
-            best_split = len(words) // 2
-            best_diff = float("inf")
-            for i in range(1, len(words)):
-                diff = abs(len(" ".join(words[:i])) - len(" ".join(words[i:])))
-                if diff < best_diff:
-                    best_diff = diff
-                    best_split = i
-            line1 = " ".join(words[:best_split])
-            line2 = " ".join(words[best_split:])
+    line1, line2 = _prepare_thumbnail_lines(title)
 
     paths = []
     n = cfg.get("variations", 3)

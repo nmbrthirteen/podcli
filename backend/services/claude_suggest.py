@@ -29,6 +29,28 @@ def _find_cli(name: str, extra_paths: list[str] = None) -> Optional[str]:
     return None
 
 
+def _find_ai_cli_candidates() -> list[tuple[str, str]]:
+    """Find all available AI CLIs in preference order."""
+    candidates = []
+
+    claude = _find_cli("claude", [
+        os.path.expanduser("~/.local/bin/claude"),
+        "/usr/local/bin/claude",
+        "/opt/homebrew/bin/claude",
+    ])
+    if claude:
+        candidates.append((claude, "claude"))
+
+    codex = _find_cli("codex", [
+        "/usr/local/bin/codex",
+        "/opt/homebrew/bin/codex",
+    ])
+    if codex:
+        candidates.append((codex, "codex"))
+
+    return candidates
+
+
 def _find_ai_cli() -> tuple[Optional[str], str]:
     """
     Find the best available AI CLI.
@@ -36,24 +58,64 @@ def _find_ai_cli() -> tuple[Optional[str], str]:
     Returns (path, engine) where engine is "claude" or "codex".
     Returns (None, "") if neither is available.
     """
-    # Prefer Claude Code
-    claude = _find_cli("claude", [
-        os.path.expanduser("~/.local/bin/claude"),
-        "/usr/local/bin/claude",
-        "/opt/homebrew/bin/claude",
-    ])
-    if claude:
-        return claude, "claude"
+    candidates = _find_ai_cli_candidates()
+    return candidates[0] if candidates else (None, "")
 
-    # Fall back to Codex
-    codex = _find_cli("codex", [
-        "/usr/local/bin/codex",
-        "/opt/homebrew/bin/codex",
-    ])
-    if codex:
-        return codex, "codex"
 
-    return None, ""
+def _engine_label(engine: str) -> str:
+    """Human-readable name for an AI engine id."""
+    if engine == "claude":
+        return "Claude"
+    if engine == "codex":
+        return "Codex"
+    return "AI"
+
+
+def _run_ai_command(
+    cli_path: str,
+    engine: str,
+    prompt: str,
+    prompt_file: str,
+    project_dir: str,
+    timeout: int,
+) -> subprocess.CompletedProcess:
+    """Execute one AI CLI prompt and return the completed process."""
+    if engine == "codex":
+        output_file = prompt_file + ".out"
+        result = subprocess.run(
+            [
+                cli_path, "exec",
+                "--full-auto",
+                "-o", output_file,
+                prompt,
+            ],
+            capture_output=True,
+            text=True,
+            cwd=project_dir,
+            timeout=timeout,
+        )
+        if os.path.exists(output_file):
+            with open(output_file) as f:
+                result = subprocess.CompletedProcess(
+                    args=result.args,
+                    returncode=result.returncode,
+                    stdout=f.read(),
+                    stderr=result.stderr,
+                )
+            try:
+                os.unlink(output_file)
+            except Exception:
+                pass
+        return result
+
+    return subprocess.run(
+        f'cat "{prompt_file}" | "{cli_path}" --print -p -',
+        capture_output=True,
+        text=True,
+        cwd=project_dir,
+        timeout=timeout,
+        shell=True,
+    )
 
 
 def _load_existing_shorts(episodes_path: str) -> list[str]:
@@ -216,15 +278,15 @@ def suggest_with_claude(
     """
     Use an AI CLI (Claude Code or Codex) to extract the best clip moments.
 
-    Tries Claude Code first, falls back to Codex. Returns None if neither
-    is available.
+    Tries available AI CLIs in preference order and retries on runtime failure.
+    Returns None if neither succeeds.
     """
-    cli_path, engine = _find_ai_cli()
-    if not cli_path:
+    candidates = _find_ai_cli_candidates()
+    if not candidates:
         return None
 
     if progress_callback:
-        label = "Claude" if engine == "claude" else "Codex"
+        label = _engine_label(candidates[0][1])
         progress_callback(0, f"Preparing transcript for {label}...")
 
     # Build transcript text from segments
@@ -255,84 +317,10 @@ def suggest_with_claude(
         prompt_file = f.name
 
     if progress_callback:
-        label = "Claude" if engine == "claude" else "Codex"
-        progress_callback(20, f"Asking {label} to analyze transcript...")
+        first_label = _engine_label(candidates[0][1])
+        progress_callback(20, f"Asking {first_label} to analyze transcript...")
 
     try:
-        # Run the AI CLI to analyze the transcript
-        if engine == "codex":
-            # Codex: use `codex exec` with --output-last-message to capture response
-            output_file = prompt_file + ".out"
-            result = subprocess.run(
-                [
-                    cli_path, "exec",
-                    "--full-auto",
-                    "-o", output_file,
-                    prompt,
-                ],
-                capture_output=True,
-                text=True,
-                cwd=project_dir,
-                timeout=300,
-            )
-            # Read response from output file
-            if os.path.exists(output_file):
-                with open(output_file) as f:
-                    result = subprocess.CompletedProcess(
-                        args=result.args,
-                        returncode=result.returncode,
-                        stdout=f.read(),
-                        stderr=result.stderr,
-                    )
-                try:
-                    os.unlink(output_file)
-                except Exception:
-                    pass
-        else:
-            # Claude: pipe prompt via stdin with --print mode
-            result = subprocess.run(
-                f'cat "{prompt_file}" | "{cli_path}" --print -p -',
-                capture_output=True,
-                text=True,
-                cwd=project_dir,
-                timeout=300,
-                shell=True,
-            )
-
-        if result.returncode != 0:
-            if progress_callback:
-                progress_callback(0, f"{label} returned error: {result.stderr[:200]}")
-            return None
-
-        if progress_callback:
-            progress_callback(80, f"Parsing {label}'s suggestions...")
-
-        # Parse JSON from Claude's response
-        response = result.stdout.strip()
-
-        # Strip markdown code fences if present
-        if "```" in response:
-            import re
-            fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", response, re.DOTALL)
-            if fence_match:
-                response = fence_match.group(1).strip()
-
-        # Use raw_decode to extract the first complete JSON object
-        # (safer than rfind which can grab a stray "}" after the JSON)
-        json_start = response.find("{")
-        if json_start >= 0:
-            decoder = json.JSONDecoder()
-            data, _ = decoder.raw_decode(response, json_start)
-        else:
-            data = json.loads(response)
-
-        clips = data.get("clips", [])
-
-        if not clips:
-            return None
-
-        # Normalize to the format the CLI expects
-        normalized = []
         def _parse_seconds(val) -> float:
             """Parse a timestamp value — handles both 123.4 and '2:03' formats."""
             if isinstance(val, (int, float)):
@@ -349,71 +337,115 @@ def suggest_with_claude(
             except ValueError:
                 return 0.0
 
-        for c in clips:
-            scores = c.get("scores", {})
-            total = sum(scores.values()) if scores else c.get("total_score", 0)
+        for idx, (cli_path, engine) in enumerate(candidates):
+            label = _engine_label(engine)
+            if idx > 0 and progress_callback:
+                progress_callback(0, f"Retrying with {label}...")
+                progress_callback(20, f"Asking {label} to analyze transcript...")
 
-            # Parse segments (multi-cut ranges) or fall back to single range
-            raw_segments = c.get("segments", [])
-            keep_segments = []
-            for seg in raw_segments:
-                s = round(_parse_seconds(seg.get("start", 0)), 1)
-                e = round(_parse_seconds(seg.get("end", 0)), 1)
-                if e > s:
-                    keep_segments.append({"start": s, "end": e})
-
-            start_sec = round(_parse_seconds(c.get("start_second", 0)), 1)
-            end_sec = round(_parse_seconds(c.get("end_second", 0)), 1)
-
-            # Fall back to single segment if none provided
-            if not keep_segments and end_sec > start_sec:
-                keep_segments = [{"start": start_sec, "end": end_sec}]
-
-            # Compute actual kept duration
-            kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
-
-            # Reject clips outside the target duration range
-            if kept_duration < 15 or kept_duration > 55:
+            try:
+                result = _run_ai_command(
+                    cli_path=cli_path,
+                    engine=engine,
+                    prompt=prompt,
+                    prompt_file=prompt_file,
+                    project_dir=project_dir,
+                    timeout=300,
+                )
+            except subprocess.TimeoutExpired:
+                if progress_callback:
+                    progress_callback(0, f"{label} timed out (5 min limit)")
+                continue
+            except Exception as e:
+                if progress_callback:
+                    progress_callback(0, f"{label} error: {e}")
                 continue
 
-            normalized.append({
-                "title": c.get("title", "Untitled")[:55],
-                "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
-                "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
-                "segments": keep_segments,
-                "duration": round(kept_duration),
-                "score": total,
-                "content_type": c.get("content_type", "unknown"),
-                # MCP-aligned fields
-                "reasoning": c.get("why", ""),
-                "preview_text": c.get("quote", "")[:120],
-                "suggested_caption_style": "hormozi",
-                # Backwards compat
-                "quote": c.get("quote", ""),
-                "why": c.get("why", ""),
-                "reasons": [c.get("content_type", "")],
-                "preview": c.get("quote", "")[:120],
-            })
+            if result.returncode != 0 or not result.stdout.strip():
+                if progress_callback:
+                    detail = (result.stderr or "no response").strip()[:200]
+                    progress_callback(0, f"{label} returned error: {detail}")
+                continue
 
-        # Sort by timestamp
-        normalized.sort(key=lambda x: x["start_second"])
+            if progress_callback:
+                progress_callback(80, f"Parsing {label}'s suggestions...")
 
-        if progress_callback:
-            progress_callback(100, f"{label} suggested {len(normalized)} clips")
+            try:
+                response = result.stdout.strip()
+                if "```" in response:
+                    import re
+                    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", response, re.DOTALL)
+                    if fence_match:
+                        response = fence_match.group(1).strip()
 
-        return normalized
+                json_start = response.find("{")
+                if json_start >= 0:
+                    decoder = json.JSONDecoder()
+                    data, _ = decoder.raw_decode(response, json_start)
+                else:
+                    data = json.loads(response)
+            except json.JSONDecodeError as e:
+                if progress_callback:
+                    progress_callback(0, f"Could not parse {label}'s response as JSON: {e}")
+                continue
 
-    except json.JSONDecodeError as e:
-        if progress_callback:
-            progress_callback(0, f"Could not parse {label}'s response as JSON: {e}")
-        return None
-    except subprocess.TimeoutExpired:
-        if progress_callback:
-            progress_callback(0, f"{label} timed out (5 min limit)")
-        return None
-    except Exception as e:
-        if progress_callback:
-            progress_callback(0, f"{label} error: {e}")
+            clips = data.get("clips", [])
+            if not clips:
+                if progress_callback:
+                    progress_callback(0, f"{label} returned no clips")
+                continue
+
+            normalized = []
+            for c in clips:
+                scores = c.get("scores", {})
+                total = sum(scores.values()) if scores else c.get("total_score", 0)
+
+                raw_segments = c.get("segments", [])
+                keep_segments = []
+                for seg in raw_segments:
+                    s = round(_parse_seconds(seg.get("start", 0)), 1)
+                    e = round(_parse_seconds(seg.get("end", 0)), 1)
+                    if e > s:
+                        keep_segments.append({"start": s, "end": e})
+
+                start_sec = round(_parse_seconds(c.get("start_second", 0)), 1)
+                end_sec = round(_parse_seconds(c.get("end_second", 0)), 1)
+
+                if not keep_segments and end_sec > start_sec:
+                    keep_segments = [{"start": start_sec, "end": end_sec}]
+
+                kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
+                if kept_duration < 15 or kept_duration > 55:
+                    continue
+
+                normalized.append({
+                    "title": c.get("title", "Untitled")[:55],
+                    "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
+                    "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
+                    "segments": keep_segments,
+                    "duration": round(kept_duration),
+                    "score": total,
+                    "content_type": c.get("content_type", "unknown"),
+                    "reasoning": c.get("why", ""),
+                    "preview_text": c.get("quote", "")[:120],
+                    "suggested_caption_style": "hormozi",
+                    "quote": c.get("quote", ""),
+                    "why": c.get("why", ""),
+                    "reasons": [c.get("content_type", "")],
+                    "preview": c.get("quote", "")[:120],
+                    "_ai_engine": engine,
+                })
+
+            normalized.sort(key=lambda x: x["start_second"])
+
+            if normalized:
+                if progress_callback:
+                    progress_callback(100, f"{label} suggested {len(normalized)} clips")
+                return normalized
+
+            if progress_callback:
+                progress_callback(0, f"{label} returned no usable clips")
+
         return None
     finally:
         # Clean up temp file

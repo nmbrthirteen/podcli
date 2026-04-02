@@ -21,17 +21,35 @@ interface Chunk {
   end: number;
 }
 
+const MAX_CHARS_PER_CHUNK = 18;
+
 function buildChunks(words: Word[], perChunk: number): Chunk[] {
   const chunks: Chunk[] = [];
   let i = 0;
 
   while (i < words.length) {
-    let end = Math.min(i + perChunk, words.length);
+    let end = i;
+    let charCount = 0;
 
-    // Only absorb 1 leftover word, not 2
+    while (end < words.length && end - i < perChunk) {
+      const nextWord = words[end].word.trim();
+      const nextChars = charCount === 0 ? nextWord.length : charCount + 1 + nextWord.length;
+
+      if (end > i && nextChars > MAX_CHARS_PER_CHUNK) {
+        break;
+      }
+
+      charCount = nextChars;
+      end += 1;
+    }
+
+    if (end === i) {
+      end = i + 1;
+    }
+
     const remaining = words.length - end;
-    if (remaining === 1) {
-      end = words.length;
+    if (remaining === 1 && end - i > 2) {
+      end -= 1;
     }
 
     const slice = words.slice(i, end);
@@ -47,11 +65,13 @@ function buildChunks(words: Word[], perChunk: number): Chunk[] {
 }
 
 function splitIntoLines(words: Word[]): [Word[], Word[]] {
-  if (words.length <= 3) {
+  if (words.length <= 2) {
     return [words, []];
   }
-  const mid = Math.ceil(words.length / 2);
-  return [words.slice(0, mid), words.slice(mid)];
+  if (words.length === 3) {
+    return [words.slice(0, 2), words.slice(2)];
+  }
+  return [words.slice(0, 2), words.slice(2)];
 }
 
 /**
@@ -114,6 +134,7 @@ const CaptionLine: React.FC<{
         color: style.color,
         textShadow: "0 0 40px rgba(0, 0, 0, 0.15), 0 0 80px rgba(0, 0, 0, 0.1), 0 0 150px rgba(0, 0, 0, 0.08)",
         lineHeight: 1.25,
+        whiteSpace: "nowrap",
       }}
     >
       {words.map((word, i) => {

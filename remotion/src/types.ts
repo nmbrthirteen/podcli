@@ -71,7 +71,7 @@ export const STYLES: Record<string, CaptionStyle> = {
     color: "#FFFFFF",
     activeColor: "#FFFFFF",
     uppercase: false,
-    wordsPerChunk: 4,
+    wordsPerChunk: 3,
     position: "lower-third",
     marginBottom: 420,
   },

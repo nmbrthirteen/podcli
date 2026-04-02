@@ -366,14 +366,15 @@ def ask_claude_for_layout(
     config: Optional[dict] = None,
 ) -> Optional[dict]:
     """
-    Ask Claude to generate ALL layout values for the thumbnail.
-    Claude sees the frame info and decides everything dynamically.
+    Ask an available AI CLI to generate layout values for the thumbnail.
+    The model sees the frame info and decides everything dynamically.
 
     Returns dict with line1, line2, box_y, photo_object_position, etc.
     """
-    from services.claude_suggest import _find_ai_cli
-    claude_path, _engine = _find_ai_cli()
-    if not claude_path:
+    from services.claude_suggest import _find_ai_cli_candidates, _run_ai_command
+
+    candidates = _find_ai_cli_candidates()
+    if not candidates:
         return None
 
     cfg = config or _load_brand_config()
@@ -404,7 +405,11 @@ Return ONLY valid JSON with these fields:
 }}
 
 RULES:
-- Split the title into 2 impactful lines. Line 1 = setup, Line 2 = payoff.
+- Rewrite the title into thumbnail copy, not a literal transcript sentence.
+- Split it into 2 impactful lines. Line 1 = setup, Line 2 = payoff.
+- Keep the combined copy to 4-8 words total whenever possible.
+- Keep each line short enough to fit comfortably on a Shorts thumbnail. Hard max: 24 characters per line.
+- Drop filler words and trailing clauses. Keep numbers, nouns, and the strongest claim.
 - box_y: position the text box so it does NOT overlap the face. If face is high (y<40%), use 80-85%. If face is centered (y~50%), use 75-78%. If face is low, use 68-72%.
 - photo_object_position: CSS value to show the face well. The photo is already 1080x1920 with face centered, so "center top" usually works. Adjust if face_y is unusual.
 - Font sizes: for short text (1-2 words per line) use 96-110px. For medium (3-4 words) use 80-96px. For long (5+ words) use 64-80px. Line 2 should be 85-95% of Line 1.
@@ -412,28 +417,44 @@ RULES:
 
     project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 
+    prompt_file = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=project_dir) as f:
             f.write(prompt)
             prompt_file = f.name
 
-        result = subprocess.run(
-            f'cat "{prompt_file}" | "{claude_path}" --print -p -',
-            capture_output=True, text=True, shell=True, timeout=30,
-            cwd=project_dir,
-        )
-        os.unlink(prompt_file)
+        for cli_path, engine in candidates:
+            try:
+                result = _run_ai_command(
+                    cli_path=cli_path,
+                    engine=engine,
+                    prompt=prompt,
+                    prompt_file=prompt_file,
+                    project_dir=project_dir,
+                    timeout=30,
+                )
+            except Exception:
+                continue
 
-        if result.returncode != 0:
-            return None
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
 
-        text = result.stdout.strip()
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(text[start:end])
+            text = result.stdout.strip()
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start >= 0 and end > start:
+                try:
+                    return json.loads(text[start:end])
+                except json.JSONDecodeError:
+                    continue
     except Exception:
         pass
+    finally:
+        if prompt_file:
+            try:
+                os.unlink(prompt_file)
+            except Exception:
+                pass
     return None
 
 
@@ -450,7 +471,7 @@ def generate_thumbnail_with_template(
     Template + AI layout. Claude decides all dynamic values per frame.
     Template provides consistent visual structure.
     """
-    from services.thumbnail_html import generate_thumbnail, _load_config
+    from services.thumbnail_html import generate_thumbnail, _load_config, _prepare_thumbnail_lines
 
     cfg = _load_config()
     if config:
@@ -460,8 +481,11 @@ def generate_thumbnail_with_template(
     layout = ask_claude_for_layout(title, frame_path, frame_info, logo_path, cfg)
 
     if layout:
-        line1 = layout.get("line1", title).strip().strip("/").strip()
-        line2 = layout.get("line2", "").strip().strip("/").strip()
+        line1, line2 = _prepare_thumbnail_lines(
+            title=title,
+            line1=layout.get("line1", title),
+            line2=layout.get("line2", ""),
+        )
         # Apply Claude's CSS decisions to config
         if layout.get("box_y"):
             cfg["box_y"] = layout["box_y"]
@@ -473,15 +497,7 @@ def generate_thumbnail_with_template(
         if layout.get("line2_font_size"):
             cfg["line2_font_size"] = layout["line2_font_size"]
     else:
-        # Fallback
-        if " / " in title:
-            parts = title.split(" / ", 1)
-            line1, line2 = parts[0].strip(), parts[1].strip()
-        else:
-            words = title.split()
-            mid = len(words) // 2 or 1
-            line1 = " ".join(words[:mid])
-            line2 = " ".join(words[mid:])
+        line1, line2 = _prepare_thumbnail_lines(title=title)
 
     return generate_thumbnail(
         line1, line2, output_path,

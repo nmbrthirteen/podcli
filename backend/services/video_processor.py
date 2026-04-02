@@ -202,10 +202,60 @@ def crop_to_vertical(
     source_ratio = width / height
 
     if strategy in ("face", "speaker"):
+        speakers_in_clip = {
+            w.get("speaker") for w in (transcript_words or []) if w.get("speaker")
+        }
+        # Any clip with speaker labels should prefer clip-local tracking over the
+        # episode-wide face_map. Global speaker→side mappings are too coarse for
+        # monologues and mixed-layout edits; they can pin a single-speaker clip
+        # to the wrong person for the whole render.
+        if speakers_in_clip:
+            result = _track_and_crop(
+                input_path, output_path,
+                width, height, target_w, target_h,
+                transcript_words, clip_start,
+                face_map=face_map,
+            )
+            if result:
+                return result
+
+        if face_map:
+            crop_h = height
+            crop_y = max(0, (height - crop_h) // 2)
+            x_expr = _use_face_map(
+                face_map=face_map,
+                transcript_words=transcript_words,
+                clip_start=clip_start,
+                width=width,
+                height=height,
+                target_ratio=target_ratio,
+                crop_h=crop_h,
+            )
+            if x_expr:
+                crop_w = int(crop_h * target_ratio)
+                crop_w = min(crop_w, width)
+                vf = f"crop={crop_w}:{crop_h}:{x_expr}:{crop_y},scale={target_w}:{target_h}"
+                return _run_ffmpeg_with_fallback(
+                    cmd_parts_before_enc=[
+                        "ffmpeg", "-y",
+                        "-i", input_path,
+                        "-vf", vf,
+                    ],
+                    cmd_parts_after_enc=[
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        "-ar", "44100",
+                        "-movflags", "+faststart",
+                    ],
+                    output_path=output_path,
+                    label="crop_face_map",
+                )
+
         result = _track_and_crop(
             input_path, output_path,
             width, height, target_w, target_h,
             transcript_words, clip_start,
+            face_map=face_map,
         )
         if result:
             return result
@@ -331,32 +381,170 @@ def _build_cam_expr(keyframes: list, duration: float, is_split: bool, max_parts:
     if len(keyframes) == 1:
         return str(keyframes[0][1])
 
+    def _eased_move_expr(start_t: float, move_t: float, start_x: int, end_x: int) -> str:
+        # Smootherstep gives a softer start/landing than smoothstep while still
+        # finishing inside the bounded reframe window.
+        progress = f"((t-{start_t:.3f})/{move_t:.3f})"
+        eased = (
+            f"((6*({progress})*({progress})*({progress})*({progress})*({progress}))"
+            f"-(15*({progress})*({progress})*({progress})*({progress}))"
+            f"+(10*({progress})*({progress})*({progress})))"
+        )
+        return f"{start_x}+(({end_x}-{start_x})*{eased})"
+
     parts = []
     for i in range(len(keyframes) - 1):
         t0, x0 = keyframes[i]
         t1, x1 = keyframes[i + 1]
         dt = max(0.01, t1 - t0)
         jump = abs(x1 - x0)
+        blurred_cut_jump = 90 if is_split else 180
+        quick_reframe_jump = 40 if is_split else 90
 
         if jump < 2:
             # Negligible movement — hold
             parts.append(f"if(between(t\\,{t0:.3f}\\,{t1:.3f})\\,{x0}\\,")
-        elif jump > 150 or (is_split and jump > 50):
-            # Large jump / split-screen speaker switch: instant cut
-            cut_t = round(t1 - 0.01, 3)
-            parts.append(f"if(between(t\\,{t0:.3f}\\,{cut_t:.3f})\\,{x0}\\,")
-            parts.append(f"if(between(t\\,{cut_t:.3f}\\,{t1:.3f})\\,{x1}\\,")
+        elif jump >= blurred_cut_jump:
+            # Very large jumps look worse as animated crop slides than as a
+            # short blurred cut. The blur/zoom filters carry the transition.
+            parts.append(f"if(between(t\\,{t0:.3f}\\,{t1:.3f})\\,{x1}\\,")
+        elif jump >= quick_reframe_jump:
+            # Moderate jump: use a short bounded reframe, but keep it much
+            # tighter than a literal camera pan.
+            pan_t = min(0.14 if is_split else 0.18, dt)
+            pan_end_t = round(t0 + pan_t, 3)
+            parts.append(
+                f"if(between(t\\,{t0:.3f}\\,{pan_end_t:.3f})\\,"
+                f"{_eased_move_expr(t0, pan_t, x0, x1)}\\,"
+            )
+            if pan_end_t < t1:
+                parts.append(f"if(between(t\\,{pan_end_t:.3f}\\,{t1:.3f})\\,{x1}\\,")
         else:
-            # Smooth linear interpolation (camera pan)
+            # Small pans still benefit from eased starts/stops so they read like
+            # a camera operator, not a value sliding on rails.
             parts.append(
                 f"if(between(t\\,{t0:.3f}\\,{t1:.3f})\\,"
-                f"{x0}+(({x1}-{x0})*(t-{t0:.3f})/{dt:.3f})\\,"
+                f"{_eased_move_expr(t0, dt, x0, x1)}\\,"
             )
 
     if len(parts) > max_parts:
         return None
 
     return "".join(parts) + str(keyframes[-1][1]) + ")" * len(parts)
+
+
+def _motion_windows_from_keyframes(
+    keyframes: list,
+    min_jump: int = 60,
+    max_window_duration: float = 0.5,
+    max_windows: int = 16,
+) -> list[tuple[float, float]]:
+    """Find short reframe windows worth accenting."""
+    windows = []
+    for i in range(len(keyframes) - 1):
+        t0, x0 = keyframes[i]
+        t1, x1 = keyframes[i + 1]
+        if abs(x1 - x0) < min_jump:
+            continue
+        dt = t1 - t0
+        if dt <= 0.01 or dt > max_window_duration:
+            continue
+        windows.append((t0, t1))
+
+    if not windows or len(windows) > max_windows:
+        return []
+    return windows
+
+
+def _expand_motion_windows(
+    windows: list[tuple[float, float]],
+    pad_before: float = 0.03,
+    pad_after: float = 0.05,
+) -> list[tuple[float, float]]:
+    """Pad and merge motion windows so the blur eases in and out."""
+    if not windows:
+        return []
+
+    expanded: list[tuple[float, float]] = []
+    for t0, t1 in windows:
+        start = max(0.0, t0 - pad_before)
+        end = t1 + pad_after
+        if expanded and start <= expanded[-1][1] + 0.01:
+            expanded[-1] = (expanded[-1][0], max(expanded[-1][1], end))
+        else:
+            expanded.append((start, end))
+    return expanded
+
+
+def _build_motion_blur_filter(
+    keyframes: list,
+    min_jump: int = 60,
+    max_window_duration: float = 0.5,
+    max_windows: int = 16,
+    sigma: float = 5.4,
+    steps: int = 2,
+    pad_before: float = 0.03,
+    pad_after: float = 0.05,
+) -> str:
+    """
+    Add a stronger full-frame blur only while the camera is actively reframing.
+
+    The goal is to hide the crop move, not just soften it slightly.
+    """
+    windows = _expand_motion_windows(_motion_windows_from_keyframes(
+        keyframes=keyframes,
+        min_jump=min_jump,
+        max_window_duration=max_window_duration,
+        max_windows=max_windows,
+    ), pad_before=pad_before, pad_after=pad_after)
+    if not windows:
+        return ""
+
+    enable_expr = "+".join(
+        f"between(t\\,{t0:.3f}\\,{t1:.3f})"
+        for t0, t1 in windows
+    )
+    return f",gblur=sigma={sigma:.1f}:steps={steps}:enable='{enable_expr}'"
+
+
+def _build_motion_zoom_filter(
+    keyframes: list,
+    target_w: int,
+    target_h: int,
+    min_jump: int = 60,
+    max_window_duration: float = 0.5,
+    max_windows: int = 16,
+    max_zoom: float = 0.018,
+) -> str:
+    """
+    Add a tiny center zoom bump during short reframes.
+
+    The goal is not visible punch-in. It just helps the move read as an
+    intentional editorial transition instead of a hard crop shove.
+    """
+    windows = _motion_windows_from_keyframes(
+        keyframes=keyframes,
+        min_jump=min_jump,
+        max_window_duration=max_window_duration,
+        max_windows=max_windows,
+    )
+    if not windows:
+        return ""
+
+    bumps = []
+    for t0, t1 in windows:
+        dt = max(0.01, t1 - t0)
+        progress = f"((t-{t0:.3f})/{dt:.3f})"
+        bumps.append(
+            f"(16*pow({progress}\\,2)*pow((1-{progress})\\,2)*between(t\\,{t0:.3f}\\,{t1:.3f}))"
+        )
+
+    zoom_expr = "+".join(bumps)
+    return (
+        f",scale=w='iw*(1+{max_zoom:.4f}*({zoom_expr}))'"
+        f":h='ih*(1+{max_zoom:.4f}*({zoom_expr}))'"
+        f":eval=frame,crop={target_w}:{target_h}:(iw-{target_w})/2:(ih-{target_h})/2"
+    )
 
 
 def _simplify_keyframes(keyframes: list, tolerance: int = 5) -> list:
@@ -378,6 +566,519 @@ def _simplify_keyframes(keyframes: list, tolerance: int = 5) -> list:
     return result
 
 
+def _resolve_speaker_sides(
+    segments: list,
+    detections: list,
+    width: int,
+    face_map: dict = None,
+) -> dict:
+    """
+    Build left/right speaker hints for mixed split-screen clips.
+    Prefer precomputed face_map mappings, then fall back to first-speaker order.
+    """
+    speaker_side = {}
+    mid_x = width // 2
+
+    if face_map:
+        clusters = face_map.get("clusters", [])
+        mappings = face_map.get("speaker_mappings", {})
+        for speaker, cluster_index in mappings.items():
+            if cluster_index is None or cluster_index >= len(clusters):
+                continue
+            speaker_side[speaker] = "left" if clusters[cluster_index]["center_x"] < mid_x else "right"
+
+    split_count = sum(1 for _, faces in detections if len(faces) >= 2)
+    has_any_split = split_count >= 3
+    speakers = sorted(set(seg[2] for seg in segments)) if segments else []
+
+    if has_any_split and len(speakers) >= 2 and len(speaker_side) < 2:
+        talk = {}
+        first = {}
+        for start_t, end_t, speaker in segments:
+            talk[speaker] = talk.get(speaker, 0) + (end_t - start_t)
+            if speaker not in first:
+                first[speaker] = start_t
+        top2 = sorted(speakers, key=lambda s: talk.get(s, 0), reverse=True)[:2]
+        by_first = sorted(top2, key=lambda s: first.get(s, float("inf")))
+        speaker_side[by_first[0]] = "left"
+        if len(by_first) > 1:
+            speaker_side[by_first[1]] = "right"
+
+    return speaker_side
+
+
+def _assign_face_tracks(
+    detections: list,
+    width: int,
+    max_gap: float = 1.2,
+) -> list:
+    """
+    Give detected faces stable local track ids.
+
+    This mirrors the useful part of OpenShorts: a lightweight identity pass
+    based on horizontal continuity. We only need clip-local stickiness, not
+    perfect biometric identity.
+    """
+    known_tracks = []
+    next_track_id = 0
+    tracked_detections = []
+
+    for t, faces in detections:
+        known_tracks = [track for track in known_tracks if (t - track["last_t"]) <= max_gap]
+        used_track_ids = set()
+        tracked_faces = []
+
+        for face in sorted(faces, key=lambda f: f["fw"], reverse=True):
+            best_track = None
+            best_dist = None
+            match_radius = max(width * 0.10, face["fw"] * 1.6)
+
+            for track in known_tracks:
+                if track["id"] in used_track_ids:
+                    continue
+                dx = abs(face["cx"] - track["cx"])
+                dy = abs(face.get("cy", 0) - track["cy"])
+                size_ratio = abs(face["fw"] - track["fw"]) / max(face["fw"], track["fw"], 1.0)
+                allowed_dist = max(match_radius, track["fw"] * 1.6)
+                if dx > allowed_dist:
+                    continue
+                score = dx + dy * 0.35 + size_ratio * width * 0.4
+                if best_dist is None or score < best_dist:
+                    best_track = track
+                    best_dist = score
+
+            if best_track is None:
+                track_id = next_track_id
+                next_track_id += 1
+                known_tracks.append({
+                    "id": track_id,
+                    "cx": float(face["cx"]),
+                    "cy": float(face.get("cy", 0)),
+                    "fw": float(face["fw"]),
+                    "last_t": t,
+                })
+            else:
+                track_id = best_track["id"]
+                best_track["cx"] = float(face["cx"])
+                best_track["cy"] = float(face.get("cy", 0))
+                best_track["fw"] = float(face["fw"])
+                best_track["last_t"] = t
+
+            used_track_ids.add(track_id)
+            tracked_face = dict(face)
+            tracked_face["track_id"] = track_id
+            tracked_faces.append(tracked_face)
+
+        tracked_faces.sort(key=lambda f: f["cx"])
+        tracked_detections.append((t, tracked_faces))
+
+    return tracked_detections
+
+
+def _choose_segment_tracks(
+    segments: list,
+    tracked_detections: list,
+    speaker_side: dict,
+    speaker_anchor_x: dict,
+    width: int,
+) -> tuple[list, dict, dict]:
+    """
+    Choose one persistent visual track for each merged speaker segment.
+
+    The selected track is later followed for the whole turn. Other visible
+    faces in the same turn are ignored, which prevents reaction shots from
+    stealing the camera.
+    """
+    from statistics import median
+
+    segment_tracks = []
+    learned_anchor_x = dict(speaker_anchor_x or {})
+    learned_side = dict(speaker_side or {})
+    last_track_for_speaker = {}
+
+    for start_t, end_t, speaker in segments:
+        candidates = {}
+        for t, faces in tracked_detections:
+            if t < start_t or t > end_t:
+                continue
+            is_split_frame = len(faces) >= 2
+            for face in faces:
+                data = candidates.setdefault(face["track_id"], {
+                    "frames": 0,
+                    "split_frames": 0,
+                    "solo_frames": 0,
+                    "cxs": [],
+                    "fws": [],
+                    "first_t": t,
+                })
+                data["frames"] += 1
+                data["split_frames"] += 1 if is_split_frame else 0
+                data["solo_frames"] += 0 if is_split_frame else 1
+                data["cxs"].append(face["cx"])
+                data["fws"].append(face["fw"])
+                data["first_t"] = min(data["first_t"], t)
+
+        if not candidates:
+            segment_tracks.append((start_t, end_t, speaker, None, None))
+            continue
+
+        prev_track_id = last_track_for_speaker.get(speaker)
+        hint_anchor = learned_anchor_x.get(speaker)
+        hint_side = learned_side.get(speaker)
+
+        def _local_score(item):
+            track_id, data = item
+            median_x = float(median(data["cxs"]))
+            median_fw = float(median(data["fws"]))
+            score = (
+                data["frames"] * 1.0
+                + data["split_frames"] * 2.4
+                + data["solo_frames"] * 0.35
+                + median_fw / 140.0
+            )
+
+            if prev_track_id == track_id:
+                score += 2.5
+
+            score += max(0.0, 1.2 - max(0.0, data["first_t"] - start_t))
+            return score
+
+        def _score(item):
+            track_id, data = item
+            score = _local_score(item)
+            median_x = float(median(data["cxs"]))
+
+            if hint_side:
+                on_hint_side = median_x < (width / 2) if hint_side == "left" else median_x >= (width / 2)
+                score += 1.1 if on_hint_side else -0.8
+
+            if hint_anchor is not None:
+                score -= min(1.8, abs(median_x - hint_anchor) / max(width * 0.30, 1))
+            return score
+
+        local_best_track_id, local_best_data = max(candidates.items(), key=_local_score)
+        chosen_track_id, chosen_data = max(candidates.items(), key=_score)
+
+        local_best_score = _local_score((local_best_track_id, local_best_data))
+        hinted_score = _score((chosen_track_id, chosen_data))
+        local_scored_with_hints = _score((local_best_track_id, local_best_data))
+        if (
+            local_best_track_id != chosen_track_id
+            and local_best_score >= _local_score((chosen_track_id, chosen_data)) + 1.5
+            and local_scored_with_hints >= hinted_score - 0.8
+        ):
+            chosen_track_id, chosen_data = local_best_track_id, local_best_data
+
+        chosen_x = float(median(chosen_data["cxs"]))
+
+        segment_tracks.append((start_t, end_t, speaker, chosen_track_id, chosen_x))
+        last_track_for_speaker[speaker] = chosen_track_id
+
+        prev_anchor = learned_anchor_x.get(speaker)
+        if prev_anchor is None or abs(chosen_x - prev_anchor) > width * 0.18:
+            learned_anchor_x[speaker] = chosen_x
+        else:
+            learned_anchor_x[speaker] = prev_anchor * 0.65 + chosen_x * 0.35
+        learned_side[speaker] = "left" if learned_anchor_x[speaker] < (width / 2) else "right"
+
+    return segment_tracks, learned_anchor_x, learned_side
+
+
+def _update_tripod_camera(
+    current_center_x: float,
+    target_center_x: float | None,
+    crop_w: int,
+    video_width: int,
+    dt: float,
+    force_snap: bool = False,
+) -> float:
+    """
+    Heavy-tripod camera movement inspired by OpenShorts.
+
+    The camera stays still while the subject remains inside a safe zone, then
+    moves at a bounded speed instead of constantly chasing every face twitch.
+    """
+    half_crop = crop_w / 2.0
+    min_center = half_crop
+    max_center = max(half_crop, video_width - half_crop)
+
+    if target_center_x is None:
+        return min(max(current_center_x, min_center), max_center)
+
+    if force_snap:
+        current_center_x = target_center_x
+    else:
+        diff = target_center_x - current_center_x
+        # Keep the hold zone fairly tight so the speaker stays composed near
+        # center, but still ignore ordinary head movement and detector noise.
+        safe_zone_radius = crop_w * 0.14
+        if abs(diff) > safe_zone_radius:
+            slow_speed = 72.0
+            fast_speed = 360.0
+            speed = fast_speed if abs(diff) > crop_w * 0.5 else slow_speed
+            step = min(abs(diff), speed * max(dt, 0.01))
+            current_center_x += step if diff > 0 else -step
+
+    return min(max(current_center_x, min_center), max_center)
+
+
+def _choose_track_segment_targets(
+    segment_tracks: list,
+    tracked_detections: list,
+    speaker_anchor_x: dict,
+    width: int,
+    crop_w: int,
+) -> list[tuple[float, float, int, str | None]]:
+    """
+    Choose one horizontal crop target per speaker turn.
+
+    This keeps the speaker-tracked path from "rolling" across the frame.
+    We pick a stable representative position for the chosen visual track, then
+    let FFmpeg do one short reframe at the segment boundary.
+    """
+    from statistics import median
+
+    max_crop_x = max(0, width - crop_w)
+
+    def _crop_x_for_center(center_x: float) -> int:
+        crop_x = int(round(center_x - crop_w / 2.0))
+        return max(0, min(crop_x, max_crop_x))
+
+    def _pick_representative_center(points: list[tuple[float, float]]) -> float:
+        first_x = points[0][1]
+        median_x = float(median([cx for _, cx in points]))
+        seed_x = first_x * 0.72 + median_x * 0.28
+        return min(points, key=lambda p: abs(p[1] - seed_x))[1]
+
+    def _split_points_into_stable_runs(
+        points: list[tuple[float, float]],
+        end_t: float,
+    ) -> list[tuple[float, float, list[tuple[float, float]]]]:
+        if not points:
+            return []
+
+        jump_threshold = max(120.0, crop_w * 0.22)
+        gap_threshold = 0.55
+        runs = []
+
+        run_start_t = points[0][0]
+        run_points = [points[0]]
+        candidate_points: list[tuple[float, float]] = []
+
+        def _run_center(ps: list[tuple[float, float]]) -> float:
+            return float(median([cx for _, cx in ps]))
+
+        for point in points[1:]:
+            gap = point[0] - run_points[-1][0]
+            stable_center = _run_center(run_points)
+            far_from_run = abs(point[1] - stable_center) > jump_threshold
+            gap_reposition = gap > gap_threshold and abs(point[1] - stable_center) > jump_threshold * 0.45
+            should_probe_new_run = far_from_run or gap_reposition
+
+            if not should_probe_new_run:
+                if candidate_points:
+                    run_points.extend(candidate_points)
+                    candidate_points = []
+                run_points.append(point)
+                continue
+
+            candidate_points.append(point)
+
+            candidate_center = _run_center(candidate_points)
+            candidate_far = abs(candidate_center - stable_center) > jump_threshold * 0.85
+            enough_evidence = len(candidate_points) >= 2 or gap > gap_threshold
+            if candidate_far and enough_evidence:
+                split_t = candidate_points[0][0]
+                runs.append((run_start_t, split_t, run_points))
+                run_start_t = split_t
+                run_points = candidate_points[:]
+                candidate_points = []
+
+        if candidate_points:
+            candidate_center = _run_center(candidate_points)
+            stable_center = _run_center(run_points)
+            if abs(candidate_center - stable_center) > jump_threshold and len(candidate_points) >= 2:
+                split_t = candidate_points[0][0]
+                runs.append((run_start_t, split_t, run_points))
+                run_start_t = split_t
+                run_points = candidate_points[:]
+            else:
+                run_points.extend(candidate_points)
+
+        runs.append((run_start_t, end_t, run_points))
+        return runs
+
+    segment_targets = []
+    for start_t, end_t, speaker, track_id, _ in segment_tracks:
+        points = []
+        for t, faces in tracked_detections:
+            if t < start_t or t > end_t:
+                continue
+            face = next((f for f in faces if f["track_id"] == track_id), None)
+            if face is not None:
+                points.append((t, float(face["cx"])))
+
+        if points:
+            for idx, (sub_start_t, sub_end_t, run_points) in enumerate(_split_points_into_stable_runs(points, end_t)):
+                if idx == 0:
+                    sub_start_t = start_t
+                center_x = _pick_representative_center(run_points)
+                segment_targets.append((sub_start_t, sub_end_t, _crop_x_for_center(center_x), speaker))
+        elif speaker is not None and speaker in speaker_anchor_x:
+            center_x = float(speaker_anchor_x[speaker])
+            segment_targets.append((start_t, end_t, _crop_x_for_center(center_x), speaker))
+        else:
+            continue
+
+    return segment_targets
+
+
+def _build_track_turn_keyframes(
+    segment_targets: list,
+    default_x: int,
+) -> list[tuple[float, int]]:
+    """
+    Build short bounded reframes between stable speaker-turn targets.
+
+    The camera should hold through the turn, then move quickly onto the new
+    speaker instead of slowly chasing the face for seconds.
+    """
+    keyframes = [(0.0, default_x)]
+    prev_x = default_x
+    prev_speaker = None
+    left_edge_margin = 90
+
+    for target in segment_targets:
+        if len(target) >= 4:
+            start_t, end_t, target_x, speaker = target[:4]
+        else:
+            start_t, end_t, target_x = target[:3]
+            speaker = None
+
+        if abs(target_x - prev_x) <= 6:
+            prev_speaker = speaker
+            continue
+
+        seg_duration = max(0.01, end_t - start_t)
+        jump = abs(target_x - prev_x)
+        same_speaker_continuation = prev_speaker is not None and speaker == prev_speaker
+        if same_speaker_continuation and prev_x <= left_edge_margin and jump > 180:
+            hold_t = max(0.0, round(start_t - 0.01, 3))
+            if hold_t > keyframes[-1][0]:
+                keyframes.append((hold_t, prev_x))
+            keyframes.append((round(start_t, 3), target_x))
+            prev_x = target_x
+            prev_speaker = speaker
+            continue
+
+        if same_speaker_continuation:
+            if jump > 180:
+                reframe_t = min(0.18, max(0.10, seg_duration * 0.15))
+            else:
+                reframe_t = min(0.14, max(0.08, seg_duration * 0.12))
+        elif jump > 180:
+            reframe_t = min(0.30, max(0.16, seg_duration * 0.24))
+        else:
+            reframe_t = min(0.22, max(0.12, seg_duration * 0.18))
+
+        settle_t = min(end_t, round(start_t + reframe_t, 3))
+        keyframes.append((start_t, prev_x))
+        keyframes.append((settle_t, target_x))
+        prev_x = target_x
+        prev_speaker = speaker
+
+    return keyframes
+
+
+def _pick_tracking_face(
+    faces: list,
+    speaker: str,
+    speaker_side: dict,
+    width: int,
+    last_target_x: float | None,
+    last_speaker: str | None,
+    speaker_anchor_x: dict,
+    has_any_split: bool,
+) -> tuple[dict | None, bool]:
+    """
+    Pick a tracking target for the active speaker.
+
+    Returns (face_dict_or_none, reliable_selection).
+    reliable_selection means the face is trustworthy enough to update a
+    speaker anchor, not merely good enough to keep the camera steady.
+    """
+    if not faces:
+        return None, False
+
+    mid_x = width // 2
+    side_hint = speaker_side.get(speaker)
+    anchor_x = speaker_anchor_x.get(speaker)
+
+    if len(faces) >= 2:
+        if side_hint == "left":
+            return min(faces, key=lambda f: f["cx"]), True
+        if side_hint == "right":
+            return max(faces, key=lambda f: f["cx"]), True
+        if last_target_x is not None:
+            return min(faces, key=lambda f: abs(f["cx"] - last_target_x)), False
+        return max(faces, key=lambda f: f["fw"]), False
+
+    face = faces[0]
+    if not has_any_split or side_hint is None:
+        return face, True
+
+    side_ok = face["cx"] < mid_x if side_hint == "left" else face["cx"] >= mid_x
+    near_anchor = anchor_x is not None and abs(face["cx"] - anchor_x) < width * 0.18
+
+    # On a fresh speaker turn, accept the solo face so we can move with the cut.
+    if speaker != last_speaker:
+        return face, side_ok or near_anchor
+
+    # Same speaker continuing: reject large contradictory jumps that usually
+    # come from reaction shots or layout inserts of the other person.
+    if last_target_x is not None and abs(face["cx"] - last_target_x) > width * 0.22 and not (side_ok or near_anchor):
+        return None, False
+
+    return face, side_ok or near_anchor
+
+
+def _choose_camera_speaker(
+    transcript_speaker: str | None,
+    transcript_duration: float,
+    active_speaker: str | None,
+    pending_speaker: str | None,
+    pending_count: int,
+    min_turn_duration: float = 2.6,
+    confirmation_frames: int = 3,
+) -> tuple[str | None, str | None, int, bool]:
+    """
+    Stabilize diarization before the camera switches.
+
+    Returns (camera_speaker, pending_speaker, pending_count, switched_now).
+    """
+    if transcript_speaker is None:
+        return active_speaker, pending_speaker, pending_count, False
+
+    if active_speaker is None:
+        return transcript_speaker, None, 0, True
+
+    if transcript_speaker == active_speaker:
+        return active_speaker, None, 0, False
+
+    # Brief interjections should not move the camera.
+    if transcript_duration < min_turn_duration:
+        return active_speaker, None, 0, False
+
+    if pending_speaker != transcript_speaker:
+        return active_speaker, transcript_speaker, 1, False
+
+    pending_count += 1
+    if pending_count < confirmation_frames:
+        return active_speaker, pending_speaker, pending_count, False
+
+    return transcript_speaker, None, 0, True
+
+
 def _track_and_crop(
     input_path: str,
     output_path: str,
@@ -387,16 +1088,17 @@ def _track_and_crop(
     target_h: int,
     transcript_words: list = None,
     clip_start: float = 0,
+    face_map: dict = None,
 ) -> Optional[str]:
     """
-    Adaptive face tracking with exponential-smoothing camera.
+    Adaptive face tracking with sticky visual tracks and heavy-tripod movement.
 
     Works for both split-screen and single-camera layouts:
     1. Dense face sampling (~10 fps) with YuNet
-    2. Transcript-driven speaker selection (who's talking → which face)
-    3. Exponential-smoothing camera with dead zone (no jitter)
-    4. Hard cuts only for split-screen speaker switches
-    5. Vertical position from median face-Y (static per clip)
+    2. Clip-local face tracks (OpenShorts-style identity stickiness)
+    3. One chosen visual track per merged speaker turn
+    4. Heavy-tripod camera movement with a safe zone
+    5. Vertical position fixed for full-height crop
     """
     try:
         import cv2
@@ -492,133 +1194,132 @@ def _track_and_crop(
                 merged.append(list(seg))
         segments = merged
 
-    speakers = sorted(set(seg[2] for seg in segments)) if segments else []
+    tracked_detections = _assign_face_tracks(detections, width)
 
-    def _speaker_at(t):
-        for s, e, sp in segments:
-            if s <= t <= e:
-                return sp
-        return segments[0][2] if segments else None
+    speaker_side = _resolve_speaker_sides(segments, tracked_detections, width, face_map)
+    speaker_anchor_x = {}
+    if face_map:
+        clusters = face_map.get("clusters", [])
+        mappings = face_map.get("speaker_mappings", {})
+        for speaker, cluster_index in mappings.items():
+            if cluster_index is None or cluster_index >= len(clusters):
+                continue
+            speaker_anchor_x[speaker] = float(clusters[cluster_index]["center_x"])
 
-    # ── Speaker-to-side mapping ─────────────────────────────────
-    # Built from ANY frames with 2+ faces — works for both
-    # pure split-screen and Riverside-style mixed layouts.
-    speaker_side = {}  # speaker → "left" | "right"
-    if has_any_split and len(speakers) >= 2:
-        talk = {}
-        first = {}
-        for seg in segments:
-            sp = seg[2]
-            talk[sp] = talk.get(sp, 0) + (seg[1] - seg[0])
-            if sp not in first:
-                first[sp] = seg[0]
-        top2 = sorted(speakers, key=lambda s: talk.get(s, 0), reverse=True)[:2]
-        by_first = sorted(top2, key=lambda s: first.get(s, float("inf")))
-        speaker_side[by_first[0]] = "left"
-        if len(by_first) > 1:
-            speaker_side[by_first[1]] = "right"
-        for sp in speakers:
-            if sp not in speaker_side:
-                speaker_side[sp] = "left"
-
-    # ── Face selection per frame ─────────────────────────────────
-    # Per-frame layout detection: if THIS frame has 2+ faces,
-    # pick the one on the active speaker's side. Handles Riverside
-    # videos that switch between single-camera and split-screen.
-    def _pick_face(faces, speaker):
-        if not faces:
-            return None
-        if len(faces) >= 2 and speaker in speaker_side:
-            side = speaker_side[speaker]
-            return (min if side == "left" else max)(faces, key=lambda f: f["cx"])
-        # Single face or no side mapping: use largest (most prominent)
-        return max(faces, key=lambda f: f["fw"])
-
-    # ── Exponential-smoothing camera ────────────────────────────
-    # The camera "chases" the target face using exponential decay,
-    # which gives natural ease-out motion (fast start, gradual
-    # settling). Unlike fixed-speed approaches this is frame-rate
-    # independent and feels organic.
-    #
-    # dead_zone:     ignore face drift within this radius of the
-    #                current camera center — prevents micro-jitter
-    # smooth_rate:   convergence speed; at rate 4 the camera
-    #                reaches ~95 % of the target in ≈0.75 s
-    # snap_distance: teleport instantly above this (speaker change
-    #                or layout switch — no sweeping across the seam)
-    import math
-
-    dead_zone = crop_w * 0.20
-    smooth_rate = 4.0
-    snap_distance = crop_w * 0.55
-
-    # Initialise camera on the first detected face
-    cam_x = float(width) / 2
-    for _, faces in detections:
-        if faces:
-            cam_x = float(max(faces, key=lambda f: f["fw"])["cx"])
-            break
-
-    keyframes_x = []
-    prev_t = 0.0
-    prev_speaker = None
-    last_snap_t = -10.0  # time of last force_snap (start with no cooldown)
-    snap_cooldown = 2.0   # minimum seconds between force_snaps
-
-    for t, faces in detections:
-        speaker = _speaker_at(t) if segments else None
-        face = _pick_face(faces, speaker)
-
-        if face is None:
-            prev_t = t
-            continue
-
-        target_x = float(face["cx"])
-        diff = target_x - cam_x
-        dt = max(0.01, t - prev_t)
-
-        # Hard cut when the active speaker switches to a different
-        # side.  Works for pure split-screen AND mixed layouts
-        # (Riverside-style single↔split transitions).
-        # Cooldown prevents rapid ping-pong from brief interjections
-        # that survive segment merging.
-        force_snap = (
-            speaker is not None
-            and speaker != prev_speaker
-            and prev_speaker is not None
-            and speaker_side.get(speaker) != speaker_side.get(prev_speaker)
-            and (t - last_snap_t) >= snap_cooldown
+    segment_tracks = []
+    if segments:
+        segment_tracks, speaker_anchor_x, speaker_side = _choose_segment_tracks(
+            segments=segments,
+            tracked_detections=tracked_detections,
+            speaker_side=speaker_side,
+            speaker_anchor_x=speaker_anchor_x,
+            width=width,
         )
 
-        if force_snap or abs(diff) > snap_distance:
-            # Smooth 2-second pan to the other speaker instead of instant snap
-            # Rate 1.5 with dt~0.1 gives alpha~0.14 per step → reaches 95% in ~2s
-            pan_alpha = 1.0 - math.exp(-1.5 * dt)
-            cam_x += diff * pan_alpha
-            if force_snap:
-                last_snap_t = t
-        elif abs(diff) > dead_zone:
-            # Exponential smoothing: move a fraction of remaining
-            # distance each step.  alpha → 1 means instant, → 0 means
-            # no movement.  exp(-rate * dt) makes it time-step safe.
-            alpha = 1.0 - math.exp(-smooth_rate * dt)
-            cam_x += diff * alpha
-        # else: face inside dead zone — camera holds position
-
-        crop_x = int(cam_x - crop_w / 2)
-        crop_x = max(0, min(crop_x, width - crop_w))
-
-        if not keyframes_x or crop_x != keyframes_x[-1][1]:
-            keyframes_x.append((round(t, 3), crop_x))
-
-        prev_t = t
-        if speaker is not None:
-            prev_speaker = speaker
+    fallback_track_id = None
+    if not segment_tracks:
+        track_counts = {}
+        for _, faces in tracked_detections:
+            for face in faces:
+                track_id = face["track_id"]
+                track_counts[track_id] = track_counts.get(track_id, 0) + 1
+        if track_counts:
+            fallback_track_id = max(track_counts, key=lambda tid: track_counts[tid])
 
     # ── Vertical position ────────────────────────────────────────
     # Full-height crop → crop_y is always 0 (or centered if
     # crop_h < height due to aspect-ratio clamping).
     crop_y = max(0, (height - crop_h) // 2)
+
+    keyframes_x = []
+    if segment_tracks:
+        segment_targets = _choose_track_segment_targets(
+            segment_tracks=segment_tracks,
+            tracked_detections=tracked_detections,
+            speaker_anchor_x=speaker_anchor_x,
+            width=width,
+            crop_w=crop_w,
+        )
+        if segment_targets:
+            default_x = segment_targets[0][2] if segment_targets[0][0] <= 0.3 else max(0, (width - crop_w) // 2)
+            keyframes_x = _build_track_turn_keyframes(
+                segment_targets=segment_targets,
+                default_x=default_x,
+            )
+
+    if not keyframes_x:
+        cam_x = float(width) / 2
+        first_target_x = None
+        if segment_tracks:
+            first_track_id = segment_tracks[0][3]
+            first_speaker = segment_tracks[0][2]
+            for _, faces in tracked_detections:
+                face = next((f for f in faces if f["track_id"] == first_track_id), None)
+                if face is not None:
+                    first_target_x = float(face["cx"])
+                    break
+            if first_target_x is None and first_speaker is not None:
+                first_target_x = speaker_anchor_x.get(first_speaker)
+        elif fallback_track_id is not None:
+            for _, faces in tracked_detections:
+                face = next((f for f in faces if f["track_id"] == fallback_track_id), None)
+                if face is not None:
+                    first_target_x = float(face["cx"])
+                    break
+
+        if first_target_x is not None:
+            cam_x = _update_tripod_camera(
+                current_center_x=cam_x,
+                target_center_x=first_target_x,
+                crop_w=crop_w,
+                video_width=width,
+                dt=0.0,
+                force_snap=True,
+            )
+
+        prev_t = 0.0
+        segment_index = 0
+
+        for t, faces in tracked_detections:
+            while segment_index + 1 < len(segment_tracks) and t > segment_tracks[segment_index][1]:
+                segment_index += 1
+
+            speaker = None
+            target_track_id = fallback_track_id
+            if segment_tracks:
+                _, _, speaker, target_track_id, _ = segment_tracks[segment_index]
+
+            chosen_face = None
+            if target_track_id is not None:
+                chosen_face = next((f for f in faces if f["track_id"] == target_track_id), None)
+
+            if chosen_face is not None:
+                target_x = float(chosen_face["cx"])
+                if speaker is not None:
+                    prev_anchor = speaker_anchor_x.get(speaker, target_x)
+                    speaker_anchor_x[speaker] = prev_anchor * 0.75 + target_x * 0.25
+            elif speaker is not None and speaker in speaker_anchor_x:
+                target_x = float(speaker_anchor_x[speaker])
+            elif faces:
+                target_x = float(max(faces, key=lambda f: f["fw"])["cx"])
+            else:
+                target_x = None
+
+            cam_x = _update_tripod_camera(
+                current_center_x=cam_x,
+                target_center_x=target_x,
+                crop_w=crop_w,
+                video_width=width,
+                dt=max(0.01, t - prev_t),
+            )
+
+            crop_x = int(cam_x - crop_w / 2)
+            crop_x = max(0, min(crop_x, width - crop_w))
+
+            if not keyframes_x or crop_x != keyframes_x[-1][1]:
+                keyframes_x.append((round(t, 3), crop_x))
+
+            prev_t = t
 
     # ── Build FFmpeg filter ──────────────────────────────────────
     if not keyframes_x:
@@ -630,13 +1331,14 @@ def _track_and_crop(
         # Simplify keyframes to reduce expression complexity
         keyframes_x = _simplify_keyframes(keyframes_x)
         x_expr = _build_cam_expr(keyframes_x, duration, has_any_split)
+        blur_filter = _build_motion_blur_filter(keyframes_x)
+        zoom_filter = _build_motion_zoom_filter(keyframes_x, target_w=target_w, target_h=target_h)
         if x_expr is None:
-            # Too complex — fall back to median position
             xs = [x for _, x in keyframes_x]
             med_x = sorted(xs)[len(xs) // 2]
-            vf = f"crop={crop_w}:{crop_h}:{med_x}:{crop_y},scale={target_w}:{target_h}"
+            vf = f"crop={crop_w}:{crop_h}:{med_x}:{crop_y}{blur_filter},scale={target_w}:{target_h}{zoom_filter}"
         else:
-            vf = f"crop={crop_w}:{crop_h}:{x_expr}:{crop_y},scale={target_w}:{target_h}"
+            vf = f"crop={crop_w}:{crop_h}:{x_expr}:{crop_y}{blur_filter},scale={target_w}:{target_h}{zoom_filter}"
 
     return _run_ffmpeg_with_fallback(
         cmd_parts_before_enc=["ffmpeg", "-y", "-i", input_path, "-vf", vf],
@@ -1102,6 +1804,7 @@ def _build_speaker_aware_crop(
     target_ratio: float,
     transcript_words: list,
     clip_start: float,
+    face_map: dict = None,
 ) -> Optional[str]:
     """
     Build a speaker-aware crop that pans to whoever is speaking.
@@ -1132,8 +1835,10 @@ def _build_speaker_aware_crop(
             cap.release()
             return None
 
-        # Zoom to 75% of frame height for tight face framing
-        adjusted_h = int(height * 0.75)
+        # Full-height crop is the safest baseline for podcasts. The horizontal
+        # crop already creates a strong zoom on 16:9 sources; extra vertical
+        # zoom made solo and mixed-layout shots feel too aggressive.
+        adjusted_h = height
         adj_w = int(adjusted_h * target_ratio)
         if adj_w > width:
             adjusted_h = height
@@ -1227,7 +1932,15 @@ def _build_speaker_aware_crop(
         # In split-screen: left face belongs to one speaker, right to another
         speaker_side = {}  # speaker → "left" or "right"
 
-        if has_split and len(speakers) >= 2:
+        if face_map:
+            clusters = face_map.get("clusters", [])
+            mappings = face_map.get("speaker_mappings", {})
+            for sp, ci in mappings.items():
+                if ci is None or ci >= len(clusters):
+                    continue
+                speaker_side[sp] = "left" if clusters[ci]["center_x"] < mid_x else "right"
+
+        if has_split and len(speakers) >= 2 and len(speaker_side) < 2:
             # Use first-word heuristic: first speaker to talk → left face
             speaker_talk_time = {}
             speaker_first_word = {}
@@ -1285,12 +1998,11 @@ def _build_speaker_aware_crop(
             """Compute crop_x and crop_y for a face at (cx, cy)."""
             crop_x = cx - adj_w // 2
             crop_x = max(0, min(crop_x, width - adj_w))
-            crop_y = cy - int(adjusted_h * 0.33)
-            crop_y = max(0, min(crop_y, height - adjusted_h))
+            crop_y = max(0, (height - adjusted_h) // 2)
             return crop_x, crop_y
 
         # Build per-timestamp crop positions
-        timed_crops = []  # (time, crop_x, crop_y, speaker)
+        timed_crops = []  # (time, crop_x, crop_y, speaker, reliable)
         for t, faces in frame_data:
             if not faces:
                 continue
@@ -1300,7 +2012,8 @@ def _build_speaker_aware_crop(
                 continue
             cx, cy, fw, conf = face
             crop_x, crop_y = _crop_xy_for_face(cx, cy)
-            timed_crops.append((t, crop_x, crop_y, speaker))
+            reliable = len(faces) >= 2 or speaker not in speaker_side
+            timed_crops.append((t, crop_x, crop_y, speaker, reliable))
 
         if not timed_crops:
             return None
@@ -1312,45 +2025,34 @@ def _build_speaker_aware_crop(
             speaker_durations[sp] = speaker_durations.get(sp, 0) + (end_t - start_t)
         dominant_speaker = max(speaker_durations, key=speaker_durations.get)
 
-        dom_crops = [(cx, cy) for _, cx, cy, sp in timed_crops if sp == dominant_speaker]
+        dom_crops = [(cx, cy) for _, cx, cy, sp, _ in timed_crops if sp == dominant_speaker]
         default_x = int(np.median([cx for cx, cy in dom_crops])) if dom_crops else width // 2 - adj_w // 2
         default_y = int(np.median([cy for cx, cy in dom_crops])) if dom_crops else 0
 
-        x_keyframes = []
-        y_keyframes = []
+        segment_targets = _choose_segment_targets(
+            segments=segments,
+            timed_crops=timed_crops,
+            speakers=speakers,
+            default_x=default_x,
+            default_y=default_y,
+            max_crop_x=max(0, width - adj_w),
+            preferred_margin=max(24, int(adj_w * 0.10)),
+        )
 
-        for start_t, end_t, speaker in segments:
-            # Get crop positions for frames within this segment
-            seg_crops = [(t, cx, cy) for t, cx, cy, sp in timed_crops if start_t <= t <= end_t]
+        # Start locked on the first actual speaker target when available.
+        if segment_targets and segment_targets[0][0] <= 0.3:
+            default_x = segment_targets[0][2]
+            default_y = segment_targets[0][3]
 
-            if seg_crops:
-                for t, cx, cy in seg_crops:
-                    x_keyframes.append((t, cx))
-                    y_keyframes.append((t, cy))
-            else:
-                # No frames in segment — use speaker's median from all frames
-                sp_crops = [(cx, cy) for _, cx, cy, sp in timed_crops if sp == speaker]
-                if sp_crops:
-                    med_x = int(np.median([cx for cx, cy in sp_crops]))
-                    med_y = int(np.median([cy for cx, cy in sp_crops]))
-                    x_keyframes.append((start_t, med_x))
-                    y_keyframes.append((start_t, med_y))
-                else:
-                    x_keyframes.append((start_t, default_x))
-                    y_keyframes.append((start_t, default_y))
-
-        # Deduplicate and sort both keyframe lists
-        def _smooth_keyframes(kf, min_interval=0.5):
-            kf.sort(key=lambda k: k[0])
-            smoothed = []
-            for t, v in kf:
-                if smoothed and abs(t - smoothed[-1][0]) < min_interval:
-                    continue
-                smoothed.append((t, v))
-            return smoothed
-
-        x_keyframes = _smooth_keyframes(x_keyframes)
-        y_keyframes = _smooth_keyframes(y_keyframes)
+        # Build transition-aware keyframes from segment targets. This keeps the
+        # crop stable within a speaker turn and only moves around turn changes.
+        x_keyframes, y_keyframes = _build_transition_keyframes(
+            segment_targets=segment_targets,
+            default_x=default_x,
+            default_y=default_y,
+            adj_w=adj_w,
+            adjusted_h=adjusted_h,
+        )
 
         if not x_keyframes and not y_keyframes:
             return str(default_x), str(default_y), adjusted_h
@@ -1381,10 +2083,9 @@ def _build_speaker_aware_crop(
                     dt = max(0.01, t1 - t0)
                     value_jump = abs(v1 - v0)
 
-                    if dt > 1.5 or value_jump > jump_threshold:
-                        # Large time gap OR large value jump (layout change):
-                        # hold previous value, then instant-cut to next.
-                        # Avoids interpolating through the split-screen seam.
+                    if dt > 1.5:
+                        # Large unsupported gap: hold until the next reliable
+                        # keyframe instead of inventing motion through missing data.
                         jump_t = t1 - 0.01
                         parts.append(
                             f"if(between(t\\,{t0:.2f}\\,{jump_t:.2f})\\,{v0}\\,"
@@ -1392,9 +2093,21 @@ def _build_speaker_aware_crop(
                         parts.append(
                             f"if(between(t\\,{jump_t:.2f}\\,{t1:.2f})\\,{v1}\\,"
                         )
+                    elif value_jump > jump_threshold:
+                        # Host/guest switches should move with intent, not snap.
+                        pan_t = min(0.30, dt)
+                        mid_t = t0 + pan_t
+                        parts.append(
+                            f"if(between(t\\,{t0:.2f}\\,{mid_t:.2f})\\,"
+                            f"{v0}+(({v1}-{v0})*(t-{t0:.2f})/{pan_t:.2f})\\,"
+                        )
+                        if mid_t < t1:
+                            parts.append(
+                                f"if(between(t\\,{mid_t:.2f}\\,{t1:.2f})\\,{v1}\\,"
+                            )
                     elif value_jump > jump_threshold * 0.6:
-                        # Medium jump (significant lean/shift): fast reframe (~0.15s)
-                        pan_t = min(0.15, dt)
+                        # Medium jump: still move briskly, but slower than a cut.
+                        pan_t = min(0.24, dt)
                         mid_t = t0 + pan_t
                         parts.append(
                             f"if(between(t\\,{t0:.2f}\\,{mid_t:.2f})\\,"
@@ -1427,6 +2140,138 @@ def _build_speaker_aware_crop(
         import traceback
         print(f"Warning: speaker-aware crop failed: {e}\n{traceback.format_exc()}", file=sys.stderr)
         return None
+
+
+def _choose_segment_targets(
+    segments: list,
+    timed_crops: list,
+    speakers: list,
+    default_x: int,
+    default_y: int,
+    max_crop_x: int,
+    preferred_margin: int,
+) -> list:
+    """
+    Choose one crop target per speaker segment.
+
+    timed_crops entries are (time, crop_x, crop_y, speaker, reliable).
+    Reliable crops come from frames where speaker identity is trustworthy,
+    e.g. split-screen frames with known side mapping.
+    """
+    from statistics import median
+
+    def _pick_representative(points: list[tuple]) -> tuple[int, int]:
+        first_x = points[0][1]
+        first_y = points[0][2]
+        median_x = int(median([cx for _, cx, _ in points]))
+        median_y = int(median([cy for _, _, cy in points]))
+
+        # Bias toward how the speaker first appears in the turn so the camera
+        # starts in the right place, then settle around the segment median.
+        seed_x = int(round(first_x * 0.7 + median_x * 0.3))
+        seed_y = int(round(first_y * 0.7 + median_y * 0.3))
+
+        def _score(point):
+            _, cx, cy = point
+            edge_margin = min(cx, max_crop_x - cx) if max_crop_x > 0 else preferred_margin
+            edge_penalty = max(0, preferred_margin - edge_margin) * 3
+            return abs(cx - seed_x) + abs(cy - seed_y) * 0.35 + edge_penalty
+
+        _, best_x, best_y = min(points, key=_score)
+        return int(best_x), int(best_y)
+
+    speaker_anchors = {}
+    for speaker in speakers:
+        reliable = [
+            (t, cx, cy)
+            for t, cx, cy, sp, is_reliable in timed_crops
+            if sp == speaker and is_reliable
+        ]
+        if reliable:
+            speaker_anchors[speaker] = _pick_representative(reliable)
+
+    segment_targets = []
+    for start_t, end_t, speaker in segments:
+        reliable_seg_crops = [
+            (t, cx, cy)
+            for t, cx, cy, sp, is_reliable in timed_crops
+            if start_t <= t <= end_t and sp == speaker and is_reliable
+        ]
+        seg_crops = [
+            (t, cx, cy)
+            for t, cx, cy, sp, _ in timed_crops
+            if start_t <= t <= end_t and sp == speaker
+        ]
+
+        if reliable_seg_crops:
+            med_x, med_y = _pick_representative(reliable_seg_crops)
+        elif seg_crops and speaker in speaker_anchors:
+            local_x, local_y = _pick_representative(seg_crops)
+            anchor_x, anchor_y = speaker_anchors[speaker]
+            local_is_centerish = preferred_margin <= local_x <= max_crop_x - preferred_margin
+            local_overrides_anchor = (
+                start_t <= 0.35
+                or (local_is_centerish and abs(local_x - anchor_x) > max(80, int(max_crop_x * 0.18)))
+            )
+            if local_overrides_anchor:
+                med_x, med_y = local_x, local_y
+            else:
+                med_x, med_y = anchor_x, anchor_y
+        elif speaker in speaker_anchors:
+            med_x, med_y = speaker_anchors[speaker]
+        elif seg_crops:
+            med_x, med_y = _pick_representative(seg_crops)
+        else:
+            sp_crops = [(t, cx, cy) for t, cx, cy, sp, _ in timed_crops if sp == speaker]
+            if sp_crops:
+                med_x, med_y = _pick_representative(sp_crops)
+            else:
+                med_x = default_x
+                med_y = default_y
+
+        segment_targets.append((start_t, end_t, med_x, med_y))
+
+    return segment_targets
+
+
+def _build_transition_keyframes(
+    segment_targets: list,
+    default_x: int,
+    default_y: int,
+    adj_w: int,
+    adjusted_h: int,
+) -> tuple[list, list]:
+    """
+    Convert per-segment crop targets into eased transition keyframes.
+    """
+    x_keyframes = [(0.0, default_x)]
+    y_keyframes = [(0.0, default_y)]
+    prev_x = default_x
+    prev_y = default_y
+
+    for start_t, end_t, target_x, target_y in segment_targets:
+        seg_duration = max(0.01, end_t - start_t)
+        delta_x = abs(target_x - prev_x)
+        delta_y = abs(target_y - prev_y)
+
+        if delta_x <= 6 and delta_y <= 6:
+            continue
+
+        x_keyframes.append((start_t, prev_x))
+        y_keyframes.append((start_t, prev_y))
+
+        if delta_x > adj_w * 0.33 or delta_y > adjusted_h * 0.12:
+            pan_t = min(0.38, seg_duration * 0.45)
+        else:
+            pan_t = min(0.26, seg_duration * 0.35)
+
+        settle_t = min(end_t, start_t + max(0.08, pan_t))
+        x_keyframes.append((settle_t, target_x))
+        y_keyframes.append((settle_t, target_y))
+        prev_x = target_x
+        prev_y = target_y
+
+    return x_keyframes, y_keyframes
 
 
 def _create_gradient_png(output_path: str, width: int = 1080, height: int = 1920, opacity: float = 0.7) -> str:

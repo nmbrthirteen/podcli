@@ -366,12 +366,12 @@ def cmd_process(args):
     top_n = config.get("top_clips", 5)
     clips = None
 
-    # Try Claude first (uses PodStack knowledge base for intelligent selection)
-    from services.claude_suggest import suggest_with_claude, _find_ai_cli
+    # Try an AI CLI first (uses PodStack knowledge base for intelligent selection)
+    from services.claude_suggest import suggest_with_claude, _engine_label, _find_ai_cli
 
     ai_path, ai_engine = _find_ai_cli()
     if ai_path:
-        ai_label = "Claude" if ai_engine == "claude" else "Codex"
+        ai_label = _engine_label(ai_engine)
         print(f"  [3/4] Selecting moments with {ai_label} (PodStack)...")
         clips = suggest_with_claude(
             segments=segments,
@@ -379,9 +379,10 @@ def cmd_process(args):
             progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
         )
         if clips:
-            print(f"         ✓ {ai_label} selected {len(clips)} clips")
+            actual_engine = next((c.get("_ai_engine") for c in clips if c.get("_ai_engine")), ai_engine)
+            print(f"         ✓ {_engine_label(actual_engine)} selected {len(clips)} clips")
         else:
-            print(f"         ⚠ {ai_label} unavailable, falling back to heuristics")
+            print("         ⚠ AI CLI unavailable, falling back to heuristics")
     else:
         print(f"  [3/4] Scoring clips (heuristic mode)...")
         print(f"         ℹ Install Claude Code or Codex for smarter selection")
@@ -421,7 +422,7 @@ def cmd_process(args):
 
     # Check if AI CLI is available for per-clip content generation
     from services.claude_suggest import _find_ai_cli
-    _ai_cli_path, _ai_engine = _find_ai_cli()
+    _ai_cli_path, _ = _find_ai_cli()
 
     # Pre-load thumbnail tools if enabled
     _thumb_gen = None
@@ -444,7 +445,7 @@ def cmd_process(args):
         except Exception:
             _thumb_enabled = False
 
-    _ai_label = f" (+ titles via {'Claude' if _ai_engine == 'claude' else 'Codex'})" if _ai_cli_path else ""
+    _ai_label = " (+ AI titles)" if _ai_cli_path else ""
     print(f"\n  [4/4] Exporting {len(clips)} clips{_ai_label} to {output_dir}/")
     results = []
     t0 = time.time()
@@ -764,10 +765,10 @@ def _print_clips(clips: list):
 
 def _find_moment_with_claude(description: str, segments: list, existing_clips: list) -> list:
     """Use Claude to find a specific moment described by the user."""
-    from services.claude_suggest import _find_ai_cli
+    from services.claude_suggest import _find_ai_cli_candidates, _run_ai_command
 
-    cli_path, engine = _find_ai_cli()
-    if not cli_path:
+    candidates = _find_ai_cli_candidates()
+    if not candidates:
         print("         ⚠ No AI CLI available for moment search")
         return []
 
@@ -830,83 +831,83 @@ Transcript:
         prompt_file = f.name
 
     try:
-        if engine == "codex":
-            output_file = prompt_file + ".out"
-            result = subprocess.run(
-                [cli_path, "exec", "--full-auto", "-o", output_file, prompt],
-                capture_output=True, text=True, cwd=project_dir, timeout=300,
-            )
-            if os.path.exists(output_file):
-                with open(output_file) as fh:
-                    result = subprocess.CompletedProcess(
-                        args=result.args, returncode=result.returncode,
-                        stdout=fh.read(), stderr=result.stderr,
-                    )
-                try:
-                    os.unlink(output_file)
-                except Exception:
-                    pass
-        else:
-            result = subprocess.run(
-                f'cat "{prompt_file}" | "{cli_path}" --print -p -',
-                capture_output=True, text=True, cwd=project_dir, timeout=300, shell=True,
-            )
-
-        if result.returncode != 0:
-            return []
-
-        response = result.stdout.strip()
-        if "```" in response:
-            import re
-            fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", response, re.DOTALL)
-            if fence_match:
-                response = fence_match.group(1).strip()
-
-        json_start = response.find("{")
-        if json_start >= 0:
-            decoder = _json.JSONDecoder()
-            data, _ = decoder.raw_decode(response, json_start)
-        else:
-            data = _json.loads(response)
-
-        found = []
-        for c in data.get("clips", []):
-            scores = c.get("scores", {})
-            total = sum(scores.values()) if scores else c.get("total_score", 0)
-            raw_segments = c.get("segments", [])
-            keep_segments = []
-            for seg in raw_segments:
-                s = round(float(seg.get("start", 0)), 1)
-                e = round(float(seg.get("end", 0)), 1)
-                if e > s:
-                    keep_segments.append({"start": s, "end": e})
-
-            start_sec = round(float(c.get("start_second", 0)), 1)
-            end_sec = round(float(c.get("end_second", 0)), 1)
-            if not keep_segments and end_sec > start_sec:
-                keep_segments = [{"start": start_sec, "end": end_sec}]
-
-            kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
-            if kept_duration < 10 or kept_duration > 90:
+        for idx, (cli_path, engine) in enumerate(candidates):
+            if idx > 0:
+                print(f"         ⚠ Retrying moment search with {'Claude' if engine == 'claude' else 'Codex'}")
+            try:
+                result = _run_ai_command(
+                    cli_path=cli_path,
+                    engine=engine,
+                    prompt=prompt,
+                    prompt_file=prompt_file,
+                    project_dir=project_dir,
+                    timeout=300,
+                )
+            except Exception:
                 continue
 
-            found.append({
-                "title": c.get("title", "Untitled")[:55],
-                "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
-                "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
-                "segments": keep_segments,
-                "duration": round(kept_duration),
-                "score": total,
-                "content_type": c.get("content_type", "unknown"),
-                "reasoning": c.get("why", ""),
-                "preview_text": c.get("quote", "")[:120],
-                "suggested_caption_style": "hormozi",
-                "quote": c.get("quote", ""),
-                "why": c.get("why", ""),
-                "reasons": [c.get("content_type", "")],
-                "preview": c.get("quote", "")[:120],
-            })
-        return found
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
+
+            response = result.stdout.strip()
+            if "```" in response:
+                import re
+                fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", response, re.DOTALL)
+                if fence_match:
+                    response = fence_match.group(1).strip()
+
+            try:
+                json_start = response.find("{")
+                if json_start >= 0:
+                    decoder = _json.JSONDecoder()
+                    data, _ = decoder.raw_decode(response, json_start)
+                else:
+                    data = _json.loads(response)
+            except Exception:
+                continue
+
+            found = []
+            for c in data.get("clips", []):
+                scores = c.get("scores", {})
+                total = sum(scores.values()) if scores else c.get("total_score", 0)
+                raw_segments = c.get("segments", [])
+                keep_segments = []
+                for seg in raw_segments:
+                    s = round(float(seg.get("start", 0)), 1)
+                    e = round(float(seg.get("end", 0)), 1)
+                    if e > s:
+                        keep_segments.append({"start": s, "end": e})
+
+                start_sec = round(float(c.get("start_second", 0)), 1)
+                end_sec = round(float(c.get("end_second", 0)), 1)
+                if not keep_segments and end_sec > start_sec:
+                    keep_segments = [{"start": start_sec, "end": end_sec}]
+
+                kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
+                if kept_duration < 10 or kept_duration > 90:
+                    continue
+
+                found.append({
+                    "title": c.get("title", "Untitled")[:55],
+                    "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
+                    "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
+                    "segments": keep_segments,
+                    "duration": round(kept_duration),
+                    "score": total,
+                    "content_type": c.get("content_type", "unknown"),
+                    "reasoning": c.get("why", ""),
+                    "preview_text": c.get("quote", "")[:120],
+                    "suggested_caption_style": "hormozi",
+                    "quote": c.get("quote", ""),
+                    "why": c.get("why", ""),
+                    "reasons": [c.get("content_type", "")],
+                    "preview": c.get("quote", "")[:120],
+                })
+
+            if found:
+                return found
+
+        return []
 
     except Exception as e:
         print(f"         ⚠ Search error: {e}")
@@ -1020,7 +1021,7 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
         elif action == "more":
             top_n = config.get("top_clips", 5)
             from services.claude_suggest import suggest_with_claude
-            with _Spinner(f"Asking Claude for {top_n} more suggestions...") as sp:
+            with _Spinner(f"Asking AI for {top_n} more suggestions...") as sp:
                 more_clips = suggest_with_claude(
                     segments=segments,
                     top_n=top_n,
@@ -1299,7 +1300,7 @@ def _post_render_loop(
 
         elif action == "more":
             top_n = config.get("top_clips", 5)
-            print(f"\n         Asking Claude for more suggestions...")
+            print(f"\n         Asking AI for more suggestions...")
             from services.claude_suggest import suggest_with_claude
             more_clips = suggest_with_claude(
                 segments=segments,
