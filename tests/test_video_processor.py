@@ -13,6 +13,20 @@ from services import video_processor as vp
 
 
 class VideoProcessorTests(unittest.TestCase):
+    def test_resolve_speaker_sides_does_not_guess_from_transcript_order(self):
+        speaker_side = vp._resolve_speaker_sides(
+            segments=[(0.0, 2.0, "SPEAKER_00"), (2.0, 4.0, "SPEAKER_01")],
+            detections=[
+                (0.0, [{"cx": 420, "fw": 180}, {"cx": 1500, "fw": 180}]),
+                (0.4, [{"cx": 430, "fw": 180}, {"cx": 1490, "fw": 180}]),
+                (0.8, [{"cx": 440, "fw": 180}, {"cx": 1480, "fw": 180}]),
+            ],
+            width=1920,
+            face_map=None,
+        )
+
+        self.assertEqual(speaker_side, {})
+
     def test_assign_face_tracks_keeps_ids_stable_across_frames(self):
         tracked = vp._assign_face_tracks(
             detections=[
@@ -87,6 +101,28 @@ class VideoProcessorTests(unittest.TestCase):
         self.assertEqual(segment_tracks[0][3], 0)
         self.assertLess(anchors["SPEAKER_03"], 1200)
         self.assertEqual(sides["SPEAKER_03"], "left")
+
+    def test_choose_segment_tracks_infers_opposite_side_for_other_speaker(self):
+        tracked_detections = [
+            (0.0, [{"cx": 510, "fw": 360, "track_id": 0}]),
+            (0.5, [{"cx": 535, "fw": 352, "track_id": 0}]),
+            (1.0, [{"cx": 540, "fw": 300, "track_id": 0}, {"cx": 1510, "fw": 255, "track_id": 1}]),
+            (1.5, [{"cx": 548, "fw": 298, "track_id": 0}, {"cx": 1496, "fw": 260, "track_id": 1}]),
+            (2.0, [{"cx": 560, "fw": 296, "track_id": 0}, {"cx": 1488, "fw": 262, "track_id": 1}]),
+        ]
+
+        segment_tracks, anchors, sides = vp._choose_segment_tracks(
+            segments=[(0.0, 0.9, "SPEAKER_00"), (0.9, 2.2, "SPEAKER_01")],
+            tracked_detections=tracked_detections,
+            speaker_side={},
+            speaker_anchor_x={},
+            width=1920,
+        )
+
+        self.assertEqual(segment_tracks[0][3], 0)
+        self.assertEqual(sides["SPEAKER_00"], "left")
+        self.assertEqual(segment_tracks[1][3], 1)
+        self.assertEqual(sides["SPEAKER_01"], "right")
 
     def test_choose_track_segment_targets_picks_one_stable_target_per_turn(self):
         targets = vp._choose_track_segment_targets(

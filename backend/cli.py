@@ -161,6 +161,10 @@ def cmd_process(args):
         config["crop_strategy"] = args.crop
     if args.top:
         config["top_clips"] = args.top
+    if getattr(args, "review_each", False):
+        config["review_each_clip"] = True
+    if getattr(args, "post_review", False):
+        config["post_render_review"] = True
     if args.logo:
         from services.asset_store import resolve as resolve_asset
         resolved = resolve_asset(args.logo)
@@ -449,7 +453,7 @@ def cmd_process(args):
     print(f"\n  [4/4] Exporting {len(clips)} clips{_ai_label} to {output_dir}/")
     results = []
     t0 = time.time()
-    _skip_review = False
+    _skip_review = not config.get("review_each_clip", False)
 
     for i, clip in enumerate(clips):
         ok = False
@@ -696,17 +700,18 @@ def cmd_process(args):
         print(f"\n  {gray}For titles, descriptions & tags: install Claude Code or Codex CLI{reset}")
 
     # ── Post-render iteration ──
-    _post_render_loop(
-        clips=clips,
-        results=results,
-        segments=segments,
-        words=words,
-        config=config,
-        video_path=video_path,
-        output_dir=output_dir,
-        face_map=face_map,
-        energy_scores=energy_scores,
-    )
+    if config.get("post_render_review", False):
+        _post_render_loop(
+            clips=clips,
+            results=results,
+            segments=segments,
+            words=words,
+            config=config,
+            video_path=video_path,
+            output_dir=output_dir,
+            face_map=face_map,
+            energy_scores=energy_scores,
+        )
 
 
 class _Spinner:
@@ -949,10 +954,10 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
         _print_clips(clips)
 
         choices = [
-            questionary.Choice(f"Render {len(selected)} clips", value="render"),
+            questionary.Choice(f"Render {len(selected)} selected clips", value="render"),
             questionary.Choice("Toggle clips on/off", value="toggle"),
             questionary.Choice("Find a specific moment", value="find"),
-            questionary.Choice("Get more suggestions from Claude", value="more"),
+            questionary.Choice("Find additional clips beyond current picks", value="more"),
             questionary.Choice("Quit", value="quit"),
         ]
 
@@ -1020,32 +1025,44 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
 
         elif action == "more":
             top_n = config.get("top_clips", 5)
-            from services.claude_suggest import suggest_with_claude
-            with _Spinner(f"Asking AI for {top_n} more suggestions...") as sp:
-                more_clips = suggest_with_claude(
+            from services.claude_suggest import suggest_more_with_claude
+            request_n = min(18, max(top_n + 4, top_n * config.get("more_suggestions_multiplier", 3)))
+            with _Spinner(f"Finding up to {request_n} additional non-overlapping clips...") as sp:
+                more_clips = suggest_more_with_claude(
                     segments=segments,
-                    top_n=top_n,
+                    existing_clips=clips,
+                    top_n=request_n,
                     progress_callback=lambda pct, msg: sp.update(msg) if msg else None,
                 )
             if more_clips:
-                # Filter out duplicates (overlapping timestamps)
-                new_count = 0
-                for mc in more_clips:
-                    is_dup = False
-                    for existing in clips:
-                        # Check if timestamps overlap significantly
-                        overlap_start = max(mc["start_second"], existing["start_second"])
-                        overlap_end = min(mc["end_second"], existing["end_second"])
-                        if overlap_end - overlap_start > 5:
-                            is_dup = True
-                            break
-                    if not is_dup:
-                        mc["_selected"] = True
-                        clips.append(mc)
-                        new_count += 1
+                new_clips = _filter_duplicate_clip_suggestions(more_clips, clips)
+                for mc in new_clips:
+                    mc["_selected"] = True
+                    clips.append(mc)
+                new_count = len(new_clips)
                 print(f"         Added {new_count} new suggestions ({len(more_clips) - new_count} duplicates skipped)")
             else:
                 print(f"         No additional suggestions found.")
+
+
+def _filter_duplicate_clip_suggestions(candidates: list, existing: list, overlap_threshold: float = 5.0) -> list:
+    """Drop suggestions that significantly overlap already-selected clips."""
+    filtered = []
+    all_existing = list(existing)
+
+    for candidate in candidates:
+        is_dup = False
+        for current in all_existing:
+            overlap_start = max(candidate["start_second"], current["start_second"])
+            overlap_end = min(candidate["end_second"], current["end_second"])
+            if overlap_end - overlap_start > overlap_threshold:
+                is_dup = True
+                break
+        if not is_dup:
+            filtered.append(candidate)
+            all_existing.append(candidate)
+
+    return filtered
 
 
 def _post_render_loop(
@@ -1185,7 +1202,7 @@ def _post_render_loop(
             questionary.Choice("Done — open output folder", value="done"),
             questionary.Choice("Re-review a clip", value="rerender"),
             questionary.Choice("Find another moment to clip", value="find"),
-            questionary.Choice("Get more suggestions from Claude", value="more"),
+            questionary.Choice("Find additional clips beyond current picks", value="more"),
         ]
 
         action = questionary.select(
@@ -1300,25 +1317,17 @@ def _post_render_loop(
 
         elif action == "more":
             top_n = config.get("top_clips", 5)
-            print(f"\n         Asking AI for more suggestions...")
-            from services.claude_suggest import suggest_with_claude
-            more_clips = suggest_with_claude(
+            request_n = min(18, max(top_n + 4, top_n * config.get("more_suggestions_multiplier", 3)))
+            print(f"\n         Finding additional non-overlapping clip ideas...")
+            from services.claude_suggest import suggest_more_with_claude
+            more_clips = suggest_more_with_claude(
                 segments=segments,
-                top_n=top_n,
+                existing_clips=clips,
+                top_n=request_n,
                 progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
             )
             if more_clips:
-                new_clips = []
-                for mc in more_clips:
-                    is_dup = False
-                    for existing in clips:
-                        overlap_start = max(mc["start_second"], existing["start_second"])
-                        overlap_end = min(mc["end_second"], existing["end_second"])
-                        if overlap_end - overlap_start > 5:
-                            is_dup = True
-                            break
-                    if not is_dup:
-                        new_clips.append(mc)
+                new_clips = _filter_duplicate_clip_suggestions(more_clips, clips)
 
                 if new_clips:
                     for nc in new_clips:
@@ -1695,6 +1704,10 @@ def cmd_presets(args):
             config["time_adjust"] = args.time_adjust
         if args.quality:
             config["quality"] = args.quality
+        if args.review_each:
+            config["review_each_clip"] = True
+        if args.post_review:
+            config["post_render_review"] = True
         if args.no_energy:
             config["energy_boost"] = False
         if args.no_speakers:
@@ -2289,6 +2302,8 @@ def main():
     proc.add_argument("--no-speakers", action="store_true", help="Skip speaker detection (faster, uses face detection only)")
     proc.add_argument("--no-cache", action="store_true", help="Force re-transcription (ignore cached transcript)")
     proc.add_argument("--quality", choices=["low", "medium", "high", "max"], help="Output quality (default: high)")
+    proc.add_argument("--review-each", action="store_true", help="Review each rendered clip interactively")
+    proc.add_argument("--post-review", action="store_true", help="Open the post-render review loop after export")
 
     # ── presets ──
     pre = sub.add_parser("presets", help="Manage presets")
@@ -2308,6 +2323,8 @@ def main():
     pre_save.add_argument("--top", type=int, help="Default top clips count")
     pre_save.add_argument("--time-adjust", type=float)
     pre_save.add_argument("--quality", choices=["low", "medium", "high", "max"])
+    pre_save.add_argument("--review-each", action="store_true", help="Enable per-clip interactive review")
+    pre_save.add_argument("--post-review", action="store_true", help="Enable post-render review loop")
     pre_save.add_argument("--no-energy", action="store_true", help="Skip audio energy analysis")
     pre_save.add_argument("--no-speakers", action="store_true", help="Skip speaker detection")
     pre_save.add_argument("--with-corrections", action="store_true", help="Include current global corrections in preset")

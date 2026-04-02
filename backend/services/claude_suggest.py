@@ -8,6 +8,7 @@ Priority: Claude Code → Codex → heuristic fallback.
 """
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -143,7 +144,13 @@ def _load_existing_shorts(episodes_path: str) -> list[str]:
         return []
 
 
-def _build_prompt(transcript_text: str, segment_count: int, duration_min: float, top_n: int) -> str:
+def _build_prompt(
+    transcript_text: str,
+    segment_count: int,
+    duration_min: float,
+    top_n: int,
+    exclude_clips: list[dict] | None = None,
+) -> str:
     """Build the prompt for Claude to extract clips.
 
     Inlines key rules from the knowledge base since Claude --print mode
@@ -183,6 +190,21 @@ def _build_prompt(transcript_text: str, segment_count: int, duration_min: float,
     episodes_path = os.path.join(kb_dir, "03-episodes-database.md")
     existing_shorts = _load_existing_shorts(episodes_path)
 
+    excluded_ranges = ""
+    if exclude_clips:
+        lines = []
+        for clip in exclude_clips[:24]:
+            start = round(float(clip.get("start_second", 0)), 1)
+            end = round(float(clip.get("end_second", 0)), 1)
+            title = str(clip.get("title", "Untitled")).strip()
+            if end > start:
+                lines.append(f"- {start:.1f}s to {end:.1f}s: {title[:80]}")
+        if lines:
+            excluded_ranges = (
+                "\nALREADY SELECTED CLIPS (do NOT return overlapping moments with these):\n"
+                + "\n".join(lines)
+            )
+
     return f"""You are a viral clip editor for TikTok and YouTube Shorts. Find the {top_n} most scroll-stopping moments in this podcast transcript.
 
 IMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences.
@@ -214,10 +236,12 @@ MOMENT SELECTION (think like a TikTok editor):
 - Single focused idea — one concept, fully delivered, no loose threads
 - Prioritize: controversial takes, surprising numbers, founder war stories, "wait what?" moments, emotional peaks
 - Skip: generic advice, obvious statements, context-dependent references
+- On long episodes, search the ENTIRE timeline and diversify the picks. Do not cluster all clips in one section if later sections contain strong standalone moments.
 
 {f"KNOWLEDGE BASE:{kb_context}" if kb_context else ""}
 
 {f"EXISTING SHORTS (avoid duplicating these moments):{chr(10).join('- ' + s for s in existing_shorts)}" if existing_shorts else ""}
+{excluded_ranges}
 
 Score each moment on 4 dimensions (1-5 each):
 - standalone: Makes sense without episode context?
@@ -273,6 +297,7 @@ Transcript ({segment_count} segments, ~{duration_min:.0f} min):
 def suggest_with_claude(
     segments: list[dict],
     top_n: int = 5,
+    exclude_clips: list[dict] | None = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> Optional[list[dict]]:
     """
@@ -307,7 +332,13 @@ def suggest_with_claude(
     if segments:
         duration_min = (segments[-1].get("end", 0) - segments[0].get("start", 0)) / 60
 
-    prompt = _build_prompt(transcript_text, len(segments), duration_min, top_n)
+    prompt = _build_prompt(
+        transcript_text,
+        len(segments),
+        duration_min,
+        top_n,
+        exclude_clips=exclude_clips,
+    )
 
     # Write prompt to temp file to avoid shell escaping issues
     project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
@@ -453,3 +484,155 @@ def suggest_with_claude(
             os.unlink(prompt_file)
         except Exception:
             pass
+
+
+def _bucket_coverage_seconds(existing_clips: list[dict], start: float, end: float) -> float:
+    """Total selected-clip overlap inside a time bucket."""
+    covered = 0.0
+    for clip in existing_clips:
+        overlap_start = max(start, float(clip.get("start_second", 0)))
+        overlap_end = min(end, float(clip.get("end_second", 0)))
+        if overlap_end > overlap_start:
+            covered += overlap_end - overlap_start
+    return covered
+
+
+def _slice_segments_for_range(segments: list[dict], start: float, end: float) -> list[dict]:
+    """Return transcript segments that overlap a bucket range."""
+    return [
+        seg for seg in segments
+        if float(seg.get("end", seg.get("start", 0))) > start
+        and float(seg.get("start", 0)) < end
+    ]
+
+
+def suggest_more_with_claude(
+    segments: list[dict],
+    existing_clips: list[dict],
+    top_n: int = 8,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> Optional[list[dict]]:
+    """
+    Ask the AI for more clips by searching under-covered time buckets first.
+
+    This prevents the common failure mode where repeated whole-episode prompts
+    keep returning the same few obvious moments.
+    """
+    if not segments:
+        return None
+
+    start_bound = float(segments[0].get("start", 0))
+    end_bound = float(segments[-1].get("end", segments[-1].get("start", 0)))
+    duration = max(0.0, end_bound - start_bound)
+    if duration <= 0:
+        return None
+
+    bucket_count = min(6, max(3, math.ceil((duration / 60.0) / 25.0)))
+    bucket_size = duration / bucket_count
+    buckets = []
+    for idx in range(bucket_count):
+        bucket_start = start_bound + idx * bucket_size
+        bucket_end = end_bound if idx == bucket_count - 1 else start_bound + (idx + 1) * bucket_size
+        bucket_segments = _slice_segments_for_range(segments, bucket_start, bucket_end)
+        if len(bucket_segments) < 3:
+            continue
+        coverage_seconds = _bucket_coverage_seconds(existing_clips, bucket_start, bucket_end)
+        bucket_duration = max(1.0, bucket_end - bucket_start)
+        buckets.append({
+            "start": bucket_start,
+            "end": bucket_end,
+            "segments": bucket_segments,
+            "coverage_ratio": coverage_seconds / bucket_duration,
+            "coverage_seconds": coverage_seconds,
+        })
+
+    if not buckets:
+        return suggest_with_claude(
+            segments=segments,
+            top_n=top_n,
+            exclude_clips=existing_clips,
+            progress_callback=progress_callback,
+        )
+
+    buckets.sort(key=lambda b: (b["coverage_ratio"], b["coverage_seconds"], b["start"]))
+    target_bucket_count = min(len(buckets), max(2, min(4, math.ceil(top_n / 3.0))))
+    selected_buckets = buckets[:target_bucket_count]
+    remaining_buckets = buckets[target_bucket_count:]
+    per_bucket_top_n = max(2, math.ceil(top_n / max(1, len(selected_buckets))))
+
+    aggregated: list[dict] = []
+    for idx, bucket in enumerate(selected_buckets):
+        bucket_label = f"bucket {idx + 1}/{len(selected_buckets)} [{int(bucket['start'] // 60)}:{int(bucket['start'] % 60):02d}-{int(bucket['end'] // 60)}:{int(bucket['end'] % 60):02d}]"
+        if progress_callback:
+            progress_callback(0, f"Searching {bucket_label}...")
+
+        bucket_clips = suggest_with_claude(
+            segments=bucket["segments"],
+            top_n=per_bucket_top_n,
+            exclude_clips=existing_clips + aggregated,
+            progress_callback=(
+                None if progress_callback is None
+                else lambda pct, msg, bucket_label=bucket_label: progress_callback(
+                    pct,
+                    f"{bucket_label}: {msg}" if msg else msg,
+                )
+            ),
+        )
+        if not bucket_clips:
+            continue
+
+        aggregated.extend(bucket_clips)
+        if len(aggregated) >= top_n:
+            break
+
+    if len(aggregated) < top_n and remaining_buckets:
+        for idx, bucket in enumerate(remaining_buckets, start=len(selected_buckets) + 1):
+            bucket_label = f"bucket {idx}/{len(buckets)} [{int(bucket['start'] // 60)}:{int(bucket['start'] % 60):02d}-{int(bucket['end'] // 60)}:{int(bucket['end'] % 60):02d}]"
+            if progress_callback:
+                progress_callback(0, f"Searching {bucket_label}...")
+
+            bucket_clips = suggest_with_claude(
+                segments=bucket["segments"],
+                top_n=max(1, min(per_bucket_top_n, top_n - len(aggregated))),
+                exclude_clips=existing_clips + aggregated,
+                progress_callback=(
+                    None if progress_callback is None
+                    else lambda pct, msg, bucket_label=bucket_label: progress_callback(
+                        pct,
+                        f"{bucket_label}: {msg}" if msg else msg,
+                    )
+                ),
+            )
+            if not bucket_clips:
+                continue
+
+            aggregated.extend(bucket_clips)
+            if len(aggregated) >= top_n:
+                break
+
+    if len(aggregated) < max(2, min(top_n, 4)):
+        fallback_clips = suggest_with_claude(
+            segments=segments,
+            top_n=top_n,
+            exclude_clips=existing_clips + aggregated,
+            progress_callback=(
+                None if progress_callback is None
+                else lambda pct, msg: progress_callback(
+                    pct,
+                    f"global pass: {msg}" if msg else msg,
+                )
+            ),
+        )
+        if fallback_clips:
+            aggregated.extend(fallback_clips)
+
+    deduped = []
+    seen_ranges = set()
+    for clip in sorted(aggregated, key=lambda c: c.get("start_second", 0)):
+        key = (round(float(clip.get("start_second", 0)), 1), round(float(clip.get("end_second", 0)), 1))
+        if key in seen_ranges:
+            continue
+        seen_ranges.add(key)
+        deduped.append(clip)
+
+    return deduped[:top_n] if deduped else None

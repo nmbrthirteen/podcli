@@ -17,6 +17,23 @@ from services import thumbnail_ai as tai
 
 
 class AIFallbackTests(unittest.TestCase):
+    def test_build_prompt_includes_excluded_ranges(self):
+        prompt = cs._build_prompt(
+            transcript_text="[0.0s] Test transcript",
+            segment_count=1,
+            duration_min=100 / 60,
+            top_n=8,
+            exclude_clips=[
+                {"start_second": 120.0, "end_second": 152.0, "title": "Grid connection hot take"},
+                {"start_second": 900.0, "end_second": 932.0, "title": "Gigawatts nobody considers"},
+            ],
+        )
+
+        self.assertIn("ALREADY SELECTED CLIPS", prompt)
+        self.assertIn("120.0s to 152.0s", prompt)
+        self.assertIn("Grid connection hot take", prompt)
+        self.assertIn("search the ENTIRE timeline and diversify the picks", prompt)
+
     def test_suggest_with_claude_retries_with_codex_after_runtime_failure(self):
         segments = [
             {"start": 0.0, "end": 12.0, "speaker": "SPEAKER_00", "text": "Warmup context."},
@@ -62,6 +79,93 @@ class AIFallbackTests(unittest.TestCase):
         self.assertEqual(clips[0]["_ai_engine"], "codex")
         self.assertIn("Retrying with Codex...", progress)
         self.assertIn("Codex suggested 1 clips", progress)
+
+    def test_suggest_more_with_claude_searches_undercovered_buckets(self):
+        segments = []
+        for i in range(12):
+            start = float(i * 300)
+            segments.append({
+                "start": start,
+                "end": start + 40.0,
+                "speaker": "SPEAKER_00",
+                "text": f"Segment {i}",
+            })
+
+        calls = []
+
+        def fake_suggest(*, segments, top_n, exclude_clips=None, progress_callback=None):
+            calls.append({
+                "start": segments[0]["start"],
+                "end": segments[-1]["end"],
+                "top_n": top_n,
+                "exclude_len": len(exclude_clips or []),
+            })
+            first_start = segments[0]["start"]
+            return [{
+                "title": f"Clip {first_start}",
+                "start_second": first_start,
+                "end_second": first_start + 28.0,
+                "segments": [{"start": first_start, "end": first_start + 28.0}],
+                "duration": 28,
+            }]
+
+        with mock.patch.object(cs, "suggest_with_claude", side_effect=fake_suggest):
+            clips = cs.suggest_more_with_claude(
+                segments=segments,
+                existing_clips=[
+                    {"start_second": 0.0, "end_second": 180.0, "title": "Early clip"},
+                    {"start_second": 320.0, "end_second": 500.0, "title": "Another early clip"},
+                ],
+                top_n=6,
+            )
+
+        self.assertIsNotNone(clips)
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertTrue(all(call["exclude_len"] >= 2 for call in calls))
+        bucketed_calls = [call for call in calls if call["end"] - call["start"] < 2000]
+        self.assertGreaterEqual(len(bucketed_calls), 2)
+        self.assertTrue(all(call["start"] > 500.0 for call in bucketed_calls[:2]))
+
+    def test_suggest_more_with_claude_uses_global_fallback_after_bucket_passes(self):
+        segments = []
+        for i in range(9):
+            start = float(i * 240)
+            segments.append({
+                "start": start,
+                "end": start + 35.0,
+                "speaker": "SPEAKER_00",
+                "text": f"Segment {i}",
+            })
+
+        calls = []
+
+        def fake_suggest(*, segments, top_n, exclude_clips=None, progress_callback=None):
+            calls.append({
+                "start": segments[0]["start"],
+                "end": segments[-1]["end"],
+                "top_n": top_n,
+            })
+            if segments[0]["start"] == 0.0 and segments[-1]["end"] > 1000.0:
+                return [{
+                    "title": "Global clip",
+                    "start_second": 1440.0,
+                    "end_second": 1468.0,
+                    "segments": [{"start": 1440.0, "end": 1468.0}],
+                    "duration": 28,
+                }]
+            return None
+
+        with mock.patch.object(cs, "suggest_with_claude", side_effect=fake_suggest):
+            clips = cs.suggest_more_with_claude(
+                segments=segments,
+                existing_clips=[],
+                top_n=5,
+            )
+
+        self.assertIsNotNone(clips)
+        self.assertEqual(clips[0]["title"], "Global clip")
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertEqual(calls[-1]["start"], 0.0)
 
     def test_generate_clip_content_retries_with_codex(self):
         clip = {

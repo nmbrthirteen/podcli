@@ -574,7 +574,11 @@ def _resolve_speaker_sides(
 ) -> dict:
     """
     Build left/right speaker hints for mixed split-screen clips.
-    Prefer precomputed face_map mappings, then fall back to first-speaker order.
+    Only use precomputed face_map mappings here.
+
+    Guessing speaker sides from transcript order is low-confidence and can
+    easily reverse the camera on host/guest clips. Clip-local track evidence
+    should make that decision instead.
     """
     speaker_side = {}
     mid_x = width // 2
@@ -586,23 +590,6 @@ def _resolve_speaker_sides(
             if cluster_index is None or cluster_index >= len(clusters):
                 continue
             speaker_side[speaker] = "left" if clusters[cluster_index]["center_x"] < mid_x else "right"
-
-    split_count = sum(1 for _, faces in detections if len(faces) >= 2)
-    has_any_split = split_count >= 3
-    speakers = sorted(set(seg[2] for seg in segments)) if segments else []
-
-    if has_any_split and len(speakers) >= 2 and len(speaker_side) < 2:
-        talk = {}
-        first = {}
-        for start_t, end_t, speaker in segments:
-            talk[speaker] = talk.get(speaker, 0) + (end_t - start_t)
-            if speaker not in first:
-                first[speaker] = start_t
-        top2 = sorted(speakers, key=lambda s: talk.get(s, 0), reverse=True)[:2]
-        by_first = sorted(top2, key=lambda s: first.get(s, float("inf")))
-        speaker_side[by_first[0]] = "left"
-        if len(by_first) > 1:
-            speaker_side[by_first[1]] = "right"
 
     return speaker_side
 
@@ -725,6 +712,16 @@ def _choose_segment_tracks(
         prev_track_id = last_track_for_speaker.get(speaker)
         hint_anchor = learned_anchor_x.get(speaker)
         hint_side = learned_side.get(speaker)
+        side_hint_strength = 1.1
+        anchor_hint_penalty = 1.8
+
+        if hint_side is None:
+            other_sides = {sp: side for sp, side in learned_side.items() if sp != speaker}
+            if len(other_sides) == 1:
+                only_side = next(iter(other_sides.values()))
+                hint_side = "right" if only_side == "left" else "left"
+                side_hint_strength = 0.6
+                anchor_hint_penalty = 0.9
 
         def _local_score(item):
             track_id, data = item
@@ -750,22 +747,44 @@ def _choose_segment_tracks(
 
             if hint_side:
                 on_hint_side = median_x < (width / 2) if hint_side == "left" else median_x >= (width / 2)
-                score += 1.1 if on_hint_side else -0.8
+                score += side_hint_strength if on_hint_side else -side_hint_strength * 0.72
 
             if hint_anchor is not None:
-                score -= min(1.8, abs(median_x - hint_anchor) / max(width * 0.30, 1))
+                score -= min(anchor_hint_penalty, abs(median_x - hint_anchor) / max(width * 0.30, 1))
             return score
 
         local_best_track_id, local_best_data = max(candidates.items(), key=_local_score)
         chosen_track_id, chosen_data = max(candidates.items(), key=_score)
 
         local_best_score = _local_score((local_best_track_id, local_best_data))
+        chosen_local_score = _local_score((chosen_track_id, chosen_data))
         hinted_score = _score((chosen_track_id, chosen_data))
         local_scored_with_hints = _score((local_best_track_id, local_best_data))
+        local_best_x = float(median(local_best_data["cxs"]))
+        local_best_opposes_hint = False
+        if learned_side.get(speaker):
+            expected_left = learned_side[speaker] == "left"
+            local_best_left = local_best_x < (width / 2)
+            local_best_opposes_hint = expected_left != local_best_left
+        local_best_has_decisive_local_evidence = (
+            local_best_score >= chosen_local_score + 2.5
+            or local_best_data["split_frames"] >= chosen_data["split_frames"] + 2
+        )
+        hint_is_inferred_or_weak = hint_anchor is None or side_hint_strength < 1.0
+
         if (
             local_best_track_id != chosen_track_id
-            and local_best_score >= _local_score((chosen_track_id, chosen_data)) + 1.5
-            and local_scored_with_hints >= hinted_score - 0.8
+            and (
+                (
+                    local_best_score >= chosen_local_score + 1.2
+                    and local_scored_with_hints >= hinted_score - 0.6
+                )
+                or (
+                    local_best_opposes_hint
+                    and local_best_has_decisive_local_evidence
+                    and hint_is_inferred_or_weak
+                )
+            )
         ):
             chosen_track_id, chosen_data = local_best_track_id, local_best_data
 

@@ -36,6 +36,9 @@ DEFAULT_PRESET = {
     "energy_boost": True,
     "quality": "max",
     "no_speakers": False,
+    "review_each_clip": False,
+    "post_render_review": False,
+    "more_suggestions_multiplier": 3,
     "corrections": {},
 }
 
