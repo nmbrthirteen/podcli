@@ -271,10 +271,15 @@ export function createServer(): McpServer {
         .default("hormozi")
         .describe("Caption style"),
       crop_strategy: z
-        .enum(["center", "face"])
+        .enum(["center", "face", "speaker"])
         .optional()
-        .default("face")
+        .default("speaker")
         .describe("Cropping strategy"),
+      allow_ass_fallback: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe("Allow ASS caption fallback if Remotion rendering fails (default: false)"),
       transcript_words: z
         .array(
           z.object({
@@ -344,7 +349,7 @@ export function createServer(): McpServer {
           params.start_second as number,
           params.end_second as number,
           (params.caption_style || "hormozi") as string,
-          (params.crop_strategy || "face") as string
+          (params.crop_strategy || "speaker") as string
         );
         if (dup) {
           return {
@@ -369,7 +374,8 @@ export function createServer(): McpServer {
                 end_second: params.end_second,
                 title: (params.title || "clip") as string,
                 caption_style: params.caption_style || "hormozi",
-                crop_strategy: params.crop_strategy || "face",
+                crop_strategy: params.crop_strategy || "speaker",
+                allow_ass_fallback: params.allow_ass_fallback === true,
                 ...(keepSegments && { segments: keepSegments }),
               }],
               transcript_words: params.transcript_words,
@@ -427,7 +433,7 @@ export function createServer(): McpServer {
             start_second: params.start_second as number,
             end_second: params.end_second as number,
             caption_style: (params.caption_style || "hormozi") as string,
-            crop_strategy: (params.crop_strategy || "face") as string,
+            crop_strategy: (params.crop_strategy || "speaker") as string,
             logo_path: params.logo_path as string | undefined,
             title: (params.title || "clip") as string,
             output_path: parsed.output_path,
@@ -478,7 +484,8 @@ export function createServer(): McpServer {
             end_second: z.number(),
             title: z.string().optional(),
             caption_style: z.enum(["hormozi", "karaoke", "subtle", "branded"]).optional(),
-            crop_strategy: z.enum(["center", "face"]).optional(),
+            crop_strategy: z.enum(["center", "face", "speaker"]).optional(),
+            allow_ass_fallback: z.boolean().optional(),
           })
         )
         .optional()
@@ -522,7 +529,8 @@ export function createServer(): McpServer {
                 end_second: s.end_second,
                 title: s.title || `clip_${i + 1}`,
                 caption_style: (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
-                crop_strategy: settings.cropStrategy || "face",
+                crop_strategy: settings.cropStrategy || "speaker",
+                allow_ass_fallback: false,
                 ...(Array.isArray(s.segments) && s.segments.length > 0 && { keep_segments: s.segments }),
               })) as any;
           } else if (params.clip_numbers) {
@@ -535,7 +543,8 @@ export function createServer(): McpServer {
                   end_second: s.end_second,
                   title: s.title || `clip_${n}`,
                   caption_style: (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
-                  crop_strategy: settings.cropStrategy || "face",
+                  crop_strategy: settings.cropStrategy || "speaker",
+                  allow_ass_fallback: false,
                   ...(Array.isArray(s.segments) && s.segments.length > 0 && { keep_segments: s.segments }),
                 };
               }) as any;
@@ -609,7 +618,7 @@ export function createServer(): McpServer {
                   start_second: r.start_second || 0,
                   end_second: r.end_second || 0,
                   caption_style: r.caption_style || "hormozi",
-                  crop_strategy: r.crop_strategy || "face",
+                  crop_strategy: r.crop_strategy || "speaker",
                   title: r.title || "clip",
                   output_path: r.output_path,
                   file_size_mb: r.file_size_mb || 0,
@@ -779,7 +788,7 @@ export function createServer(): McpServer {
         if (action === "check" && source_video && start_second !== undefined && end_second !== undefined) {
           const dup = await history.findDuplicate(
             source_video, start_second, end_second,
-            caption_style || "hormozi", crop_strategy || "face"
+            caption_style || "hormozi", crop_strategy || "speaker"
           );
           if (dup) {
             return { content: [{ type: "text" as const, text: `Duplicate found: "${dup.title}" created ${dup.created_at}\nOutput: ${dup.output_path}` }] };
@@ -1073,7 +1082,7 @@ export function createServer(): McpServer {
     "Update rendering settings (caption style, crop strategy, logo, outro) in the Web UI.",
     {
       caption_style: z.enum(["hormozi", "karaoke", "subtle", "branded"]).optional().describe("Caption style"),
-      crop_strategy: z.enum(["center", "face"]).optional().describe("Cropping strategy"),
+      crop_strategy: z.enum(["center", "face", "speaker"]).optional().describe("Cropping strategy"),
       logo_path: z.string().optional().describe("Path or registered asset name for PNG logo"),
       outro_path: z.string().optional().describe("Path or registered asset name for outro video"),
     },
@@ -1159,7 +1168,7 @@ export function createServer(): McpServer {
       name: z.string().optional().describe("Preset name (required for save/load/delete)"),
       config: z.object({
         caption_style: z.enum(["hormozi", "karaoke", "subtle", "branded"]).optional(),
-        crop_strategy: z.enum(["center", "face"]).optional(),
+        crop_strategy: z.enum(["center", "face", "speaker"]).optional(),
         logo_path: z.string().optional(),
         outro_path: z.string().optional(),
       }).optional().describe("Preset config (for save action)"),

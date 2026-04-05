@@ -58,7 +58,10 @@ export const batchClipsToolDef = {
             },
             crop_strategy: {
               type: "string",
-              enum: ["center", "face"],
+              enum: ["center", "face", "speaker"],
+            },
+            allow_ass_fallback: {
+              type: "boolean",
             },
           },
           required: ["start_second", "end_second"],
@@ -69,6 +72,12 @@ export const batchClipsToolDef = {
         description:
           "Remove filler words (um, uh, hmm) from captions and compress long silences. Default: true",
         default: true,
+      },
+      allow_ass_fallback: {
+        type: "boolean",
+        description:
+          "Allow fallback to legacy ASS captions if Remotion caption rendering fails. Default: false.",
+        default: false,
       },
       transcript_words: {
         type: "array",
@@ -122,7 +131,8 @@ export async function handleBatchClips(
     title: s.title || `clip_${num}`,
     caption_style:
       (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
-    crop_strategy: settings.cropStrategy || "face",
+    crop_strategy: settings.cropStrategy || "speaker",
+    allow_ass_fallback: input.allow_ass_fallback === true,
     logo_path: settings.logoPath || null,
     // Preserve multi-cut segments from suggestion
     ...(Array.isArray(s.segments) && s.segments.length > 0 && { keep_segments: s.segments }),
@@ -173,6 +183,7 @@ export async function handleBatchClips(
     clips,
     transcript_words: transcriptWords,
     clean_fillers: input.clean_fillers !== false,
+    allow_ass_fallback: input.allow_ass_fallback === true,
     output_dir: paths.output,
     logo_path: settings.logoPath || null,
   });

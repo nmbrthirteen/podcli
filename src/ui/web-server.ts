@@ -102,7 +102,7 @@ function loadPersistedState(): UIState {
         deselectedIndices: saved.deselectedIndices || [],
         settings: {
           captionStyle: saved.settings?.captionStyle || "branded",
-          cropStrategy: saved.settings?.cropStrategy || "face",
+          cropStrategy: saved.settings?.cropStrategy || "speaker",
           logoPath: saved.settings?.logoPath || "",
           outroPath: saved.settings?.outroPath || "",
         },
@@ -119,7 +119,7 @@ function loadPersistedState(): UIState {
     rawTranscriptText: "",
     suggestions: [],
     deselectedIndices: [],
-    settings: { captionStyle: "branded", cropStrategy: "face", logoPath: "", outroPath: "" },
+    settings: { captionStyle: "branded", cropStrategy: "speaker", logoPath: "", outroPath: "" },
     phase: "idle",
     lastUpdated: 0,
   };
@@ -411,12 +411,13 @@ app.post("/api/create-clip", async (req, res) => {
     start_second,
     end_second,
     caption_style = "hormozi",
-    crop_strategy = "face",
+    crop_strategy = "speaker",
     transcript_words = [],
     title = "clip",
     logo_path = null,
     outro_path = null,
     clean_fillers = false,
+    allow_ass_fallback = false,
   } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
@@ -451,7 +452,7 @@ app.post("/api/create-clip", async (req, res) => {
     res.status(400).json({ error: `Invalid caption style. Use: ${validStyles.join(", ")}` });
     return;
   }
-  const validCrops = ["center", "face"];
+  const validCrops = ["center", "face", "speaker"];
   if (!validCrops.includes(crop_strategy)) {
     res.status(400).json({ error: `Invalid crop strategy. Use: ${validCrops.join(", ")}` });
     return;
@@ -487,6 +488,7 @@ app.post("/api/create-clip", async (req, res) => {
         logo_path,
         outro_path,
         clean_fillers,
+        allow_ass_fallback,
       },
       (event) => {
         job.progress = event.percent;
@@ -604,7 +606,7 @@ app.post("/api/batch-clips", async (req, res) => {
                 start_second: r.start_second || 0,
                 end_second: r.end_second || 0,
                 caption_style: r.caption_style || "hormozi",
-                crop_strategy: r.crop_strategy || "face",
+                crop_strategy: r.crop_strategy || "speaker",
                 title: r.title || "clip",
                 output_path: r.output_path,
                 file_size_mb: r.file_size_mb || 0,
@@ -991,7 +993,7 @@ app.get("/api/history", async (req, res) => {
 
 app.get("/api/history/check", async (req, res) => {
   try {
-    const { source, start, end, style = "hormozi", crop = "face" } = req.query;
+    const { source, start, end, style = "hormozi", crop = "speaker" } = req.query;
     if (!source || !start || !end) {
       res.json({ duplicate: null });
       return;
@@ -1456,7 +1458,8 @@ app.post("/api/mcp/export", async (req, res) => {
   const logoPath = req.body.logo_path || uiState.settings.logoPath || null;
   const outroPath = req.body.outro_path || (uiState.settings as any).outroPath || null;
   const captionStyle = req.body.caption_style || uiState.settings.captionStyle || "branded";
-  const cropStrategy = req.body.crop_strategy || uiState.settings.cropStrategy || "face";
+  const cropStrategy = req.body.crop_strategy || uiState.settings.cropStrategy || "speaker";
+  const allowAssFallback = req.body.allow_ass_fallback === true;
 
   if (!videoPath || !existsSync(videoPath)) {
     res.status(400).json({ error: "Video file not found" });
@@ -1476,6 +1479,7 @@ app.post("/api/mcp/export", async (req, res) => {
     title: (c.title || "clip").slice(0, 40),
     caption_style: c.caption_style || captionStyle,
     crop_strategy: c.crop_strategy || cropStrategy,
+    allow_ass_fallback: c.allow_ass_fallback === true || allowAssFallback,
     // Preserve multi-cut segments from suggestions
     ...(Array.isArray(c.segments) && c.segments.length > 0 && { keep_segments: c.segments }),
   }));

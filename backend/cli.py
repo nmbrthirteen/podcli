@@ -40,6 +40,10 @@ if os.path.exists(_env_file):
                 if _key and _val:
                     os.environ.setdefault(_key, _val)
 
+# Quality defaults (can be overridden via .env or shell env).
+# Keep transition autofix enabled by default with a strict hard cap in renderer.
+os.environ.setdefault("PODCLI_TRANSITION_AUTOFIX_PASSES", "2")
+
 # Add parent dir to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -108,6 +112,52 @@ def _ensure_ssl_certs():
     ssl._create_default_https_context = ssl._create_unverified_context
     os.environ["PYTHONHTTPSVERIFY"] = "0"
     print("  ⚠ SSL verification disabled for this session (model downloads only)")
+
+
+def _sanitize_path_component(value: str) -> str:
+    """Convert a user-facing label into a safe directory name."""
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in value.strip())
+    safe = safe.strip("._")
+    return safe or "default"
+
+
+def _resolve_output_dir(
+    video_path: str,
+    preset_name: str | None,
+    configured_output_dir: str | None,
+    explicit_output_dir: str | None,
+) -> str:
+    """
+    Resolve the clip output directory.
+
+    Rules:
+    - Explicit --output wins exactly as given.
+    - Otherwise use preset/default output root.
+    - Preset-driven runs get their own subfolder by preset name to avoid
+      collisions when multiple presets run in parallel.
+    """
+    if explicit_output_dir:
+        return explicit_output_dir
+
+    base_output_dir = configured_output_dir or os.path.join(os.path.dirname(video_path), "clips")
+    if not preset_name:
+        return base_output_dir
+
+    preset_folder = _sanitize_path_component(preset_name)
+    normalized_base = os.path.normpath(base_output_dir)
+    if os.path.basename(normalized_base) == preset_folder:
+        return base_output_dir
+    return os.path.join(base_output_dir, preset_folder)
+
+
+def _has_successful_results(results: list) -> bool:
+    """Return True if at least one clip rendered successfully."""
+    return any(isinstance(r, dict) and r.get("output_path") for r in results)
+
+
+def _should_enter_post_render_loop(config: dict, interrupted: bool, results: list) -> bool:
+    """Open the post-render rerender flow on explicit config or partial interrupt recovery."""
+    return bool(config.get("post_render_review", False) or (interrupted and _has_successful_results(results)))
 
 
 def cmd_process(args):
@@ -206,8 +256,14 @@ def cmd_process(args):
     quality = config.get("quality", os.environ.get("PODCLI_QUALITY", "max"))
     os.environ["PODCLI_QUALITY"] = quality
 
-    # Output directory: CLI arg > preset > default
-    output_dir = args.output or config.get("output_dir") or os.path.join(os.path.dirname(video_path), "clips")
+    # Output directory: explicit --output wins. Otherwise preset runs get
+    # their own subfolder under the configured/default clips root.
+    output_dir = _resolve_output_dir(
+        video_path=video_path,
+        preset_name=args.preset,
+        configured_output_dir=config.get("output_dir"),
+        explicit_output_dir=args.output,
+    )
     os.makedirs(output_dir, exist_ok=True)
 
     enc_info = get_encoder_info()
@@ -371,13 +427,13 @@ def cmd_process(args):
     clips = None
 
     # Try an AI CLI first (uses PodStack knowledge base for intelligent selection)
-    from services.claude_suggest import suggest_with_claude, _engine_label, _find_ai_cli
+    from services.claude_suggest import suggest_initial_with_claude, _engine_label, _find_ai_cli
 
     ai_path, ai_engine = _find_ai_cli()
     if ai_path:
         ai_label = _engine_label(ai_engine)
         print(f"  [3/4] Selecting moments with {ai_label} (PodStack)...")
-        clips = suggest_with_claude(
+        clips = suggest_initial_with_claude(
             segments=segments,
             top_n=top_n,
             progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
@@ -454,238 +510,246 @@ def cmd_process(args):
     results = []
     t0 = time.time()
     _skip_review = not config.get("review_each_clip", False)
+    interrupted = False
 
-    for i, clip in enumerate(clips):
-        ok = False
-        result = None
-        with _Spinner(f"Clip {i+1}/{len(clips)}: {clip['title'][:40]}...") as sp:
-            try:
-                result = generate_clip(
-                    video_path=video_path,
-                    start_second=clip["start_second"],
-                    end_second=clip["end_second"],
-                    caption_style=config.get("caption_style", "branded"),
-                    crop_strategy=config.get("crop_strategy", "face"),
-                    transcript_words=words,
-                    title=clip.get("title", f"clip_{i+1}"),
-                    output_dir=output_dir,
-                    logo_path=config.get("logo_path") or None,
-                    outro_path=config.get("outro_path") or None,
-                    keep_segments=clip.get("segments"),
-                    face_map=face_map,
-                )
-                results.append(result)
-                ok = True
-            except Exception as e:
-                print(f"\n         ✗ {e}")
-                results.append({"status": "error", "error": str(e)})
-                continue
-        if ok:
-            print(f"         ✓ Clip {i+1}/{len(clips)}: {result['file_size_mb']}MB")
+    try:
+        for i, clip in enumerate(clips):
+            ok = False
+            result = None
+            with _Spinner(f"Clip {i+1}/{len(clips)}: {clip['title'][:40]}...") as sp:
+                try:
+                    result = generate_clip(
+                        video_path=video_path,
+                        start_second=clip["start_second"],
+                        end_second=clip["end_second"],
+                        caption_style=config.get("caption_style", "branded"),
+                        crop_strategy=config.get("crop_strategy", "speaker"),
+                        transcript_words=words,
+                        title=clip.get("title", f"clip_{i+1}"),
+                        output_dir=output_dir,
+                        logo_path=config.get("logo_path") or None,
+                        outro_path=config.get("outro_path") or None,
+                        keep_segments=clip.get("segments"),
+                        face_map=face_map,
+                    )
+                    results.append(result)
+                    ok = True
+                except Exception as e:
+                    print(f"\n         ✗ {e}")
+                    results.append({"status": "error", "error": str(e)})
+                    continue
+            if ok:
+                print(f"         ✓ Clip {i+1}/{len(clips)}: {result['file_size_mb']}MB")
 
-        # Generate thumbnail and append to clip immediately
-        if _thumb_enabled and _thumb_gen and result.get("output_path"):
-            try:
-                clip_thumb_dir = os.path.join(thumb_dir, f"clip_{i+1}")
-                paths = _thumb_gen(
-                    title=clip.get("title", f"Clip {i+1}"),
-                    output_dir=clip_thumb_dir,
-                    photo_path=_thumb_photo,
-                    video_path=video_path,
-                    logo_path=_thumb_logo,
-                )
-                if paths:
-                    thumb_video = os.path.join(clip_thumb_dir, "thumb_frame.mp4")
-                    _thumb_to_video(paths[0], thumb_video, duration=1.5)
-                    from services.video_processor import concat_outro
-                    final_with_thumb = result["output_path"].replace(".mp4", "_with_thumb.mp4")
-                    concat_outro(result["output_path"], thumb_video, final_with_thumb, crossfade_duration=0.15)
-                    os.replace(final_with_thumb, result["output_path"])
-                    print(f"                 + thumbnail appended ({len(paths)} variations in {os.path.basename(clip_thumb_dir)}/)")
-            except Exception as e:
-                print(f"                 ⚠ thumbnail: {e}")
+            # Generate thumbnail and append to clip immediately
+            if _thumb_enabled and _thumb_gen and result.get("output_path"):
+                try:
+                    clip_thumb_dir = os.path.join(thumb_dir, f"clip_{i+1}")
+                    paths = _thumb_gen(
+                        title=clip.get("title", f"Clip {i+1}"),
+                        output_dir=clip_thumb_dir,
+                        photo_path=_thumb_photo,
+                        video_path=video_path,
+                        logo_path=_thumb_logo,
+                    )
+                    if paths:
+                        thumb_video = os.path.join(clip_thumb_dir, "thumb_frame.mp4")
+                        _thumb_to_video(paths[0], thumb_video, duration=1.5)
+                        from services.video_processor import concat_outro
+                        final_with_thumb = result["output_path"].replace(".mp4", "_with_thumb.mp4")
+                        concat_outro(result["output_path"], thumb_video, final_with_thumb, crossfade_duration=0.15)
+                        os.replace(final_with_thumb, result["output_path"])
+                        print(f"                 + thumbnail appended ({len(paths)} variations in {os.path.basename(clip_thumb_dir)}/)")
+                except Exception as e:
+                    print(f"                 ⚠ thumbnail: {e}")
 
-        # Generate titles, descriptions, tags for this clip immediately
-        if _ai_cli_path and result.get("output_path"):
-            try:
-                from services.content_generator import generate_clip_content
-                content_result = generate_clip_content(
-                    clip=clip,
-                    transcript_segments=segments,
-                )
-                if content_result and content_result.get("raw_text"):
-                    # Save per-clip content to file
-                    _content_path = result["output_path"].replace(".mp4", "_content.md")
-                    with open(_content_path, "w") as _cf:
-                        _cf.write(f"# {clip.get('title', 'Clip')}\n\n{content_result['raw_text']}")
+            # Generate titles, descriptions, tags for this clip immediately
+            if _ai_cli_path and result.get("output_path"):
+                try:
+                    from services.content_generator import generate_clip_content
+                    content_result = generate_clip_content(
+                        clip=clip,
+                        transcript_segments=segments,
+                    )
+                    if content_result and content_result.get("raw_text"):
+                        # Save per-clip content to file
+                        _content_path = result["output_path"].replace(".mp4", "_content.md")
+                        with open(_content_path, "w") as _cf:
+                            _cf.write(f"# {clip.get('title', 'Clip')}\n\n{content_result['raw_text']}")
 
-                    # Pretty-print in terminal
-                    _accent = "\033[38;2;212;135;74m"
-                    _bold = "\033[1m"
-                    _dim = "\033[2m"
-                    _yellow = "\033[33m"
-                    _reset = "\033[0m"
+                        # Pretty-print in terminal
+                        _accent = "\033[38;2;212;135;74m"
+                        _bold = "\033[1m"
+                        _dim = "\033[2m"
+                        _yellow = "\033[33m"
+                        _reset = "\033[0m"
 
-                    print(f"\n  {'─' * 45}")
-                    print(f"  {_bold}📋 Clip {i+1}: {clip['title'][:45]}{_reset}")
-                    print(f"  {'─' * 45}")
-                    for line in content_result["raw_text"].split("\n"):
-                        stripped = line.strip()
-                        if not stripped:
-                            continue
-                        if stripped.startswith("TITLES") or stripped.startswith("DESCRIPTION") or stripped.startswith("TAGS") or stripped.startswith("HASHTAGS") or stripped.startswith("TOP PICK"):
-                            print(f"  {_bold}{stripped}{_reset}")
-                        elif stripped[0:1].isdigit() and ". " in stripped[:4]:
-                            print(f"  {_accent}{stripped}{_reset}")
-                        elif stripped.startswith("#"):
-                            print(f"  {_yellow}{stripped}{_reset}")
-                        else:
-                            print(f"  {_dim}{stripped}{_reset}")
-                    print(f"  {_dim}Saved: {os.path.basename(_content_path)}{_reset}")
-                    print()
-            except Exception as e:
-                print(f"                 ⚠ content: {e}")
+                        print(f"\n  {'─' * 45}")
+                        print(f"  {_bold}📋 Clip {i+1}: {clip['title'][:45]}{_reset}")
+                        print(f"  {'─' * 45}")
+                        for line in content_result["raw_text"].split("\n"):
+                            stripped = line.strip()
+                            if not stripped:
+                                continue
+                            if stripped.startswith("TITLES") or stripped.startswith("DESCRIPTION") or stripped.startswith("TAGS") or stripped.startswith("HASHTAGS") or stripped.startswith("TOP PICK"):
+                                print(f"  {_bold}{stripped}{_reset}")
+                            elif stripped[0:1].isdigit() and ". " in stripped[:4]:
+                                print(f"  {_accent}{stripped}{_reset}")
+                            elif stripped.startswith("#"):
+                                print(f"  {_yellow}{stripped}{_reset}")
+                            else:
+                                print(f"  {_dim}{stripped}{_reset}")
+                        print(f"  {_dim}Saved: {os.path.basename(_content_path)}{_reset}")
+                        print()
+                except Exception as e:
+                    print(f"                 ⚠ content: {e}")
 
-        # ── Per-clip review: open video, ask for feedback ──
-        if ok and not _skip_review and result.get("output_path") and os.path.exists(result["output_path"]):
-            import subprocess as _review_sp
-            _review_sp.Popen(["open", result["output_path"]] if sys.platform == "darwin" else ["xdg-open", result["output_path"]])
+            # ── Per-clip review: open video, ask for feedback ──
+            if ok and not _skip_review and result.get("output_path") and os.path.exists(result["output_path"]):
+                import subprocess as _review_sp
+                _review_sp.Popen(["open", result["output_path"]] if sys.platform == "darwin" else ["xdg-open", result["output_path"]])
 
-            while True:
-                import questionary as _rq
-                from questionary import Style as _RS
-                _rstyle = _RS([
-                    ("qmark", "fg:#d4874a bold"), ("question", "bold"),
-                    ("answer", "fg:#4ade80"), ("pointer", "fg:#d4874a bold"),
-                    ("highlighted", "fg:#d4874a bold"), ("selected", "fg:#4ade80"),
-                ])
-                _raction = _rq.select(
-                    f"Clip {i+1}/{len(clips)}: {clip['title'][:40]}",
-                    choices=[
-                        _rq.Choice("Looks good — next clip", value="next"),
-                        _rq.Choice("Change caption style", value="style"),
-                        _rq.Choice("Make shorter (trim 5s from end)", value="shorter"),
-                        _rq.Choice("Make longer (extend 5s)", value="longer"),
-                        _rq.Choice("Start earlier (5s)", value="earlier"),
-                        _rq.Choice("Start later (3s)", value="later"),
-                        _rq.Choice("Swap speaker (camera on wrong person)", value="swap"),
-                        _rq.Choice("Tell me what to change", value="custom"),
-                        _rq.Choice("Render the rest without asking", value="skip_review"),
-                    ],
-                    style=_rstyle,
-                    instruction="",
-                ).ask()
-
-                if _raction is None or _raction == "next":
-                    break
-
-                if _raction == "skip_review":
-                    _skip_review = True
-                    break
-
-                if _raction == "swap":
-                    # Swap speaker labels in the words for this clip's time range
-                    # so the camera follows the other person
-                    clip_speakers = sorted(set(
-                        w.get("speaker") for w in words
-                        if w.get("speaker") and w["start"] >= clip["start_second"] and w["end"] <= clip["end_second"]
-                    ))
-                    if len(clip_speakers) >= 2:
-                        swap_map = {clip_speakers[0]: clip_speakers[1], clip_speakers[1]: clip_speakers[0]}
-                        for w in words:
-                            if w["start"] >= clip["start_second"] and w["end"] <= clip["end_second"]:
-                                sp = w.get("speaker")
-                                if sp in swap_map:
-                                    w["speaker"] = swap_map[sp]
-                        print(f"         Swapped speakers: {clip_speakers[0]} ↔ {clip_speakers[1]}")
-                    else:
-                        print(f"         Only one speaker detected in this clip")
-                        continue
-
-                if _raction == "custom":
-                    _feedback = _rq.text(
-                        "What should I change?",
+                while True:
+                    import questionary as _rq
+                    from questionary import Style as _RS
+                    _rstyle = _RS([
+                        ("qmark", "fg:#d4874a bold"), ("question", "bold"),
+                        ("answer", "fg:#4ade80"), ("pointer", "fg:#d4874a bold"),
+                        ("highlighted", "fg:#d4874a bold"), ("selected", "fg:#4ade80"),
+                    ])
+                    _raction = _rq.select(
+                        f"Clip {i+1}/{len(clips)}: {clip['title'][:40]}",
+                        choices=[
+                            _rq.Choice("Looks good — next clip", value="next"),
+                            _rq.Choice("Change caption style", value="style"),
+                            _rq.Choice("Make shorter (trim 5s from end)", value="shorter"),
+                            _rq.Choice("Make longer (extend 5s)", value="longer"),
+                            _rq.Choice("Start earlier (5s)", value="earlier"),
+                            _rq.Choice("Start later (3s)", value="later"),
+                            _rq.Choice("Swap speaker (camera on wrong person)", value="swap"),
+                            _rq.Choice("Tell me what to change", value="custom"),
+                            _rq.Choice("Render the rest without asking", value="skip_review"),
+                        ],
                         style=_rstyle,
+                        instruction="",
                     ).ask()
-                    if _feedback and _feedback.strip():
-                        fb = _feedback.strip().lower()
-                        # Parse into a known action
-                        if any(w in fb for w in ["shorter", "trim", "cut"]):
-                            _raction = "shorter"
-                        elif any(w in fb for w in ["longer", "extend", "more"]):
-                            _raction = "longer"
-                        elif any(w in fb for w in ["earlier", "before", "back"]):
-                            _raction = "earlier"
-                        elif any(w in fb for w in ["later", "forward"]):
-                            _raction = "later"
-                        elif any(w in fb for w in ["hormozi", "karaoke", "subtle", "branded"]):
-                            _raction = "style"
-                            for s in ["hormozi", "karaoke", "subtle", "branded"]:
-                                if s in fb:
-                                    config["caption_style"] = s
-                                    break
-                        elif any(w in fb for w in ["wrong person", "swap", "other speaker", "other face", "wrong face", "wrong speaker"]):
-                            _raction = "swap"
-                        else:
-                            print(f"         Couldn't parse that. Try: 'shorter', 'longer 10', 'start earlier', 'hormozi style', 'wrong person'")
-                            continue
-                    else:
-                        continue
 
-                # Apply change
-                _adj = 5  # default seconds for timing adjustments
-                if _raction == "style":
-                    _new_style = _rq.select("Style:", choices=[
-                        _rq.Choice("branded", value="branded"),
-                        _rq.Choice("hormozi", value="hormozi"),
-                        _rq.Choice("karaoke", value="karaoke"),
-                        _rq.Choice("subtle", value="subtle"),
-                    ], style=_rstyle).ask()
-                    if _new_style:
-                        config["caption_style"] = _new_style
-                elif _raction == "shorter":
-                    clip["end_second"] -= _adj
-                    clip["duration"] = max(10, clip["duration"] - _adj)
-                    print(f"         Trimming {_adj}s from end")
-                elif _raction == "longer":
-                    clip["end_second"] += _adj
-                    clip["duration"] += _adj
-                    print(f"         Extending {_adj}s")
-                elif _raction == "earlier":
-                    clip["start_second"] = max(0, clip["start_second"] - _adj)
-                    print(f"         Starting {_adj}s earlier")
-                elif _raction == "later":
-                    clip["start_second"] += 3
-                    print(f"         Starting 3s later")
-
-                # Re-render
-                with _Spinner(f"Re-rendering clip {i+1}..."):
-                    try:
-                        result = generate_clip(
-                            video_path=video_path,
-                            start_second=clip["start_second"],
-                            end_second=clip["end_second"],
-                            caption_style=config.get("caption_style", "branded"),
-                            crop_strategy=config.get("crop_strategy", "face"),
-                            transcript_words=words,
-                            title=clip.get("title", f"clip_{i+1}"),
-                            output_dir=output_dir,
-                            logo_path=config.get("logo_path") or None,
-                            outro_path=config.get("outro_path") or None,
-                            keep_segments=clip.get("segments"),
-                            face_map=face_map,
-                        )
-                        results[-1] = result
-                        print(f"         ✓ Re-rendered: {result['file_size_mb']}MB")
-                        # Open new version
-                        _review_sp.Popen(["open", result["output_path"]] if sys.platform == "darwin" else ["xdg-open", result["output_path"]])
-                    except Exception as _re:
-                        print(f"         ✗ {_re}")
+                    if _raction is None or _raction == "next":
                         break
+
+                    if _raction == "skip_review":
+                        _skip_review = True
+                        break
+
+                    if _raction == "swap":
+                        # Swap speaker labels in the words for this clip's time range
+                        # so the camera follows the other person
+                        clip_speakers = sorted(set(
+                            w.get("speaker") for w in words
+                            if w.get("speaker") and w["start"] >= clip["start_second"] and w["end"] <= clip["end_second"]
+                        ))
+                        if len(clip_speakers) >= 2:
+                            swap_map = {clip_speakers[0]: clip_speakers[1], clip_speakers[1]: clip_speakers[0]}
+                            for w in words:
+                                if w["start"] >= clip["start_second"] and w["end"] <= clip["end_second"]:
+                                    sp = w.get("speaker")
+                                    if sp in swap_map:
+                                        w["speaker"] = swap_map[sp]
+                            print(f"         Swapped speakers: {clip_speakers[0]} ↔ {clip_speakers[1]}")
+                        else:
+                            print(f"         Only one speaker detected in this clip")
+                            continue
+
+                    if _raction == "custom":
+                        _feedback = _rq.text(
+                            "What should I change?",
+                            style=_rstyle,
+                        ).ask()
+                        if _feedback and _feedback.strip():
+                            fb = _feedback.strip().lower()
+                            # Parse into a known action
+                            if any(w in fb for w in ["shorter", "trim", "cut"]):
+                                _raction = "shorter"
+                            elif any(w in fb for w in ["longer", "extend", "more"]):
+                                _raction = "longer"
+                            elif any(w in fb for w in ["earlier", "before", "back"]):
+                                _raction = "earlier"
+                            elif any(w in fb for w in ["later", "forward"]):
+                                _raction = "later"
+                            elif any(w in fb for w in ["hormozi", "karaoke", "subtle", "branded"]):
+                                _raction = "style"
+                                for s in ["hormozi", "karaoke", "subtle", "branded"]:
+                                    if s in fb:
+                                        config["caption_style"] = s
+                                        break
+                            elif any(w in fb for w in ["wrong person", "swap", "other speaker", "other face", "wrong face", "wrong speaker"]):
+                                _raction = "swap"
+                            else:
+                                print(f"         Couldn't parse that. Try: 'shorter', 'longer 10', 'start earlier', 'hormozi style', 'wrong person'")
+                                continue
+                        else:
+                            continue
+
+                    # Apply change
+                    _adj = 5  # default seconds for timing adjustments
+                    if _raction == "style":
+                        _new_style = _rq.select("Style:", choices=[
+                            _rq.Choice("branded", value="branded"),
+                            _rq.Choice("hormozi", value="hormozi"),
+                            _rq.Choice("karaoke", value="karaoke"),
+                            _rq.Choice("subtle", value="subtle"),
+                        ], style=_rstyle).ask()
+                        if _new_style:
+                            config["caption_style"] = _new_style
+                    elif _raction == "shorter":
+                        clip["end_second"] -= _adj
+                        clip["duration"] = max(10, clip["duration"] - _adj)
+                        print(f"         Trimming {_adj}s from end")
+                    elif _raction == "longer":
+                        clip["end_second"] += _adj
+                        clip["duration"] += _adj
+                        print(f"         Extending {_adj}s")
+                    elif _raction == "earlier":
+                        clip["start_second"] = max(0, clip["start_second"] - _adj)
+                        print(f"         Starting {_adj}s earlier")
+                    elif _raction == "later":
+                        clip["start_second"] += 3
+                        print(f"         Starting 3s later")
+
+                    # Re-render
+                    with _Spinner(f"Re-rendering clip {i+1}..."):
+                        try:
+                            result = generate_clip(
+                                video_path=video_path,
+                                start_second=clip["start_second"],
+                                end_second=clip["end_second"],
+                                caption_style=config.get("caption_style", "branded"),
+                                crop_strategy=config.get("crop_strategy", "speaker"),
+                                transcript_words=words,
+                                title=clip.get("title", f"clip_{i+1}"),
+                                output_dir=output_dir,
+                                logo_path=config.get("logo_path") or None,
+                                outro_path=config.get("outro_path") or None,
+                                keep_segments=clip.get("segments"),
+                                face_map=face_map,
+                            )
+                            results[-1] = result
+                            print(f"         ✓ Re-rendered: {result['file_size_mb']}MB")
+                            # Open new version
+                            _review_sp.Popen(["open", result["output_path"]] if sys.platform == "darwin" else ["xdg-open", result["output_path"]])
+                        except Exception as _re:
+                            print(f"         ✗ {_re}")
+                            break
+    except KeyboardInterrupt:
+        interrupted = True
+        print(f"\n         ⚠ Render interrupted — keeping completed clips")
 
     elapsed = time.time() - t0
     success = sum(1 for r in results if "output_path" in r)
-    print(f"\n         {success}/{len(clips)} clips exported in {elapsed:.1f}s")
+    if interrupted:
+        print(f"\n         Interrupted with {success}/{len(clips)} completed clips in {elapsed:.1f}s")
+    else:
+        print(f"\n         {success}/{len(clips)} clips exported in {elapsed:.1f}s")
     if _thumb_enabled:
         print(f"         Thumbnails saved to {thumb_dir}/")
 
@@ -700,7 +764,9 @@ def cmd_process(args):
         print(f"\n  {gray}For titles, descriptions & tags: install Claude Code or Codex CLI{reset}")
 
     # ── Post-render iteration ──
-    if config.get("post_render_review", False):
+    if _should_enter_post_render_loop(config, interrupted, results):
+        if interrupted and not config.get("post_render_review", False):
+            print(f"\n  Reviewing completed clips so you can rerender what already finished.")
         _post_render_loop(
             clips=clips,
             results=results,
@@ -1113,7 +1179,7 @@ def _post_render_loop(
                     start_second=clip["start_second"],
                     end_second=clip["end_second"],
                     caption_style=config.get("caption_style", "branded"),
-                    crop_strategy=config.get("crop_strategy", "face"),
+                    crop_strategy=config.get("crop_strategy", "speaker"),
                     transcript_words=words,
                     title=clip.get("title", "clip"),
                     output_dir=output_dir,
@@ -1296,7 +1362,7 @@ def _post_render_loop(
                                         start_second=f_clip["start_second"],
                                         end_second=f_clip["end_second"],
                                         caption_style=config.get("caption_style", "branded"),
-                                        crop_strategy=config.get("crop_strategy", "face"),
+                                        crop_strategy=config.get("crop_strategy", "speaker"),
                                         transcript_words=words,
                                         title=f_clip.get("title", "clip"),
                                         output_dir=output_dir,
@@ -1348,7 +1414,7 @@ def _post_render_loop(
                                         start_second=nc["start_second"],
                                         end_second=nc["end_second"],
                                         caption_style=config.get("caption_style", "branded"),
-                                        crop_strategy=config.get("crop_strategy", "face"),
+                                        crop_strategy=config.get("crop_strategy", "speaker"),
                                         transcript_words=words,
                                         title=nc.get("title", "clip"),
                                         output_dir=output_dir,
@@ -2246,7 +2312,7 @@ def print_help():
     print(f"    {green}-o{reset}, {green}--output{reset} {gray}<dir>{reset}        Output directory {dim}(default: ./clips){reset}")
     print(f"    {green}-p{reset}, {green}--preset{reset} {gray}<name>{reset}       Load a saved preset")
     print(f"    {green}--caption-style{reset} {gray}<style>{reset}  branded | hormozi | karaoke | subtle")
-    print(f"    {green}--crop{reset} {gray}<strategy>{reset}       center | face")
+    print(f"    {green}--crop{reset} {gray}<strategy>{reset}       speaker | face | center")
     print(f"    {green}--logo{reset} {gray}<asset|path>{reset}     Overlay logo image")
     print(f"    {green}--outro{reset} {gray}<asset|path>{reset}    Append outro video")
     print(f"    {green}--quality{reset} {gray}<level>{reset}       low | medium | high | max")
@@ -2294,7 +2360,7 @@ def main():
     proc.add_argument("-o", "--output", help="Output directory (default: ./clips)")
     proc.add_argument("-p", "--preset", help="Load a saved preset")
     proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
-    proc.add_argument("--crop", choices=["center", "face"])
+    proc.add_argument("--crop", choices=["center", "face", "speaker"])
     proc.add_argument("--logo", help="Logo image (asset name or path)")
     proc.add_argument("--outro", help="Outro video (asset name or path)")
     proc.add_argument("--time-adjust", type=float, help="Timestamp offset in seconds")
@@ -2317,7 +2383,7 @@ def main():
     pre_save.add_argument("--transcript", help="Default transcript path")
     pre_save.add_argument("--output", help="Default output directory")
     pre_save.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
-    pre_save.add_argument("--crop", choices=["center", "face"])
+    pre_save.add_argument("--crop", choices=["center", "face", "speaker"])
     pre_save.add_argument("--logo", help="Logo (asset name or path)")
     pre_save.add_argument("--outro", help="Outro (asset name or path)")
     pre_save.add_argument("--top", type=int, help="Default top clips count")
@@ -2889,8 +2955,8 @@ def _interactive_presets():
     # Crop strategy
     crop = questionary.select(
         "Crop strategy:",
-        choices=["face", "center"],
-        default=config.get("crop_strategy", "face"),
+        choices=["speaker", "face", "center"],
+        default=config.get("crop_strategy", "speaker"),
         style=qstyle,
     ).ask()
     if crop:

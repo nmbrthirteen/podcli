@@ -214,7 +214,8 @@ async function main() {
     const cpus = os.cpus().length;
     const concurrency = Math.max(2, Math.min(cpus, 8));
     // Store overlay in /tmp to survive temp dir cleanup
-    const overlayId = path.basename(opts.output, ".mp4");
+    const overlaySeed = `${path.resolve(opts.output)}:${process.pid}:${Date.now()}`;
+    const overlayId = crypto.createHash("md5").update(overlaySeed).digest("hex").slice(0, 12);
     const captionOverlay = path.join(os.tmpdir(), `remotion_overlay_${overlayId}.mov`);
 
     let lastPct = -1;

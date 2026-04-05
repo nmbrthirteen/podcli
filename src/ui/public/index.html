@@ -209,7 +209,7 @@
       const [timeAdjust, setTimeAdjust] = useState(-1);
       const [whisperModel, setWhisperModel] = useState('base');
       const [captionStyle, setCaptionStyle] = useState('branded');
-      const [cropStrategy, setCropStrategy] = useState('face');
+      const [cropStrategy, setCropStrategy] = useState('speaker');
       const [logoPath, setLogoPath] = useState('');
       const logoRef = useRef();
       const [outroPath, setOutroPath] = useState('');
@@ -1003,7 +1003,7 @@
                   <div>
                     <label className="field-label">Crop</label>
                     <select value={cropStrategy} onChange={e => onCropChange(e.target.value)} disabled={isProcessing}>
-                      <option value="center">Center</option><option value="face">Face Detection</option>
+                      <option value="speaker">Speaker Aware</option><option value="face">Face Detection</option><option value="center">Center</option>
                     </select>
                   </div>
                 </div>

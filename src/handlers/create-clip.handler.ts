@@ -24,7 +24,7 @@ export const createClipToolDef = {
     "Output: H.264 MP4 with burned-in captions, normalized audio (-14 LUFS).\n\n" +
     "For batch export, use batch_create_clips instead.\n" +
     "Caption styles: branded (professional), hormozi (bold/yellow), karaoke (progressive highlight), subtle (minimal).\n" +
-    "Crop modes: face (follows the speaker), center (fixed center crop).",
+    "Crop modes: speaker (speaker-aware), face (face tracking), center (fixed center crop).",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -57,7 +57,7 @@ export const createClipToolDef = {
       },
       crop_strategy: {
         type: "string",
-        enum: ["center", "face"],
+        enum: ["center", "face", "speaker"],
         description:
           "How to crop to vertical. Auto-loaded from session settings if omitted.",
       },
@@ -90,6 +90,12 @@ export const createClipToolDef = {
         description:
           "Remove filler words (um, uh, hmm) from captions and compress long silences. Default: true",
         default: true,
+      },
+      allow_ass_fallback: {
+        type: "boolean",
+        description:
+          "Allow fallback to legacy ASS captions if Remotion caption rendering fails. Default: false.",
+        default: false,
       },
       outro_path: {
         type: "string",
@@ -139,7 +145,7 @@ export async function handleCreateClip(
     settings.captionStyle ||
     "hormozi";
   const cropStrategy =
-    (input.crop_strategy as string) || settings.cropStrategy || "face";
+    (input.crop_strategy as string) || settings.cropStrategy || "speaker";
   const logoPath =
     (input.logo_path as string) || settings.logoPath || null;
   const outroPath =
@@ -173,6 +179,7 @@ export async function handleCreateClip(
     title,
     output_dir: paths.output,
     clean_fillers: input.clean_fillers !== false,
+    allow_ass_fallback: input.allow_ass_fallback === true,
     logo_path: logoPath,
     outro_path: outroPath,
     ...(keepSegments && { keep_segments: keepSegments }),
