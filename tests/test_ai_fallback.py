@@ -167,6 +167,74 @@ class AIFallbackTests(unittest.TestCase):
         self.assertGreaterEqual(len(calls), 2)
         self.assertEqual(calls[-1]["start"], 0.0)
 
+    def test_suggest_initial_with_claude_uses_bucket_strategy_for_long_episode(self):
+        segments = []
+        for i in range(20):
+            start = float(i * 330)
+            segments.append({
+                "start": start,
+                "end": start + 45.0,
+                "speaker": "SPEAKER_00",
+                "text": f"Segment {i} with enough text to count as a normal transcript block.",
+            })
+
+        calls = []
+
+        def fake_suggest(*, segments, top_n, exclude_clips=None, progress_callback=None, timeout=300):
+            calls.append({
+                "start": segments[0]["start"],
+                "end": segments[-1]["end"],
+                "top_n": top_n,
+                "timeout": timeout,
+                "exclude_len": len(exclude_clips or []),
+            })
+            first_start = segments[0]["start"]
+            return [{
+                "title": f"Clip {first_start}",
+                "start_second": first_start,
+                "end_second": first_start + 28.0,
+                "segments": [{"start": first_start, "end": first_start + 28.0}],
+                "duration": 28,
+            }]
+
+        with mock.patch.object(cs, "suggest_with_claude", side_effect=fake_suggest):
+            clips = cs.suggest_initial_with_claude(
+                segments=segments,
+                top_n=5,
+            )
+
+        self.assertIsNotNone(clips)
+        self.assertGreaterEqual(len(calls), 4)
+        self.assertTrue(all(call["timeout"] == 90 for call in calls[:4]))
+        self.assertTrue(all(call["end"] - call["start"] < 2500 for call in calls[:4]))
+        self.assertGreaterEqual(calls[1]["exclude_len"], 1)
+
+    def test_suggest_with_claude_reports_actual_timeout_limit(self):
+        segments = [
+            {"start": 0.0, "end": 20.0, "speaker": "SPEAKER_00", "text": "Short segment one."},
+            {"start": 20.0, "end": 40.0, "speaker": "SPEAKER_00", "text": "Short segment two."},
+        ]
+        progress = []
+
+        with mock.patch.object(
+            cs,
+            "_find_ai_cli_candidates",
+            return_value=[("/tmp/claude", "claude")],
+        ), mock.patch.object(
+            cs,
+            "_run_ai_command",
+            side_effect=subprocess.TimeoutExpired(cmd=["claude"], timeout=90),
+        ):
+            clips = cs.suggest_with_claude(
+                segments=segments,
+                top_n=1,
+                timeout=90,
+                progress_callback=lambda _pct, msg: progress.append(msg),
+            )
+
+        self.assertIsNone(clips)
+        self.assertIn("Claude timed out (90s limit)", progress)
+
     def test_generate_clip_content_retries_with_codex(self):
         clip = {
             "title": "Power demand is exploding",

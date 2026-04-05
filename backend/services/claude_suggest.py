@@ -72,6 +72,15 @@ def _engine_label(engine: str) -> str:
     return "AI"
 
 
+def _format_timeout_label(timeout: int) -> str:
+    """Render a human-readable timeout label for progress messages."""
+    if timeout % 60 == 0 and timeout >= 60:
+        minutes = timeout // 60
+        unit = "minute" if minutes == 1 else "minutes"
+        return f"{minutes} {unit}"
+    return f"{timeout}s"
+
+
 def _run_ai_command(
     cli_path: str,
     engine: str,
@@ -294,11 +303,68 @@ Transcript ({segment_count} segments, ~{duration_min:.0f} min):
 {transcript_text}"""
 
 
+def _build_transcript_text(segments: list[dict]) -> str:
+    """Serialize transcript segments into the prompt-friendly text format."""
+    lines = []
+    for seg in segments:
+        speaker = seg.get("speaker", "")
+        speaker_label = f"[{speaker}] " if speaker else ""
+        start = seg.get("start", 0)
+        text = seg.get("text", "").strip()
+        if text:
+            lines.append(f"[{start:.1f}s] {speaker_label}{text}")
+    return "\n".join(lines)
+
+
+def _segments_duration_seconds(segments: list[dict]) -> float:
+    """Estimate total covered duration from transcript segments."""
+    if not segments:
+        return 0.0
+    return max(0.0, float(segments[-1].get("end", segments[-1].get("start", 0))) - float(segments[0].get("start", 0)))
+
+
+def _should_bucket_initial_selection(segments: list[dict]) -> bool:
+    """
+    Use bucketed AI search for long or dense transcripts.
+
+    This keeps initial clip discovery from spending many minutes on a single
+    whole-episode prompt for long podcasts.
+    """
+    if not segments:
+        return False
+
+    duration_seconds = _segments_duration_seconds(segments)
+    transcript_chars = sum(len(str(seg.get("text", ""))) for seg in segments)
+
+    return bool(
+        duration_seconds >= 45 * 60
+        or len(segments) >= 180
+        or transcript_chars >= 18000
+    )
+
+
+def _dedupe_clips_by_range(clips: list[dict]) -> list[dict]:
+    """Drop duplicate clip suggestions that share the same rounded range."""
+    deduped = []
+    seen_ranges = set()
+    for clip in sorted(clips, key=lambda c: c.get("start_second", 0)):
+        key = (
+            round(float(clip.get("start_second", 0)), 1),
+            round(float(clip.get("end_second", 0)), 1),
+        )
+        if key in seen_ranges:
+            continue
+        seen_ranges.add(key)
+        deduped.append(clip)
+    return deduped
+
+
 def suggest_with_claude(
     segments: list[dict],
     top_n: int = 5,
     exclude_clips: list[dict] | None = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    timeout: int = 300,
 ) -> Optional[list[dict]]:
     """
     Use an AI CLI (Claude Code or Codex) to extract the best clip moments.
@@ -314,18 +380,7 @@ def suggest_with_claude(
         label = _engine_label(candidates[0][1])
         progress_callback(0, f"Preparing transcript for {label}...")
 
-    # Build transcript text from segments
-    lines = []
-    for seg in segments:
-        speaker = seg.get("speaker", "")
-        speaker_label = f"[{speaker}] " if speaker else ""
-        start = seg.get("start", 0)
-        text = seg.get("text", "").strip()
-        if text:
-            # Use absolute seconds (not M:SS) so Claude returns seconds too
-            lines.append(f"[{start:.1f}s] {speaker_label}{text}")
-
-    transcript_text = "\n".join(lines)
+    transcript_text = _build_transcript_text(segments)
 
     # Estimate duration
     duration_min = 0
@@ -381,11 +436,11 @@ def suggest_with_claude(
                     prompt=prompt,
                     prompt_file=prompt_file,
                     project_dir=project_dir,
-                    timeout=300,
+                    timeout=timeout,
                 )
             except subprocess.TimeoutExpired:
                 if progress_callback:
-                    progress_callback(0, f"{label} timed out (5 min limit)")
+                    progress_callback(0, f"{label} timed out ({_format_timeout_label(timeout)} limit)")
                 continue
             except Exception as e:
                 if progress_callback:
@@ -446,7 +501,7 @@ def suggest_with_claude(
                     keep_segments = [{"start": start_sec, "end": end_sec}]
 
                 kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
-                if kept_duration < 15 or kept_duration > 55:
+                if kept_duration < 15 or kept_duration > 45:
                     continue
 
                 normalized.append({
@@ -484,6 +539,111 @@ def suggest_with_claude(
             os.unlink(prompt_file)
         except Exception:
             pass
+
+
+def suggest_initial_with_claude(
+    segments: list[dict],
+    top_n: int = 5,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> Optional[list[dict]]:
+    """
+    Initial clip discovery entry point.
+
+    For long podcasts, search transcript buckets first so the AI can return
+    quickly and cover the full timeline instead of timing out on one giant
+    prompt.
+    """
+    if not _should_bucket_initial_selection(segments):
+        return suggest_with_claude(
+            segments=segments,
+            top_n=top_n,
+            progress_callback=progress_callback,
+            timeout=180,
+        )
+
+    start_bound = float(segments[0].get("start", 0))
+    end_bound = float(segments[-1].get("end", segments[-1].get("start", 0)))
+    duration = max(0.0, end_bound - start_bound)
+    if duration <= 0:
+        return None
+
+    bucket_count = min(6, max(3, math.ceil((duration / 60.0) / 25.0)))
+    bucket_size = duration / bucket_count
+    buckets = []
+    for idx in range(bucket_count):
+        bucket_start = start_bound + idx * bucket_size
+        bucket_end = end_bound if idx == bucket_count - 1 else start_bound + (idx + 1) * bucket_size
+        bucket_segments = _slice_segments_for_range(segments, bucket_start, bucket_end)
+        if len(bucket_segments) < 3:
+            continue
+        buckets.append({
+            "start": bucket_start,
+            "end": bucket_end,
+            "segments": bucket_segments,
+        })
+
+    if not buckets:
+        return suggest_with_claude(
+            segments=segments,
+            top_n=top_n,
+            progress_callback=progress_callback,
+            timeout=180,
+        )
+
+    if progress_callback:
+        progress_callback(0, f"Long episode detected — searching {len(buckets)} timeline buckets...")
+
+    aggregated: list[dict] = []
+    per_bucket_top_n = max(2, math.ceil(top_n / max(1, len(buckets))))
+
+    for idx, bucket in enumerate(buckets):
+        bucket_label = (
+            f"bucket {idx + 1}/{len(buckets)} "
+            f"[{int(bucket['start'] // 60)}:{int(bucket['start'] % 60):02d}-"
+            f"{int(bucket['end'] // 60)}:{int(bucket['end'] % 60):02d}]"
+        )
+        if progress_callback:
+            progress_callback(0, f"Searching {bucket_label}...")
+
+        bucket_clips = suggest_with_claude(
+            segments=bucket["segments"],
+            top_n=per_bucket_top_n,
+            exclude_clips=aggregated,
+            progress_callback=(
+                None if progress_callback is None
+                else lambda pct, msg, bucket_label=bucket_label: progress_callback(
+                    pct,
+                    f"{bucket_label}: {msg}" if msg else msg,
+                )
+            ),
+            timeout=90,
+        )
+        if not bucket_clips:
+            continue
+
+        aggregated.extend(bucket_clips)
+
+    deduped = _dedupe_clips_by_range(aggregated)
+    if len(deduped) >= top_n:
+        return deduped[:top_n]
+
+    fallback_clips = suggest_with_claude(
+        segments=segments,
+        top_n=top_n,
+        exclude_clips=deduped,
+        progress_callback=(
+            None if progress_callback is None
+            else lambda pct, msg: progress_callback(
+                pct,
+                f"global pass: {msg}" if msg else msg,
+            )
+        ),
+        timeout=120,
+    )
+    if fallback_clips:
+        deduped = _dedupe_clips_by_range(deduped + fallback_clips)
+
+    return deduped[:top_n] if deduped else None
 
 
 def _bucket_coverage_seconds(existing_clips: list[dict], start: float, end: float) -> float:

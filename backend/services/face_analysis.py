@@ -154,7 +154,11 @@ def analyze_faces(
         progress_callback(85, "Mapping speakers to face positions...")
 
     if is_split_screen and len(clusters_list) >= 2:
-        # Split-screen: map top-2 speakers by talk time, first-to-speak = left
+        # Split-screen: map speakers to clusters using observation evidence.
+        # For each speaker, count which cluster has more face observations
+        # during that speaker's segments (±1.5s window).  This replaces the
+        # old "first-to-speak = left" heuristic which broke when the host
+        # spoke first but sat on the right.
         speaker_talk_time = {}
         speaker_first_time = {}
         for seg in speaker_segments:
@@ -166,10 +170,53 @@ def analyze_faces(
 
         speakers_by_talk = sorted(speakers, key=lambda s: speaker_talk_time.get(s, 0), reverse=True)
         top_2 = speakers_by_talk[:2]
-        top_2_by_first = sorted(top_2, key=lambda s: speaker_first_time.get(s, float("inf")))
-        speaker_mappings[top_2_by_first[0]] = 0  # left cluster
-        if len(top_2_by_first) > 1:
-            speaker_mappings[top_2_by_first[1]] = 1  # right cluster
+
+        obs_arr = [(o["time"], o["face_center_x"]) for o in observations]
+        for speaker in top_2:
+            sp_times = [s["start"] for s in speaker_segments if s.get("speaker") == speaker]
+            votes = [0] * len(clusters_list)
+            for t in sp_times:
+                for obs_t, obs_cx in obs_arr:
+                    if abs(obs_t - t) < 1.5:
+                        for ci, cl in enumerate(clusters_list):
+                            if abs(obs_cx - cl["center_x"]) < width * 0.15:
+                                votes[ci] += 1
+            if any(votes):
+                speaker_mappings[speaker] = int(np.argmax(votes))
+
+        # Resolve conflicts: if both speakers mapped to the same cluster,
+        # assign the weaker one to the other cluster.
+        if len(top_2) == 2 and top_2[0] in speaker_mappings and top_2[1] in speaker_mappings:
+            if speaker_mappings[top_2[0]] == speaker_mappings[top_2[1]]:
+                other_ci = 1 - speaker_mappings[top_2[0]]
+                # Give the less-confident speaker the other cluster
+                sp0_votes = sum(
+                    1 for t in [s["start"] for s in speaker_segments if s.get("speaker") == top_2[0]]
+                    for obs_t, obs_cx in obs_arr
+                    if abs(obs_t - t) < 1.5 and abs(obs_cx - clusters_list[speaker_mappings[top_2[0]]]["center_x"]) < width * 0.15
+                )
+                sp1_votes = sum(
+                    1 for t in [s["start"] for s in speaker_segments if s.get("speaker") == top_2[1]]
+                    for obs_t, obs_cx in obs_arr
+                    if abs(obs_t - t) < 1.5 and abs(obs_cx - clusters_list[speaker_mappings[top_2[1]]]["center_x"]) < width * 0.15
+                )
+                if sp0_votes >= sp1_votes:
+                    speaker_mappings[top_2[1]] = other_ci
+                else:
+                    speaker_mappings[top_2[0]] = other_ci
+
+        # If observation-based mapping failed for either speaker, fall back
+        # to temporal ordering (first-to-speak = left).
+        if len(top_2) == 2:
+            top_2_by_first = sorted(top_2, key=lambda s: speaker_first_time.get(s, float("inf")))
+            if top_2[0] not in speaker_mappings and top_2[1] not in speaker_mappings:
+                speaker_mappings[top_2_by_first[0]] = 0
+                speaker_mappings[top_2_by_first[1]] = 1
+            elif top_2[0] not in speaker_mappings:
+                speaker_mappings[top_2[0]] = 1 - speaker_mappings[top_2[1]]
+            elif top_2[1] not in speaker_mappings:
+                speaker_mappings[top_2[1]] = 1 - speaker_mappings[top_2[0]]
+
         # Extra speakers → dominant speaker's cluster
         dominant_idx = speaker_mappings.get(speakers_by_talk[0], 0)
         for sp in speakers_by_talk[2:]:
@@ -211,4 +258,5 @@ def analyze_faces(
         "dominant_speaker": dominant_speaker,
         "video_width": width,
         "video_height": height,
+        "_mappings_v2": True,
     }

@@ -202,6 +202,89 @@ class VideoProcessorTests(unittest.TestCase):
         self.assertEqual(targets[0][3], "SPEAKER_00")
         self.assertEqual(targets[1][3], "SPEAKER_00")
 
+    def test_choose_track_segment_targets_rejects_edge_hugging_opening_target(self):
+        targets = vp._choose_track_segment_targets(
+            segment_tracks=[
+                (0.0, 4.0, "SPEAKER_00", 0, True),
+            ],
+            tracked_detections=[
+                (0.1, [{"cx": 140, "fw": 180, "track_id": 0}]),
+                (0.4, [{"cx": 155, "fw": 182, "track_id": 0}]),
+                (0.8, [{"cx": 620, "fw": 190, "track_id": 0}]),
+                (1.4, [{"cx": 632, "fw": 194, "track_id": 0}]),
+                (2.0, [{"cx": 628, "fw": 192, "track_id": 0}]),
+            ],
+            speaker_anchor_x={},
+            width=1920,
+            crop_w=607,
+        )
+
+        self.assertEqual(len(targets), 1)
+        self.assertGreater(targets[0][2], 250)
+        self.assertEqual(targets[0][3], "SPEAKER_00")
+
+    def test_choose_track_segment_targets_rejects_edge_hugging_trailing_target(self):
+        targets = vp._choose_track_segment_targets(
+            segment_tracks=[
+                (0.0, 4.0, "SPEAKER_00", 0, True),
+            ],
+            tracked_detections=[
+                (0.1, [{"cx": 620, "fw": 190, "track_id": 0}]),
+                (0.7, [{"cx": 632, "fw": 194, "track_id": 0}]),
+                (1.4, [{"cx": 628, "fw": 192, "track_id": 0}]),
+                (3.1, [{"cx": 150, "fw": 182, "track_id": 0}]),
+                (3.5, [{"cx": 140, "fw": 180, "track_id": 0}]),
+            ],
+            speaker_anchor_x={},
+            width=1920,
+            crop_w=607,
+        )
+
+        self.assertEqual(len(targets), 1)
+        self.assertGreater(targets[0][2], 250)
+        self.assertEqual(targets[0][3], "SPEAKER_00")
+
+    def test_choose_track_segment_targets_skips_long_anchor_only_segment(self):
+        targets = vp._choose_track_segment_targets(
+            segment_tracks=[
+                (0.0, 2.0, "SPEAKER_00", 0, True),
+                (2.0, 6.0, "SPEAKER_00", None, None),
+            ],
+            tracked_detections=[
+                (0.1, [{"cx": 620, "fw": 190, "track_id": 0}]),
+                (0.7, [{"cx": 632, "fw": 194, "track_id": 0}]),
+                (1.4, [{"cx": 628, "fw": 192, "track_id": 0}]),
+            ],
+            speaker_anchor_x={"SPEAKER_00": 140.0},
+            width=1920,
+            crop_w=607,
+        )
+
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(targets[0][0:2], (0.0, 2.0))
+        self.assertGreater(targets[0][2], 250)
+        self.assertEqual(targets[0][3], "SPEAKER_00")
+
+    def test_choose_track_segment_targets_keeps_short_anchor_only_bridge(self):
+        targets = vp._choose_track_segment_targets(
+            segment_tracks=[
+                (0.0, 2.0, "SPEAKER_00", 0, True),
+                (2.0, 2.9, "SPEAKER_00", None, None),
+            ],
+            tracked_detections=[
+                (0.1, [{"cx": 620, "fw": 190, "track_id": 0}]),
+                (0.7, [{"cx": 632, "fw": 194, "track_id": 0}]),
+                (1.4, [{"cx": 628, "fw": 192, "track_id": 0}]),
+            ],
+            speaker_anchor_x={"SPEAKER_00": 620.0},
+            width=1920,
+            crop_w=607,
+        )
+
+        self.assertEqual(len(targets), 2)
+        self.assertEqual(targets[1][0:2], (2.0, 2.9))
+        self.assertGreater(targets[1][2], 250)
+
     def test_build_track_turn_keyframes_uses_short_reframe_then_holds(self):
         keyframes = vp._build_track_turn_keyframes(
             segment_targets=[
@@ -265,16 +348,17 @@ class VideoProcessorTests(unittest.TestCase):
         self.assertLess(current, 1320.0)
 
     def test_update_tripod_camera_recenters_on_moderate_offset(self):
+        # Offset must exceed the 22% safe zone (607 * 0.22 ≈ 134px)
         current = vp._update_tripod_camera(
             current_center_x=960.0,
-            target_center_x=1060.0,
+            target_center_x=1160.0,
             crop_w=607,
             video_width=1920,
             dt=0.1,
         )
 
         self.assertGreater(current, 960.0)
-        self.assertLess(current, 1060.0)
+        self.assertLess(current, 1160.0)
 
     def test_choose_camera_speaker_ignores_short_interjection(self):
         speaker, pending, count, switched = vp._choose_camera_speaker(
@@ -484,6 +568,17 @@ class VideoProcessorTests(unittest.TestCase):
 
         self.assertIn("if(between(t\\,0.000\\,0.180)\\,420\\,", expr)
         self.assertNotIn("100+((420-100)", expr)
+
+    def test_build_cam_expr_uses_short_eased_handoff_for_split_layout_jumps(self):
+        expr = vp._build_cam_expr(
+            keyframes=[(0.0, 120), (0.20, 360), (1.0, 360)],
+            duration=1.0,
+            is_split=True,
+        )
+
+        # Split transitions should avoid hard snaps and use a brief eased handoff.
+        self.assertNotIn("if(between(t\\,0.000\\,0.200)\\,360\\,", expr)
+        self.assertIn("120+((360-120)", expr)
 
     def test_build_motion_blur_filter_targets_only_short_reframes(self):
         blur = vp._build_motion_blur_filter(

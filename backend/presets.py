@@ -21,7 +21,7 @@ PRESETS_DIR = os.path.join(
 
 DEFAULT_PRESET = {
     "caption_style": "branded",
-    "crop_strategy": "face",
+    "crop_strategy": "speaker",
     "time_adjust": -1.0,
     "logo_path": "",
     "outro_path": "",
@@ -30,8 +30,8 @@ DEFAULT_PRESET = {
     "output_dir": "",
     "whisper_model": "base",
     "top_clips": 5,
-    "max_clip_duration": 90,
-    "min_clip_duration": 20,
+    "max_clip_duration": 40,
+    "min_clip_duration": 15,
     "target_lufs": -14.0,
     "energy_boost": True,
     "quality": "max",
