@@ -13,6 +13,40 @@ from services import video_processor as vp
 
 
 class VideoProcessorTests(unittest.TestCase):
+    def test_parse_duration_seconds_rejects_nan(self):
+        self.assertIsNone(vp._parse_duration_seconds("nan"))
+        self.assertIsNone(vp._parse_duration_seconds(float("inf")))
+        self.assertIsNone(vp._parse_duration_seconds(0))
+        self.assertEqual(vp._parse_duration_seconds("12.5"), 12.5)
+
+    def test_get_media_duration_seconds_falls_back_to_default_on_invalid_values(self):
+        fake_info = {
+            "format": {"duration": "nan"},
+            "streams": [{"codec_type": "video", "duration": "N/A"}],
+        }
+        with mock.patch.object(vp, "get_video_info", return_value=fake_info):
+            duration = vp._get_media_duration_seconds("/tmp/fake.mp4", default=30.0)
+        self.assertEqual(duration, 30.0)
+
+    def test_concat_outro_uses_soft_audio_fallback_before_hard_concat(self):
+        run_fail = mock.Mock(returncode=1, stdout="", stderr="xfade unavailable")
+        with mock.patch.object(vp, "get_dimensions", return_value=(1080, 1920)), \
+             mock.patch.object(vp, "_get_media_duration_seconds", side_effect=[20.0, 5.0]), \
+             mock.patch.object(vp, "_has_audio_stream", return_value=True), \
+             mock.patch.object(vp, "get_video_encode_flags", return_value=vp.CPU_FLAGS), \
+             mock.patch.object(vp.os.path, "exists", return_value=False), \
+             mock.patch.object(vp, "_run_ffmpeg_with_fallback") as run_ffmpeg, \
+             mock.patch.object(vp.subprocess, "run", return_value=run_fail):
+            run_ffmpeg.side_effect = [
+                "/tmp/outro_scaled.mp4",  # outro scaling
+                "/tmp/out.mp4",           # soft-audio fallback
+            ]
+            out = vp.concat_outro("/tmp/in.mp4", "/tmp/outro.mp4", "/tmp/out.mp4")
+
+        self.assertEqual(out, "/tmp/out.mp4")
+        self.assertGreaterEqual(run_ffmpeg.call_count, 2)
+        self.assertEqual(run_ffmpeg.call_args_list[1].kwargs.get("label"), "outro_hardcut_soft_audio")
+
     def test_resolve_speaker_sides_does_not_guess_from_transcript_order(self):
         speaker_side = vp._resolve_speaker_sides(
             segments=[(0.0, 2.0, "SPEAKER_00"), (2.0, 4.0, "SPEAKER_01")],

@@ -8,6 +8,7 @@ audio normalization, and final encoding.
 import os
 import subprocess
 import json
+import math
 from typing import Optional
 
 from services.encoder import get_video_encode_flags
@@ -77,6 +78,41 @@ def get_video_info(video_path: str) -> dict:
     if result.returncode != 0:
         raise RuntimeError(f"ffprobe failed: {result.stderr}")
     return json.loads(result.stdout)
+
+
+def _parse_duration_seconds(value: object) -> Optional[float]:
+    """Parse a duration value and reject invalid/non-finite numbers."""
+    try:
+        parsed = float(str(value).strip())
+    except Exception:
+        return None
+    if not math.isfinite(parsed) or parsed <= 0:
+        return None
+    return parsed
+
+
+def _get_media_duration_seconds(video_path: str, default: float = 0.0) -> float:
+    """
+    Best-effort media duration in seconds.
+    Prefers max valid duration from format/streams, else returns default.
+    """
+    try:
+        info = get_video_info(video_path)
+    except Exception:
+        return default
+
+    candidates: list[float] = []
+    fmt = info.get("format", {})
+    fmt_duration = _parse_duration_seconds(fmt.get("duration"))
+    if fmt_duration is not None:
+        candidates.append(fmt_duration)
+
+    for stream in info.get("streams", []):
+        stream_duration = _parse_duration_seconds(stream.get("duration"))
+        if stream_duration is not None:
+            candidates.append(stream_duration)
+
+    return max(candidates) if candidates else default
 
 
 def get_dimensions(video_path: str) -> tuple[int, int]:
@@ -2980,18 +3016,8 @@ def concat_outro(
     """
     width, height = get_dimensions(input_path)
 
-    # Get main clip duration for crossfade offset
-    probe_cmd = [
-        "ffprobe", "-v", "quiet", "-print_format", "json",
-        "-show_format", input_path,
-    ]
-    probe = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
-    try:
-        main_duration = float(json.loads(probe.stdout)["format"]["duration"])
-    except Exception:
-        main_duration = 30.0
-
-    fade_offset = max(0, main_duration - crossfade_duration)
+    main_duration = _get_media_duration_seconds(input_path, default=30.0)
+    safe_crossfade = _parse_duration_seconds(crossfade_duration) or 0.5
 
     # Re-encode outro to match dimensions
     outro_scaled = output_path + ".outro_scaled.mp4"
@@ -3010,46 +3036,83 @@ def concat_outro(
         label="outro_scale",
     )
 
-    # Try crossfade (requires FFmpeg 4.3+).
-    # acrossfade often fails on mismatched streams, so use afade on
-    # each input and amerge instead — more robust.
-    for audio_filter in [
-        # Option 1: fade out main audio, fade in outro audio, then amerge
-        (
-            f"[0:v][1:v]xfade=transition=fade:duration={crossfade_duration}:offset={fade_offset}[v];"
-            f"[0:a]afade=t=out:st={fade_offset}:d={crossfade_duration}[a0];"
-            f"[1:a]afade=t=in:st=0:d={crossfade_duration}[a1];"
-            f"[a0][a1]concat=n=2:v=0:a=1[a]"
-        ),
-        # Option 2: just video xfade, concat audio without crossfade
-        (
-            f"[0:v][1:v]xfade=transition=fade:duration={crossfade_duration}:offset={fade_offset}[v];"
-            f"[0:a][1:a]concat=n=2:v=0:a=1[a]"
-        ),
-    ]:
-        try:
-            xfade_cmd = [
-                "ffmpeg", "-y",
-                "-i", input_path,
-                "-i", outro_scaled,
-                "-filter_complex", audio_filter,
-                "-map", "[v]", "-map", "[a]",
-            ]
-            xfade_cmd += get_video_encode_flags()
-            xfade_cmd += [
-                "-c:a", "aac", "-b:a", "192k",
-                "-movflags", "+faststart",
-                output_path,
-            ]
-            result = subprocess.run(xfade_cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
-            if result.returncode == 0:
-                if os.path.exists(outro_scaled):
-                    os.remove(outro_scaled)
-                return output_path
-        except Exception:
-            continue
+    outro_duration = _get_media_duration_seconds(outro_scaled, default=0.0)
+    safe_crossfade = min(safe_crossfade, max(0.05, main_duration - 0.05))
+    if outro_duration > 0:
+        safe_crossfade = min(safe_crossfade, max(0.05, outro_duration - 0.05))
+    fade_offset = max(0.0, main_duration - safe_crossfade)
+    can_crossfade = fade_offset >= 0.05 and safe_crossfade >= 0.05
 
-    # Fallback: hard cut concat
+    # Try crossfade (requires FFmpeg 4.3+).
+    # If durations are too short or malformed, skip xfade entirely to avoid
+    # transition-at-t=0 behavior that can make outro appear instantly.
+    if can_crossfade:
+        for audio_filter in [
+            # Option 1: proper audio crossfade.
+            (
+                f"[0:v][1:v]xfade=transition=fade:duration={safe_crossfade}:offset={fade_offset}[v];"
+                f"[0:a][1:a]acrossfade=d={safe_crossfade}[a]"
+            ),
+            # Option 2: video xfade + hard audio concat fallback.
+            (
+                f"[0:v][1:v]xfade=transition=fade:duration={safe_crossfade}:offset={fade_offset}[v];"
+                f"[0:a][1:a]concat=n=2:v=0:a=1[a]"
+            ),
+        ]:
+            try:
+                xfade_cmd = [
+                    "ffmpeg", "-y",
+                    "-i", input_path,
+                    "-i", outro_scaled,
+                    "-filter_complex", audio_filter,
+                    "-map", "[v]", "-map", "[a]",
+                ]
+                xfade_cmd += get_video_encode_flags()
+                xfade_cmd += [
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-movflags", "+faststart",
+                    output_path,
+                ]
+                result = subprocess.run(xfade_cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+                if result.returncode == 0:
+                    if os.path.exists(outro_scaled):
+                        os.remove(outro_scaled)
+                    return output_path
+            except Exception:
+                continue
+
+    # Fallback 1: hard video cut + softened audio boundary
+    # (keeps playback natural even when xfade is unavailable/fails).
+    if _has_audio_stream(input_path) and _has_audio_stream(outro_scaled):
+        audio_fade = min(safe_crossfade, max(0.05, main_duration - 0.05))
+        audio_fade_start = max(0.0, main_duration - audio_fade)
+        try:
+            return _run_ffmpeg_with_fallback(
+                cmd_parts_before_enc=[
+                    "ffmpeg", "-y",
+                    "-i", input_path,
+                    "-i", outro_scaled,
+                    "-filter_complex",
+                    (
+                        "[0:v][1:v]concat=n=2:v=1:a=0[v];"
+                        f"[0:a]afade=t=out:st={audio_fade_start}:d={audio_fade}[a0];"
+                        f"[1:a]afade=t=in:st=0:d={audio_fade}[a1];"
+                        "[a0][a1]concat=n=2:v=0:a=1[a]"
+                    ),
+                    "-map", "[v]",
+                    "-map", "[a]",
+                ],
+                cmd_parts_after_enc=[
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                    "-movflags", "+faststart",
+                ],
+                output_path=output_path,
+                label="outro_hardcut_soft_audio",
+            )
+        except Exception:
+            pass
+
+    # Fallback 2: pure hard cut concat
     main_reenc = output_path + ".main_reenc.mp4"
     concat_list = os.path.join(os.path.dirname(output_path), "concat_list.txt")
 
