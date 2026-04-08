@@ -120,9 +120,20 @@ def _face_expression_quality(frame, x1: int, y1: int, x2: int, y2: int) -> float
     if aspect < 0.7 or aspect > 1.4:
         return 0.35  # Odd angle or distortion
 
-    # Combine: eye sharpness × symmetry × (1 - mouth penalty)
+    # 7) Expressiveness — reward animated faces over flat/neutral ones.
+    #    Engaged speakers have higher variance in the eyebrow region (raised brows)
+    #    and moderate mouth activity (mid-speech, not slack-jawed).
+    brow_region = gray[int(h * 0.15):int(h * 0.30), :]
+    brow_var = cv2.Laplacian(brow_region, cv2.CV_64F).var() if brow_region.size > 0 else 30
+    # Mouth slightly open (mid-word) is more engaging than closed/neutral
+    mouth_activity = mouth_var if mouth_region.size > 0 else 30
+    # Brow raise + moderate mouth = expressive. Flat brow + closed mouth = neutral.
+    expressiveness = min(1.0, (brow_var / 80.0) * 0.6 + min(1.0, mouth_activity / 80.0) * 0.4)
+    expressiveness = max(0.3, expressiveness)  # don't zero out, just penalize flat
+
+    # Combine: eye sharpness × symmetry × (1 - mouth penalty) × expressiveness
     eye_score = min(1.0, eye_sharpness / 60.0)
-    quality = eye_score * symmetry * (1.0 - mouth_penalty)
+    quality = eye_score * symmetry * (1.0 - mouth_penalty) * expressiveness
     return max(0.15, min(1.0, quality))
 
 
@@ -130,6 +141,8 @@ def extract_candidate_frames(
     video_path: str,
     output_dir: str,
     count: int = 5,
+    start_second: Optional[float] = None,
+    end_second: Optional[float] = None,
 ) -> list[dict]:
     """
     Extract candidate frames with detected faces from a video.
@@ -167,10 +180,23 @@ def extract_candidate_frames(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # Sample more frames for better candidates
-    start_t = duration * 0.1
-    end_t = duration * 0.9
-    sample_count = max(count * 6, 30)
+    # Sample frames in requested window (clip-local), otherwise use middle 80%.
+    if start_second is not None and end_second is not None and end_second > start_second:
+        start_t = max(0.0, float(start_second))
+        end_t = min(duration, float(end_second))
+        # Small in-window margin so we avoid hard boundary frames.
+        span = max(0.0, end_t - start_t)
+        margin = min(0.6, span * 0.08)
+        start_t = min(end_t, start_t + margin)
+        end_t = max(start_t, end_t - margin)
+    else:
+        start_t = duration * 0.1
+        end_t = duration * 0.9
+
+    if end_t - start_t < 0.2:
+        start_t = max(0.0, duration * 0.1)
+        end_t = min(duration, duration * 0.9)
+    sample_count = max(count * 10, 40)
     candidates = []
 
     for i in range(sample_count):
@@ -195,67 +221,97 @@ def extract_candidate_frames(
             if fw < w * 0.08:
                 continue
 
-                # Split-screen check — only for landscape sources where
-                # a small centered face likely means a multi-cam layout.
-                # Portrait sources naturally have centered faces.
-                face_cx = (x1 + x2) / 2
-                if not is_portrait and 0.4 * w < face_cx < 0.6 * w and fw < w * 0.15:
-                    continue
+            # Split-screen check — only for landscape sources where
+            # a small centered face likely means a multi-cam layout.
+            # Portrait sources naturally have centered faces.
+            face_cx = (x1 + x2) / 2
+            if not is_portrait and 0.4 * w < face_cx < 0.6 * w and fw < w * 0.15:
+                continue
 
-                # Sharpness of face region (proxy for eyes open, good expression)
-                sharpness = _frame_sharpness(frame, (x1, y1, x2, y2))
+            # Sharpness of face region (proxy for eyes open, good expression)
+            sharpness = _frame_sharpness(frame, (x1, y1, x2, y2))
 
-                # Skip very blurry faces (motion blur, out of focus)
-                if sharpness < 12:
-                    continue
+            # Skip very blurry faces (motion blur, out of focus)
+            if sharpness < 12:
+                continue
 
-                # Face expression quality — filter blinking, open mouths
-                expression_quality = _face_expression_quality(frame, x1, y1, x2, y2)
-                if expression_quality < 0.45:
-                    continue  # Bad expression (looking down, blinking, mouth open, etc.)
+            # Face expression quality — filter blinking, open mouths
+            expression_quality = _face_expression_quality(frame, x1, y1, x2, y2)
+            if expression_quality < 0.45:
+                continue  # Bad expression (looking down, blinking, mouth open, etc.)
 
-                # Face size as fraction of frame
-                face_area_pct = (fw * fh) / (w * h) * 100
+            # Face size as fraction of frame
+            face_area_pct = (fw * fh) / (w * h) * 100
 
-                # Score: confidence × sharpness × size_preference × expression
-                # Prefer faces that are 5-25% of frame area (natural portrait)
-                # Penalize extreme close-ups (>35%) and tiny faces (<3%)
-                if face_area_pct > 35:
-                    size_factor = 0.4  # Too zoomed in
-                elif face_area_pct > 25:
-                    size_factor = 0.7
-                elif face_area_pct < 3:
-                    size_factor = 0.5  # Too small
-                else:
-                    size_factor = 1.0  # Sweet spot
+            # Score: confidence × sharpness × size_preference × expression
+            # Prefer faces that are 5-25% of frame area (natural portrait)
+            # Penalize extreme close-ups (>35%) and tiny faces (<3%)
+            if face_area_pct > 35:
+                size_factor = 0.4  # Too zoomed in
+            elif face_area_pct > 25:
+                size_factor = 0.7
+            elif face_area_pct < 3:
+                size_factor = 0.5  # Too small
+            else:
+                size_factor = 1.0  # Sweet spot
 
-                score = (conf ** 2) * (sharpness ** 0.5) * size_factor * expression_quality
+            # Prefer frames from the middle 60% of the clip — that's where
+            # the emotional peak usually is, and it avoids identical-looking
+            # boundary frames when consecutive clips share the same speaker.
+            mid_t = (start_t + end_t) / 2
+            span = max(0.1, end_t - start_t)
+            distance_from_mid = abs(t - mid_t) / (span / 2)  # 0 = center, 1 = edge
+            position_boost = 1.0 - 0.4 * min(1.0, distance_from_mid)
 
-                candidates.append({
-                    "frame": frame.copy(),
-                    "timestamp": round(t, 1),
-                    "confidence": round(float(conf), 3),
-                    "face_x_pct": round((x1 + x2) / 2 / w * 100, 1),
-                    "face_y_pct": round((y1 + y2) / 2 / h * 100, 1),
-                    "face_w_pct": round(fw / w * 100, 1),
-                    "face_h_pct": round(fh / h * 100, 1),
-                    "sharpness": round(sharpness, 1),
-                    "score": score,
-                })
+            score = (conf ** 2) * (sharpness ** 0.5) * size_factor * expression_quality * position_boost
+
+            candidates.append({
+                "frame": frame.copy(),
+                "timestamp": round(t, 1),
+                "confidence": round(float(conf), 3),
+                "face_x_pct": round((x1 + x2) / 2 / w * 100, 1),
+                "face_y_pct": round((y1 + y2) / 2 / h * 100, 1),
+                "face_w_pct": round(fw / w * 100, 1),
+                "face_h_pct": round(fh / h * 100, 1),
+                "sharpness": round(sharpness, 1),
+                "score": score,
+            })
 
     cap.release()
 
     if not candidates:
         return []
 
-    # Pick top N by score, spaced apart in time
+    # Pick top N by score, while enforcing diversity in both time and framing.
     candidates.sort(key=lambda c: c["score"], reverse=True)
     selected = []
+
+    def _too_similar(a: dict, b: dict) -> bool:
+        return (
+            abs(a["timestamp"] - b["timestamp"]) < 2.5
+            and abs(a["face_x_pct"] - b["face_x_pct"]) < 4.0
+            and abs(a["face_y_pct"] - b["face_y_pct"]) < 4.0
+            and abs(a["face_w_pct"] - b["face_w_pct"]) < 5.0
+        )
+
     for c in candidates:
         if len(selected) >= count:
             break
         too_close = any(abs(c["timestamp"] - s["timestamp"]) < 3 for s in selected)
-        if not too_close:
+        too_similar = any(_too_similar(c, s) for s in selected)
+        if not too_close and not too_similar:
+            selected.append(c)
+
+    # If strict diversity rejected too much, relax time-only spacing to still
+    # fill requested variations while preserving different moments first.
+    if len(selected) < count:
+        for c in candidates:
+            if len(selected) >= count:
+                break
+            if c in selected:
+                continue
+            if any(_too_similar(c, s) for s in selected):
+                continue
             selected.append(c)
 
     # Detect split-screen: if all faces are in the left or right third,
@@ -514,6 +570,8 @@ def generate_variations(
     output_dir: str,
     photo_path: Optional[str] = None,
     video_path: Optional[str] = None,
+    start_second: Optional[float] = None,
+    end_second: Optional[float] = None,
     logo_path: Optional[str] = None,
     config: Optional[dict] = None,
 ) -> list[str]:
@@ -539,7 +597,14 @@ def generate_variations(
         frames = [{"path": photo_path}]
     elif video_path:
         frames_dir = os.path.join(output_dir, "_frames")
-        frames = extract_candidate_frames(video_path, frames_dir, count=n)
+        # Ask for extra candidates so each variation can use a distinct moment.
+        frames = extract_candidate_frames(
+            video_path,
+            frames_dir,
+            count=max(n + 2, n * 2),
+            start_second=start_second,
+            end_second=end_second,
+        )
 
     if not frames and video_path:
         # Fallback: simpler face extraction with less aggressive filters
@@ -548,7 +613,9 @@ def generate_variations(
             fallback_path = os.path.join(output_dir, "_face_frame.png")
             result = extract_face_frame(video_path, fallback_path,
                                         target_width=cfg.get("width", 1080),
-                                        target_height=cfg.get("height", 1920))
+                                        target_height=cfg.get("height", 1920),
+                                        start_second=start_second,
+                                        end_second=end_second)
             if result:
                 frames = [result]
         except Exception:
@@ -559,7 +626,7 @@ def generate_variations(
 
     paths = []
     for i in range(n):
-        frame = frames[i % len(frames)]
+        frame = frames[i] if i < len(frames) else frames[i % len(frames)]
         frame_path = frame.get("path") or ""
         out_path = os.path.join(output_dir, f"thumb_v{i+1}.png")
 

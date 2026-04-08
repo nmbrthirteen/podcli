@@ -3006,7 +3006,8 @@ def concat_outro(
     input_path: str,
     outro_path: str,
     output_path: str,
-    crossfade_duration: float = 0.5,
+    crossfade_duration: float = 0.8,
+    transition: str = "fadeblack",
 ) -> str:
     """
     Append an outro video to the end of the main clip with a crossfade transition.
@@ -3017,7 +3018,10 @@ def concat_outro(
     width, height = get_dimensions(input_path)
 
     main_duration = _get_media_duration_seconds(input_path, default=30.0)
-    safe_crossfade = _parse_duration_seconds(crossfade_duration) or 0.5
+    if crossfade_duration <= 0:
+        safe_crossfade = 0.0
+    else:
+        safe_crossfade = _parse_duration_seconds(crossfade_duration) or 0.5
 
     # Re-encode outro to match dimensions
     outro_scaled = output_path + ".outro_scaled.mp4"
@@ -3048,14 +3052,14 @@ def concat_outro(
     # transition-at-t=0 behavior that can make outro appear instantly.
     if can_crossfade:
         for audio_filter in [
-            # Option 1: proper audio crossfade.
+            # Option 1: video transition + audio crossfade.
             (
-                f"[0:v][1:v]xfade=transition=fade:duration={safe_crossfade}:offset={fade_offset}[v];"
+                f"[0:v][1:v]xfade=transition={transition}:duration={safe_crossfade}:offset={fade_offset}[v];"
                 f"[0:a][1:a]acrossfade=d={safe_crossfade}[a]"
             ),
-            # Option 2: video xfade + hard audio concat fallback.
+            # Option 2: video transition + hard audio concat fallback.
             (
-                f"[0:v][1:v]xfade=transition=fade:duration={safe_crossfade}:offset={fade_offset}[v];"
+                f"[0:v][1:v]xfade=transition={transition}:duration={safe_crossfade}:offset={fade_offset}[v];"
                 f"[0:a][1:a]concat=n=2:v=0:a=1[a]"
             ),
         ]:

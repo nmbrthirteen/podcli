@@ -260,7 +260,7 @@
       const [quality, setQuality] = useState('max');
       const [topClips, setTopClips] = useState(8);
       const [minDuration, setMinDuration] = useState(20);
-      const [maxDuration, setMaxDuration] = useState(90);
+      const [maxDuration, setMaxDuration] = useState(45);
       const [energyBoost, setEnergyBoost] = useState(true);
 
       // Clip editing
@@ -1073,7 +1073,7 @@
                       <div className="field">
                         <label className="field-label">Max duration</label>
                         <div className="field-row">
-                          <input type="range" min="30" max="180" step="5" value={maxDuration} onChange={e => setMaxDuration(parseInt(e.target.value))} />
+                          <input type="range" min="30" max="60" step="5" value={maxDuration} onChange={e => setMaxDuration(parseInt(e.target.value))} />
                           <span className="range-value">{maxDuration}s</span>
                         </div>
                       </div>

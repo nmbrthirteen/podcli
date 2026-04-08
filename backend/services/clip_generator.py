@@ -25,6 +25,7 @@ from services.video_processor import (
     concat_outro,
 )
 from config.caption_styles import get_style
+from presets import MAX_CLIP_DURATION
 
 # Filler words to strip from captions (not aggressive — just obvious fillers)
 _FILLER_WORDS = frozenset([
@@ -646,8 +647,8 @@ def generate_clip(
             keep_segments = None
             duration = end_second - start_second
 
-    if duration > 45:
-        raise ValueError(f"Clip too long ({duration:.0f}s). Max 45 seconds for shorts.")
+    if duration > MAX_CLIP_DURATION:
+        raise ValueError(f"Clip too long ({duration:.0f}s). Max {MAX_CLIP_DURATION} seconds for shorts.")
 
     # Load style config for branded-specific settings
     style_config = get_style(caption_style)

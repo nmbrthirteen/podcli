@@ -19,6 +19,13 @@ PRESETS_DIR = os.path.join(
     "presets",
 )
 
+# ── Clip duration constants (single source of truth) ──
+# These are for clip CONTENT only — outro is appended separately.
+MIN_CLIP_DURATION = 20
+MAX_CLIP_DURATION = 45   # hard limit with buffer (outro not included)
+TARGET_CLIP_DURATION_MIN = 20
+TARGET_CLIP_DURATION_MAX = 35  # Claude targets this range
+
 DEFAULT_PRESET = {
     "caption_style": "branded",
     "crop_strategy": "speaker",
@@ -30,8 +37,8 @@ DEFAULT_PRESET = {
     "output_dir": "",
     "whisper_model": "base",
     "top_clips": 5,
-    "max_clip_duration": 40,
-    "min_clip_duration": 15,
+    "max_clip_duration": MAX_CLIP_DURATION,
+    "min_clip_duration": MIN_CLIP_DURATION,
     "target_lufs": -14.0,
     "energy_boost": True,
     "quality": "max",

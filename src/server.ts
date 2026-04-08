@@ -1505,7 +1505,7 @@ export function createServer(): McpServer {
             "- Questions that hook the viewer",
             "",
             "For each moment, note the start/end timestamps and craft a catchy title.",
-            "Aim for 30-90 second clips. Then call suggest_clips with your picks.",
+            "Aim for 15-45 second clips (target 20-35s). Then call suggest_clips with your picks.",
             "",
             "## Step 5: Export",
             "Call batch_create_clips(export_selected: true) to render all clips.",

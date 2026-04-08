@@ -15,6 +15,9 @@ import sys
 import tempfile
 from typing import Optional, Callable
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
+
 
 def _find_cli(name: str, extra_paths: list[str] = None) -> Optional[str]:
     """Find a CLI binary by name. Checks extra_paths first, then PATH."""
@@ -222,11 +225,11 @@ TIMESTAMP FORMAT: All timestamps in the transcript are in SECONDS (e.g., [123.4s
 All timestamps you return MUST be in SECONDS as numbers (e.g., 123.4), NOT minutes:seconds.
 
 DURATION RULES (CRITICAL):
-- Target: 25-40 seconds (this is the viral sweet spot)
-- Maximum: 50 seconds (absolute hard limit — anything longer loses viewers)
-- Minimum: 15 seconds (too short = no payoff)
-- SHORTER IS BETTER. A punchy 25s clip outperforms a 50s clip every time.
-- If a thought takes longer than 40s, use segments to cut the filler in the middle
+- Target: {TARGET_CLIP_DURATION_MIN}-{TARGET_CLIP_DURATION_MAX} seconds (this is the viral sweet spot)
+- Maximum: {MAX_CLIP_DURATION} seconds (absolute hard limit — anything longer WILL FAIL rendering)
+- Minimum: {MIN_CLIP_DURATION} seconds (too short = no payoff)
+- SHORTER IS BETTER. A punchy 25s clip outperforms a 40s clip every time.
+- If a thought takes longer than {TARGET_CLIP_DURATION_MAX}s, use segments to cut the filler in the middle
 
 CUTTING RULES (CRITICAL):
 - Cut TIGHT. Every second must earn its place.
@@ -235,7 +238,7 @@ CUTTING RULES (CRITICAL):
 - NEVER cut mid-sentence or mid-thought. The viewer must feel closure.
 - The last sentence must feel like a natural ending, a punchline, or a mic-drop
 - If there's filler/tangent in the middle, use multiple segments to skip it
-- A 30s clip with zero dead weight beats a 50s clip with 20s of fluff
+- A 30s clip with zero dead weight beats a {MAX_CLIP_DURATION}s clip with fluff
 
 MOMENT SELECTION (think like a TikTok editor):
 - Would YOU stop scrolling for this? If no, skip it.
@@ -292,7 +295,7 @@ SEGMENTS RULES:
 - Example: speaker makes great point (10s), rambles (8s), delivers punchline (12s) → 2 segments, 22s total
 
 Rules:
-- Final clip duration (sum of segments) MUST be 15-50 seconds (target 25-40s)
+- Final clip duration (sum of segments) MUST be {MIN_CLIP_DURATION}-{MAX_CLIP_DURATION} seconds (target {TARGET_CLIP_DURATION_MIN}-{TARGET_CLIP_DURATION_MAX}s)
 - Each segment must start and end on COMPLETE SENTENCES — never mid-thought
 - The LAST segment must end on a sentence that feels like a natural conclusion
 - Must make sense standalone when stitched together
@@ -501,7 +504,7 @@ def suggest_with_claude(
                     keep_segments = [{"start": start_sec, "end": end_sec}]
 
                 kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
-                if kept_duration < 15 or kept_duration > 45:
+                if kept_duration < MIN_CLIP_DURATION or kept_duration > MAX_CLIP_DURATION:
                     continue
 
                 normalized.append({

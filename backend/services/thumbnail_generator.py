@@ -227,6 +227,8 @@ def extract_face_frame(
     sample_count: int = 10,
     target_width: int = 1080,
     target_height: int = 1920,
+    start_second: Optional[float] = None,
+    end_second: Optional[float] = None,
 ) -> Optional[dict]:
     """
     Extract the best face frame from a video for use as thumbnail background.
@@ -267,9 +269,13 @@ def extract_face_frame(
         best_face_w = 0
         best_face_h = 0
 
-        # Sample frames evenly (skip first/last 10% to avoid intro/outro)
-        start_t = duration * 0.1
-        end_t = duration * 0.9
+        # Sample frames from the clip's time range, or middle 80% of video
+        if start_second is not None and end_second is not None and end_second > start_second:
+            start_t = max(0.0, float(start_second))
+            end_t = min(duration, float(end_second))
+        else:
+            start_t = duration * 0.1
+            end_t = duration * 0.9
         sample_times = [start_t + i * (end_t - start_t) / sample_count for i in range(sample_count)]
 
         for t in sample_times:

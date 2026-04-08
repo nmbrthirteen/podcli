@@ -46,6 +46,7 @@ os.environ.setdefault("PODCLI_TRANSITION_AUTOFIX_PASSES", "2")
 
 # Add parent dir to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 
 
 def _ensure_ssl_certs():
@@ -166,7 +167,7 @@ def cmd_process(args):
     from services.transcript_parser import parse_speaker_transcript
     from services.audio_analyzer import get_energy_profile
     from services.encoder import get_encoder_info
-    from presets import get_preset, DEFAULT_PRESET
+    from presets import get_preset, DEFAULT_PRESET, MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 
     # Load preset or defaults
     if args.preset:
@@ -453,8 +454,8 @@ def cmd_process(args):
             segments=segments,
             energy_scores=energy_scores,
             top_n=top_n,
-            min_dur=config.get("min_clip_duration", 20),
-            max_dur=config.get("max_clip_duration", 90),
+            min_dur=config.get("min_clip_duration", MIN_CLIP_DURATION),
+            max_dur=config.get("max_clip_duration", MAX_CLIP_DURATION),
         )
 
     if not clips:
@@ -495,13 +496,10 @@ def cmd_process(args):
             _thumb_gen = _tv
             _thumb_to_video = _ttv
             _thumb_logo = config.get("logo_path") or None
-            try:
-                from services.asset_store import list_assets as list_thumb_assets
-                photos = [a for a in list_thumb_assets() if a["type"] == "image" and os.path.exists(a["path"])]
-                if photos:
-                    _thumb_photo = photos[0]["path"]
-            except Exception:
-                pass
+            # Do not auto-pick a static photo for clip exports.
+            # Using a single image causes all thumbnail variations to show
+            # the same face moment. Prefer video-derived frames by default.
+            _thumb_photo = None
         except Exception:
             _thumb_enabled = False
 
@@ -541,7 +539,7 @@ def cmd_process(args):
             if ok:
                 print(f"         ✓ Clip {i+1}/{len(clips)}: {result['file_size_mb']}MB")
 
-            # Generate thumbnail and append to clip immediately
+            # Generate thumbnail and hard-cut append to clip end
             if _thumb_enabled and _thumb_gen and result.get("output_path"):
                 try:
                     clip_thumb_dir = os.path.join(thumb_dir, f"clip_{i+1}")
@@ -550,6 +548,8 @@ def cmd_process(args):
                         output_dir=clip_thumb_dir,
                         photo_path=_thumb_photo,
                         video_path=video_path,
+                        start_second=clip.get("start_second"),
+                        end_second=clip.get("end_second"),
                         logo_path=_thumb_logo,
                     )
                     if paths:
@@ -557,7 +557,9 @@ def cmd_process(args):
                         _thumb_to_video(paths[0], thumb_video, duration=1.5)
                         from services.video_processor import concat_outro
                         final_with_thumb = result["output_path"].replace(".mp4", "_with_thumb.mp4")
-                        concat_outro(result["output_path"], thumb_video, final_with_thumb, crossfade_duration=0.15)
+                        # Hard cut — no crossfade, so thumbnail appears cleanly
+                        # after outro ends, no overlap with captions
+                        concat_outro(result["output_path"], thumb_video, final_with_thumb, crossfade_duration=0.0)
                         os.replace(final_with_thumb, result["output_path"])
                         print(f"                 + thumbnail appended ({len(paths)} variations in {os.path.basename(clip_thumb_dir)}/)")
                 except Exception as e:
@@ -837,6 +839,7 @@ def _print_clips(clips: list):
 def _find_moment_with_claude(description: str, segments: list, existing_clips: list) -> list:
     """Use Claude to find a specific moment described by the user."""
     from services.claude_suggest import _find_ai_cli_candidates, _run_ai_command
+    from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 
     candidates = _find_ai_cli_candidates()
     if not candidates:
@@ -871,7 +874,7 @@ RULES:
 - Find the EXACT moment matching the user's description
 - Return 1-3 matching moments (best match first)
 - All timestamps in SECONDS as numbers
-- Duration target: 25-40 seconds, max 50 seconds
+- Duration target: {TARGET_CLIP_DURATION_MIN}-{TARGET_CLIP_DURATION_MAX} seconds, max {MAX_CLIP_DURATION} seconds
 - Cut tight: start at the hook, end when the point lands
 - Use segments to cut filler if needed
 
@@ -955,7 +958,7 @@ Transcript:
                     keep_segments = [{"start": start_sec, "end": end_sec}]
 
                 kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
-                if kept_duration < 10 or kept_duration > 90:
+                if kept_duration < MIN_CLIP_DURATION or kept_duration > MAX_CLIP_DURATION:
                     continue
 
                 found.append({
@@ -1442,8 +1445,8 @@ def _suggest_clips(
     segments: list,
     energy_scores: list | None = None,
     top_n: int = 5,
-    min_dur: float = 20,
-    max_dur: float = 90,
+    min_dur: float = MIN_CLIP_DURATION,
+    max_dur: float = MAX_CLIP_DURATION,
 ) -> list:
     """
     Score and rank transcript segments into viral clip suggestions.
@@ -1922,6 +1925,149 @@ def cmd_thumbnails(args):
 
     print(f"\n  {gray}Open the folder to preview and pick the best one.{reset}")
     print(f"  {gray}Edit .podcli/thumbnail-config.json to customize colors, fonts, layout.{reset}\n")
+
+
+def cmd_swap_thumbnail(args):
+    """Regenerate and swap the thumbnail on an existing rendered clip."""
+    from services.thumbnail_ai import generate_variations, thumbnail_to_video_frame
+    from services.video_processor import concat_outro, _get_media_duration_seconds
+    from services.asset_store import resolve as resolve_asset
+
+    accent = "\033[38;2;212;135;74m"
+    green = "\033[38;2;74;222;128m"
+    gray = "\033[38;5;245m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    clip_path = args.clip
+    if not os.path.exists(clip_path):
+        print(f"  Clip not found: {clip_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Thumbnail duration that was appended (default 1.5s)
+    thumb_duration = getattr(args, "thumb_duration", 1.5)
+    title = getattr(args, "title", None) or os.path.splitext(os.path.basename(clip_path))[0].replace("_", " ")
+
+    # Source video for extracting a new face frame — required to avoid
+    # pulling frames from rendered clips (which have captions burned in)
+    source_video = getattr(args, "source_video", None)
+    if not source_video:
+        print(f"  ✗ --source-video is required (rendered clips have captions burned in)", file=sys.stderr)
+        sys.exit(1)
+    if not os.path.exists(source_video):
+        print(f"  ✗ Source video not found: {source_video}", file=sys.stderr)
+        sys.exit(1)
+
+    logo = None
+    if getattr(args, "logo", None):
+        logo = resolve_asset(args.logo)
+    else:
+        try:
+            from services.asset_store import list_assets
+            logos = [a for a in list_assets() if a["type"] == "logo" and os.path.exists(a["path"])]
+            if logos:
+                logo = logos[0]["path"]
+        except Exception:
+            pass
+
+    # Step 1: Trim the old thumbnail from the clip
+    clip_duration = _get_media_duration_seconds(clip_path, default=0.0)
+    if clip_duration <= thumb_duration:
+        print(f"  Clip too short ({clip_duration:.1f}s) to trim thumbnail", file=sys.stderr)
+        sys.exit(1)
+
+    content_duration = clip_duration - thumb_duration
+    print(f"\n  {bold}Swapping thumbnail on:{reset} {os.path.basename(clip_path)}")
+    print(f"  {gray}Clip: {clip_duration:.1f}s → content: {content_duration:.1f}s + new thumbnail{reset}")
+
+    import tempfile
+    work_dir = tempfile.mkdtemp(prefix="swap_thumb_")
+
+    # Trim off old thumbnail
+    trimmed_path = os.path.join(work_dir, "trimmed.mp4")
+    import subprocess
+    trim_cmd = [
+        "ffmpeg", "-y", "-i", clip_path,
+        "-t", str(content_duration),
+        "-c", "copy", "-movflags", "+faststart",
+        trimmed_path,
+    ]
+    result = subprocess.run(trim_cmd, capture_output=True, text=True, timeout=60)
+    if result.returncode != 0:
+        print(f"  Failed to trim: {result.stderr[-200:]}", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 2: Generate new thumbnail
+    thumb_dir = os.path.join(work_dir, "thumbnails")
+    print(f"  {bold}Generating new thumbnails...{reset}")
+
+    timestamp = getattr(args, "timestamp", None)
+    start_sec = getattr(args, "start", None)
+    end_sec = getattr(args, "end", None)
+
+    # If exact timestamp given, extract that specific frame
+    frame_path = None
+    if timestamp is not None:
+        import cv2
+        cap = cv2.VideoCapture(source_video)
+        cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
+        ret, frame = cap.read()
+        cap.release()
+        if ret:
+            frame_path = os.path.join(thumb_dir, "_manual_frame.png")
+            os.makedirs(thumb_dir, exist_ok=True)
+            cv2.imwrite(frame_path, frame)
+            print(f"  {green}✓{reset} Using frame at {timestamp}s")
+        else:
+            print(f"  ⚠ Could not read frame at {timestamp}s, falling back to auto", file=sys.stderr)
+
+    paths = generate_variations(
+        title=title,
+        output_dir=thumb_dir,
+        photo_path=frame_path,
+        video_path=source_video,
+        start_second=start_sec,
+        end_second=end_sec,
+        logo_path=logo,
+        config={"variations": getattr(args, "variations", 3)},
+    )
+
+    if not paths:
+        print(f"  Failed to generate thumbnails", file=sys.stderr)
+        sys.exit(1)
+
+    # Show variations
+    for i, p in enumerate(paths):
+        print(f"  {green}✓{reset} Variation {i+1}: {p}")
+
+    # Use first variation (or user-specified)
+    pick = getattr(args, "pick", 1) - 1
+    pick = max(0, min(pick, len(paths) - 1))
+    chosen = paths[pick]
+    print(f"  {accent}Using variation {pick + 1}{reset}")
+
+    # Step 3: Convert to video frame and append
+    thumb_video = os.path.join(work_dir, "thumb_frame.mp4")
+    thumbnail_to_video_frame(chosen, thumb_video, duration=thumb_duration)
+
+    final_path = os.path.join(work_dir, "final.mp4")
+    concat_outro(trimmed_path, thumb_video, final_path, crossfade_duration=0.0, transition="fade")
+
+    # Step 4: Replace original
+    import shutil
+    shutil.move(final_path, clip_path)
+
+    # Copy thumbnail PNGs next to the clip
+    clip_dir = os.path.dirname(clip_path)
+    for p in paths:
+        dest = os.path.join(clip_dir, os.path.basename(p))
+        shutil.copy2(p, dest)
+
+    # Cleanup
+    shutil.rmtree(work_dir, ignore_errors=True)
+
+    print(f"  {green}✓ Thumbnail swapped!{reset}")
+    print(f"  {gray}Variations saved next to clip for future swaps.{reset}\n")
 
 
 def cmd_corrections(args):
@@ -2427,6 +2573,19 @@ def main():
     thumb.add_argument("--logo", help="Logo (asset name or path)")
     thumb.add_argument("-n", "--variations", type=int, default=3, help="Number of variations")
 
+    # ── swap-thumbnail ──
+    st = sub.add_parser("swap-thumbnail", help="Regenerate thumbnail on an existing clip")
+    st.add_argument("clip", help="Path to rendered clip (.mp4)")
+    st.add_argument("--title", help="Title text (defaults to filename)")
+    st.add_argument("--source-video", required=True, help="Original source video (required — rendered clips have captions burned in)")
+    st.add_argument("--start", type=float, help="Clip start time in source video (seconds)")
+    st.add_argument("--end", type=float, help="Clip end time in source video (seconds)")
+    st.add_argument("--timestamp", type=float, help="Exact second in source video to use as frame (skips auto-detection)")
+    st.add_argument("--logo", help="Logo (asset name or path)")
+    st.add_argument("--pick", type=int, default=1, help="Which variation to use (1-3, default 1)")
+    st.add_argument("-n", "--variations", type=int, default=3, help="Number of variations to generate")
+    st.add_argument("--thumb-duration", type=float, default=1.5, help="Duration of thumbnail end card (default 1.5s)")
+
     # ── corrections ──
     corr = sub.add_parser("corrections", help="Manage transcript word corrections (Whisper fixes)")
     corr_sub = corr.add_subparsers(dest="corrections_action")
@@ -2470,6 +2629,8 @@ def main():
         cmd_process(args)
     elif args.command == "thumbnails":
         cmd_thumbnails(args)
+    elif args.command == "swap-thumbnail":
+        cmd_swap_thumbnail(args)
     elif args.command == "presets":
         cmd_presets(args)
     elif args.command == "assets":
