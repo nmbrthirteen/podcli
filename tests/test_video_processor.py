@@ -29,6 +29,10 @@ class VideoProcessorTests(unittest.TestCase):
         self.assertEqual(duration, 30.0)
 
     def test_concat_outro_uses_soft_audio_fallback_before_hard_concat(self):
+        # xfade attempt returns non-zero so concat_outro falls through to
+        # the hardcut_soft_audio path. Patch proc_run directly — the old
+        # subprocess.run mock was a no-op since the code path migrated to
+        # utils.proc.run.
         run_fail = mock.Mock(returncode=1, stdout="", stderr="xfade unavailable")
         with mock.patch.object(vp, "get_dimensions", return_value=(1080, 1920)), \
              mock.patch.object(vp, "_get_media_duration_seconds", side_effect=[20.0, 5.0]), \
@@ -36,7 +40,7 @@ class VideoProcessorTests(unittest.TestCase):
              mock.patch.object(vp, "get_video_encode_flags", return_value=vp.CPU_FLAGS), \
              mock.patch.object(vp.os.path, "exists", return_value=False), \
              mock.patch.object(vp, "_run_ffmpeg_with_fallback") as run_ffmpeg, \
-             mock.patch.object(vp.subprocess, "run", return_value=run_fail):
+             mock.patch.object(vp, "proc_run", return_value=run_fail):
             run_ffmpeg.side_effect = [
                 "/tmp/outro_scaled.mp4",  # outro scaling
                 "/tmp/out.mp4",           # soft-audio fallback
