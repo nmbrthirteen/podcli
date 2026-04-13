@@ -32,7 +32,15 @@ export class TranscriptCache {
 
     return new Promise((resolve, reject) => {
       let bytesRead = 0;
+      let finalized = false;
       const maxBytes = 10 * 1024 * 1024; // 10MB sample
+
+      const finalize = () => {
+        if (finalized) return;
+        finalized = true;
+        hash.update(`size:${stat.size}`);
+        resolve(hash.digest("hex").slice(0, 16));
+      };
 
       const stream = createReadStream(filePath);
       stream.on("data", (chunk) => {
@@ -46,15 +54,13 @@ export class TranscriptCache {
           stream.destroy();
         }
       });
-      stream.on("end", () => {
-        hash.update(`size:${stat.size}`);
-        resolve(hash.digest("hex").slice(0, 16));
+      stream.on("end", finalize);
+      stream.on("close", finalize);
+      stream.on("error", (err) => {
+        if (finalized) return;
+        finalized = true;
+        reject(err);
       });
-      stream.on("close", () => {
-        hash.update(`size:${stat.size}`);
-        resolve(hash.digest("hex").slice(0, 16));
-      });
-      stream.on("error", reject);
     });
   }
 
