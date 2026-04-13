@@ -114,9 +114,8 @@ HASHTAGS:
 
     project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=project_dir) as f:
-        f.write(prompt)
-        prompt_file = f.name
+    from utils.prompt_files import write_prompt_file
+    prompt_file = write_prompt_file(prompt)
 
     try:
         for idx, (cli_path, engine) in enumerate(candidates):

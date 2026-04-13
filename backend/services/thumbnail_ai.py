@@ -476,9 +476,8 @@ RULES:
 
     prompt_file = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=project_dir) as f:
-            f.write(prompt)
-            prompt_file = f.name
+        from utils.prompt_files import write_prompt_file
+        prompt_file = write_prompt_file(prompt)
 
         for cli_path, engine in candidates:
             try:

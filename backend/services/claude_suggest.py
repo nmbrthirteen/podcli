@@ -399,12 +399,12 @@ def suggest_with_claude(
         exclude_clips=exclude_clips,
     )
 
-    # Write prompt to temp file to avoid shell escaping issues
+    # Write prompt to temp file to avoid shell escaping issues.
+    # Goes to .podcli/tmp/ (gitignored) so crashes don't litter the repo root.
     project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=project_dir) as f:
-        f.write(prompt)
-        prompt_file = f.name
+    from utils.prompt_files import write_prompt_file
+    prompt_file = write_prompt_file(prompt)
 
     if progress_callback:
         first_label = _engine_label(candidates[0][1])
