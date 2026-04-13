@@ -74,6 +74,33 @@ def analyze_faces(
     if progress_callback:
         progress_callback(10, f"Scanning {sample_count} frames for faces...")
 
+    # We compare each face's mouth ROI against the SAME face's mouth ROI
+    # from the previous sample. High frame-to-frame difference = the
+    # mouth is moving = this person is speaking. Listeners stay static.
+    # Matching is done by nearest cx — good enough for a split-screen
+    # where faces don't move between samples.
+    prev_mouth_gray: dict[int, "np.ndarray"] = {}
+
+    def _mouth_roi_gray(frame, cx: int, cy: int, fw: int, fh: int):
+        """Return a small downsampled grayscale of the mouth area,
+        or None if the bbox is out of frame."""
+        y0 = int(cy + fh * 0.10)
+        y1 = int(cy + fh * 0.55)
+        x0 = int(cx - fw * 0.35)
+        x1 = int(cx + fw * 0.35)
+        h_frame, w_frame = frame.shape[:2]
+        y0 = max(0, min(h_frame - 2, y0))
+        y1 = max(y0 + 1, min(h_frame, y1))
+        x0 = max(0, min(w_frame - 2, x0))
+        x1 = max(x0 + 1, min(w_frame, x1))
+        roi = frame[y0:y1, x0:x1]
+        if roi.size == 0:
+            return None
+        # 16x16 downsample + grayscale — cheap to diff and robust to
+        # sub-pixel jitter.
+        small = cv2.resize(roi, (16, 16))
+        return cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.int16)
+
     for i in range(sample_count):
         t = i * duration / sample_count
         cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
@@ -82,17 +109,34 @@ def analyze_faces(
             continue
 
         faces = detect_faces(detector, frame, width, height)
+        current_mouth_gray: dict[int, "np.ndarray"] = {}
 
         frame_faces = 0
         for f in faces:
+            fh = f.get("fh", f["fw"])  # YuNet returns fh; fall back to fw
+            mouth = _mouth_roi_gray(frame, f["cx"], f["cy"], f["fw"], fh)
+
+            activity = 0.0
+            if mouth is not None:
+                # Bucket faces by cluster-ish column (left/right half here).
+                # We'll refine to proper clusters after they're built.
+                key = 0 if f["cx"] < width // 2 else 1
+                prev = prev_mouth_gray.get(key)
+                if prev is not None and prev.shape == mouth.shape:
+                    activity = float(np.mean(np.abs(mouth - prev)))
+                current_mouth_gray[key] = mouth
+
             observations.append({
                 "time": round(t, 3),
                 "face_center_x": f["cx"],
                 "face_center_y": f["cy"],
                 "face_width": f["fw"],
                 "confidence": f["confidence"],
+                "activity": round(activity, 3),
             })
             frame_faces += 1
+
+        prev_mouth_gray = current_mouth_gray
         faces_per_frame.append(frame_faces)
 
         if progress_callback and i % 20 == 0:
@@ -154,11 +198,15 @@ def analyze_faces(
         progress_callback(85, "Mapping speakers to face positions...")
 
     if is_split_screen and len(clusters_list) >= 2:
-        # Split-screen: map speakers to clusters using observation evidence.
-        # For each speaker, count which cluster has more face observations
-        # during that speaker's segments (±1.5s window).  This replaces the
-        # old "first-to-speak = left" heuristic which broke when the host
-        # spoke first but sat on the right.
+        # Split-screen speaker→cluster mapping.
+        #
+        # Pure face-position counting is symmetric on true split-screens
+        # (both faces are visible every frame), so presence votes alone
+        # can't tell which face is actually speaking. We use the
+        # per-observation `activity` signal — the mouth-ROI frame-to-
+        # frame pixel difference computed above. During a speaker's
+        # turn, THEIR face has high activity (mouth moving) and the
+        # listener's face has near-zero activity.
         speaker_talk_time = {}
         speaker_first_time = {}
         for seg in speaker_segments:
@@ -171,23 +219,32 @@ def analyze_faces(
         speakers_by_talk = sorted(speakers, key=lambda s: speaker_talk_time.get(s, 0), reverse=True)
         top_2 = speakers_by_talk[:2]
 
-        obs_arr = [(o["time"], o["face_center_x"]) for o in observations]
-        # Pre-sort observations so each segment can binary-search its slice,
-        # and so we can score each speaker against observations over their
-        # FULL speaking turn, not just ±1.5s around the turn's start.
+        # Observation list now includes activity per face. Keep track of
+        # both the x position (for cluster matching) and the activity
+        # score (for vote weighting).
+        obs_arr = [
+            (o["time"], o["face_center_x"], o.get("activity", 0.0))
+            for o in observations
+        ]
         obs_arr.sort(key=lambda x: x[0])
-        obs_times = [t for t, _ in obs_arr]
+        obs_times = [t for t, _, _ in obs_arr]
 
-        def _vote_range(start: float, end: float, votes_out: list) -> None:
-            """Add votes for every observation inside [start-0.25, end+0.25]."""
+        def _activity_vote_range(start: float, end: float, votes_out: list) -> None:
+            """Accumulate activity-weighted votes for observations inside
+            [start-0.25, end+0.25]. A small baseline of +1 is added for
+            every matching observation so a completely static face still
+            beats a missing cluster, but activity dominates when present."""
             import bisect
             lo = bisect.bisect_left(obs_times, start - 0.25)
             hi = bisect.bisect_right(obs_times, end + 0.25)
             for idx in range(lo, hi):
-                obs_cx = obs_arr[idx][1]
+                _t, obs_cx, obs_activity = obs_arr[idx]
                 for ci, cl in enumerate(clusters_list):
                     if abs(obs_cx - cl["center_x"]) < width * 0.15:
-                        votes_out[ci] += 1
+                        # Presence gets 1 vote; activity gets ×20 weight so
+                        # a handful of mouth-motion observations outweigh
+                        # thousands of static-face observations.
+                        votes_out[ci] += 1.0 + (obs_activity * 20.0)
 
         for speaker in top_2:
             sp_ranges = [
@@ -195,9 +252,9 @@ def analyze_faces(
                 for s in speaker_segments
                 if s.get("speaker") == speaker
             ]
-            votes = [0] * len(clusters_list)
+            votes = [0.0] * len(clusters_list)
             for start, end in sp_ranges:
-                _vote_range(start, end, votes)
+                _activity_vote_range(start, end, votes)
             if any(votes):
                 speaker_mappings[speaker] = int(np.argmax(votes))
 
@@ -209,7 +266,7 @@ def analyze_faces(
             """Count observations inside this speaker's turns that fall
             near the given cluster's center_x."""
             cluster_x = clusters_list[cluster_index]["center_x"]
-            count = 0
+            score = 0.0
             for s in speaker_segments:
                 if s.get("speaker") != speaker:
                     continue
@@ -217,9 +274,12 @@ def analyze_faces(
                 lo = bisect.bisect_left(obs_times, s["start"] - 0.25)
                 hi = bisect.bisect_right(obs_times, s["end"] + 0.25)
                 for idx in range(lo, hi):
-                    if abs(obs_arr[idx][1] - cluster_x) < width * 0.15:
-                        count += 1
-            return count
+                    _t, obs_cx, obs_activity = obs_arr[idx]
+                    if abs(obs_cx - cluster_x) < width * 0.15:
+                        # Activity-weighted confidence so the conflict
+                        # resolver uses the same signal as the primary pass.
+                        score += 1.0 + (obs_activity * 20.0)
+            return score
 
         if len(top_2) == 2 and top_2[0] in speaker_mappings and top_2[1] in speaker_mappings:
             if speaker_mappings[top_2[0]] == speaker_mappings[top_2[1]]:
@@ -249,17 +309,32 @@ def analyze_faces(
         for sp in speakers_by_talk[2:]:
             speaker_mappings[sp] = dominant_idx
     elif len(clusters_list) >= 2 and len(speakers) >= 2:
-        # Non-split-screen: vote by which face is visible when speaker talks
-        obs_arr = [(o["time"], o["face_center_x"]) for o in observations]
+        # Non-split-screen: same activity-weighted voting over full
+        # speaker turns. On non-split layouts a single face is usually
+        # on-screen at a time, so the signal is already strong even
+        # without activity, but we use activity for consistency.
+        obs_arr2 = [
+            (o["time"], o["face_center_x"], o.get("activity", 0.0))
+            for o in observations
+        ]
+        obs_arr2.sort(key=lambda x: x[0])
+        obs_times2 = [t for t, _, _ in obs_arr2]
         for speaker in speakers:
-            sp_times = [s["start"] for s in speaker_segments if s.get("speaker") == speaker]
-            votes = [0] * len(clusters_list)
-            for t in sp_times:
-                for obs_t, obs_cx in obs_arr:
-                    if abs(obs_t - t) < 1.5:
-                        for ci, cl in enumerate(clusters_list):
-                            if abs(obs_cx - cl["center_x"]) < width * 0.15:
-                                votes[ci] += 1
+            sp_ranges = [
+                (s["start"], s["end"])
+                for s in speaker_segments
+                if s.get("speaker") == speaker
+            ]
+            votes = [0.0] * len(clusters_list)
+            import bisect
+            for start, end in sp_ranges:
+                lo = bisect.bisect_left(obs_times2, start - 0.25)
+                hi = bisect.bisect_right(obs_times2, end + 0.25)
+                for idx in range(lo, hi):
+                    _t, obs_cx, obs_activity = obs_arr2[idx]
+                    for ci, cl in enumerate(clusters_list):
+                        if abs(obs_cx - cl["center_x"]) < width * 0.15:
+                            votes[ci] += 1.0 + (obs_activity * 20.0)
             if any(votes):
                 speaker_mappings[speaker] = int(np.argmax(votes))
     elif len(speakers) == 1 and clusters_list:
