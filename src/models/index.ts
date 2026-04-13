@@ -6,10 +6,10 @@ export interface TaskRequest {
   params: Record<string, unknown>;
 }
 
-export interface TaskResult {
+export interface TaskResult<T = Record<string, unknown>> {
   task_id: string;
   status: "success" | "error";
-  data?: Record<string, unknown>;
+  data?: T;
   error?: string;
 }
 
@@ -94,6 +94,81 @@ export interface SuggestedClip {
   duration: number;
   reasoning: string;
   preview_text: string;
+  segments?: Array<{ start: number; end: number }>;
+  suggested_caption_style?: string;
+  timestamp_display?: string;
+  content_type?: string;
+  score?: number;
+}
+
+export interface UIState {
+  videoPath?: string;
+  filePath?: string;
+  transcript?: TranscriptResult | null;
+  rawTranscriptText?: string;
+  suggestions?: SuggestedClip[];
+  deselectedIndices?: number[];
+  settings?: {
+    captionStyle?: string;
+    cropStrategy?: string;
+    logoPath?: string;
+    outroPath?: string;
+  };
+  phase?: string;
+  lastUpdated?: number;
+}
+
+export interface CreateClipInput {
+  clip_number?: number;
+  video_path?: string;
+  start_second?: number;
+  end_second?: number;
+  title?: string;
+  caption_style?: string;
+  crop_strategy?: string;
+  logo_path?: string;
+  outro_path?: string;
+  transcript_words?: WordTimestamp[];
+  clean_fillers?: boolean;
+  allow_ass_fallback?: boolean;
+}
+
+export interface BatchClipSpec {
+  start_second: number;
+  end_second: number;
+  title?: string;
+  caption_style?: string;
+  crop_strategy?: string;
+  logo_path?: string | null;
+  allow_ass_fallback?: boolean;
+  keep_segments?: Array<{ start: number; end: number }>;
+}
+
+export interface BatchClipsInput {
+  video_path?: string;
+  transcript_words?: WordTimestamp[];
+  clip_numbers?: number[];
+  clips?: BatchClipSpec[];
+  export_selected?: boolean;
+  clean_fillers?: boolean;
+  allow_ass_fallback?: boolean;
+}
+
+export interface BatchClipsResult {
+  total_clips: number;
+  successful_clips: number;
+  results: Array<{
+    status: "success" | "error";
+    output_path?: string;
+    start_second?: number;
+    end_second?: number;
+    caption_style?: string;
+    crop_strategy?: string;
+    title?: string;
+    file_size_mb?: number;
+    duration?: number;
+    error?: string;
+  }>;
 }
 
 // === Asset Models ===

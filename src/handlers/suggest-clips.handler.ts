@@ -83,20 +83,24 @@ export const suggestClipsToolDef = {
   },
 };
 
-export async function handleSuggestClips(
-  input: Record<string, unknown>
-): Promise<string> {
-  const suggestions = input.suggestions as Array<{
-    title: string;
-    start_second: number;
-    end_second: number;
-    segments?: Array<{ start: number; end: number }>;
-    reasoning: string;
-    preview_text?: string;
-    content_type?: string;
-    score?: number;
-    suggested_caption_style?: string;
-  }>;
+export interface RawSuggestion {
+  title: string;
+  start_second: number;
+  end_second: number;
+  segments?: Array<{ start: number; end: number }>;
+  reasoning: string;
+  preview_text?: string;
+  content_type?: string;
+  score?: number;
+  suggested_caption_style?: string;
+}
+
+export interface SuggestClipsInput {
+  suggestions: RawSuggestion[];
+}
+
+export async function handleSuggestClips(input: SuggestClipsInput): Promise<string> {
+  const suggestions = input.suggestions;
 
   // Validate and enrich suggestions
   const enriched = suggestions.map((s, i) => {

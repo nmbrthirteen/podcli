@@ -2,16 +2,19 @@ import { readFileSync } from "fs";
 import { PythonExecutor } from "../services/python-executor.js";
 import { FileManager } from "../services/file-manager.js";
 import { paths } from "../config/paths.js";
-import type { ClipResult } from "../models/index.js";
+import type { ClipResult, CreateClipInput, SuggestedClip, UIState } from "../models/index.js";
+import { childLogger } from "../utils/logger.js";
 
+const log = childLogger("create-clip");
 const executor = new PythonExecutor();
 const fileManager = new FileManager();
 
 /** Load UI state from disk. Returns null if unavailable. */
-function loadState(): Record<string, unknown> | null {
+function loadState(): UIState | null {
   try {
-    return JSON.parse(readFileSync(paths.uiState, "utf-8"));
-  } catch {
+    return JSON.parse(readFileSync(paths.uiState, "utf-8")) as UIState;
+  } catch (err) {
+    log.debug("UI state unavailable", { err: err instanceof Error ? err.message : err });
     return null;
   }
 }
@@ -106,20 +109,18 @@ export const createClipToolDef = {
   },
 };
 
-export async function handleCreateClip(
-  input: Record<string, unknown>
-): Promise<string> {
+export async function handleCreateClip(input: CreateClipInput): Promise<string> {
   await fileManager.ensureDirectories();
 
   const state = loadState();
-  const settings = (state?.settings as Record<string, string>) || {};
-  const suggestions = (state?.suggestions as Array<Record<string, unknown>>) || [];
-  const transcript = state?.transcript as Record<string, unknown> | null;
+  const settings = state?.settings ?? {};
+  const suggestions: SuggestedClip[] = state?.suggestions ?? [];
+  const transcript = state?.transcript ?? null;
 
   // Resolve clip from suggestion number
-  let suggestion: Record<string, unknown> | null = null;
+  let suggestion: SuggestedClip | null = null;
   if (input.clip_number != null) {
-    const idx = (input.clip_number as number) - 1;
+    const idx = input.clip_number - 1;
     if (idx < 0 || idx >= suggestions.length) {
       return JSON.stringify({
         error: `Clip #${input.clip_number} not found. Available: 1-${suggestions.length}`,
@@ -129,35 +130,22 @@ export async function handleCreateClip(
   }
 
   // Auto-resolve fields: explicit input > suggestion > state
-  const videoPath =
-    (input.video_path as string) || (state?.videoPath as string) || "";
-  const startSecond =
-    (input.start_second as number) ?? (suggestion?.start_second as number);
-  const endSecond =
-    (input.end_second as number) ?? (suggestion?.end_second as number);
-  const title =
-    (input.title as string) ||
-    (suggestion?.title as string) ||
-    "clip";
+  const videoPath = input.video_path || state?.videoPath || "";
+  const startSecond = input.start_second ?? suggestion?.start_second;
+  const endSecond = input.end_second ?? suggestion?.end_second;
+  const title = input.title || suggestion?.title || "clip";
   const captionStyle =
-    (input.caption_style as string) ||
-    (suggestion?.suggested_caption_style as string) ||
+    input.caption_style ||
+    suggestion?.suggested_caption_style ||
     settings.captionStyle ||
     "hormozi";
-  const cropStrategy =
-    (input.crop_strategy as string) || settings.cropStrategy || "speaker";
-  const logoPath =
-    (input.logo_path as string) || settings.logoPath || null;
-  const outroPath =
-    (input.outro_path as string) || settings.outroPath || null;
-  const transcriptWords =
-    (input.transcript_words as Array<unknown>) ||
-    (transcript?.words as Array<unknown>) ||
-    [];
+  const cropStrategy = input.crop_strategy || settings.cropStrategy || "speaker";
+  const logoPath = input.logo_path || settings.logoPath || null;
+  const outroPath = input.outro_path || settings.outroPath || null;
+  const transcriptWords = input.transcript_words ?? transcript?.words ?? [];
 
   // Pull multi-cut segments from suggestion (if available)
-  const keepSegments =
-    (suggestion?.segments as Array<{ start: number; end: number }>) || null;
+  const keepSegments = suggestion?.segments ?? null;
 
   // Validate required fields
   if (!videoPath) {
@@ -169,7 +157,7 @@ export async function handleCreateClip(
     });
   }
 
-  const result = await executor.execute("create_clip", {
+  const result = await executor.execute<ClipResult>("create_clip", {
     video_path: videoPath,
     start_second: startSecond,
     end_second: endSecond,
@@ -185,10 +173,13 @@ export async function handleCreateClip(
     ...(keepSegments && { keep_segments: keepSegments }),
   });
 
-  const data = result.data as unknown as ClipResult;
+  if (!result.data) {
+    throw new Error("Clip creation returned no data");
+  }
+  const data = result.data;
 
   return JSON.stringify({
-    clip_number: input.clip_number || null,
+    clip_number: input.clip_number ?? null,
     output_path: data.output_path,
     duration: data.duration,
     file_size_mb: data.file_size_mb,

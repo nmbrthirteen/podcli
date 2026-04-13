@@ -5,6 +5,14 @@ import type { TranscriptResult } from "../models/index.js";
 const executor = new PythonExecutor();
 const cache = new TranscriptCache();
 
+export interface TranscribeInput {
+  file_path: string;
+  model_size?: "tiny" | "base" | "small" | "medium" | "large";
+  language?: string;
+  enable_diarization?: boolean;
+  num_speakers?: number;
+}
+
 export const transcribeToolDef = {
   name: "transcribe_podcast",
   description:
@@ -50,26 +58,21 @@ export const transcribeToolDef = {
   },
 };
 
-export async function handleTranscribe(
-  input: Record<string, unknown>
-): Promise<string> {
-  const filePath = input.file_path as string;
-  const modelSize = (input.model_size as string) || "base";
-  const language = input.language as string | undefined;
+export async function handleTranscribe(input: TranscribeInput): Promise<string> {
+  const filePath = input.file_path;
+  const modelSize = input.model_size ?? "base";
+  const language = input.language;
   const enableDiarization = input.enable_diarization !== false; // default true
-  const numSpeakers = input.num_speakers as number | undefined;
+  const numSpeakers = input.num_speakers;
 
   // Check cache first
   const cached = await cache.get(filePath);
   if (cached) {
-    return JSON.stringify({
-      cached: true,
-      ...formatResult(cached as unknown as Record<string, unknown>),
-    });
+    return JSON.stringify({ cached: true, ...formatResult(cached) });
   }
 
   // Execute transcription + diarization
-  const result = await executor.execute("transcribe", {
+  const result = await executor.execute<TranscriptResult>("transcribe", {
     file_path: filePath,
     model_size: modelSize,
     language,
@@ -77,21 +80,20 @@ export async function handleTranscribe(
     num_speakers: numSpeakers,
   });
 
-  const data = result.data as Record<string, unknown>;
+  if (!result.data) {
+    throw new Error("Transcription returned no data");
+  }
+  const data = result.data;
 
   // Cache the result
-  await cache.set(filePath, data as unknown as TranscriptResult);
+  await cache.set(filePath, data);
 
-  return JSON.stringify({
-    cached: false,
-    ...formatResult(data),
-  });
+  return JSON.stringify({ cached: false, ...formatResult(data) });
 }
 
-function formatResult(data: Record<string, unknown>) {
-  const words = (data.words as Array<Record<string, unknown>>) || [];
-  const segments = (data.segments as Array<Record<string, unknown>>) || [];
-  const speakers = data.speakers as Record<string, unknown> | undefined;
+function formatResult(data: TranscriptResult) {
+  const words = data.words ?? [];
+  const segments = data.segments ?? [];
 
   return {
     transcript: data.transcript,
@@ -101,7 +103,7 @@ function formatResult(data: Record<string, unknown>) {
     language: data.language,
     word_count: words.length,
     segment_count: segments.length,
-    speakers: speakers || { num_speakers: 0, speakers: {} },
-    speaker_segments: data.speaker_segments || [],
+    speakers: data.speakers ?? { num_speakers: 0, speakers: {} },
+    speaker_segments: data.speaker_segments ?? [],
   };
 }

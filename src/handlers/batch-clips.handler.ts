@@ -2,15 +2,25 @@ import { readFileSync } from "fs";
 import { PythonExecutor } from "../services/python-executor.js";
 import { FileManager } from "../services/file-manager.js";
 import { paths } from "../config/paths.js";
+import { childLogger } from "../utils/logger.js";
+import type {
+  BatchClipsInput,
+  BatchClipSpec,
+  BatchClipsResult,
+  SuggestedClip,
+  UIState,
+} from "../models/index.js";
 
+const log = childLogger("batch-clips");
 const executor = new PythonExecutor();
 const fileManager = new FileManager();
 
 /** Load UI state from disk. Returns null if unavailable. */
-function loadState(): Record<string, unknown> | null {
+function loadState(): UIState | null {
   try {
-    return JSON.parse(readFileSync(paths.uiState, "utf-8"));
-  } catch {
+    return JSON.parse(readFileSync(paths.uiState, "utf-8")) as UIState;
+  } catch (err) {
+    log.debug("UI state unavailable", { err: err instanceof Error ? err.message : err });
     return null;
   }
 }
@@ -98,44 +108,37 @@ export const batchClipsToolDef = {
   },
 };
 
-export async function handleBatchClips(
-  input: Record<string, unknown>
-): Promise<string> {
+export async function handleBatchClips(input: BatchClipsInput): Promise<string> {
   await fileManager.ensureDirectories();
 
   const state = loadState();
-  const settings = (state?.settings as Record<string, string>) || {};
-  const suggestions = (state?.suggestions as Array<Record<string, unknown>>) || [];
-  const transcript = state?.transcript as Record<string, unknown> | null;
+  const settings = state?.settings ?? {};
+  const suggestions: SuggestedClip[] = state?.suggestions ?? [];
+  const transcript = state?.transcript ?? null;
 
   // Auto-resolve video path
-  const videoPath =
-    (input.video_path as string) || (state?.videoPath as string) || "";
+  const videoPath = input.video_path || state?.videoPath || "";
   if (!videoPath) {
     return JSON.stringify({ error: "video_path is required (no video in session state)" });
   }
 
   // Auto-resolve transcript words
-  const transcriptWords =
-    (input.transcript_words as Array<unknown>) ||
-    (transcript?.words as Array<unknown>) ||
-    [];
+  const transcriptWords = input.transcript_words ?? transcript?.words ?? [];
 
   // Build clips array: from export_selected, clip_numbers, or explicit clips
-  let clips: Array<Record<string, unknown>>;
-  const deselected = (state?.deselectedIndices as number[]) || [];
+  let clips: BatchClipSpec[];
+  const deselected = state?.deselectedIndices ?? [];
 
-  const buildClipFromSuggestion = (s: Record<string, unknown>, num: number) => ({
+  const buildClipFromSuggestion = (s: SuggestedClip, num: number): BatchClipSpec => ({
     start_second: s.start_second,
     end_second: s.end_second,
     title: s.title || `clip_${num}`,
-    caption_style:
-      (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
+    caption_style: s.suggested_caption_style || settings.captionStyle || "hormozi",
     crop_strategy: settings.cropStrategy || "speaker",
     allow_ass_fallback: input.allow_ass_fallback === true,
     logo_path: settings.logoPath || null,
     // Preserve multi-cut segments from suggestion
-    ...(Array.isArray(s.segments) && s.segments.length > 0 && { keep_segments: s.segments }),
+    ...(s.segments && s.segments.length > 0 && { keep_segments: s.segments }),
   });
 
   if (input.export_selected) {
@@ -152,11 +155,10 @@ export async function handleBatchClips(
       });
     }
   } else if (input.clip_numbers) {
-    const numbers = input.clip_numbers as number[];
     const errors: string[] = [];
     clips = [];
 
-    for (const num of numbers) {
+    for (const num of input.clip_numbers) {
       const idx = num - 1;
       if (idx < 0 || idx >= suggestions.length) {
         errors.push(`Clip #${num} not found`);
@@ -171,14 +173,14 @@ export async function handleBatchClips(
       });
     }
   } else if (input.clips) {
-    clips = input.clips as Array<Record<string, unknown>>;
+    clips = input.clips;
   } else {
     return JSON.stringify({
       error: "Use export_selected=true, clip_numbers=[1, 3], or pass clips array",
     });
   }
 
-  const result = await executor.execute("batch_clips", {
+  const result = await executor.execute<BatchClipsResult>("batch_clips", {
     video_path: videoPath,
     clips,
     transcript_words: transcriptWords,
@@ -188,7 +190,10 @@ export async function handleBatchClips(
     logo_path: settings.logoPath || null,
   });
 
-  const data = result.data as Record<string, unknown>;
+  if (!result.data) {
+    throw new Error("Batch clip creation returned no data");
+  }
+  const data = result.data;
 
   return JSON.stringify({
     total_clips: data.total_clips,

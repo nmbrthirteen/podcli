@@ -17,11 +17,11 @@ export class PythonExecutor {
     this.timeoutMs = timeoutMs;
   }
 
-  async execute(
+  async execute<T = Record<string, unknown>>(
     taskType: TaskRequest["task_type"],
     params: Record<string, unknown>,
     onProgress?: ProgressCallback
-  ): Promise<TaskResult> {
+  ): Promise<TaskResult<T>> {
     const taskId = uuidv4();
 
     const request: TaskRequest = {
@@ -30,7 +30,7 @@ export class PythonExecutor {
       params,
     };
 
-    return new Promise<TaskResult>((resolve, reject) => {
+    return new Promise<TaskResult<T>>((resolve, reject) => {
       const proc = spawn(paths.pythonPath, [paths.pythonBackend], {
         stdio: ["pipe", "pipe", "pipe"],
         env: {
@@ -82,7 +82,7 @@ export class PythonExecutor {
             return;
           }
 
-          const result = JSON.parse(jsonMatch) as TaskResult;
+          const result = JSON.parse(jsonMatch) as TaskResult<T>;
 
           if (result.status === "error") {
             reject(new Error(result.error || "Unknown Python error"));
