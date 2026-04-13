@@ -42,6 +42,10 @@ from services.face_track_helpers import (
     update_tripod_camera as _update_tripod_camera,
     upgrade_speaker_mappings as _upgrade_speaker_mappings,
 )
+from services.captions_burn import (
+    burn_captions,
+    create_gradient_png as _create_gradient_png,
+)
 import sys
 
 
@@ -2310,141 +2314,6 @@ def _build_transition_keyframes(
         prev_y = target_y
 
     return x_keyframes, y_keyframes
-
-
-def _create_gradient_png(output_path: str, width: int = 1080, height: int = 1920, opacity: float = 0.7) -> str:
-    """
-    Create a transparent-to-black gradient PNG for the bottom 50% of the frame.
-    Uses Python to generate the image — no external deps needed (uses raw PPM → FFmpeg).
-    """
-    # Generate a 1-pixel wide gradient strip, then FFmpeg scales it
-    # Build gradient with FFmpeg: black fading from 0% to opacity% over bottom half
-    # We create a gradient using lavfi color + geq
-    max_alpha = int(opacity * 255)
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi",
-        "-i", f"color=black@0.0:size={width}x{height}:duration=1,format=rgba,"
-              f"geq="
-              f"r=0:"
-              f"g=0:"
-              f"b=0:"
-              f"a='if(lt(Y,H/2),0,min({max_alpha},{max_alpha}*(Y-H/2)/(H/2)))'",
-        "-frames:v", "1",
-        output_path,
-    ]
-    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"Gradient creation failed: {result.stderr[-300:]}")
-    return output_path
-
-
-def burn_captions(
-    input_path: str,
-    ass_path: str,
-    output_path: str,
-    gradient_overlay: bool = False,
-    gradient_opacity: float = 0.7,
-    logo_path: Optional[str] = None,
-    logo_height: int = 80,
-    logo_margin_x: int = 30,
-    logo_margin_y: int = 40,
-) -> str:
-    """
-    Burn ASS subtitles into the video.
-
-    Optionally adds:
-    - Bottom 50% smooth gradient overlay (transparent → black)
-    - Logo image in top-left corner
-    """
-    safe_ass = ass_path.replace("\\", "/").replace(":", "\\:")
-
-    # Get video dimensions for gradient
-    if gradient_overlay:
-        width, height = get_dimensions(input_path)
-        gradient_path = output_path + ".gradient.png"
-        _create_gradient_png(gradient_path, width, height, gradient_opacity)
-
-    # Build filter_complex for all overlay inputs
-    inputs = ["-i", input_path]
-    input_idx = 1  # next input index
-
-    filter_parts = []
-
-    if gradient_overlay:
-        inputs.extend(["-i", gradient_path])
-        grad_idx = input_idx
-        input_idx += 1
-        # Overlay gradient on video
-        filter_parts.append(
-            f"[0:v][{grad_idx}:v]overlay=0:0:format=auto[grad]"
-        )
-        current_label = "grad"
-    else:
-        current_label = "0:v"
-
-    if logo_path and os.path.exists(logo_path):
-        inputs.extend(["-i", logo_path])
-        logo_idx = input_idx
-        input_idx += 1
-        # Scale logo + overlay
-        filter_parts.append(
-            f"[{logo_idx}:v]scale=-1:{logo_height}[logo]"
-        )
-        filter_parts.append(
-            f"[{current_label}][logo]overlay={logo_margin_x}:{logo_margin_y}[withlogo]"
-        )
-        current_label = "withlogo"
-
-    # Burn ASS subtitles
-    filter_parts.append(
-        f"[{current_label}]ass='{safe_ass}'[out]"
-    )
-
-    filter_complex = ";".join(filter_parts)
-
-    # Check if input has audio (some split-screen concat outputs may not)
-    has_audio = _has_audio_stream(input_path)
-    audio_map = ["-map", "0:a?", "-c:a", "copy"] if has_audio else []
-
-    # Run with HW encoder, fallback to CPU if it fails
-    enc_flags = get_video_encode_flags()
-    cmd = [
-        "ffmpeg", "-y",
-        *inputs,
-        "-filter_complex", filter_complex,
-        "-map", "[out]",
-        *audio_map,
-        *enc_flags,
-        "-movflags", "+faststart",
-        output_path,
-    ]
-
-    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
-
-    # Fallback to CPU if HW encoder failed
-    if result.returncode != 0 and enc_flags != CPU_FLAGS:
-        print(f"Warning: HW encoder failed for caption burn, falling back to libx264", file=sys.stderr)
-        cmd_fallback = [
-            "ffmpeg", "-y",
-            *inputs,
-            "-filter_complex", filter_complex,
-            "-map", "[out]",
-            *audio_map,
-            *CPU_FLAGS,
-            "-movflags", "+faststart",
-            output_path,
-        ]
-        result = proc_run(cmd_fallback, timeout=_FFMPEG_TIMEOUT, check=False)
-
-    # Clean up gradient file
-    if gradient_overlay and os.path.exists(gradient_path):
-        os.remove(gradient_path)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg caption burn failed: {result.stderr[-500:]}")
-    return output_path
 
 
 def concat_outro(
