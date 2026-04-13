@@ -9,6 +9,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "./server.js";
 import { FileManager } from "./services/file-manager.js";
+import { logger } from "./utils/logger.js";
 
 async function main() {
   // Ensure working directories exist
@@ -22,10 +23,10 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error("podcli MCP server running on stdio");
+  logger.info("podcli MCP server running on stdio");
 }
 
 main().catch((err) => {
-  console.error("Fatal error:", err);
+  logger.error("Fatal error during startup", { err: err instanceof Error ? err.stack : err });
   process.exit(1);
 });
