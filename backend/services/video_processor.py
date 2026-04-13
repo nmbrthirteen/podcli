@@ -25,6 +25,7 @@ from services.media_probe import (
     parse_duration_seconds as _parse_duration_seconds,
     run_ffmpeg_with_fallback as _run_ffmpeg_with_fallback,
 )
+from services.audio_normalize import normalize_audio
 import sys
 
 
@@ -3074,74 +3075,7 @@ def concat_outro(
                 os.remove(tmp)
 
 
-def normalize_audio(
-    input_path: str,
-    output_path: str,
-    target_lufs: float = -14.0,
-) -> str:
-    """
-    Normalize audio to target LUFS (loudness units).
-    TikTok/YouTube Shorts standard is around -14 LUFS.
-    """
-    # First pass: measure current loudness
-    measure_cmd = [
-        "ffmpeg", "-y",
-        "-i", input_path,
-        "-af", f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11:print_format=json",
-        "-f", "null", "-",
-    ]
-    result = proc_run(measure_cmd, timeout=_FFMPEG_TIMEOUT, check=False)
-
-    # Try to parse loudnorm output from stderr
-    stderr = result.stderr
-    try:
-        # Find the JSON block in stderr
-        json_start = stderr.rfind("{")
-        json_end = stderr.rfind("}") + 1
-        if json_start >= 0 and json_end > json_start:
-            loudnorm_data = json.loads(stderr[json_start:json_end])
-        else:
-            # Fallback: simple normalization without two-pass
-            loudnorm_data = None
-    except (json.JSONDecodeError, ValueError):
-        loudnorm_data = None
-
-    # Check for invalid measurements (e.g., -inf from silence/very short clips)
-    if loudnorm_data:
-        measured_i = str(loudnorm_data.get("input_i", ""))
-        if "inf" in measured_i.lower() or measured_i == "":
-            loudnorm_data = None
-
-    if loudnorm_data:
-        # Second pass: apply measured correction
-        af_filter = (
-            f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11:"
-            f"measured_I={loudnorm_data.get('input_i', '-24')}:"
-            f"measured_TP={loudnorm_data.get('input_tp', '-1')}:"
-            f"measured_LRA={loudnorm_data.get('input_lra', '7')}:"
-            f"measured_thresh={loudnorm_data.get('input_thresh', '-34')}:"
-            f"offset={loudnorm_data.get('target_offset', '0')}:"
-            f"linear=true"
-        )
-    else:
-        # Single-pass fallback
-        af_filter = f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11"
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", input_path,
-        "-af", af_filter,
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-ar", "44100",
-        "-movflags", "+faststart",
-        output_path,
-    ]
-    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg normalize failed: {result.stderr[-500:]}")
-    return output_path
+# normalize_audio is now in services.audio_normalize; re-exported below.
 
 
 def _detect_face_y(
