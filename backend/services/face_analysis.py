@@ -172,34 +172,61 @@ def analyze_faces(
         top_2 = speakers_by_talk[:2]
 
         obs_arr = [(o["time"], o["face_center_x"]) for o in observations]
+        # Pre-sort observations so each segment can binary-search its slice,
+        # and so we can score each speaker against observations over their
+        # FULL speaking turn, not just ±1.5s around the turn's start.
+        obs_arr.sort(key=lambda x: x[0])
+        obs_times = [t for t, _ in obs_arr]
+
+        def _vote_range(start: float, end: float, votes_out: list) -> None:
+            """Add votes for every observation inside [start-0.25, end+0.25]."""
+            import bisect
+            lo = bisect.bisect_left(obs_times, start - 0.25)
+            hi = bisect.bisect_right(obs_times, end + 0.25)
+            for idx in range(lo, hi):
+                obs_cx = obs_arr[idx][1]
+                for ci, cl in enumerate(clusters_list):
+                    if abs(obs_cx - cl["center_x"]) < width * 0.15:
+                        votes_out[ci] += 1
+
         for speaker in top_2:
-            sp_times = [s["start"] for s in speaker_segments if s.get("speaker") == speaker]
+            sp_ranges = [
+                (s["start"], s["end"])
+                for s in speaker_segments
+                if s.get("speaker") == speaker
+            ]
             votes = [0] * len(clusters_list)
-            for t in sp_times:
-                for obs_t, obs_cx in obs_arr:
-                    if abs(obs_t - t) < 1.5:
-                        for ci, cl in enumerate(clusters_list):
-                            if abs(obs_cx - cl["center_x"]) < width * 0.15:
-                                votes[ci] += 1
+            for start, end in sp_ranges:
+                _vote_range(start, end, votes)
             if any(votes):
                 speaker_mappings[speaker] = int(np.argmax(votes))
 
         # Resolve conflicts: if both speakers mapped to the same cluster,
-        # assign the weaker one to the other cluster.
+        # assign the weaker one to the other cluster. Use the same
+        # full-turn voting as the primary pass so the tiebreaker doesn't
+        # regress back to the ±1.5s start-only sampling.
+        def _confidence_for(speaker: str, cluster_index: int) -> int:
+            """Count observations inside this speaker's turns that fall
+            near the given cluster's center_x."""
+            cluster_x = clusters_list[cluster_index]["center_x"]
+            count = 0
+            for s in speaker_segments:
+                if s.get("speaker") != speaker:
+                    continue
+                import bisect
+                lo = bisect.bisect_left(obs_times, s["start"] - 0.25)
+                hi = bisect.bisect_right(obs_times, s["end"] + 0.25)
+                for idx in range(lo, hi):
+                    if abs(obs_arr[idx][1] - cluster_x) < width * 0.15:
+                        count += 1
+            return count
+
         if len(top_2) == 2 and top_2[0] in speaker_mappings and top_2[1] in speaker_mappings:
             if speaker_mappings[top_2[0]] == speaker_mappings[top_2[1]]:
                 other_ci = 1 - speaker_mappings[top_2[0]]
-                # Give the less-confident speaker the other cluster
-                sp0_votes = sum(
-                    1 for t in [s["start"] for s in speaker_segments if s.get("speaker") == top_2[0]]
-                    for obs_t, obs_cx in obs_arr
-                    if abs(obs_t - t) < 1.5 and abs(obs_cx - clusters_list[speaker_mappings[top_2[0]]]["center_x"]) < width * 0.15
-                )
-                sp1_votes = sum(
-                    1 for t in [s["start"] for s in speaker_segments if s.get("speaker") == top_2[1]]
-                    for obs_t, obs_cx in obs_arr
-                    if abs(obs_t - t) < 1.5 and abs(obs_cx - clusters_list[speaker_mappings[top_2[1]]]["center_x"]) < width * 0.15
-                )
+                # Give the less-confident speaker the other cluster.
+                sp0_votes = _confidence_for(top_2[0], speaker_mappings[top_2[0]])
+                sp1_votes = _confidence_for(top_2[1], speaker_mappings[top_2[1]])
                 if sp0_votes >= sp1_votes:
                     speaker_mappings[top_2[1]] = other_ci
                 else:
