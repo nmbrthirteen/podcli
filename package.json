@@ -31,7 +31,9 @@
     "ui": "tsx src/ui/web-server.ts",
     "ui:prod": "node dist/ui/web-server.js",
     "remotion:prebundle": "node remotion/render.mjs --prebundle",
-    "remotion:studio": "npx remotion studio remotion/src/index.ts"
+    "remotion:studio": "npx remotion studio remotion/src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@fontsource/dm-sans": "^5.2.8",
@@ -53,6 +55,7 @@
     "@types/node": "^22.12.0",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.9"
   }
 }
