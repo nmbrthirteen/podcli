@@ -13,116 +13,19 @@ from typing import Optional
 
 from services.encoder import get_video_encode_flags
 from utils.proc import run as proc_run, ProcError
+from services import media_probe
+from services.media_probe import (
+    CPU_FLAGS,
+    FFMPEG_TIMEOUT as _FFMPEG_TIMEOUT,
+    QUALITY_PRESETS,
+    get_dimensions,
+    get_video_info,
+    get_media_duration_seconds as _get_media_duration_seconds,
+    has_audio_stream as _has_audio_stream,
+    parse_duration_seconds as _parse_duration_seconds,
+    run_ffmpeg_with_fallback as _run_ffmpeg_with_fallback,
+)
 import sys
-
-# Max time for any single FFmpeg call (seconds). Prevents infinite hangs.
-_FFMPEG_TIMEOUT = 300
-
-# Quality presets: name → (crf, preset)
-# Lower CRF = higher quality = larger file. 18 is visually lossless.
-QUALITY_PRESETS = {
-    "low":    {"crf": "28", "preset": "fast"},       # ~2-4 MB/min, fast encode
-    "medium": {"crf": "23", "preset": "medium"},     # ~4-8 MB/min, balanced
-    "high":   {"crf": "18", "preset": "slow"},       # ~8-15 MB/min, great quality
-    "max":    {"crf": "14", "preset": "slower"},      # ~15-30 MB/min, near-lossless
-}
-
-_quality = os.environ.get("PODCLI_QUALITY", "high")
-_qp = QUALITY_PRESETS.get(_quality, QUALITY_PRESETS["high"])
-CPU_FLAGS = ["-c:v", "libx264", "-crf", _qp["crf"], "-preset", _qp["preset"], "-profile:v", "high"]
-
-
-def _run_ffmpeg_with_fallback(cmd_parts_before_enc: list, cmd_parts_after_enc: list, output_path: str, label: str = "encode") -> str:
-    """
-    Run an FFmpeg command with the best encoder. If it fails, retry with libx264.
-    cmd = cmd_parts_before_enc + enc_flags + cmd_parts_after_enc + [output_path]
-    """
-    enc_flags = get_video_encode_flags()
-    cmd = cmd_parts_before_enc + enc_flags + cmd_parts_after_enc + [output_path]
-
-    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
-    if result.returncode == 0:
-        return output_path
-
-    # If not already CPU, retry with libx264
-    if enc_flags != CPU_FLAGS:
-        print(f"Warning: HW encoder failed for {label}, falling back to libx264", file=sys.stderr)
-        cmd_fallback = cmd_parts_before_enc + CPU_FLAGS + cmd_parts_after_enc + [output_path]
-        result2 = proc_run(cmd_fallback, timeout=_FFMPEG_TIMEOUT, check=False)
-        if result2.returncode == 0:
-            return output_path
-        raise RuntimeError(f"FFmpeg {label} failed (both HW and CPU): {result2.stderr[-500:]}")
-
-    raise RuntimeError(f"FFmpeg {label} failed: {result.stderr[-500:]}")
-
-
-def _has_audio_stream(video_path: str) -> bool:
-    """Check if a video file contains an audio stream."""
-    try:
-        info = get_video_info(video_path)
-        return any(s.get("codec_type") == "audio" for s in info.get("streams", []))
-    except Exception:
-        return True  # Assume yes if we can't check
-
-
-def get_video_info(video_path: str) -> dict:
-    """Get video metadata via ffprobe."""
-    cmd = [
-        "ffprobe",
-        "-v", "quiet",
-        "-print_format", "json",
-        "-show_format",
-        "-show_streams",
-        video_path,
-    ]
-    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"ffprobe failed: {result.stderr}")
-    return json.loads(result.stdout)
-
-
-def _parse_duration_seconds(value: object) -> Optional[float]:
-    """Parse a duration value and reject invalid/non-finite numbers."""
-    try:
-        parsed = float(str(value).strip())
-    except Exception:
-        return None
-    if not math.isfinite(parsed) or parsed <= 0:
-        return None
-    return parsed
-
-
-def _get_media_duration_seconds(video_path: str, default: float = 0.0) -> float:
-    """
-    Best-effort media duration in seconds.
-    Prefers max valid duration from format/streams, else returns default.
-    """
-    try:
-        info = get_video_info(video_path)
-    except Exception:
-        return default
-
-    candidates: list[float] = []
-    fmt = info.get("format", {})
-    fmt_duration = _parse_duration_seconds(fmt.get("duration"))
-    if fmt_duration is not None:
-        candidates.append(fmt_duration)
-
-    for stream in info.get("streams", []):
-        stream_duration = _parse_duration_seconds(stream.get("duration"))
-        if stream_duration is not None:
-            candidates.append(stream_duration)
-
-    return max(candidates) if candidates else default
-
-
-def get_dimensions(video_path: str) -> tuple[int, int]:
-    """Get video width and height."""
-    info = get_video_info(video_path)
-    for stream in info.get("streams", []):
-        if stream.get("codec_type") == "video":
-            return int(stream["width"]), int(stream["height"])
-    raise ValueError(f"No video stream found in {video_path}")
 
 
 def cut_segment(
