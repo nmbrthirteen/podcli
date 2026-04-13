@@ -26,6 +26,19 @@ import { AssetManager } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths } from "../config/paths.js";
+import { childLogger } from "../utils/logger.js";
+import type {
+  BatchClipsResult,
+  ClipResult,
+  SuggestedClip,
+  TranscriptResult,
+} from "../models/index.js";
+
+const log = childLogger("web-server");
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -54,22 +67,26 @@ interface JobState {
   status: "pending" | "running" | "done" | "error";
   progress: number;
   message: string;
-  result?: Record<string, unknown>;
+  result?: unknown;
   error?: string;
   createdAt: number;
 }
 
 const jobs = new Map<string, JobState>();
+
+/** Transcript data stored per file, plus optional face-tracking hints. */
+type ServerTranscript = TranscriptResult & { face_map?: unknown };
+
 // Store the latest transcript per uploaded file for the session
-const sessionTranscripts = new Map<string, Record<string, unknown>>();
+const sessionTranscripts = new Map<string, ServerTranscript>();
 
 // --- MCP ↔ UI Bridge State ---
 interface UIState {
   videoPath: string;
   filePath: string;
-  transcript: Record<string, unknown> | null;
+  transcript: ServerTranscript | null;
   rawTranscriptText: string;
-  suggestions: Array<Record<string, unknown>>;
+  suggestions: SuggestedClip[];
   deselectedIndices: number[];
   settings: {
     captionStyle: string;
@@ -111,7 +128,9 @@ function loadPersistedState(): UIState {
         lastUpdated: saved.lastUpdated || 0,
       };
     }
-  } catch {}
+  } catch (err) {
+    log.warn("Failed to load persisted UI state; using defaults", { err: errMsg(err) });
+  }
   return {
     videoPath: "",
     filePath: "",
@@ -134,7 +153,9 @@ function persistState() {
   saveTimer = setTimeout(() => {
     try {
       writeFileSync(paths.uiState, JSON.stringify(uiState, null, 2));
-    } catch {}
+    } catch (err) {
+      log.warn("Failed to persist UI state to disk", { err: errMsg(err) });
+    }
   }, 500);
 }
 
@@ -288,7 +309,7 @@ app.post("/api/import-transcript", (req, res) => {
     imported: true,
   };
 
-  sessionTranscripts.set(file_path, result);
+  sessionTranscripts.set(file_path, result as unknown as ServerTranscript);
 
   res.json({
     status: "done",
@@ -323,7 +344,7 @@ app.post("/api/parse-transcript", async (req, res) => {
     });
 
     if (result.data) {
-      sessionTranscripts.set(file_path, result.data as Record<string, unknown>);
+      sessionTranscripts.set(file_path, result.data as unknown as ServerTranscript);
     }
 
     res.json({
@@ -351,7 +372,7 @@ app.post("/api/transcribe", async (req, res) => {
   const cached = await cache.get(file_path);
   if (cached) {
     const jobId = uuidv4();
-    sessionTranscripts.set(file_path, cached as unknown as Record<string, unknown>);
+    sessionTranscripts.set(file_path, cached as unknown as ServerTranscript);
     res.json({
       job_id: jobId,
       status: "done",
@@ -389,11 +410,13 @@ app.post("/api/transcribe", async (req, res) => {
       job.progress = 100;
       job.message = "Transcription complete";
       job.result = result.data;
-      sessionTranscripts.set(file_path, result.data as Record<string, unknown>);
+      sessionTranscripts.set(file_path, result.data as unknown as ServerTranscript);
       // Cache it
       try {
-        await cache.set(file_path, result.data as any);
-      } catch {}
+        await cache.set(file_path, result.data as unknown as TranscriptResult);
+      } catch (err) {
+        log.warn("Failed to cache transcript", { file_path, err: errMsg(err) });
+      }
     })
     .catch((err) => {
       job.status = "error";
@@ -474,7 +497,7 @@ app.post("/api/create-clip", async (req, res) => {
   res.json({ job_id: jobId, status: "running" });
 
   executor
-    .execute(
+    .execute<ClipResult>(
       "create_clip",
       {
         video_path,
@@ -503,17 +526,19 @@ app.post("/api/create-clip", async (req, res) => {
       broadcastSSE("job-complete", { jobId, result: result.data });
       // Record to history
       try {
-        const d = result.data as any;
+        const d = result.data;
         await clipsHistory.record({
           source_video: video_path,
           start_second, end_second,
           caption_style, crop_strategy,
           logo_path: logo_path || undefined,
-          title, output_path: d.output_path || "",
-          file_size_mb: d.file_size_mb || 0,
-          duration: d.duration || 0,
+          title, output_path: d?.output_path || "",
+          file_size_mb: d?.file_size_mb || 0,
+          duration: d?.duration || 0,
         });
-      } catch {}
+      } catch (err) {
+        log.warn("Failed to record clip to history", { title, err: errMsg(err) });
+      }
     })
     .catch((err) => {
       job.status = "error";
@@ -580,9 +605,9 @@ app.post("/api/batch-clips", async (req, res) => {
   res.json({ job_id: jobId, status: "running" });
 
   executor
-    .execute(
+    .execute<BatchClipsResult>(
       "batch_clips",
-      { video_path, clips, transcript_words, output_dir: paths.output, logo_path, outro_path, clean_fillers, face_map: (uiState.transcript as any)?.face_map },
+      { video_path, clips, transcript_words, output_dir: paths.output, logo_path, outro_path, clean_fillers, face_map: uiState.transcript?.face_map },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
@@ -597,7 +622,7 @@ app.post("/api/batch-clips", async (req, res) => {
       broadcastSSE("job-complete", { jobId, result: result.data });
       // Record successful clips to history
       try {
-        const d = result.data as any;
+        const d = result.data;
         if (d?.results) {
           for (const r of d.results) {
             if (r.status === "success" && r.output_path) {
@@ -615,7 +640,9 @@ app.post("/api/batch-clips", async (req, res) => {
             }
           }
         }
-      } catch {}
+      } catch (err) {
+        log.warn("Failed to record batch clips to history", { err: errMsg(err) });
+      }
     })
     .catch((err) => {
       job.status = "error";
@@ -836,7 +863,7 @@ app.get("/api/integration-info", (_req, res) => {
 // --- Transcript export (SRT/VTT) ---
 app.get("/api/export-transcript", (_req, res) => {
   const format = (_req.query.format as string) || "srt";
-  const transcript = uiState.transcript as any;
+  const transcript = uiState.transcript;
 
   if (!transcript?.words?.length) {
     res.status(400).json({ error: "No transcript available" });
@@ -1154,7 +1181,7 @@ app.delete("/api/knowledge/:filename", async (req, res) => {
 
 function getStateContext() {
   const hasVideo = !!uiState.videoPath;
-  const hasTranscript = Array.isArray((uiState.transcript as any)?.words) && (uiState.transcript as any).words.length > 0;
+  const hasTranscript = (uiState.transcript?.words?.length ?? 0) > 0;
   const hasRawTranscript = !!uiState.rawTranscriptText?.trim();
   const hasSuggestions = uiState.suggestions.length > 0;
   const selectedCount = uiState.suggestions.length - uiState.deselectedIndices.length;
@@ -1277,7 +1304,7 @@ app.post("/api/claude-suggest", async (req, res) => {
     return;
   }
 
-  const segs = (uiState.transcript as any)?.segments;
+  const segs = uiState.transcript?.segments;
   if (!segs || !Array.isArray(segs) || segs.length === 0) {
     res.status(400).json({ error: "No transcript segments available." });
     return;
@@ -1287,35 +1314,37 @@ app.post("/api/claude-suggest", async (req, res) => {
     const params: Record<string, unknown> = { segments: segs, top_n };
     if (min_duration) params.min_duration = min_duration;
     if (max_duration) params.max_duration = max_duration;
-    const result = await executor.execute(
+    const result = await executor.execute<{ clips?: SuggestedClip[] }>(
       "suggest_clips",
       params,
       (event) => broadcastSSE("job-update", { progress: event.percent, message: event.message }),
     );
 
-    const clips = (result.data as any)?.clips || [];
+    const clips = result.data?.clips ?? [];
 
     // Auto-push to UI state as suggestions
     if (clips.length > 0) {
-      (uiState as any).suggestions = clips.map((c: any, i: number) => ({
-        id: `claude-${i}`,
+      uiState.suggestions = clips.map((c, i) => ({
+        clip_id: `claude-${i}`,
         title: c.title,
         start_second: c.start_second,
         end_second: c.end_second,
+        duration: c.duration ?? c.end_second - c.start_second,
         segments: c.segments,
-        reasoning: c.reasoning,
-        preview_text: c.preview_text,
+        reasoning: c.reasoning ?? "",
+        preview_text: c.preview_text ?? "",
         content_type: c.content_type,
         score: c.score,
         suggested_caption_style: c.suggested_caption_style || "hormozi",
       }));
-      (uiState as any).phase = "review";
+      uiState.phase = "review";
       broadcastSSE("state-sync", uiState);
     }
 
     res.json({ clips, source: "python" });
-  } catch (err: any) {
-    res.status(500).json({ error: `Suggestion failed: ${err.message?.substring(0, 200)}` });
+  } catch (err: unknown) {
+    const msg = errMsg(err);
+    res.status(500).json({ error: `Suggestion failed: ${msg.substring(0, 200)}` });
   }
 });
 
@@ -1330,7 +1359,7 @@ app.post("/api/generate-content", async (req, res) => {
   }
 
   // Use transcript segments from request or fall back to UI state
-  const segs = transcript_segments || (uiState.transcript as any)?.segments || [];
+  const segs = transcript_segments || uiState.transcript?.segments || [];
 
   try {
     const result = await executor.execute(
@@ -1395,8 +1424,8 @@ app.get("/api/ui-state", (_req, res) => {
     deselectedIndices: uiState.deselectedIndices,
     totalSuggestions: uiState.suggestions.length,
     deselectedCount: uiState.deselectedIndices.length,
-    transcriptWordCount: Array.isArray((uiState.transcript as any)?.words)
-      ? (uiState.transcript as any).words.length
+    transcriptWordCount: Array.isArray(uiState.transcript?.words)
+      ? uiState.transcript?.words ?? [].length
       : 0,
     transcript: uiState.transcript,
     rawTranscriptText: uiState.rawTranscriptText,
@@ -1454,9 +1483,9 @@ app.post("/api/mcp/export", async (req, res) => {
     (_: unknown, i: number) => !uiState.deselectedIndices.includes(i)
   );
   const transcriptWords = req.body.transcript_words ||
-    (Array.isArray((uiState.transcript as any)?.words) ? (uiState.transcript as any).words : []);
+    (Array.isArray(uiState.transcript?.words) ? uiState.transcript?.words ?? [] : []);
   const logoPath = req.body.logo_path || uiState.settings.logoPath || null;
-  const outroPath = req.body.outro_path || (uiState.settings as any).outroPath || null;
+  const outroPath = req.body.outro_path || uiState.settings.outroPath || null;
   const captionStyle = req.body.caption_style || uiState.settings.captionStyle || "branded";
   const cropStrategy = req.body.crop_strategy || uiState.settings.cropStrategy || "speaker";
   const allowAssFallback = req.body.allow_ass_fallback === true;
@@ -1504,9 +1533,9 @@ app.post("/api/mcp/export", async (req, res) => {
   res.json({ job_id: jobId, status: "running", clipCount: styledClips.length });
 
   executor
-    .execute(
+    .execute<BatchClipsResult>(
       "batch_clips",
-      { video_path: videoPath, clips: styledClips, transcript_words: transcriptWords, output_dir: paths.output, logo_path: logoPath, outro_path: outroPath, face_map: (uiState.transcript as any)?.face_map },
+      { video_path: videoPath, clips: styledClips, transcript_words: transcriptWords, output_dir: paths.output, logo_path: logoPath, outro_path: outroPath, face_map: uiState.transcript?.face_map },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
@@ -1520,7 +1549,7 @@ app.post("/api/mcp/export", async (req, res) => {
       job.result = result.data;
       // Record clips to history
       try {
-        const d = result.data as any;
+        const d = result.data;
         if (d?.results) {
           for (const r of d.results) {
             if (r.status === "success" && r.output_path) {
@@ -1538,7 +1567,9 @@ app.post("/api/mcp/export", async (req, res) => {
             }
           }
         }
-      } catch {}
+      } catch (err) {
+        log.warn("Failed to record batch export clips to history", { err: errMsg(err) });
+      }
       broadcastSSE("job-complete", { jobId, result: result.data });
     })
     .catch((err) => {
@@ -1558,13 +1589,17 @@ async function main() {
   // Cleanup old temp files on startup (>48h)
   try {
     const cleaned = await fileManager.cleanupOldTasks(48);
-    if (cleaned > 0) console.log(`  Cleaned up ${cleaned} old temp files`);
-  } catch {}
+    if (cleaned > 0) log.info(`Cleaned up ${cleaned} old temp files`);
+  } catch (err) {
+    log.warn("Startup temp-file cleanup failed", { err: errMsg(err) });
+  }
 
   app.listen(PORT, () => {
-    console.log(`\n  🎬 podcli running at:`);
-    console.log(`  ➜  http://localhost:${PORT}\n`);
+    log.info(`podcli running at http://localhost:${PORT}`);
   });
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  log.error("Fatal error during startup", { err: err instanceof Error ? err.stack : String(err) });
+  process.exit(1);
+});
