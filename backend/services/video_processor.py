@@ -3051,17 +3051,23 @@ def concat_outro(
     # Try crossfade (requires FFmpeg 4.3+).
     # If durations are too short or malformed, skip xfade entirely to avoid
     # transition-at-t=0 behavior that can make outro appear instantly.
+    #
+    # Both audio streams are normalized via aformat before the fade/concat
+    # so mismatched sample rates / channel layouts don't cause rc=234.
+    _AFMT = "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo"
     if can_crossfade:
         for audio_filter in [
             # Option 1: video transition + audio crossfade.
             (
                 f"[0:v][1:v]xfade=transition={transition}:duration={safe_crossfade}:offset={fade_offset}[v];"
-                f"[0:a][1:a]acrossfade=d={safe_crossfade}[a]"
+                f"[0:a]{_AFMT}[a0];[1:a]{_AFMT}[a1];"
+                f"[a0][a1]acrossfade=d={safe_crossfade}[a]"
             ),
             # Option 2: video transition + hard audio concat fallback.
             (
                 f"[0:v][1:v]xfade=transition={transition}:duration={safe_crossfade}:offset={fade_offset}[v];"
-                f"[0:a][1:a]concat=n=2:v=0:a=1[a]"
+                f"[0:a]{_AFMT}[a0];[1:a]{_AFMT}[a1];"
+                f"[a0][a1]concat=n=2:v=0:a=1[a]"
             ),
         ]:
             try:
@@ -3088,9 +3094,16 @@ def concat_outro(
 
     # Fallback 1: hard video cut + softened audio boundary
     # (keeps playback natural even when xfade is unavailable/fails).
+    #
+    # Both audio streams MUST be normalized to the same sample rate,
+    # channel layout, and sample format before `concat` — otherwise
+    # ffmpeg fails with rc=234 ("at least one of its streams received
+    # no packets"), which the old code silently swallowed and then
+    # cascaded into the pure-concat fallback.
     if _has_audio_stream(input_path) and _has_audio_stream(outro_scaled):
-        audio_fade = min(safe_crossfade, max(0.05, main_duration - 0.05))
+        audio_fade = min(safe_crossfade, max(0.05, max(0.1, main_duration) - 0.05))
         audio_fade_start = max(0.0, main_duration - audio_fade)
+        AFMT = "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo"
         try:
             return _run_ffmpeg_with_fallback(
                 cmd_parts_before_enc=[
@@ -3100,8 +3113,8 @@ def concat_outro(
                     "-filter_complex",
                     (
                         "[0:v][1:v]concat=n=2:v=1:a=0[v];"
-                        f"[0:a]afade=t=out:st={audio_fade_start}:d={audio_fade}[a0];"
-                        f"[1:a]afade=t=in:st=0:d={audio_fade}[a1];"
+                        f"[0:a]{AFMT},afade=t=out:st={audio_fade_start}:d={audio_fade}[a0];"
+                        f"[1:a]{AFMT},afade=t=in:st=0:d={audio_fade}[a1];"
                         "[a0][a1]concat=n=2:v=0:a=1[a]"
                     ),
                     "-map", "[v]",
