@@ -10,6 +10,28 @@ import { KnowledgeBase } from "./services/knowledge-base.js";
 import { AssetManager } from "./services/asset-manager.js";
 import { ClipsHistory } from "./services/clips-history.js";
 import { paths } from "./config/paths.js";
+import { childLogger } from "./utils/logger.js";
+import type { BatchClipsResult, UIState } from "./models/index.js";
+
+const log = childLogger("server");
+
+/**
+ * Fire-and-forget notification to the optional Web UI.
+ * Never throws — the UI may not be running, which is expected.
+ */
+async function uiPing(body: Record<string, unknown>): Promise<void> {
+  try {
+    await fetch("http://localhost:3847/api/ui-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    log.debug("UI ping failed (Web UI likely not running)", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 const kb = new KnowledgeBase();
 const assets = new AssetManager();
@@ -32,13 +54,74 @@ function withNextStep(result: string, nextStep: string): string {
   return `${result}\n\n---\n[Next Step] ${nextStep}`;
 }
 
-/** Read UI state from the web server, returns null if unavailable. */
-async function readUIState(): Promise<Record<string, unknown> | null> {
+/**
+ * Read UI state from the optional Web UI server.
+ * Returns null when the UI isn't running (expected in headless mode).
+ *
+ * NOTE: The returned shape also includes a few fields the Web UI writes
+ * (transcriptWordCount, etc.) that aren't part of the canonical UIState
+ * model. We widen UIState locally for those extras.
+ */
+interface ServerUIState extends UIState {
+  transcriptWordCount?: number;
+}
+
+interface WebJob {
+  job_id: string;
+  status: "pending" | "running" | "done" | "error";
+  result?: unknown;
+  error?: string;
+}
+
+interface OutputClip {
+  filename: string;
+  size_mb: number;
+  created?: string;
+}
+
+interface ApiError {
+  error?: string;
+}
+
+interface FileInfo {
+  filename?: string;
+  name?: string;
+  path?: string;
+  size_mb?: number;
+  duration?: number;
+}
+
+interface PresetConfig {
+  caption_style?: string;
+  crop_strategy?: string;
+  logo_path?: string;
+  outro_path?: string;
+}
+
+interface PresetResult extends ApiError {
+  presets?: Array<string | { name?: string }>;
+  preset?: unknown;
+  config?: PresetConfig;
+}
+
+interface ImportTranscriptResult extends ApiError {
+  data?: {
+    transcript?: string;
+    words?: unknown[];
+    segments?: unknown[];
+    duration?: number;
+  };
+}
+
+async function readUIState(): Promise<ServerUIState | null> {
   try {
     const res = await fetch("http://localhost:3847/api/ui-state");
     if (!res.ok) return null;
-    return await res.json() as Record<string, unknown>;
-  } catch {
+    return (await res.json()) as ServerUIState;
+  } catch (err) {
+    log.debug("readUIState failed (UI likely not running)", {
+      err: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -58,14 +141,14 @@ async function getWorkflowGuidance(): Promise<string> {
     );
   }
 
-  const phase = state.phase as string || "idle";
+  const phase = state.phase ?? "idle";
   const hasVideo = !!(state.videoPath || state.filePath);
-  const wordCount = state.transcriptWordCount as number || 0;
+  const wordCount = state.transcriptWordCount ?? 0;
   const hasTranscript = wordCount > 0;
-  const rawText = state.rawTranscriptText as string || "";
+  const rawText = state.rawTranscriptText ?? "";
   const hasRawTranscript = rawText.length > 0;
-  const suggestions = (state.suggestions as unknown[]) || [];
-  const deselected = (state.deselectedIndices as number[]) || [];
+  const suggestions = state.suggestions ?? [];
+  const deselected = state.deselectedIndices ?? [];
   const selectedCount = suggestions.length - deselected.length;
 
   const lines: string[] = [];
@@ -150,20 +233,20 @@ export function createServer(): McpServer {
       try {
         const result = await handleTranscribe({ file_path, model_size, language, enable_diarization, num_speakers });
 
-        // Push transcript to Web UI state
+        // Push transcript to Web UI state (fire-and-forget)
         try {
           const parsed = JSON.parse(result);
-          await fetch("http://localhost:3847/api/ui-state", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              videoPath: file_path,
-              filePath: file_path,
-              transcript: parsed,
-              phase: "idle",
-            }),
+          await uiPing({
+            videoPath: file_path,
+            filePath: file_path,
+            transcript: parsed,
+            phase: "idle",
           });
-        } catch {}
+        } catch (err) {
+          log.warn("Failed to parse transcript for UI push", {
+            err: err instanceof Error ? err.message : String(err),
+          });
+        }
 
         const text = withNextStep(
           await withKnowledge(result),
@@ -216,12 +299,12 @@ export function createServer(): McpServer {
         // Push enriched suggestions (with clip_ids) to Web UI
         try {
           const parsed = JSON.parse(result);
-          await fetch("http://localhost:3847/api/ui-state", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ suggestions: parsed.clips, phase: "review" }),
+          await uiPing({ suggestions: parsed.clips, phase: "review" });
+        } catch (err) {
+          log.warn("Failed to parse suggestions for UI push", {
+            err: err instanceof Error ? err.message : String(err),
           });
-        } catch {}
+        }
 
         // Include clip history so Claude avoids duplicates
         const existing = await history.list(20);
@@ -313,8 +396,8 @@ export function createServer(): McpServer {
         let keepSegments: Array<{ start: number; end: number }> | null = null;
         if (params.clip_number != null && (params.start_second == null || params.end_second == null)) {
           const uiState = await readUIState();
-          const suggestions = (uiState?.suggestions as Array<Record<string, unknown>>) || [];
-          const settings = (uiState?.settings as Record<string, string>) || {};
+          const suggestions = uiState?.suggestions ?? [];
+          const settings = uiState?.settings ?? {};
           const idx = (params.clip_number as number) - 1;
           if (idx < 0 || idx >= suggestions.length) {
             return {
@@ -333,8 +416,8 @@ export function createServer(): McpServer {
             params.caption_style = ((suggestion.suggested_caption_style as string) || settings.captionStyle || "hormozi") as typeof params.caption_style;
           }
           if (!params.transcript_words) {
-            const transcript = uiState?.transcript as Record<string, unknown> | null;
-            if (transcript?.words) params.transcript_words = transcript.words as any;
+            const transcript = uiState?.transcript;
+            if (transcript?.words) params.transcript_words = transcript.words;
           }
           // Pull multi-cut segments from suggestion
           const segs = suggestion.segments as Array<{ start: number; end: number }> | undefined;
@@ -384,7 +467,7 @@ export function createServer(): McpServer {
             }),
           });
           if (webRes.ok) {
-            const webData = await webRes.json() as any;
+            const webData = (await webRes.json()) as WebJob;
             const jobId = webData.job_id;
 
             // Poll the job until completion (1 hour max)
@@ -393,7 +476,7 @@ export function createServer(): McpServer {
               await new Promise((r) => setTimeout(r, 2000));
               const pollRes = await fetch(`http://localhost:3847/api/job/${jobId}`);
               if (!pollRes.ok) break;
-              const job = await pollRes.json() as any;
+              const job = (await pollRes.json()) as WebJob;
               if (job.status === "done") {
                 usedWebServer = true;
                 finalResult = JSON.stringify(job.result, null, 2);
@@ -416,13 +499,7 @@ export function createServer(): McpServer {
 
         if (!usedWebServer) {
           // Notify UI that export is starting
-          try {
-            await fetch("http://localhost:3847/api/ui-state", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ phase: "exporting" }),
-            });
-          } catch {}
+          await uiPing({ phase: "exporting" });
 
           finalResult = await handleCreateClip(params);
           const parsed = JSON.parse(finalResult);
@@ -442,13 +519,7 @@ export function createServer(): McpServer {
           });
 
           // Notify UI that export is done
-          try {
-            await fetch("http://localhost:3847/api/ui-state", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ phase: "done" }),
-            });
-          } catch {}
+          await uiPing({ phase: "done" });
         }
 
         const clipText = withNextStep(
@@ -512,26 +583,26 @@ export function createServer(): McpServer {
         let resolvedTranscriptWords = params.transcript_words;
         if (!resolvedClips && (params.export_selected || params.clip_numbers)) {
           const uiState = await readUIState();
-          const suggestions = (uiState?.suggestions as Array<Record<string, unknown>>) || [];
-          const settings = (uiState?.settings as Record<string, string>) || {};
+          const suggestions = uiState?.suggestions ?? [];
+          const settings = uiState?.settings ?? {};
           const deselected = (uiState?.deselectedIndices as number[]) || [];
           if (!resolvedVideoPath) resolvedVideoPath = (uiState?.videoPath || uiState?.filePath || "") as string;
           if (!resolvedTranscriptWords) {
-            const transcript = uiState?.transcript as Record<string, unknown> | null;
-            if (transcript?.words) resolvedTranscriptWords = transcript.words as any;
+            const transcript = uiState?.transcript;
+            if (transcript?.words) resolvedTranscriptWords = transcript.words;
           }
 
           if (params.export_selected) {
             resolvedClips = suggestions
-              .filter((_: unknown, i: number) => !deselected.includes(i))
-              .map((s: Record<string, unknown>, i: number) => ({
+              .filter((_, i) => !deselected.includes(i))
+              .map((s, i) => ({
                 start_second: s.start_second,
                 end_second: s.end_second,
                 title: s.title || `clip_${i + 1}`,
-                caption_style: (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
+                caption_style: s.suggested_caption_style || settings.captionStyle || "hormozi",
                 crop_strategy: settings.cropStrategy || "speaker",
                 allow_ass_fallback: false,
-                ...(Array.isArray(s.segments) && s.segments.length > 0 && { keep_segments: s.segments }),
+                ...(s.segments && s.segments.length > 0 && { keep_segments: s.segments }),
               })) as any;
           } else if (params.clip_numbers) {
             resolvedClips = (params.clip_numbers as number[])
@@ -542,10 +613,10 @@ export function createServer(): McpServer {
                   start_second: s.start_second,
                   end_second: s.end_second,
                   title: s.title || `clip_${n}`,
-                  caption_style: (s.suggested_caption_style as string) || settings.captionStyle || "hormozi",
+                  caption_style: s.suggested_caption_style || settings.captionStyle || "hormozi",
                   crop_strategy: settings.cropStrategy || "speaker",
                   allow_ass_fallback: false,
-                  ...(Array.isArray(s.segments) && s.segments.length > 0 && { keep_segments: s.segments }),
+                  ...(s.segments && s.segments.length > 0 && { keep_segments: s.segments }),
                 };
               }) as any;
           }
@@ -566,7 +637,7 @@ export function createServer(): McpServer {
             }),
           });
           if (webRes.ok) {
-            const webData = await webRes.json() as any;
+            const webData = (await webRes.json()) as WebJob;
             const jobId = webData.job_id;
 
             // Poll the job until completion (1 hour max)
@@ -575,7 +646,7 @@ export function createServer(): McpServer {
               await new Promise((r) => setTimeout(r, 2000));
               const pollRes = await fetch(`http://localhost:3847/api/job/${jobId}`);
               if (!pollRes.ok) break;
-              const job = await pollRes.json() as any;
+              const job = (await pollRes.json()) as WebJob;
               if (job.status === "done") {
                 usedWebServer = true;
                 finalResult = JSON.stringify(job.result, null, 2);
@@ -598,20 +669,14 @@ export function createServer(): McpServer {
 
         if (!usedWebServer) {
           // Fallback: run directly without web server (no UI progress)
-          try {
-            await fetch("http://localhost:3847/api/ui-state", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ phase: "exporting" }),
-            });
-          } catch {}
+          await uiPing({ phase: "exporting" });
 
           finalResult = await handleBatchClips(params);
-          const parsed = JSON.parse(finalResult);
+          const parsed = JSON.parse(finalResult) as BatchClipsResult;
 
           // Record each successful clip
           if (parsed.results) {
-            for (const r of parsed.results as any[]) {
+            for (const r of parsed.results) {
               if (r.status === "success" && r.output_path) {
                 await history.record({
                   source_video: params.video_path || "",
@@ -628,13 +693,7 @@ export function createServer(): McpServer {
             }
           }
 
-          try {
-            await fetch("http://localhost:3847/api/ui-state", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ phase: "done" }),
-            });
-          } catch {}
+          await uiPing({ phase: "done" });
         }
 
         const batchText = withNextStep(
@@ -647,13 +706,8 @@ export function createServer(): McpServer {
         return { content: [{ type: "text" as const, text: batchText }] };
       } catch (err: unknown) {
         // Notify UI of error
-        try {
-          await fetch("http://localhost:3847/api/ui-state", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ phase: "review" }),
-          });
-        } catch {}
+        await uiPing({ phase: "review" });
+        log.error("batch_create_clips failed", { err: err instanceof Error ? err.stack : String(err) });
         const msg = err instanceof Error ? err.message : String(err);
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
@@ -689,7 +743,12 @@ export function createServer(): McpServer {
               // First non-empty, non-heading line as preview
               const lines = content.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
               preview = lines[0]?.trim().slice(0, 100) || "";
-            } catch {}
+            } catch (err) {
+              log.debug("Failed to read KB file for preview", {
+                file: f.filename,
+                err: err instanceof Error ? err.message : String(err),
+              });
+            }
             summaries.push(`- ${f.filename} (updated ${f.updatedAt})${preview ? `\n  ${preview}` : ""}`);
           }
           return { content: [{ type: "text" as const, text: `Knowledge base (${files.length} files) — use read action with filename to get full content:\n${summaries.join("\n")}` }] };
@@ -823,16 +882,16 @@ export function createServer(): McpServer {
       try {
         const res = await fetch("http://localhost:3847/api/ui-state");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const state = await res.json() as any;
+        const state = (await res.json()) as ServerUIState;
 
         const lines: string[] = [];
         lines.push(`Phase: ${state.phase}`);
         lines.push(`Video: ${state.videoPath || state.filePath || "(none)"}`);
         lines.push(`Settings: caption=${state.settings?.captionStyle}, crop=${state.settings?.cropStrategy}, logo=${state.settings?.logoPath || "none"}`);
-        lines.push(`Transcript: ${state.transcriptWordCount} words`);
+        lines.push(`Transcript: ${state.transcriptWordCount ?? 0} words`);
 
-        const allSuggestions = state.suggestions || [];
-        const deselected: number[] = state.deselectedIndices || [];
+        const allSuggestions = state.suggestions ?? [];
+        const deselected = state.deselectedIndices ?? [];
         const selectedCount = allSuggestions.length - deselected.length;
         lines.push(`Clips: ${selectedCount} selected, ${allSuggestions.length} total`);
 
@@ -840,7 +899,7 @@ export function createServer(): McpServer {
           lines.push("");
           lines.push("Clips (use these numbers with create_clip/batch_create_clips):");
           for (let i = 0; i < allSuggestions.length; i++) {
-            const clip = allSuggestions[i] as any;
+            const clip = allSuggestions[i];
             const num = i + 1;
             const title = clip.title || "untitled";
             const start = clip.start_second ?? "?";
@@ -924,8 +983,8 @@ export function createServer(): McpServer {
         // 1. Read current UI state
         const res = await fetch("http://localhost:3847/api/ui-state");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const state = await res.json() as any;
-        const suggestions: any[] = state.suggestions || [];
+        const state = (await res.json()) as ServerUIState;
+        const suggestions = state.suggestions ?? [];
 
         if (!suggestions.length) {
           return { content: [{ type: "text" as const, text: "No suggestions in UI state." }] };
@@ -936,7 +995,7 @@ export function createServer(): McpServer {
         if (clip_number !== undefined) {
           targetIdx = clip_number - 1;
         } else if (clip_id) {
-          targetIdx = suggestions.findIndex((s: any) => s.clip_id === clip_id);
+          targetIdx = suggestions.findIndex((s) => s.clip_id === clip_id);
         } else if (index !== undefined) {
           targetIdx = index;
         }
@@ -1026,16 +1085,16 @@ export function createServer(): McpServer {
       try {
         const res = await fetch("http://localhost:3847/api/ui-state");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const state = await res.json() as any;
-        const suggestions: any[] = state.suggestions || [];
-        const deselected: number[] = state.deselectedIndices || [];
+        const state = (await res.json()) as ServerUIState;
+        const suggestions = state.suggestions ?? [];
+        const deselected: number[] = state.deselectedIndices ?? [];
 
         // Find target index (clip_number is 1-based)
         let targetIdx = -1;
         if (clip_number !== undefined) {
           targetIdx = clip_number - 1;
         } else if (clip_id) {
-          targetIdx = suggestions.findIndex((s: any) => s.clip_id === clip_id);
+          targetIdx = suggestions.findIndex((s) => s.clip_id === clip_id);
         } else if (index !== undefined) {
           targetIdx = index;
         }
@@ -1133,13 +1192,13 @@ export function createServer(): McpServer {
       try {
         const res = await fetch("http://localhost:3847/api/outputs");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const clips = await res.json() as any[];
+        const clips = (await res.json()) as OutputClip[];
 
         if (!clips.length) {
           return { content: [{ type: "text" as const, text: "No rendered clips found." }] };
         }
 
-        const lines = clips.map((c: any) => {
+        const lines = clips.map((c) => {
           const date = c.created ? c.created.split("T")[0] : "unknown";
           return `  - ${c.filename} (${c.size_mb} MB, ${date})`;
         });
@@ -1185,16 +1244,16 @@ export function createServer(): McpServer {
           body: JSON.stringify({ action, name, config }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json() as any;
+        const data = (await res.json()) as PresetResult;
 
         if (data.error) {
           return { content: [{ type: "text" as const, text: `Error: ${data.error}` }], isError: true };
         }
 
         if (action === "list") {
-          const presets: string[] = data.presets || [];
+          const presets = data.presets ?? [];
           if (!presets.length) return { content: [{ type: "text" as const, text: "No presets saved." }] };
-          return { content: [{ type: "text" as const, text: `Presets:\n${presets.map((p: any) => `  - ${typeof p === "string" ? p : p.name || JSON.stringify(p)}`).join("\n")}` }] };
+          return { content: [{ type: "text" as const, text: `Presets:\n${presets.map((p) => `  - ${typeof p === "string" ? p : p.name || JSON.stringify(p)}`).join("\n")}` }] };
         }
 
         if (action === "load" && data.config) {
@@ -1255,11 +1314,11 @@ export function createServer(): McpServer {
         if (!vPath || !segs) {
           const stateRes = await fetch("http://localhost:3847/api/ui-state");
           if (stateRes.ok) {
-            const state = await stateRes.json() as any;
+            const state = (await stateRes.json()) as ServerUIState;
             if (!vPath) vPath = state.videoPath || state.filePath;
             if (!segs) {
-              const suggestions: any[] = state.suggestions || [];
-              segs = suggestions.map((s: any) => ({ start: s.start_second, end: s.end_second }));
+              const suggestions = state.suggestions ?? [];
+              segs = suggestions.map((s) => ({ start: s.start_second, end: s.end_second }));
             }
           }
         }
@@ -1278,7 +1337,7 @@ export function createServer(): McpServer {
           body: JSON.stringify({ video_path: vPath, segments: segs }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json() as any;
+        const data = (await res.json()) as ApiError & Record<string, unknown>;
 
         if (data.error) {
           return { content: [{ type: "text" as const, text: `Error: ${data.error}` }], isError: true };
@@ -1314,10 +1373,10 @@ export function createServer(): McpServer {
           body: JSON.stringify({ file_path }),
         });
         if (!selectRes.ok) {
-          const err = await selectRes.json() as any;
+          const err = (await selectRes.json()) as ApiError;
           return { content: [{ type: "text" as const, text: `Error: ${err.error || "File not found"}` }], isError: true };
         }
-        const fileInfo = await selectRes.json() as any;
+        const fileInfo = (await selectRes.json()) as FileInfo;
 
         // Push to UI state
         await fetch("http://localhost:3847/api/ui-state", {
@@ -1376,10 +1435,10 @@ export function createServer(): McpServer {
           body: JSON.stringify({ file_path, transcript }),
         });
         if (!res.ok) {
-          const err = await res.json() as any;
+          const err = (await res.json()) as ApiError;
           return { content: [{ type: "text" as const, text: `Error: ${err.error || "Import failed"}` }], isError: true };
         }
-        const result = await res.json() as any;
+        const result = (await res.json()) as ImportTranscriptResult;
 
         // Push transcript to UI state
         await fetch("http://localhost:3847/api/ui-state", {
@@ -1432,10 +1491,10 @@ export function createServer(): McpServer {
           body: JSON.stringify({ file_path, raw_text, total_duration, time_adjust }),
         });
         if (!res.ok) {
-          const err = await res.json() as any;
+          const err = (await res.json()) as ApiError;
           return { content: [{ type: "text" as const, text: `Error: ${err.error || "Parse failed"}` }], isError: true };
         }
-        const result = await res.json() as any;
+        const result = (await res.json()) as ImportTranscriptResult;
 
         // Push parsed transcript to UI state
         await fetch("http://localhost:3847/api/ui-state", {
