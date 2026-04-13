@@ -35,6 +35,13 @@ from services.motion_filters import (
     motion_windows_from_keyframes as _motion_windows_from_keyframes,
     simplify_keyframes as _simplify_keyframes,
 )
+from services.face_track_helpers import (
+    choose_camera_speaker as _choose_camera_speaker,
+    clamp_away_from_dead_zone as _clamp_away_from_dead_zone,
+    safe_default_center as _safe_default_center,
+    update_tripod_camera as _update_tripod_camera,
+    upgrade_speaker_mappings as _upgrade_speaker_mappings,
+)
 import sys
 
 
@@ -469,44 +476,6 @@ def _choose_segment_tracks(
     return segment_tracks, learned_anchor_x, learned_side
 
 
-def _update_tripod_camera(
-    current_center_x: float,
-    target_center_x: float | None,
-    crop_w: int,
-    video_width: int,
-    dt: float,
-    force_snap: bool = False,
-) -> float:
-    """
-    Heavy-tripod camera movement inspired by OpenShorts.
-
-    The camera stays still while the subject remains inside a safe zone, then
-    moves at a bounded speed instead of constantly chasing every face twitch.
-    """
-    half_crop = crop_w / 2.0
-    min_center = half_crop
-    max_center = max(half_crop, video_width - half_crop)
-
-    if target_center_x is None:
-        return min(max(current_center_x, min_center), max_center)
-
-    if force_snap:
-        current_center_x = target_center_x
-    else:
-        diff = target_center_x - current_center_x
-        # Wide enough to absorb natural head movement and detector noise,
-        # narrow enough to keep the speaker composed near center.
-        safe_zone_radius = crop_w * 0.22
-        if abs(diff) > safe_zone_radius:
-            slow_speed = 72.0
-            fast_speed = 360.0
-            speed = fast_speed if abs(diff) > crop_w * 0.5 else slow_speed
-            step = min(abs(diff), speed * max(dt, 0.01))
-            current_center_x += step if diff > 0 else -step
-
-    return min(max(current_center_x, min_center), max_center)
-
-
 def _choose_track_segment_targets(
     segment_tracks: list,
     tracked_detections: list,
@@ -829,132 +798,6 @@ def _pick_tracking_face(
         return None, False
 
     return face, side_ok or near_anchor
-
-
-def _choose_camera_speaker(
-    transcript_speaker: str | None,
-    transcript_duration: float,
-    active_speaker: str | None,
-    pending_speaker: str | None,
-    pending_count: int,
-    min_turn_duration: float = 2.6,
-    confirmation_frames: int = 3,
-) -> tuple[str | None, str | None, int, bool]:
-    """
-    Stabilize diarization before the camera switches.
-
-    Returns (camera_speaker, pending_speaker, pending_count, switched_now).
-    """
-    if transcript_speaker is None:
-        return active_speaker, pending_speaker, pending_count, False
-
-    if active_speaker is None:
-        return transcript_speaker, None, 0, True
-
-    if transcript_speaker == active_speaker:
-        return active_speaker, None, 0, False
-
-    # Brief interjections should not move the camera.
-    if transcript_duration < min_turn_duration:
-        return active_speaker, None, 0, False
-
-    if pending_speaker != transcript_speaker:
-        return active_speaker, transcript_speaker, 1, False
-
-    pending_count += 1
-    if pending_count < confirmation_frames:
-        return active_speaker, pending_speaker, pending_count, False
-
-    return transcript_speaker, None, 0, True
-
-
-def _safe_default_center(
-    width: int,
-    crop_w: int,
-    face_map: dict | None,
-    has_any_split: bool,
-    first_speaker: str | None,
-    speaker_anchor_x: dict,
-) -> float:
-    """
-    Pick a safe initial camera center.
-
-    On split-screen, width/2 is the dead zone between two feeds.  Use the
-    face_map or speaker_anchor to start on an actual speaker instead.
-    """
-    # Best case: we know where the first speaker sits
-    if first_speaker and first_speaker in speaker_anchor_x:
-        return float(speaker_anchor_x[first_speaker])
-
-    # Face-map cluster fallback: pick the cluster with more observations
-    if face_map and face_map.get("clusters"):
-        clusters = face_map["clusters"]
-        best = max(clusters, key=lambda c: c.get("count", 0))
-        return float(best["center_x"])
-
-    # Non-split: center is fine
-    if not has_any_split:
-        return float(width) / 2
-
-    # Split with no map: pick the left quarter as a safer guess than center
-    return float(width) / 4
-
-
-def _clamp_away_from_dead_zone(
-    crop_x: int,
-    crop_w: int,
-    width: int,
-    face_map: dict | None,
-    has_any_split: bool,
-) -> int:
-    """
-    If crop_x centers the window on the split-screen seam (where no face
-    lives), snap to the nearest cluster position instead.
-
-    Only triggers when the crop CENTER is close to mid_x.  A crop that
-    merely straddles mid_x is fine — in fullscreen mode the face genuinely
-    sits near center.
-    """
-    if not has_any_split or not face_map:
-        return crop_x
-
-    mid_x = width // 2
-    crop_center = crop_x + crop_w // 2
-
-    # Only clamp when the crop is centered near the seam itself.
-    # A tight margin avoids false-positives on fullscreen layouts where
-    # the face legitimately sits near center.
-    seam_margin = crop_w // 8  # ~75px on a 607-wide crop
-    if abs(crop_center - mid_x) > seam_margin:
-        return crop_x
-
-    # Snap to nearest cluster
-    clusters = face_map.get("clusters", [])
-    if not clusters:
-        return max(0, width // 4 - crop_w // 2)
-
-    best_cluster = min(clusters, key=lambda c: abs(c["center_x"] - crop_center))
-    snapped = max(0, min(best_cluster["center_x"] - crop_w // 2, width - crop_w))
-    return snapped
-
-
-def _upgrade_speaker_mappings(face_map: dict) -> dict:
-    """
-    Invalidate stale speaker-to-cluster mappings from old caches.
-
-    Old caches used "first-to-speak = left" which breaks when the host
-    speaks first but sits on the right.  Rather than trying to re-compute
-    mappings from clip-scoped data, we clear the mappings entirely so the
-    clip-local tracking decides which face to follow based on visual
-    evidence (which is more reliable for any single clip).
-
-    Cluster positions are kept — they're still useful for dead-zone
-    clamping and safe defaults.
-    """
-    face_map = dict(face_map)
-    face_map["speaker_mappings"] = {}
-    face_map["_mappings_v2"] = True
-    return face_map
 
 
 def _track_and_crop(
