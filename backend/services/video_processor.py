@@ -12,6 +12,7 @@ import math
 from typing import Optional
 
 from services.encoder import get_video_encode_flags
+from utils.proc import run as proc_run, ProcError
 import sys
 
 # Max time for any single FFmpeg call (seconds). Prevents infinite hangs.
@@ -39,7 +40,7 @@ def _run_ffmpeg_with_fallback(cmd_parts_before_enc: list, cmd_parts_after_enc: l
     enc_flags = get_video_encode_flags()
     cmd = cmd_parts_before_enc + enc_flags + cmd_parts_after_enc + [output_path]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
     if result.returncode == 0:
         return output_path
 
@@ -47,7 +48,7 @@ def _run_ffmpeg_with_fallback(cmd_parts_before_enc: list, cmd_parts_after_enc: l
     if enc_flags != CPU_FLAGS:
         print(f"Warning: HW encoder failed for {label}, falling back to libx264", file=sys.stderr)
         cmd_fallback = cmd_parts_before_enc + CPU_FLAGS + cmd_parts_after_enc + [output_path]
-        result2 = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+        result2 = proc_run(cmd_fallback, timeout=_FFMPEG_TIMEOUT, check=False)
         if result2.returncode == 0:
             return output_path
         raise RuntimeError(f"FFmpeg {label} failed (both HW and CPU): {result2.stderr[-500:]}")
@@ -74,7 +75,7 @@ def get_video_info(video_path: str) -> dict:
         "-show_streams",
         video_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"ffprobe failed: {result.stderr}")
     return json.loads(result.stdout)
@@ -146,7 +147,7 @@ def cut_segment(
         "-avoid_negative_ts", "make_zero",
         output_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg cut failed: {result.stderr[-500:]}")
     return output_path
@@ -194,7 +195,7 @@ def cut_multi_segment(
             "-movflags", "+faststart",
             output_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+        result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg concat failed: {result.stderr[-500:]}")
 
@@ -1646,7 +1647,7 @@ def _track_and_crop(
                         "-avoid_negative_ts", "make_zero",
                         part_path,
                     ]
-                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+                    r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
                     if r.returncode != 0:
                         continue
                     part_paths.append(part_path)
@@ -1678,7 +1679,7 @@ def _track_and_crop(
                         "-movflags", "+faststart",
                         output_path,
                     ]
-                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+                    r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
                     if r.returncode == 0:
                         return output_path
                 else:
@@ -1717,7 +1718,7 @@ def _track_and_crop(
                         "-movflags", "+faststart",
                         output_path,
                     ]
-                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+                    r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
                     if r.returncode == 0:
                         return output_path
 
@@ -2203,7 +2204,7 @@ def _crop_split_screen(
                     "-avoid_negative_ts", "make_zero",
                     part_path,
                 ]
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+                r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
                 if r.returncode != 0:
                     print(f"Warning: split-screen segment {i} failed: {r.stderr[-200:]}", file=sys.stderr)
                     continue
@@ -2226,7 +2227,7 @@ def _crop_split_screen(
                 "-movflags", "+faststart",
                 output_path,
             ]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+            r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
             if r.returncode != 0:
                 return None
 
@@ -2889,7 +2890,7 @@ def _create_gradient_png(output_path: str, width: int = 1080, height: int = 1920
         "-frames:v", "1",
         output_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"Gradient creation failed: {result.stderr[-300:]}")
     return output_path
@@ -2976,7 +2977,7 @@ def burn_captions(
         output_path,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
 
     # Fallback to CPU if HW encoder failed
     if result.returncode != 0 and enc_flags != CPU_FLAGS:
@@ -2991,7 +2992,7 @@ def burn_captions(
             "-movflags", "+faststart",
             output_path,
         ]
-        result = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+        result = proc_run(cmd_fallback, timeout=_FFMPEG_TIMEOUT, check=False)
 
     # Clean up gradient file
     if gradient_overlay and os.path.exists(gradient_path):
@@ -3077,7 +3078,7 @@ def concat_outro(
                     "-movflags", "+faststart",
                     output_path,
                 ]
-                result = subprocess.run(xfade_cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+                result = proc_run(xfade_cmd, timeout=_FFMPEG_TIMEOUT, check=False)
                 if result.returncode == 0:
                     if os.path.exists(outro_scaled):
                         os.remove(outro_scaled)
@@ -3147,7 +3148,7 @@ def concat_outro(
             "-movflags", "+faststart",
             output_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+        result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg concat failed: {result.stderr[-500:]}")
         return output_path
@@ -3173,7 +3174,7 @@ def normalize_audio(
         "-af", f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11:print_format=json",
         "-f", "null", "-",
     ]
-    result = subprocess.run(measure_cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+    result = proc_run(measure_cmd, timeout=_FFMPEG_TIMEOUT, check=False)
 
     # Try to parse loudnorm output from stderr
     stderr = result.stderr
@@ -3221,7 +3222,7 @@ def normalize_audio(
         "-movflags", "+faststart",
         output_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg normalize failed: {result.stderr[-500:]}")
     return output_path

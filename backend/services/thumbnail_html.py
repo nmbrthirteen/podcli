@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import subprocess
+from utils.proc import run as proc_run, ProcError
 import sys
 import tempfile
 from typing import Optional
@@ -744,7 +745,7 @@ def thumbnail_to_video_frame(
         "-shortest",
         output_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = proc_run(cmd, timeout=120, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"Thumbnail to video failed: {result.stderr[-300:]}")
     return output_path

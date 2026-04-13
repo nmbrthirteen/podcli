@@ -11,6 +11,7 @@ Returns optimal FFmpeg encoder flags for the current system.
 """
 
 import subprocess
+from utils.proc import run as proc_run, ProcError
 import platform
 import tempfile
 import os
@@ -82,12 +83,10 @@ def _test_encoder(encoder: str) -> bool:
             "-shortest",
             tmp_out,
         ]
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=15,
-        )
+        result = proc_run(cmd, timeout=15, check=False)
         # Check both return code AND that the file was actually created
         return result.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 100
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except (ProcError, FileNotFoundError, OSError):
         return False
     finally:
         if tmp_out and os.path.exists(tmp_out):

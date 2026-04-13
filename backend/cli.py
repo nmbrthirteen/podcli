@@ -1985,14 +1985,14 @@ def cmd_swap_thumbnail(args):
 
     # Trim off old thumbnail
     trimmed_path = os.path.join(work_dir, "trimmed.mp4")
-    import subprocess
+    from utils.proc import run as proc_run
     trim_cmd = [
         "ffmpeg", "-y", "-i", clip_path,
         "-t", str(content_duration),
         "-c", "copy", "-movflags", "+faststart",
         trimmed_path,
     ]
-    result = subprocess.run(trim_cmd, capture_output=True, text=True, timeout=60)
+    result = proc_run(trim_cmd, timeout=60, check=False)
     if result.returncode != 0:
         print(f"  Failed to trim: {result.stderr[-200:]}", file=sys.stderr)
         sys.exit(1)

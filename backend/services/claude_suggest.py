@@ -25,7 +25,8 @@ def _find_cli(name: str, extra_paths: list[str] = None) -> Optional[str]:
         if os.path.exists(path):
             return path
     try:
-        result = subprocess.run(["which", name], capture_output=True, text=True, timeout=5)
+        from utils.proc import run as proc_run
+        result = proc_run(["which", name], timeout=5, check=False)
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception:

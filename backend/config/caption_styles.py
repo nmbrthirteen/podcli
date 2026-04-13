@@ -6,6 +6,7 @@ supported caption types.
 """
 
 import subprocess
+from utils.proc import run as proc_run
 import functools
 
 
@@ -27,9 +28,9 @@ def _detect_font() -> str:
     ]
 
     try:
-        result = subprocess.run(
+        result = proc_run(
             ["fc-list", "--format=%{family}\n"],
-            capture_output=True, text=True, timeout=5,
+            timeout=5, check=False,
         )
         if result.returncode == 0:
             available = set()

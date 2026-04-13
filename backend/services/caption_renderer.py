@@ -266,8 +266,8 @@ def _calibrate_libass_y(
     Render a probe frame with FFmpeg+libass to measure the exact Y position
     of each text line. Returns a list of Y-center values (one per line).
     """
-    import subprocess
     import tempfile
+    from utils.proc import run as proc_run
 
     cache_key = f"{font_name}:{font_size}:{bold}:{margin_v}:{len(lines)}"
     if cache_key in _libass_calibration_cache:
@@ -312,7 +312,7 @@ def _calibrate_libass_y(
             "-vf", f"ass='{ass_file.name}'",
             "-frames:v", "1", png_file.name,
         ]
-        subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        proc_run(cmd, timeout=10, check=False)
 
         # Analyze the rendered frame to find text line Y centers
         from PIL import Image
@@ -380,16 +380,16 @@ def _measure_text_widths(texts: list[str], font_name: str, font_size: int, bold:
     """
     try:
         from PIL import ImageFont, ImageDraw, Image
-        import subprocess
+        from utils.proc import run as proc_run
 
         font = None
 
         # 1) Use fc-match to find the exact font libass resolves (most accurate)
         try:
             style = "Bold" if bold else "Regular"
-            result = subprocess.run(
+            result = proc_run(
                 ["fc-match", f"{font_name}:{style}", "--format=%{file}"],
-                capture_output=True, text=True, timeout=3,
+                timeout=3, check=False,
             )
             if result.returncode == 0 and result.stdout.strip():
                 fc_path = result.stdout.strip()

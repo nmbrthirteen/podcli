@@ -13,6 +13,8 @@ import subprocess
 import re
 from typing import Optional, Callable
 
+from utils.proc import run as proc_run, ProcError
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.caption_renderer import render_captions
@@ -113,7 +115,7 @@ def _get_media_duration(path: str) -> float:
             "-of", "default=nk=1:nw=1",
             path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        result = proc_run(cmd, timeout=10, check=False)
         if result.returncode != 0:
             return 0.0
         return float((result.stdout or "0").strip() or 0.0)
@@ -134,7 +136,7 @@ def _detect_scene_cuts(path: str, threshold: float = 0.22, max_cuts: int = 32) -
             "-an",
             "-f", "null", "-",
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+        result = proc_run(cmd, timeout=90, check=False)
         text = (result.stderr or "") + "\n" + (result.stdout or "")
         raw = [float(m.group(1)) for m in _SCENE_TIME_RE.finditer(text)]
         if not raw:
@@ -221,7 +223,7 @@ def _apply_local_transition_smoothing(
         output_path,
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = proc_run(cmd, timeout=300, check=False)
         return result.returncode == 0 and os.path.exists(output_path)
     except Exception:
         return False
@@ -430,9 +432,9 @@ def _render_with_remotion(
     if not os.path.exists(bundle_index):
         # Try a quick prebundle
         try:
-            r = subprocess.run(
+            r = proc_run(
                 [node_path, render_script, "--prebundle"],
-                capture_output=True, text=True, timeout=30, cwd=project_root,
+                timeout=30, check=False, cwd=project_root,
             )
             if r.returncode != 0 or not os.path.exists(bundle_index):
                 _remotion_available = False
@@ -457,7 +459,7 @@ def _render_with_remotion(
         probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0",
                      "-show_entries", "stream=height", "-of", "csv=p=0",
                      os.path.abspath(video_path)]
-        vid_h = int(subprocess.run(probe_cmd, capture_output=True, text=True, timeout=5).stdout.strip())
+        vid_h = int(proc_run(probe_cmd, timeout=5, check=False).stdout.strip())
 
         # Get face center Y from the cropped video's face detection
         # Use a quick sample at the middle of the clip

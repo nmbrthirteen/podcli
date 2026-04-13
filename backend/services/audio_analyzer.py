@@ -11,6 +11,8 @@ import json
 import re
 from typing import Optional, Callable
 
+from utils.proc import run as proc_run
+
 
 def extract_audio_energy(
     video_path: str,
@@ -32,7 +34,7 @@ def extract_audio_energy(
         "-f", "null", "-",
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = proc_run(cmd, timeout=600, check=False)
 
     # Parse the ametadata output from stdout
     # Format: "frame:N    pts:N    pts_time:N.N\nlavfi.astats.Overall.RMS_level=N.N"
@@ -72,7 +74,7 @@ def _fallback_energy(video_path: str) -> list[dict]:
         "ffprobe", "-v", "quiet", "-print_format", "json",
         "-show_format", video_path,
     ]
-    probe = subprocess.run(probe_cmd, capture_output=True, text=True)
+    probe = proc_run(probe_cmd, timeout=30, check=False)
     try:
         duration = float(json.loads(probe.stdout)["format"]["duration"])
     except (json.JSONDecodeError, KeyError):
@@ -86,7 +88,7 @@ def _fallback_energy(video_path: str) -> list[dict]:
         "-af", "ebur128=peak=true",
         "-f", "null", "-",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = proc_run(cmd, timeout=600, check=False)
 
     energy_data = []
     # Parse ebur128 output from stderr: "t: N.N   M: -N.N S: -N.N"
