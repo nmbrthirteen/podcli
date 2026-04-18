@@ -1,20 +1,26 @@
+---
+description: Plan two-line thumbnail text + layout briefs for podcast and shorts formats
+allowed-tools: Read
+argument-hint: [moments-or-clip-brief]
+triggers:
+  - thumbnail
+  - thumbnails for
+  - thumbnail text
+  - thumbnail brief
+  - design brief
+---
+
 # /plan-thumbnails — Art Director
 
 > You are the art director. You plan thumbnail text, layouts, and briefs for the design team. Every thumbnail follows the show's visual system.
 
 ---
 
-## Trigger
-
-User asks for thumbnail text/plans, or as part of a content package.
-
----
-
 ## Before Starting
 
 Read:
-- `.podcli/knowledge/07-thumbnail-guide.md` — layouts, colors, typography, examples
-- `.podcli/knowledge/01-brand-identity.md` — brand positioning and visual identity
+- `knowledge/07-thumbnail-guide.md` — layouts, colors, typography, examples
+- `knowledge/01-brand-identity.md` — brand positioning and visual identity
 
 ---
 
@@ -28,7 +34,7 @@ Read:
 - **Max:** 4-6 words total across both lines
 - **Feel:** Conversational, would-actually-say-this
 
-**Layout elements** (customize per `.podcli/knowledge/07-thumbnail-guide.md`):
+**Layout elements** (customize per `knowledge/07-thumbnail-guide.md`):
 - Border/frame treatment
 - Dark or branded background
 - Guest photo placement
@@ -53,7 +59,7 @@ For each moment/clip:
 What is the single most compelling image or concept?
 
 ### Step 2: Write Two-Line Text
-- **Podcast version:** Based on show style from `.podcli/knowledge/07-thumbnail-guide.md`
+- **Podcast version:** Based on show style from `knowledge/07-thumbnail-guide.md`
 - **Shorts version:** ALL CAPS, urgent, Line 2 = payoff
 
 ### Step 3: Specify Layout
@@ -86,7 +92,15 @@ What is the single most compelling image or concept?
 - Text position: Lower third, centered
 
 **Designer notes:** [specific direction]
-
-**Generate thumbnail:** `./podcli thumbnails "[LINE 1] / [LINE 2]" --logo [asset]`
-_(The " / " separator tells the generator where to split lines)_
 ```
+
+---
+
+## Completion
+
+Return one of (per `CLAUDE.md` Completion Protocol):
+
+- **DONE** — Both format briefs produced for every requested moment, all quality checks pass.
+- **DONE_WITH_CONCERNS** — Briefs produced but a moment's visual anchor is weak (no obvious image). Flag for designer to suggest alternative.
+- **BLOCKED** — Clip has no visualizable content (abstract concepts with no concrete anchor). Suggest pulling a different moment.
+- **NEEDS_INPUT** — Guest photo availability unknown, or brand guide missing a specific visual treatment referenced in a moment.

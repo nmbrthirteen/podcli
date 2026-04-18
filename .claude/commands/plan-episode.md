@@ -1,26 +1,34 @@
+---
+description: Design questions, story arc, and moment map BEFORE recording an episode
+allowed-tools: Read, Write
+argument-hint: [guest-name-and-company]
+triggers:
+  - plan episode
+  - upcoming recording
+  - guest prep
+  - prepare for interview
+  - design questions
+  - new episode plan
+---
+
 # /plan-episode — Episode Architect
 
 > You are an episode architect. You work BACKWARDS from the ideal output — viral shorts, compelling titles, a story that holds attention — to design questions, story arcs, and moments BEFORE the recording happens.
 
 ---
 
-## Trigger
-
-User says "plan episode", provides a guest name, or asks about preparing for an upcoming recording.
-
----
-
 ## Before Starting
 
 Read the knowledge base:
-- `.podcli/knowledge/01-brand-identity.md` — show positioning, what makes it unique
-- `.podcli/knowledge/02-voice-and-tone.md` — voice fingerprint, what resonates with the audience
-- `.podcli/knowledge/03-episodes-database.md` — past episodes (avoid repetition, find gaps)
-- `.podcli/knowledge/05-title-formulas.md` — title patterns (design questions that produce title-worthy answers)
-- `.podcli/knowledge/08-topics-themes.md` — core topics, audience interests
-- `.podcli/knowledge/11-inspiration-channels.md` — reference channels and what they do well
+- `knowledge/01-brand-identity.md` — show positioning, what makes it unique
+- `knowledge/02-voice-and-tone.md` — voice fingerprint, what resonates with the audience
+- `knowledge/03-episodes-database.md` — past episodes (avoid repetition, find gaps)
+- `knowledge/05-title-formulas.md` — title patterns (design questions that produce title-worthy answers)
+- `knowledge/08-topics-themes.md` — core topics, audience interests
+- `knowledge/11-inspiration-channels.md` — reference channels and what they do well
+- `knowledge/13-learnings.md` — what consistently works / doesn't across past episodes
 
-If using podcli, replace `.podcli/knowledge/` with `.podcli/knowledge/`.
+If using podcli, replace `knowledge/` with `.podcli/knowledge/`.
 
 ---
 
@@ -117,6 +125,13 @@ Adapt the best patterns from each.
 
 For each planned moment, draft 2-3 title options BEFORE recording. This gives the host a "target" — they know which answers will become shorts.
 
+### Step 7: Apply Learnings
+
+Read `knowledge/13-learnings.md` and adjust:
+- Prefer question types that have produced high-performing shorts in past retros
+- Avoid patterns flagged as "consistently doesn't work"
+- Consider testing one Open Question if relevant
+
 ---
 
 ## Output Format
@@ -194,6 +209,12 @@ For each planned moment, draft 2-3 title options BEFORE recording. This gives th
 
 ---
 
+## Applied Learnings (from knowledge/13-learnings.md)
+- [Pattern applied in this plan] → [which question/moment uses it]
+- [Pattern avoided] → [what we're doing instead]
+
+---
+
 ## Pre-Recording Checklist
 - [ ] Guest briefed on format (length, style, topics)
 - [ ] Questions printed / on screen
@@ -201,6 +222,8 @@ For each planned moment, draft 2-3 title options BEFORE recording. This gives th
 - [ ] Recording software ready
 - [ ] Moment map visible (know what clips you're aiming for)
 ```
+
+Save to: `episodes/ep[XX]-[guest]-plan.md`
 
 ---
 
@@ -215,3 +238,15 @@ Before delivering the plan:
 - [ ] At least 1 question designed to produce a contrarian hot take
 - [ ] No overlap with topics from previous episodes (check database)
 - [ ] Reference channels consulted for format ideas
+- [ ] Applied Learnings section filled in (not "[Pattern applied...]" placeholder)
+
+---
+
+## Completion
+
+Return one of (per `CLAUDE.md` Completion Protocol):
+
+- **DONE** — Plan saved, all quality gates pass, moment map covers 5 content types, learnings applied.
+- **DONE_WITH_CONCERNS** — Plan saved but one or more gates borderline (e.g., only 4 content types covered because guest's scope is narrow). Flag which.
+- **BLOCKED** — Not enough guest context to write sharp, specific questions. Ask for background (links, bio, prior interviews).
+- **NEEDS_INPUT** — Missing guest role, topic focus, or episode number.

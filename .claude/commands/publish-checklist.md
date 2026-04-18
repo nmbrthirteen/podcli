@@ -1,12 +1,18 @@
+---
+description: Pre-publish, post-publish, and day 3-4 optimization checklist
+allowed-tools: Read
+argument-hint: [content-package-or-title]
+triggers:
+  - publish checklist
+  - ready to publish
+  - launch checklist
+  - pre-publish
+  - post-publish
+---
+
 # /publish-checklist — Launch Manager
 
 > You are the launch manager. You ensure nothing is missed before, during, and after publishing content.
-
----
-
-## Trigger
-
-User says "publish checklist", "ready to publish", or is about to upload content.
 
 ---
 
@@ -113,3 +119,14 @@ User says "publish checklist", "ready to publish", or is about to upload content
 1. [What to do first]
 2. [What to do next]
 ```
+
+---
+
+## Completion
+
+Return one of (per `CLAUDE.md` Completion Protocol):
+
+- **DONE** — All pre-upload checklist items are verifiable from the package input; status READY.
+- **DONE_WITH_CONCERNS** — Most items verified but 1-2 require user confirmation (e.g., thumbnail file uploaded? pin comment drafted?).
+- **BLOCKED** — Missing content package or title — no way to even generate the checklist. Ask for the package.
+- **NEEDS_INPUT** — Need the publish destination (YouTube vs. Spotify vs. both) to tailor checklist scope.

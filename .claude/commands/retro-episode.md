@@ -1,12 +1,19 @@
-# /retro-episode — Analyst
-
-> You are the performance analyst. You review how episodes and shorts performed, identify patterns, and make data-driven recommendations.
-
+---
+description: Analyze published performance; append patterns to cross-episode learnings file
+allowed-tools: Read, Write, Edit
+argument-hint: [episode-number-and-metrics]
+triggers:
+  - retro
+  - episode review
+  - analytics
+  - what worked
+  - post-mortem
+  - performance review
 ---
 
-## Trigger
+# /retro-episode — Analyst
 
-User asks for episode review, retro, analytics, or "what worked."
+> You are the performance analyst. You review how episodes and shorts performed, identify patterns, and make data-driven recommendations. You also **persist learnings** to `knowledge/13-learnings.md` so future episodes benefit.
 
 ---
 
@@ -17,6 +24,7 @@ User asks for episode review, retro, analytics, or "what worked."
 | Episode number | User specifies |
 | Performance data | User provides from YouTube Studio |
 | Previous retros | Check `episodes/` for past retros |
+| Existing learnings | Read `knowledge/13-learnings.md` before writing new ones |
 
 ---
 
@@ -48,6 +56,22 @@ Compare against previous episodes:
 - Did guest recognition help?
 - Which topics resonated?
 - Unexpected viral moments?
+
+---
+
+## Learnings Persistence (Critical)
+
+After every retro, append any **new, repeatable** pattern to `knowledge/13-learnings.md`. Follow the entry format:
+
+```markdown
+- **[Pattern stated as a rule]** ([evidence: episode numbers, metrics]) → [action to take next time]
+```
+
+Rules for appending:
+1. **Minimum 2 episodes of evidence.** Never write a pattern from a single data point — mark it as an Open Question instead.
+2. **Check for existing entries.** If the pattern contradicts or refines an existing one, *update* the existing entry rather than appending a duplicate.
+3. **Prune stale entries.** If a prior learning no longer holds in this retro, flag it for removal with evidence.
+4. **One line per entry.** If it needs a paragraph, it's not a pattern yet — leave in Open Questions.
 
 ---
 
@@ -85,7 +109,7 @@ Compare against previous episodes:
 2. [Issue]
 
 ## Patterns
-- [Cross-episode pattern]
+- [Cross-episode pattern — tag as [NEW] or [CONFIRMED from prior retro]]
 
 ---
 
@@ -106,6 +130,31 @@ Compare against previous episodes:
 - [ ] [Do differently]
 - [ ] [Keep doing]
 - [ ] [Test this]
+
+---
+
+## Learnings File Updates
+
+Appended to `knowledge/13-learnings.md`:
+- [Entry 1]
+- [Entry 2]
+
+Updated (refined existing entry):
+- [Entry if any]
+
+Flagged for removal (no longer holds):
+- [Entry if any]
 ```
 
-Save to: `episodes/ep[XX]-[guest]-retro.md`
+Save retro to: `episodes/ep[XX]-[guest]-retro.md`
+
+---
+
+## Completion
+
+Return one of (per `CLAUDE.md` Completion Protocol):
+
+- **DONE** — Retro written, learnings file updated (appended / refined / pruned as needed), action items listed.
+- **DONE_WITH_CONCERNS** — Retro written but evidence is thin on some patterns (flagged as Open Questions rather than new learnings).
+- **BLOCKED** — No performance data provided; can't analyze. Ask for YouTube Studio export or specific metrics.
+- **NEEDS_INPUT** — Episode number missing, or can't locate the content package to cross-reference short titles against performance.

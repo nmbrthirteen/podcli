@@ -1,121 +1,111 @@
-# /produce-shorts — Full Production Pipeline
+---
+description: Full pipeline from transcript to publish-ready content package
+allowed-tools: Read, Write, Edit, Task
+argument-hint: [transcript-file-or-episode-number]
+triggers:
+  - process episode
+  - produce shorts
+  - full pipeline
+  - prep episode
+  - make content package
+  - run the full thing
+---
 
-> You are the executive producer for this podcast. You run the ENTIRE production pipeline from raw episode file to publish-ready shorts with complete content packages. One command, zero handoffs.
+# /produce-shorts — Producer
+
+> You are the head producer. You run the full content pipeline from raw transcript to publish-ready package. This is the master orchestrator.
 
 ---
 
-## Trigger
+## Before Starting
 
-User says "produce episode", provides an mp4 + transcript, or wants the full end-to-end pipeline.
+Read the full knowledge base to understand the show:
+- `knowledge/01-brand-identity.md` — who the show is
+- `knowledge/02-voice-and-tone.md` — voice, banned words
+- `knowledge/03-episodes-database.md` — existing content (dedup)
+- `knowledge/04-shorts-creation-guide.md` — moment criteria
+- `knowledge/05-title-formulas.md` — title spec
+- `knowledge/06-descriptions-template.md` — description templates
+- `knowledge/07-thumbnail-guide.md` — visual specs
+- `knowledge/13-learnings.md` — past retro patterns (what worked, what didn't)
 
 ---
 
 ## Inputs
 
-| Field | Required | How to Get |
-|-------|----------|-----------|
-| Episode video (.mp4) | Yes | User provides path or it's in `.podcli/working/uploads/` |
-| Transcript | Yes | User provides file/text, or auto-transcribe with Whisper |
+| Field | Required | Source |
+|-------|----------|--------|
+| Transcript | Yes | User provides (paste or file) |
 | Episode number | Yes | User provides or auto-detect |
 | Guest name | Preferred | Auto-detect from transcript |
 | Company/Org | Preferred | Auto-detect from transcript |
-| Caption style | Optional | Default: branded (from presets or user) |
-| Crop strategy | Optional | Default: face |
+| Focus areas | Optional | User specifies |
 
 ---
 
-## The Full Pipeline (3 Phases, 10 Steps)
+## Full Pipeline (6 Phases)
 
-### PHASE 1: VIDEO PRODUCTION (podcli engine)
+Each phase calls the corresponding skill's logic. Each phase reports its own Completion outcome.
 
-#### Step 1 — Load Video
-- Confirm the video file exists and is accessible
-- If using the Web UI, call `POST /api/select-file` or check `get_ui_state`
-- Note the file path for clip generation
-
-#### Step 2 — Transcribe (if no transcript provided)
-- Use the `transcribe_podcast` MCP tool or `POST /api/transcribe`
-- Model: base (or user's preference)
-- Wait for completion — this produces word-level timestamps + speaker labels
-- Cache the result for reuse
-
-#### Step 3 — If transcript is provided as text/file
-- Parse it (supports Speaker (MM:SS) format, SRT, VTT, or JSON)
-- Use `POST /api/parse-transcript` or the MCP tool
-- Ensure word-level timestamps are generated
-
-#### Step 4 — Analyze & Suggest Clips
-- Read the full transcript
-- Identify the 8-15 best moments based on:
-  - Hook strength (first 3 seconds grab attention?)
-  - Standalone value (makes sense without context?)
-  - Energy/quotability (memorable phrasing?)
-  - Audience relevance
-- Use the `suggest_clips` MCP tool to submit suggestions
-- Each suggestion needs: title, start_second, end_second, reasoning
-
-#### Step 5 — Render Clips
-- Use `batch_create_clips` with `export_selected: true`
-- Settings: caption style from presets or user, crop strategy, logo if registered
-- Wait for all clips to finish rendering
-- Note output file paths and durations
-
-**PHASE 1 OUTPUT:** Rendered .mp4 clips in `.podcli/output/`
-
----
-
-### PHASE 2: CONTENT GENERATION (PodStack)
-
-#### Step 6 — Process Transcript for Content
+### Phase 1: Transcript Processing
 *Runs `/process-transcript` logic*
 
-Using the same transcript from Phase 1:
-1. Score each extracted moment (Standalone + Hook + Relevance + Quotability, 1-5 each)
-2. Classify each by content type (Guest Story / Technical Insight / Market / Business / Hot Take)
-3. Check for duplicates against `03-episodes-database.md`
-4. Extract SEO keywords from the full transcript
+Extract guest info, flag 15-20 moments, score them, select top moments, classify by content type, check for duplicates.
 
-#### Step 7 — Generate Titles
-*Runs `/generate-titles` logic per clip*
+### Phase 2: Title Development
+*Runs `/generate-titles` logic per moment*
 
-For each rendered clip:
-1. Extract the anchor — the single most non-obvious thing
-2. Generate 8 title options following the show's title spec
-3. Run the 6-point verification checklist
-4. Flag top 2 picks
-5. Narrow to 2-3 best per clip
+For each moment: extract anchor, classify, generate 8 options, verify, flag top 2. Narrow to 2-3 best per moment.
 
-#### Step 8 — Generate Descriptions + Thumbnails
-*Runs `/generate-descriptions` and `/plan-thumbnails` logic*
+### Phase 3: Description Writing
+*Runs `/generate-descriptions` logic*
 
-For each clip:
-- Shorts description: hook + attribution + link placeholder + hashtags
-- Thumbnail text: podcast (16:9) lowercase + shorts (9:16) ALL CAPS
+Shorts descriptions (hook + attribution + link + hashtags) and full episode long-form description.
 
-For the full episode:
-- Long-form description with timestamps, guest links, bullet points
-- Podcast thumbnail brief
+### Phase 4: Thumbnail Planning
+*Runs `/plan-thumbnails` logic*
 
-#### Step 9 — Quality Review
-*Runs `/review-content` logic*
+Two-line text for both podcast and shorts formats per moment.
 
-4-pass review on ALL generated content:
-1. Banned word scan (from `02-voice-and-tone.md`)
-2. Voice & tone check
-3. Title-specific review (length, keyword position, shapes)
-4. Package completeness
+### Phase 5: Quality Review
+*Runs `/review-content` logic — Fix-First + specialist dispatch*
 
-Fix all blocking issues before output.
+Parallel specialists: voice, banned words, title, standalone, clickbait, SEO, dedup. Auto-fix mechanical issues. Batch ASK items for user.
 
-**PHASE 2 OUTPUT:** Complete content package
+### Phase 6: Package Assembly
+
+Compile into final deliverable. Save to `episodes/ep[XX]-[guest]-content-package.md`.
 
 ---
 
-### PHASE 3: DELIVERY
+## Three-Strike Rule (Critical)
 
-#### Step 10 — Assemble & Save
+Each phase has a budget of 3 attempts. If a phase fails to produce valid output 3 times in a row, **STOP the pipeline** and return:
 
-Compile everything into the final deliverable and save to `episodes/`.
+```
+STATUS: BLOCKED
+Failed phase: [phase name]
+Evidence: [what went wrong, 3 attempts summarized]
+Partial output preserved at: [path if any]
+Needed to unblock: [specific ask]
+```
+
+Do not proceed to downstream phases when an upstream phase is BLOCKED — downstream output would be corrupt.
+
+---
+
+## Phase Handoff
+
+Each phase consumes upstream output and passes structured state downstream. Phase 1's moment list is the contract — if it's empty, Phase 2 has nothing to do.
+
+| Phase | Consumes | Produces |
+|-------|----------|----------|
+| 1 | Transcript | Moment list with scores, categories, quotes, timestamps |
+| 2 | Moment list | 2-3 titles per moment + top picks |
+| 3 | Moments + titles | Per-short + long-form descriptions with hashtags |
+| 4 | Moments | Podcast + shorts thumbnail briefs |
+| 5 | All of above | Fix log + ASK queue + suppressed appendix |
+| 6 | Everything | Packaged markdown written to `episodes/` |
 
 ---
 
@@ -123,12 +113,11 @@ Compile everything into the final deliverable and save to `episodes/`.
 
 ```markdown
 # Episode [X]: [Guest] — [Company]
-## Full Production Package
+## Complete Content Package
 
-**Produced:** [Date]
-**Video:** [filename]
-**Transcript:** [source — Whisper/imported]
-**Clips rendered:** [X]
+**Prepared:** [Date]
+**Transcript length:** ~[X] minutes
+**Shorts extracted:** [X]
 **Keywords:** [comma-separated]
 
 ---
@@ -140,126 +129,102 @@ Compile everything into the final deliverable and save to `episodes/`.
 
 ## Long-Form Episode Metadata
 
-**Title Options:**
+**Recommended Title Options:**
 1. [Option 1]
 2. [Option 2]
 3. [Option 3]
 
-**Description (ready to paste):**
-[Full long-form description with timestamps, links, hashtags]
+**Description:**
+[Full long-form description]
 
 **Podcast Thumbnail:**
 - Text: "[line 1] / [line 2]"
 
-**Tags:** [comma-separated, under 500 chars]
+**Tags/Keywords:** [comma-separated]
 
 ---
 
 ## Shorts Package
 
-### Short 1: [Title]
+### Short 1: [Best Title]
 
-**File:** [output filename]
 **Timestamp:** [XX:XX — XX:XX]
-**Duration:** [X]s
+**Duration:** ~[XX]s
 **Category:** [Type]
 **Score:** [X/20]
 
 > "[Key quote]"
 
+**Why it works:** [One sentence]
+
 **Title options:**
 1. [Best] ← PICK
-2. [Alt]
-3. [Alt]
+2. [Alternative]
+3. [Alternative]
 
 **Thumbnail:**
 - Podcast: "[line 1] / [line 2]"
 - Shorts: "[LINE 1] / [LINE 2]"
 
 **Description (ready to paste):**
-[Complete shorts description with hashtags]
+[Complete description]
 
 ---
 
-### Short 2: [Title]
+### Short 2: [Best Title]
 ...
 
 ---
 
-## Posting Schedule
+## Handoff Checklist
 
-| Order | Short | Why This Order |
-|-------|-------|---------------|
-| 1 | [Title] | [Strongest hook — lead with this] |
-| 2 | [Title] | [Different topic — variety] |
-| ... | ... | ... |
+### For Video Editor
+- [ ] Timestamp ranges for each short
+- [ ] Cut instructions (if any)
 
----
+### For Thumbnail Designer
+- [ ] Text briefs for all thumbnails
+- [ ] Guest photo specs
+- [ ] Layout templates
 
-## Publish Checklist
-
-### Pre-Upload
-- [ ] File names use keywords
-- [ ] Titles under 60 chars
-- [ ] Descriptions have hooks + hashtags
-- [ ] Thumbnails briefed to designer
-- [ ] End screen set to ONE specific video
-- [ ] Playlist link hack set up
-
-### At Publish
-- [ ] Pin comment written
-- [ ] Community tab post scheduled (+15 min)
-- [ ] ManyChat keyword automation set
-
-### First 24 Hours
-- [ ] Reply to every comment
-- [ ] Instagram Stories (3-part sequence)
-- [ ] Update link in bio
+### For Publishing
+- [ ] All titles finalized
+- [ ] All descriptions with hashtags
+- [ ] Posting order recommendation
 
 ---
 
-## Quality Review
-- **Blocking issues:** 0 (all resolved)
-- **Status:** READY TO PUBLISH
+## Pipeline Report (per CLAUDE.md Completion Protocol)
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 1. Transcript Processing | DONE | [X moments extracted] |
+| 2. Title Development | DONE | [X titles per moment] |
+| 3. Description Writing | DONE | [Shorts + long-form] |
+| 4. Thumbnail Planning | DONE | [Both formats per moment] |
+| 5. Quality Review | DONE / DONE_WITH_CONCERNS | [auto-fixes: X, ASK: X] |
+| 6. Package Assembly | DONE | [Saved to episodes/ep[XX]...] |
+
+**Overall status:** DONE / DONE_WITH_CONCERNS / BLOCKED
+**Blocking issues resolved:** [X]
+**Non-blocking concerns:** [list]
 ```
 
 ---
 
-## Post-Pipeline Actions
+## Post-Pipeline
 
-1. **Update episode database** — add to `.podcli/knowledge/03-episodes-database.md`
-2. **Save package** — write to `episodes/ep[XX]-[guest]-production-package.md`
-3. **Update clip history** — already tracked by podcli engine
+1. **Update episode database:** Add to `knowledge/03-episodes-database.md`
+2. **Save package:** Write to `episodes/ep[XX]-[guest]-content-package.md`
+3. **Posting order:** Vary topics, lead with strongest hooks, mix energy levels
 
 ---
 
-## How to Use
+## Completion
 
-### Fully automatic (one command)
-```
-/produce-shorts
-```
-Then provide the video path and transcript. Everything else is automatic.
+The Producer emits a rollup status based on the 6 phases:
 
-### With specific inputs
-```
-User: /produce-shorts
-      Video: /path/to/episode.mp4
-      Transcript: /path/to/transcript.txt
-      Episode: 7
-      Guest: John Smith, Acme Corp
-```
-
-### What happens behind the scenes
-1. Video gets loaded into podcli
-2. Transcript gets parsed (or Whisper runs)
-3. Best moments identified and scored
-4. Clips rendered with captions and smart crop
-5. Titles generated (8 per clip, verified)
-6. Descriptions written (ready to paste)
-7. Thumbnails planned (both formats)
-8. Everything reviewed against brand voice
-9. Package assembled and saved
-10. Publish checklist included
-
-**Total output: rendered .mp4 shorts + complete content package + publish checklist**
+- **DONE** — All 6 phases DONE, zero BLOCKING issues after review.
+- **DONE_WITH_CONCERNS** — All phases completed, but review surfaced WARNING items that need user call, or one phase was DONE_WITH_CONCERNS.
+- **BLOCKED** — Any phase hit the Three-Strike Rule or returned BLOCKED. Pipeline halted. Partial output preserved.
+- **NEEDS_INPUT** — A phase needs missing input (episode number, guest name, banned-words file, etc.). Ask once, batched, then resume.

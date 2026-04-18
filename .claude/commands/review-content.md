@@ -1,61 +1,89 @@
-# /review-content — Brand Guardian
-
-> You are the brand guardian. Your job is paranoid review — catch every brand violation, quality issue, and weak point before content goes live.
-
+---
+description: Fix-First brand review — auto-fixes mechanical issues, batches human-decision items, dispatches parallel specialists
+allowed-tools: Read, Edit, Task
+argument-hint: [content-package-or-file]
+triggers:
+  - review content
+  - check this
+  - brand review
+  - quality check
+  - verify package
+  - review package
 ---
 
-## Trigger
+# /review-content — Brand Guardian (Fix-First)
 
-User asks to review content, check quality, or verify a content package.
+> You are the brand guardian. Your job is paranoid review — catch every brand violation, quality issue, and weak point before content goes live. You don't just flag problems. You fix what you can and batch what you can't into a single decision for the user.
 
 ---
 
 ## Before Starting
 
 Read:
-- `.podcli/knowledge/02-voice-and-tone.md` — voice fingerprint, banned words
-- `.podcli/knowledge/05-title-formulas.md` — title rules and shapes
-- `.podcli/knowledge/01-brand-identity.md` — brand positioning
+- `knowledge/02-voice-and-tone.md` — voice fingerprint, banned words
+- `knowledge/05-title-formulas.md` — title rules and shapes
+- `knowledge/01-brand-identity.md` — brand positioning
+- `knowledge/13-learnings.md` — patterns from past retros (what worked, what didn't)
 
 ---
 
-## Review Protocol (4 Passes)
+## Fix-First Classification
 
-### Pass 1: Banned Word Scan (Blocking)
+Every finding goes into one of two buckets:
 
-Scan ALL text for banned words from `.podcli/knowledge/02-voice-and-tone.md`.
+| Bucket | What qualifies | Action |
+|--------|----------------|--------|
+| **AUTO-FIX** | Mechanical, unambiguous: banned-word swaps, hashtag dedup, casing, character-limit trims, missing show hashtag, missing attribution | Apply the fix directly via `Edit` |
+| **ASK** | Needs human judgment: weak hook, borderline voice, title–payoff mismatch, duplicate-with-existing-short | Propose a specific fix, batch into one `AskUserQuestion` |
 
-**If any found:** Flag with exact location, provide rewrite. BLOCKING — content cannot ship.
+**Rule:** Never leave AUTO-FIX items as flags. Never ship ASK items without a proposed fix.
 
-### Pass 2: Voice & Tone Check (Blocking)
+---
 
-Run the voice fingerprint check from `.podcli/knowledge/02-voice-and-tone.md`.
+## Specialist Dispatch (Parallel)
 
-**The Coffee Test:** "Would someone say this out loud to a friend over coffee?" If it sounds like a slide deck — reject.
+Dispatch subagents in parallel, each owning one dimension. Each returns a findings list with confidence (1-10).
 
-**If fails:** Flag which quality failed, provide rewrite.
+| Specialist | Owns | Always run? |
+|-----------|------|-------------|
+| **Voice Check** | Coffee Test, tone fingerprint match | Yes |
+| **Banned Words** | Exact scan against `knowledge/02-voice-and-tone.md` | Yes |
+| **Title Review** | Length, keyword-first, shape, anchor presence, no tension-without-payoff | If titles in package |
+| **Standalone Check** | Each short makes sense without the episode | If shorts in package |
+| **Clickbait Detector** | Title promises something the clip can't deliver | If titles + clips both in package |
+| **SEO / Hashtags** | Description hashtags count, show hashtag present, keyword coverage | If descriptions in package |
+| **Duplication Check** | Cross-reference `knowledge/03-episodes-database.md` | If moments/shorts in package |
 
-### Pass 3: Title-Specific Review (Blocking for titles)
+Run specialists concurrently via `Task`. Collect findings, then merge with **deduplication**: if two specialists flag the same span/field, merge into one finding and raise confidence by +1 (cap 10). Tag `MULTI-SPECIALIST`.
 
-For every title check:
-- Length (target 40-60, hard cap 70 chars)
-- Keyword in first 3 words
-- Fits one of the show's allowed title shapes
-- Clip delivers what title promises (no tension-without-payoff)
-- No duplicates with existing shorts
-- Standalone (makes sense without episode context)
+**Confidence gating:**
+- Confidence ≥ 7: include in fix queue
+- Confidence 4–6: include with "low confidence" marker, do not auto-fix
+- Confidence ≤ 3: suppress to appendix
 
-### Pass 4: Package Completeness (Informational)
+---
 
-- [ ] All moments have timestamps
-- [ ] All moments have titles (at least 2 options)
-- [ ] All moments have descriptions with hashtags
-- [ ] All moments have thumbnail text (both formats)
-- [ ] Guest names spelled correctly
-- [ ] Episode number consistent
-- [ ] No duplicate moments
-- [ ] Category variety
-- [ ] Target shorts count met
+## Execution Protocol
+
+### Phase 1: Ingest
+Read the target content package. Identify which dimensions apply (titles? descriptions? thumbnails? moments?).
+
+### Phase 2: Dispatch
+Launch all applicable specialists in parallel. Wait for all to return.
+
+### Phase 3: Merge & Classify
+- Dedupe across specialists (same fingerprint → merged finding)
+- Classify each as AUTO-FIX or ASK
+- Rank ASK items by blocking severity
+
+### Phase 4: Apply Auto-Fixes
+For every AUTO-FIX finding, apply the edit directly to the source file (or emit the rewrite if source isn't editable).
+
+### Phase 5: Batch ASK
+Emit one ASK block with all human-decision items, each with a specific proposed fix.
+
+### Phase 6: Report
+Emit the fix log + ASK queue + appendix (suppressed low-confidence findings).
 
 ---
 
@@ -65,35 +93,59 @@ For every title check:
 # Content Review: Episode [X] — [Guest]
 
 ## Summary
-- **Total items reviewed:** [X]
-- **Blocking issues:** [X]
-- **Warnings:** [X]
-- **Status:** PASS / NEEDS FIXES
+- **Items reviewed:** [X]
+- **Auto-fixed:** [X]
+- **Needs user call:** [X]
+- **Suppressed (low-confidence):** [X]
+- **Status:** DONE / DONE_WITH_CONCERNS / BLOCKED
 
-## Blocking Issues (Must Fix)
+---
 
-### [Issue 1]
-- **Location:** [Where]
-- **Problem:** [What's wrong]
+## Auto-Fixed (Applied)
+
+### [Fix 1] — [Specialist]
+- **Location:** [file:field]
+- **Before:** "[original]"
+- **After:** "[fixed]"
+- **Reason:** [one line]
+
+---
+
+## Needs User Call (ASK)
+
+### [Issue 1] — [Specialist] — Confidence [X/10]
+- **Location:** [file:field]
+- **Problem:** [what's wrong]
 - **Current:** "[problematic text]"
-- **Suggested fix:** "[rewrite]"
+- **Proposed fix:** "[specific rewrite]"
+- **Why not auto-fix:** [needs judgment — specify]
 
-## Warnings (Should Fix)
+---
 
-### [Warning 1]
-- **Location:** [Where]
-- **Suggestion:** [How to improve]
+## Appendix (Suppressed, confidence ≤3)
 
-## Pass (No Issues)
-[Items that passed all checks]
+- [One-line summary per suppressed finding]
 ```
 
 ---
 
 ## Severity Levels
 
-| Level | Meaning | Action |
-|-------|---------|--------|
-| **BLOCKING** | Banned word, fails voice check, title violation | Must fix |
-| **WARNING** | Weak hook, borderline voice | Should fix |
-| **INFO** | Minor improvement | Nice to have |
+| Level | Meaning | Handling |
+|-------|---------|----------|
+| **BLOCKING** | Banned word, fails voice check, title violation | Auto-fix if mechanical, else ASK (must resolve before ship) |
+| **WARNING** | Weak hook, borderline voice | ASK with proposed rewrite |
+| **INFO** | Minor improvement, low confidence | Appendix only |
+
+---
+
+## Completion
+
+Return one of (per `CLAUDE.md` Completion Protocol):
+
+- **DONE** — Zero BLOCKING issues remain. All AUTO-FIX applied. ASK queue (if any) is non-blocking WARNING/INFO.
+- **DONE_WITH_CONCERNS** — ASK queue contains WARNING items the user should decide on, but none are shipping blockers.
+- **BLOCKED** — BLOCKING issues found that couldn't auto-fix. ASK queue MUST be resolved before publish. Clearly mark status.
+- **NEEDS_INPUT** — Specialists need a missing reference (e.g., banned-word list empty, brand identity file missing). Ask specifically.
+
+**Three-Strike Rule:** If a specialist fails to return findings 3 times in a row (subagent errors), skip that specialist, tag its dimension as UNREVIEWED in the output, and escalate to DONE_WITH_CONCERNS.

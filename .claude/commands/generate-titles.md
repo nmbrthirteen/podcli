@@ -1,23 +1,30 @@
+---
+description: Generate 8 verified title options for a clip, moment, or episode
+allowed-tools: Read
+argument-hint: [clip-transcript-or-moment-brief]
+triggers:
+  - titles for
+  - title options
+  - write titles
+  - generate titles
+  - need titles
+---
+
 # /generate-titles — Title Writer
 
 > You are the title writer for this podcast. You follow the show's title spec exactly. Every title must pass all quality gates before output. Zero exceptions.
 
 ---
 
-## Trigger
-
-User provides a clip transcript, moment summary, or asks for title options.
-
----
-
 ## Before Starting
 
 Read the knowledge base:
-- `.podcli/knowledge/05-title-formulas.md` — title patterns, shapes, rules, banned words
-- `.podcli/knowledge/02-voice-and-tone.md` — voice fingerprint, The Coffee Test
-- `.podcli/knowledge/01-brand-identity.md` — show positioning
+- `knowledge/05-title-formulas.md` — title patterns, shapes, rules, banned words
+- `knowledge/02-voice-and-tone.md` — voice fingerprint, The Coffee Test
+- `knowledge/01-brand-identity.md` — show positioning
+- `knowledge/13-learnings.md` — past title patterns that worked / didn't
 
-If using podcli, replace `.podcli/knowledge/` with `.podcli/knowledge/`.
+If using podcli, replace `knowledge/` with `.podcli/knowledge/`.
 
 ---
 
@@ -74,7 +81,7 @@ For EVERY title:
 | **For Whom Test** | Can you name who would stop scrolling? |
 | **Payoff Check** | Does the clip deliver what the title promises? |
 | **Hook Alignment** | Is the core tension visible in first 3 seconds? |
-| **Banned Words** | Zero banned words from `.podcli/knowledge/02-voice-and-tone.md` |
+| **Banned Words** | Zero banned words from `knowledge/02-voice-and-tone.md` |
 | **Length** | Under 70 characters. Main keyword in first 3 words. |
 
 ### Step 7: Flag Top 2 and Output
@@ -88,7 +95,7 @@ For EVERY title:
 - **5-11 words**. One clear idea per title.
 
 ### Four Default Shapes
-(Check `.podcli/knowledge/05-title-formulas.md` for show-specific shapes)
+(Check `knowledge/05-title-formulas.md` for show-specific shapes)
 
 | Shape | Pattern | Example |
 |-------|---------|---------|
@@ -132,3 +139,14 @@ A title can create curiosity but must NEVER promise more than the clip delivers.
 - **#[X]** — [One-line reason]
 - **#[X]** — [One-line reason]
 ```
+
+---
+
+## Completion
+
+Return one of (per `CLAUDE.md` Completion Protocol):
+
+- **DONE** — 8 titles produced, all pass the 6-point checklist, top 2 flagged.
+- **DONE_WITH_CONCERNS** — 8 titles produced but one or more only barely cleared the Coffee Test or Payoff Check. Flag which.
+- **BLOCKED** — Clip content too thin to produce 8 distinct angles without repetition. Suggest what more context would help.
+- **NEEDS_INPUT** — Clip scope ambiguous (summary vs. transcript unclear, missing guest name for name-lead titles).

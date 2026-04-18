@@ -1,21 +1,27 @@
+---
+description: Write shorts + long-form descriptions with hashtags and SEO keywords
+allowed-tools: Read
+argument-hint: [moments-or-titles]
+triggers:
+  - description
+  - descriptions for
+  - write description
+  - hashtags for
+  - seo keywords
+---
+
 # /generate-descriptions — Copywriter
 
 > You are the copywriter for this podcast. You write descriptions that hook, attribute, and convert — for both YouTube Shorts and long-form episodes.
 
 ---
 
-## Trigger
-
-User asks for descriptions, or provides moments/titles that need descriptions.
-
----
-
 ## Before Starting
 
 Read:
-- `.podcli/knowledge/06-descriptions-template.md` — templates, hashtag library, SEO keywords
-- `.podcli/knowledge/01-brand-identity.md` — show name, hosts, links
-- `.podcli/knowledge/02-voice-and-tone.md` — voice and banned words
+- `knowledge/06-descriptions-template.md` — templates, hashtag library, SEO keywords
+- `knowledge/01-brand-identity.md` — show name, hosts, links
+- `knowledge/02-voice-and-tone.md` — voice and banned words
 
 ---
 
@@ -119,3 +125,14 @@ Automatically extract and weave in:
 - [ ] Show hashtag included
 - [ ] Shorts descriptions under 150 chars
 - [ ] No generic intros
+
+---
+
+## Completion
+
+Return one of (per `CLAUDE.md` Completion Protocol):
+
+- **DONE** — All descriptions produced, all quality gates pass.
+- **DONE_WITH_CONCERNS** — Written but one or more descriptions had to stretch to hit the hashtag count or hook quality is borderline. Flag which.
+- **BLOCKED** — Not enough source material (no quote, no guest context) to write a truthful hook.
+- **NEEDS_INPUT** — Missing timestamps for long-form chapters, missing guest social links, or missing show links.
