@@ -74,6 +74,20 @@ class GetVideoEncodeFlagsTests(unittest.TestCase):
 
 
 class GetEncoderInfoTests(unittest.TestCase):
+    def setUp(self):
+        # Isolate the on-disk cache so each test exercises detect_encoders directly.
+        import tempfile
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._cache_path = os.path.join(self._tmpdir.name, "encoder.json")
+        self._cache_patch = mock.patch.object(
+            encoder, "_encoder_cache_path", return_value=self._cache_path
+        )
+        self._cache_patch.start()
+
+    def tearDown(self):
+        self._cache_patch.stop()
+        self._tmpdir.cleanup()
+
     def test_returns_detect_encoders_output_on_success(self):
         fake_info = {"available": ["libx264", "h264_nvenc"], "best": "h264_nvenc"}
         with mock.patch.object(encoder, "detect_encoders", return_value=fake_info):
@@ -85,6 +99,13 @@ class GetEncoderInfoTests(unittest.TestCase):
             self.assertEqual(info["best"], "libx264")
             self.assertIn("libx264", info["available"])
             self.assertIn("libx264", info["best_flags"])
+
+    def test_caches_result_between_calls(self):
+        fake_info = {"available": ["libx264", "h264_nvenc"], "best": "h264_nvenc"}
+        with mock.patch.object(encoder, "detect_encoders", return_value=fake_info) as detect:
+            encoder.get_encoder_info()
+            encoder.get_encoder_info()
+            self.assertEqual(detect.call_count, 1)
 
 
 if __name__ == "__main__":
