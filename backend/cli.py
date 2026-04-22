@@ -2475,6 +2475,7 @@ def print_help():
     print(f"    {dim}${reset} podcli thumbnails \"Why AI Changes Everything\" --video ep42.mp4")
     print()
     print(f"  {bold}PodStack{reset} {dim}(Claude Code slash commands):{reset}")
+    print(f"    {accent}/auto{reset}                  One-verb pipeline: confirm strategy → render clips")
     print(f"    {accent}/prep-episode{reset}          Full pipeline: transcript → publish-ready")
     print(f"    {accent}/process-transcript{reset}    Extract clip-worthy moments from transcript")
     print(f"    {accent}/generate-titles{reset}       Generate 8 title options with verification")

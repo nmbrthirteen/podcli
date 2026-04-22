@@ -23,7 +23,7 @@ CMD="$1"
 CMD_CLEAN="${CMD#/}"
 CMD_CLEAN="${CMD_CLEAN#--}"
 
-PODSTACK_COMMANDS="prep-episode process-transcript generate-titles generate-descriptions plan-thumbnails review-content publish-checklist retro-episode plan-episode produce-shorts"
+PODSTACK_COMMANDS="auto prep-episode process-transcript generate-titles generate-descriptions plan-thumbnails review-content publish-checklist retro-episode plan-episode produce-shorts"
 
 for pc in $PODSTACK_COMMANDS; do
   if [ "$CMD_CLEAN" = "$pc" ]; then
