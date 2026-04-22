@@ -280,10 +280,10 @@ def handle_presets(task_id: str, params: dict):
 
     if action == "list":
         emit_result(task_id, "success", data={"presets": list_presets()})
-    elif action == "get":
+    elif action in ("get", "load"):  # MCP manage_presets uses "load"
         try:
             preset = get_preset(name)
-            emit_result(task_id, "success", data=preset)
+            emit_result(task_id, "success", data={"config": preset, "name": name})
         except FileNotFoundError as e:
             emit_result(task_id, "error", error=str(e))
     elif action == "save":
