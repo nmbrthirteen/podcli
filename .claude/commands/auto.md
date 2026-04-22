@@ -80,13 +80,16 @@ Confirm? (yes / redirect / change specific clips)
 
 **Stop here. Wait for the user's response.** Do not call `batch_create_clips` on implicit approval — require an explicit "yes", "go", "ship it", or similar.
 
-### Phase 3 — Render
+### Phase 3 — Render (with live progress)
 
 Once the user confirms:
 
-1. Call `batch_create_clips(clip_numbers=[1,2,...])` with the confirmed list.
-2. Stream progress events back to the user as they arrive.
-3. When done, print the output paths and a one-line-per-clip summary.
+1. Call `batch_create_clips(clip_numbers=[1,2,...], async_mode: true)` → returns `{job_id, clip_count}` immediately.
+2. Emit to the user: _"Rendering {clip_count} clips — I'll report progress per clip."_
+3. Loop: `job_status(job_id, wait_seconds: 30)` → emit ONE terse line per poll, e.g. `"Rendering 3/7 — clip #3 (speaker crop)"`. Exit when `done: true`.
+4. When done, print the output paths and a one-line-per-clip summary (from the result field).
+
+**Fallback**: if `async_mode` fails (Web UI down), fall back to sync `batch_create_clips(clip_numbers=[...])` — renders silently but still works.
 
 ### Phase 4 — Persist
 

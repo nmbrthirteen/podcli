@@ -152,6 +152,12 @@ export interface BatchClipsInput {
   export_selected?: boolean;
   clean_fillers?: boolean;
   allow_ass_fallback?: boolean;
+  /**
+   * When true, POST to the Web UI's /api/batch-clips and return a job_id
+   * immediately so the caller can poll job_status and emit live progress.
+   * Requires the Web UI to be running (npm run ui).
+   */
+  async_mode?: boolean;
 }
 
 export interface BatchClipsResult {

@@ -6,8 +6,8 @@ import {
   handleTranscribe,
   transcribeStartToolDef,
   handleTranscribeStart,
-  transcribeStatusToolDef,
-  handleTranscribeStatus,
+  jobStatusToolDef,
+  handleJobStatus,
 } from "./handlers/transcribe.handler.js";
 import { suggestClipsToolDef, handleSuggestClips } from "./handlers/suggest-clips.handler.js";
 import { createClipToolDef, handleCreateClip } from "./handlers/create-clip.handler.js";
@@ -300,18 +300,18 @@ export function createServer(): McpServer {
   );
 
   // =============================================
-  // Tool: transcribe_status (poll)
+  // Tool: job_status (generic poll — transcribe, render, batch)
   // =============================================
   server.tool(
-    transcribeStatusToolDef.name,
-    transcribeStatusToolDef.description,
+    jobStatusToolDef.name,
+    jobStatusToolDef.description,
     {
       job_id: z.string(),
       wait_seconds: z.number().min(0).max(60).optional().default(30),
     },
     async (input) => {
       try {
-        const text = await handleTranscribeStatus(input);
+        const text = await handleJobStatus(input);
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -633,6 +633,14 @@ export function createServer(): McpServer {
         .describe("Word-level timestamps. Auto-loaded from session state if omitted."),
       export_selected: z.boolean().optional().describe("If true, export all selected suggestions from the UI."),
       clip_numbers: z.array(z.number()).optional().describe("Export specific clip numbers from suggestions (e.g. [1, 3, 5])."),
+      async_mode: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Return a job_id immediately and render in background. Use for multi-clip batches " +
+          "so Claude can poll job_status and emit live progress. Requires Web UI running."
+        ),
     },
     async (params) => {
       try {
@@ -699,7 +707,25 @@ export function createServer(): McpServer {
             const webData = (await webRes.json()) as WebJob;
             const jobId = webData.job_id;
 
-            // Poll the job until completion (1 hour max)
+            // async_mode: return job_id immediately so the caller can narrate
+            // progress by polling job_status between outputs.
+            if (params.async_mode) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify({
+                      job_id: jobId,
+                      status: "running",
+                      clip_count: (resolvedClips || []).length,
+                      next_step: `Poll job_status("${jobId}", wait_seconds: 30) in a loop, emitting one terse progress line per poll (e.g. "Rendering 3/7 — clip #3"). Stop when done=true.`,
+                    }),
+                  },
+                ],
+              };
+            }
+
+            // Sync path — poll internally until completion (1 hour max)
             const deadline = Date.now() + 3600_000;
             while (Date.now() < deadline) {
               await new Promise((r) => setTimeout(r, 2000));

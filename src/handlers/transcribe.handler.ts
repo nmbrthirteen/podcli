@@ -195,7 +195,7 @@ export async function handleTranscribeStart(input: TranscribeInput): Promise<str
       estimate,
       next_step: data.cached
         ? "Cached — skip polling, read via get_ui_state(include_transcript: true)."
-        : `Poll transcribe_status("${data.job_id}", wait_seconds: 30) in a loop, emitting progress text to the user between polls.`,
+        : `Poll job_status("${data.job_id}", wait_seconds: 30) in a loop, emitting one terse progress line to the user between polls.`,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -208,15 +208,15 @@ export async function handleTranscribeStart(input: TranscribeInput): Promise<str
   }
 }
 
-export const transcribeStatusToolDef = {
-  name: "transcribe_status",
+export const jobStatusToolDef = {
+  name: "job_status",
   description:
-    "Poll the status of a background transcription job started via transcribe_start. " +
+    "Poll the status of any background job (transcription, clip render, batch export). " +
     "Supports long-polling: pass wait_seconds (1–60) to block until the job changes state " +
-    "or the timeout elapses, whichever comes first. This paces Claude's polling naturally " +
-    "so the spinner doesn't spam.\n\n" +
+    "or the timeout elapses, whichever comes first. Paces Claude's polling naturally so " +
+    "the spinner doesn't spam and the user sees steady progress text.\n\n" +
     "Returns { status: 'running'|'done'|'error', progress, message, done, result? }.\n" +
-    "When done=true, read the packed transcript via get_ui_state(include_transcript: true).",
+    "Use after transcribe_start or batch_create_clips(async_mode: true).",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -233,9 +233,10 @@ export const transcribeStatusToolDef = {
   },
 };
 
-export async function handleTranscribeStatus(input: {
+export async function handleJobStatus(input: {
   job_id: string;
   wait_seconds?: number;
+  job_kind?: string;
 }): Promise<string> {
   const wait = Math.max(0, Math.min(60, input.wait_seconds ?? 30));
   const deadline = Date.now() + wait * 1000;
@@ -268,10 +269,10 @@ export async function handleTranscribeStatus(input: {
           error: job.error,
           next_step:
             job.status === "done"
-              ? "Read transcript via get_ui_state(include_transcript: true)."
+              ? "Job complete. For transcription: get_ui_state(include_transcript: true). For renders: clips are on disk — the result field lists paths."
               : job.status === "error"
-              ? "Job failed — check the error and retry transcribe_start if needed."
-              : `Still running — call transcribe_status("${input.job_id}", wait_seconds: 30) again.`,
+              ? "Job failed — check the error. Retry the original start call if appropriate."
+              : `Still running — call job_status("${input.job_id}", wait_seconds: 30) again and emit one terse progress line to the user between polls.`,
         });
       }
 

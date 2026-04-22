@@ -103,6 +103,14 @@ export const batchClipsToolDef = {
           },
         },
       },
+      async_mode: {
+        type: "boolean",
+        description:
+          "Return a job_id immediately and render in the background. Use for multi-clip " +
+          "batches so Claude can poll job_status and emit live progress to the user. " +
+          "Requires the Web UI to be running (npm run ui). Default: false (sync).",
+        default: false,
+      },
     },
     required: [],
   },
@@ -178,6 +186,42 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     return JSON.stringify({
       error: "Use export_selected=true, clip_numbers=[1, 3], or pass clips array",
     });
+  }
+
+  // Async path — route through Web UI so caller can poll job_status for
+  // live progress during a multi-minute render. Falls back to sync if the
+  // UI isn't running.
+  if (input.async_mode) {
+    try {
+      const res = await fetch("http://localhost:3847/api/batch-clips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          video_path: videoPath,
+          clips,
+          transcript_words: transcriptWords,
+          clean_fillers: input.clean_fillers !== false,
+          logo_path: settings.logoPath || null,
+          outro_path: settings.outroPath || null,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      const data = (await res.json()) as { job_id: string; status: string };
+      return JSON.stringify({
+        job_id: data.job_id,
+        status: data.status,
+        clip_count: clips.length,
+        next_step: `Poll job_status("${data.job_id}", wait_seconds: 30) in a loop, emitting one terse progress line to the user between polls (e.g. "Rendering 3/7 — clip #3"). Stop when done=true.`,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
+        log.warn("Web UI unavailable, falling back to sync batch render", { err: msg });
+        // fall through to sync path
+      } else {
+        throw err;
+      }
+    }
   }
 
   const result = await executor.execute<BatchClipsResult>("batch_clips", {
