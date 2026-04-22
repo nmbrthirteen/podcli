@@ -20,18 +20,15 @@ from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_M
 
 
 def _find_cli(name: str, extra_paths: list[str] = None) -> Optional[str]:
-    """Find a CLI binary by name. Checks extra_paths first, then PATH."""
+    """Find a CLI binary by name. Checks extra_paths first, then PATH.
+    Uses shutil.which (pure Python) to avoid the ~50-100ms cost of spawning
+    a `which` subprocess — banner renders twice (claude + codex) on startup.
+    """
+    import shutil
     for path in (extra_paths or []):
         if os.path.exists(path):
             return path
-    try:
-        from utils.proc import run as proc_run
-        result = proc_run(["which", name], timeout=5, check=False)
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except Exception:
-        pass
-    return None
+    return shutil.which(name)
 
 
 def _find_ai_cli_candidates() -> list[tuple[str, str]]:

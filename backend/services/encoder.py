@@ -150,11 +150,54 @@ def get_video_encode_flags() -> list[str]:
         return ["-c:v", "libx264", "-crf", "18", "-preset", "slow", "-profile:v", "high"]
 
 
-def get_encoder_info() -> dict:
-    """Get full encoder detection info (for UI/logging)."""
+def _encoder_cache_path() -> str:
+    return os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", ".podcli", "cache", "encoder.json",
+    )
+
+
+def _ffmpeg_fingerprint() -> str:
+    """Cheap fingerprint (path + mtime) to invalidate cache when ffmpeg changes."""
+    import shutil
+    ffbin = shutil.which("ffmpeg") or "ffmpeg"
     try:
-        return detect_encoders()
+        st = os.stat(ffbin)
+        return f"{ffbin}:{int(st.st_mtime)}:{st.st_size}"
+    except OSError:
+        return ffbin
+
+
+def get_encoder_info() -> dict:
+    """Get full encoder detection info (for UI/logging).
+
+    Cached at .podcli/cache/encoder.json keyed by ffmpeg binary fingerprint.
+    Encoder probing runs ffmpeg twice (~1.6s on macOS) — huge startup win.
+    """
+    import json
+    cache_path = _encoder_cache_path()
+    fp = _ffmpeg_fingerprint()
+
+    try:
+        with open(cache_path) as f:
+            cached = json.load(f)
+        if cached.get("fingerprint") == fp and cached.get("system") == platform.system():
+            return cached["info"]
+    except (OSError, ValueError, KeyError):
+        pass
+
+    try:
+        info = detect_encoders()
     except Exception:
-        return {"available": ["libx264"], "best": "libx264",
+        info = {"available": ["libx264"], "best": "libx264",
                 "best_flags": ["-c:v", "libx264", "-crf", "18", "-preset", "slow", "-profile:v", "high"],
                 "system": platform.system()}
+
+    try:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "w") as f:
+            json.dump({"fingerprint": fp, "system": platform.system(), "info": info}, f)
+    except OSError:
+        pass
+
+    return info

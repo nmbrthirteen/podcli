@@ -2684,6 +2684,7 @@ def interactive_menu():
         choice = questionary.select(
             "What do you want to do?",
             choices=[
+                questionary.Choice("/auto → one-verb pipeline (Claude Code)", value="auto"),
                 questionary.Choice("Process a video → shorts", value="process"),
                 questionary.Choice("Open Web UI", value="webui"),
                 questionary.Separator(),
@@ -2703,6 +2704,9 @@ def interactive_menu():
         ).ask()
 
         if choice is None or choice == "quit":
+            return
+        elif choice == "auto":
+            _interactive_auto()
             return
         elif choice == "process":
             _interactive_process()
@@ -2773,6 +2777,123 @@ def _ask(prompt, default=None, validate=None, required=False, is_path=False):
         if validate and not validate(val):
             continue
         return val
+
+
+def _interactive_auto():
+    """Pick a video (preset or new), then launch Claude Code with /auto <path>."""
+    import questionary
+    from questionary import Style
+
+    accent = "\033[38;2;212;135;74m"
+    green = "\033[38;2;74;222;128m"
+    gray = "\033[38;5;245m"
+    dim = "\033[2m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
+    from presets import list_presets, get_preset
+    presets = list_presets()
+    preset_choices = [p for p in presets if p.get("video_path")]
+
+    video_path = None
+    preset_name = None
+
+    if preset_choices:
+        options = [
+            questionary.Choice(
+                f"{p['name']} — {os.path.basename(p['video_path'])}",
+                value=p["name"],
+            )
+            for p in preset_choices
+        ]
+        options.append(questionary.Separator())
+        options.append(questionary.Choice("New video (paste path)", value="_new"))
+        options.append(questionary.Choice("Back", value="_back"))
+
+        pick = questionary.select(
+            "Which video should /auto work on?",
+            choices=options,
+            style=qstyle,
+        ).ask()
+        if pick is None or pick == "_back":
+            return
+
+        if pick != "_new":
+            config = get_preset(pick)
+            video_path = config.get("video_path")
+            preset_name = pick
+            if not video_path or not os.path.exists(video_path):
+                print(f"\n  {bold}Video not found:{reset} {video_path}\n")
+                return
+
+    if not video_path:
+        val = questionary.path(
+            "Video file:",
+            style=qstyle,
+            validate=lambda v: True if os.path.exists(_clean_path(v)) else "File not found",
+        ).ask()
+        if not val:
+            return
+        video_path = _clean_path(val)
+
+    brief = questionary.text(
+        "Brief (optional — e.g. '5 clips' or 'focus on investor pitch'):",
+        style=qstyle,
+        default="",
+    ).ask()
+    if brief is None:
+        return
+
+    # Build the prompt. Preset settings (caption style, crop, logo, outro) flow
+    # as context so /auto can honor them without a preset-aware tool schema change.
+    prompt_parts = [f"/auto {video_path}"]
+    if preset_name:
+        config = get_preset(preset_name)
+        hints = []
+        if config.get("caption_style"):
+            hints.append(f"caption: {config['caption_style']}")
+        if config.get("crop_strategy"):
+            hints.append(f"crop: {config['crop_strategy']}")
+        if config.get("logo"):
+            hints.append(f"logo: {config['logo']}")
+        if config.get("outro"):
+            hints.append(f"outro: {config['outro']}")
+        tag = f"preset '{preset_name}'"
+        if hints:
+            tag += f" ({', '.join(hints)})"
+        prompt_parts.append(f"— {tag}")
+    if brief.strip():
+        prompt_parts.append(f"— {brief.strip()}")
+    prompt = " ".join(prompt_parts)
+
+    import shutil
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        print()
+        print(f"  {bold}Claude Code not found in PATH.{reset}")
+        print(f"  {dim}Install it, then run:{reset}")
+        print(f"    {accent}claude \"{prompt}\"{reset}")
+        print()
+        return
+
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    print()
+    print(f"  {green}▶{reset} Launching Claude Code with: {accent}{prompt}{reset}")
+    print(f"  {dim}cwd: {project_root}{reset}")
+    print()
+    sys.stdout.flush()
+    import subprocess as _sp
+    sys.exit(_sp.call([claude_bin, prompt], cwd=project_root))
 
 
 def _interactive_process():
