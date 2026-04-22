@@ -411,6 +411,13 @@ app.post("/api/transcribe", async (req, res) => {
       job.message = "Transcription complete";
       job.result = result.data;
       sessionTranscripts.set(file_path, result.data as unknown as ServerTranscript);
+      // Populate uiState.transcript with the FULL result so downstream
+      // batch_create_clips can resolve transcript_words for caption burn-in.
+      uiState.transcript = result.data as unknown as typeof uiState.transcript;
+      uiState.videoPath = file_path;
+      uiState.filePath = file_path;
+      uiState.lastUpdated = Date.now();
+      persistState();
       // Cache it
       try {
         await cache.set(file_path, result.data as unknown as TranscriptResult);

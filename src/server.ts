@@ -27,6 +27,8 @@ const log = childLogger("server");
  * Fire-and-forget notification to the optional Web UI.
  * Never throws — the UI may not be running, which is expected.
  */
+const transcriptCache = new TranscriptCache();
+
 async function uiPing(body: Record<string, unknown>): Promise<void> {
   try {
     await fetch("http://localhost:3847/api/ui-state", {
@@ -241,17 +243,21 @@ export function createServer(): McpServer {
       try {
         const result = await handleTranscribe({ file_path, model_size, language, enable_diarization, num_speakers });
 
-        // Push transcript to Web UI state (fire-and-forget)
+        // Push FULL transcript (words[] + segments[]) to Web UI state from the
+        // on-disk cache — NOT the trimmed MCP response. Without words in UI
+        // state, downstream batch_create_clips can't burn captions.
         try {
-          const parsed = JSON.parse(result);
-          await uiPing({
-            videoPath: file_path,
-            filePath: file_path,
-            transcript: parsed,
-            phase: "idle",
-          });
+          const cached = await transcriptCache.get(file_path);
+          if (cached) {
+            await uiPing({
+              videoPath: file_path,
+              filePath: file_path,
+              transcript: cached,
+              phase: "idle",
+            });
+          }
         } catch (err) {
-          log.warn("Failed to parse transcript for UI push", {
+          log.warn("Failed to push full transcript to UI state", {
             err: err instanceof Error ? err.message : String(err),
           });
         }
@@ -1003,7 +1009,6 @@ export function createServer(): McpServer {
         if (include_transcript) {
           // Prefer packed markdown (10x smaller, phrase-grouped, LLM-readable).
           // Auto-generated during transcription — see backend/services/transcript_packer.py.
-          const transcriptCache = new TranscriptCache();
           let packed: string | null = null;
           if (state.videoPath) {
             packed = await transcriptCache.getPackedMarkdown(state.videoPath);
