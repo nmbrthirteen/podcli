@@ -128,3 +128,161 @@ function formatResult(data: TranscriptResult) {
     next_step: "Read the transcript via get_ui_state(include_transcript: true), then suggest_clips.",
   };
 }
+
+// =============================================
+// Async transcription via Web UI job queue
+// =============================================
+
+export const transcribeStartToolDef = {
+  name: "transcribe_start",
+  description:
+    "Start transcription as a background job and return a job_id immediately. " +
+    "Use this instead of transcribe_podcast for long files so you can narrate progress " +
+    "to the user while it runs (a 60-min episode takes 15–25 min).\n\n" +
+    "Flow: call transcribe_start(file_path) → emit status text to user → " +
+    "call transcribe_status(job_id, wait_seconds: 30) in a loop until done → " +
+    "then read the packed transcript via get_ui_state(include_transcript: true).\n\n" +
+    "Requires the Web UI to be running (npm run ui). Returns { job_id, cached, status, estimate_minutes }.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      file_path: { type: "string", description: "Absolute path to the podcast file" },
+      model_size: {
+        type: "string",
+        enum: ["tiny", "base", "small", "medium", "large"],
+        default: "base",
+      },
+      language: { type: "string" },
+      enable_diarization: { type: "boolean", default: true },
+      num_speakers: { type: "number" },
+    },
+    required: ["file_path"],
+  },
+};
+
+export async function handleTranscribeStart(input: TranscribeInput): Promise<string> {
+  try {
+    const res = await fetch("http://localhost:3847/api/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        file_path: input.file_path,
+        model_size: input.model_size ?? "base",
+        language: input.language,
+        enable_diarization: input.enable_diarization !== false,
+        num_speakers: input.num_speakers,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    const data = (await res.json()) as { job_id: string; status: string; cached?: boolean };
+
+    // Rough estimate — Whisper base + diarization is roughly 1/3× audio duration on CPU.
+    // We don't know duration here; ballpark from file size.
+    let estimate = "10–30 min depending on episode length";
+    try {
+      const { statSync } = await import("fs");
+      const mb = statSync(input.file_path).size / (1024 * 1024);
+      const mins = Math.max(2, Math.round(mb / 50)); // very rough: ~50MB/min of processing
+      estimate = data.cached ? "instant (cached)" : `~${mins}–${mins * 2} min`;
+    } catch {
+      // ignore
+    }
+
+    return JSON.stringify({
+      job_id: data.job_id,
+      cached: !!data.cached,
+      status: data.status,
+      estimate,
+      next_step: data.cached
+        ? "Cached — skip polling, read via get_ui_state(include_transcript: true)."
+        : `Poll transcribe_status("${data.job_id}", wait_seconds: 30) in a loop, emitting progress text to the user between polls.`,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
+      return JSON.stringify({
+        error: "Web UI not running. Start it with `npm run ui`, or fall back to transcribe_podcast for synchronous transcription.",
+      });
+    }
+    throw err;
+  }
+}
+
+export const transcribeStatusToolDef = {
+  name: "transcribe_status",
+  description:
+    "Poll the status of a background transcription job started via transcribe_start. " +
+    "Supports long-polling: pass wait_seconds (1–60) to block until the job changes state " +
+    "or the timeout elapses, whichever comes first. This paces Claude's polling naturally " +
+    "so the spinner doesn't spam.\n\n" +
+    "Returns { status: 'running'|'done'|'error', progress, message, done, result? }.\n" +
+    "When done=true, read the packed transcript via get_ui_state(include_transcript: true).",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      job_id: { type: "string" },
+      wait_seconds: {
+        type: "number",
+        default: 30,
+        minimum: 0,
+        maximum: 60,
+        description: "How long to wait for a status change before returning. Default 30s.",
+      },
+    },
+    required: ["job_id"],
+  },
+};
+
+export async function handleTranscribeStatus(input: {
+  job_id: string;
+  wait_seconds?: number;
+}): Promise<string> {
+  const wait = Math.max(0, Math.min(60, input.wait_seconds ?? 30));
+  const deadline = Date.now() + wait * 1000;
+  let lastProgress = -1;
+
+  try {
+    while (true) {
+      const res = await fetch(`http://localhost:3847/api/job/${input.job_id}`);
+      if (res.status === 404) {
+        return JSON.stringify({ error: `Job ${input.job_id} not found` });
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const job = (await res.json()) as {
+        status: "running" | "done" | "error";
+        progress: number;
+        message: string;
+        result?: unknown;
+        error?: string;
+      };
+
+      const progressChanged = job.progress !== lastProgress;
+      const terminal = job.status === "done" || job.status === "error";
+
+      if (terminal || progressChanged || Date.now() >= deadline) {
+        return JSON.stringify({
+          status: job.status,
+          progress: job.progress,
+          message: job.message,
+          done: terminal,
+          error: job.error,
+          next_step:
+            job.status === "done"
+              ? "Read transcript via get_ui_state(include_transcript: true)."
+              : job.status === "error"
+              ? "Job failed — check the error and retry transcribe_start if needed."
+              : `Still running — call transcribe_status("${input.job_id}", wait_seconds: 30) again.`,
+        });
+      }
+
+      lastProgress = job.progress;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
+      return JSON.stringify({ error: "Web UI not running." });
+    }
+    throw err;
+  }
+}

@@ -1,7 +1,14 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { transcribeToolDef, handleTranscribe } from "./handlers/transcribe.handler.js";
+import {
+  transcribeToolDef,
+  handleTranscribe,
+  transcribeStartToolDef,
+  handleTranscribeStart,
+  transcribeStatusToolDef,
+  handleTranscribeStatus,
+} from "./handlers/transcribe.handler.js";
 import { suggestClipsToolDef, handleSuggestClips } from "./handlers/suggest-clips.handler.js";
 import { createClipToolDef, handleCreateClip } from "./handlers/create-clip.handler.js";
 import { batchClipsToolDef, handleBatchClips } from "./handlers/batch-clips.handler.js";
@@ -254,6 +261,57 @@ export function createServer(): McpServer {
           "Transcript is ready! Now read it with get_ui_state(include_transcript: true), " +
           "analyze it for viral moments, then call suggest_clips with your findings."
         );
+        return { content: [{ type: "text" as const, text }] };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // =============================================
+  // Tool: transcribe_start (async)
+  // =============================================
+  server.tool(
+    transcribeStartToolDef.name,
+    transcribeStartToolDef.description,
+    {
+      file_path: z.string(),
+      model_size: z.enum(["tiny", "base", "small", "medium", "large"]).optional().default("base"),
+      language: z.string().optional(),
+      enable_diarization: z.boolean().optional().default(true),
+      num_speakers: z.number().optional(),
+    },
+    async (input) => {
+      try {
+        const text = await handleTranscribeStart(input);
+        return { content: [{ type: "text" as const, text }] };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // =============================================
+  // Tool: transcribe_status (poll)
+  // =============================================
+  server.tool(
+    transcribeStatusToolDef.name,
+    transcribeStatusToolDef.description,
+    {
+      job_id: z.string(),
+      wait_seconds: z.number().min(0).max(60).optional().default(30),
+    },
+    async (input) => {
+      try {
+        const text = await handleTranscribeStatus(input);
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

@@ -1,6 +1,6 @@
 ---
 description: One-verb pipeline — drop a video, confirm strategy, render clips
-allowed-tools: Read, Bash, mcp__podcli__transcribe_podcast, mcp__podcli__get_ui_state, mcp__podcli__set_video, mcp__podcli__suggest_clips, mcp__podcli__batch_create_clips, mcp__podcli__knowledge_base, mcp__podcli__clip_history
+allowed-tools: Read, Bash, mcp__podcli__transcribe_podcast, mcp__podcli__transcribe_start, mcp__podcli__transcribe_status, mcp__podcli__get_ui_state, mcp__podcli__set_video, mcp__podcli__suggest_clips, mcp__podcli__batch_create_clips, mcp__podcli__knowledge_base, mcp__podcli__clip_history
 argument-hint: [video-path-or-episode-slug] [optional: count e.g. "5 clips"]
 triggers:
   - auto
@@ -40,10 +40,18 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
 
 ### Phase 1 — Inventory
 
-1. If a video path was given, call `set_video(file_path)` then `transcribe_podcast(file_path)`. If no path, read `get_ui_state` and use the current video.
-2. Read the packed transcript: `get_ui_state(include_transcript: true)`. This returns a compact phrase-grouped view with speakers, silence gaps, and energy peaks.
-3. If `.podcli/knowledge/` exists, read `01-brand-identity.md`, `02-voice-and-tone.md`, and `04-shorts-creation-guide.md` for show context. Skip silently if missing — `/auto` works on any content.
-4. Call `clip_history` to see what's already been shipped for this episode. Avoid duplicates in the proposal.
+1. If a video path was given, call `set_video(file_path)`. If no path, read `get_ui_state` and use the current video.
+2. **Transcribe with progress narration.** Transcription takes 15–25 min on a 60-min episode — do NOT use the silent `transcribe_podcast` for long files. Instead:
+   - Call `transcribe_start(file_path)` → returns `{job_id, cached, estimate}` immediately.
+   - If `cached: true`, skip to step 3.
+   - Otherwise emit a short status to the user: _"Transcription started — estimated {estimate}. I'll check progress every 30s."_
+   - Loop: call `transcribe_status(job_id, wait_seconds: 30)`. Between calls, emit ONE terse line to the user like `"Progress: 47% — pyannote diarization"`. Keep it to one line per poll — no repeat prose. Exit the loop when `done: true`.
+   - If `status: "error"`, stop and report the error.
+3. Read the packed transcript: `get_ui_state(include_transcript: true)`. This returns a compact phrase-grouped view with speakers, silence gaps, and energy peaks.
+4. If `.podcli/knowledge/` exists, read `01-brand-identity.md`, `02-voice-and-tone.md`, and `04-shorts-creation-guide.md` for show context. Skip silently if missing — `/auto` works on any content.
+5. Call `clip_history` to see what's already been shipped for this episode. Avoid duplicates in the proposal.
+
+**Fallback**: if `transcribe_start` returns an error about the Web UI not running, tell the user and offer either (a) run `npm run ui` in another terminal then retry, or (b) fall back to the synchronous `transcribe_podcast` (no live progress, works silently).
 
 ### Phase 2 — Strategy Proposal (GATE)
 
