@@ -26,6 +26,7 @@ export const paths = {
   projectRoot,
   cache: join(dataDir, "cache"),
   transcripts: join(dataDir, "cache", "transcripts"),
+  packed: join(home, "packed"),
   working: join(dataDir, "working"),
   output: join(dataDir, "output"),
   logs: join(dataDir, "logs"),

@@ -84,4 +84,41 @@ export class TranscriptCache {
     const cachePath = join(this.cacheDir, `${hash}.json`);
     await writeFile(cachePath, JSON.stringify(transcript), "utf-8");
   }
+
+  /**
+   * Return the packed markdown view (LLM-readable, ~10x smaller than raw JSON)
+   * written by backend/services/transcript_packer.py as a side-effect of
+   * transcription. Returns null if not yet generated.
+   */
+  async getPackedMarkdown(filePath: string): Promise<string | null> {
+    try {
+      const hash = await this.getFileHash(filePath);
+      return await this.readPackedByHash(hash);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Look up the packed view for a pasted transcript (no source file).
+   * Mirrors backend/services handle_parse_transcript's content-hash keying:
+   * sha256 of UTF-8 raw text, first 16 hex chars.
+   */
+  async getPackedMarkdownFromText(rawText: string): Promise<string | null> {
+    try {
+      const hash = createHash("sha256")
+        .update(rawText, "utf-8")
+        .digest("hex")
+        .slice(0, 16);
+      return await this.readPackedByHash(hash);
+    } catch {
+      return null;
+    }
+  }
+
+  private async readPackedByHash(hash: string): Promise<string | null> {
+    const packedPath = join(paths.packed, `${hash}.md`);
+    if (!existsSync(packedPath)) return null;
+    return await readFile(packedPath, "utf-8");
+  }
 }

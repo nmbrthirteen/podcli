@@ -51,10 +51,12 @@ def handle_transcribe(task_id: str, params: dict):
     """Transcribe a podcast video/audio file with speaker detection."""
     from services.transcription import transcribe_file
     from services.corrections import apply_corrections
+    from services.transcript_packer import compute_cache_hash, write_packed
 
     emit_progress(task_id, "transcribing", 0, "Starting transcription...")
+    file_path = params["file_path"]
     result = transcribe_file(
-        file_path=params["file_path"],
+        file_path=file_path,
         model_size=params.get("model_size", "base"),
         language=params.get("language"),
         enable_diarization=params.get("enable_diarization", True),
@@ -63,6 +65,31 @@ def handle_transcribe(task_id: str, params: dict):
     )
     # Apply word corrections (Whisper misheard proper nouns)
     apply_corrections(result.get("words", []), result.get("segments", []))
+
+    # Auto-pack: emit compact LLM-readable markdown alongside raw JSON.
+    # Pulls energy data so the packed view includes peak moments for clip reasoning.
+    try:
+        from services.audio_analyzer import extract_audio_energy
+
+        cache_hash = compute_cache_hash(file_path)
+        energy_data = None
+        try:
+            energy_data = extract_audio_energy(file_path)
+        except Exception:
+            pass  # energy is a nice-to-have
+
+        packed_path, packed_md = write_packed(
+            result,
+            cache_hash,
+            source_label=os.path.basename(file_path),
+            energy_data=energy_data,
+        )
+        result["packed_path"] = packed_path
+        result["packed_size_bytes"] = len(packed_md.encode("utf-8"))
+    except Exception as e:
+        # Non-fatal — transcription result is still useful without the packed view
+        emit_progress(task_id, "packing", 99, f"Packer skipped: {e}")
+
     emit_result(task_id, "success", data=result)
 
 
@@ -149,8 +176,10 @@ def handle_batch_clips(task_id: str, params: dict):
 
 def handle_parse_transcript(task_id: str, params: dict):
     """Parse a speaker-labeled transcript into word-level timestamps."""
+    import hashlib
     from services.transcript_parser import detect_and_parse
     from services.corrections import apply_corrections
+    from services.transcript_packer import write_packed
 
     raw_text = params.get("raw_text", "")
     total_duration = params.get("total_duration")
@@ -170,8 +199,51 @@ def handle_parse_transcript(task_id: str, params: dict):
     # Apply word corrections (proper nouns, brand names)
     apply_corrections(result.get("words", []), result.get("segments", []))
 
+    # Auto-pack: key pasted transcripts by content hash since there's no source file.
+    try:
+        content_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()[:16]
+        packed_path, packed_md = write_packed(
+            result, content_hash, source_label="pasted-transcript"
+        )
+        result["packed_path"] = packed_path
+        result["packed_size_bytes"] = len(packed_md.encode("utf-8"))
+        result["content_hash"] = content_hash
+    except Exception as e:
+        emit_progress(task_id, "packing", 99, f"Packer skipped: {e}")
+
     emit_progress(task_id, "parsing", 100, "Transcript parsed!")
     emit_result(task_id, "success", data=result)
+
+
+def handle_pack_transcript(task_id: str, params: dict):
+    """Pack a transcript dict into LLM-readable markdown. Used to backfill
+    the packed view for caches that predate auto-packing."""
+    from services.transcript_packer import write_packed
+
+    transcript = params.get("transcript")
+    cache_hash = params.get("cache_hash")
+    if not transcript or not cache_hash:
+        emit_result(task_id, "error", error="transcript and cache_hash are required")
+        return
+
+    energy_data = params.get("energy_data")
+    if energy_data is None and params.get("file_path"):
+        try:
+            from services.audio_analyzer import extract_audio_energy
+            energy_data = extract_audio_energy(params["file_path"])
+        except Exception:
+            pass
+
+    path, md = write_packed(
+        transcript,
+        cache_hash,
+        source_label=params.get("source_label"),
+        energy_data=energy_data,
+    )
+    emit_result(task_id, "success", data={
+        "packed_path": path,
+        "size_bytes": len(md.encode("utf-8")),
+    })
 
 
 def handle_analyze_energy(task_id: str, params: dict):
@@ -312,6 +384,7 @@ TASK_HANDLERS = {
     "create_clip": handle_create_clip,
     "batch_clips": handle_batch_clips,
     "analyze_energy": handle_analyze_energy,
+    "pack_transcript": handle_pack_transcript,
     "detect_encoder": handle_detect_encoder,
     "presets": handle_presets,
     "corrections": handle_corrections,

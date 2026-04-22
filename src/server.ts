@@ -9,6 +9,7 @@ import { FileManager } from "./services/file-manager.js";
 import { KnowledgeBase } from "./services/knowledge-base.js";
 import { AssetManager } from "./services/asset-manager.js";
 import { ClipsHistory } from "./services/clips-history.js";
+import { TranscriptCache } from "./services/transcript-cache.js";
 import { paths } from "./config/paths.js";
 import { childLogger } from "./utils/logger.js";
 import type { BatchClipsResult, UIState } from "./models/index.js";
@@ -872,7 +873,9 @@ export function createServer(): McpServer {
     "IMPORTANT: Call this FIRST when starting a new conversation to understand the current state.\n" +
     "Clips are numbered #1, #2, etc. Use these numbers with create_clip(clip_number), " +
     "batch_create_clips(clip_numbers), modify_clip, and toggle_clip.\n\n" +
-    "Set include_transcript=true when you need to analyze transcript content (e.g. for suggesting clips).",
+    "Set include_transcript=true to analyze transcript content. Returns a compact phrase-grouped " +
+    "markdown view (~10x smaller than raw segments) with speaker attribution, silence gaps, and " +
+    "optional energy peaks — the primary surface for reasoning about clip boundaries.",
     {
       include_transcript: z.boolean().optional().default(false).describe(
         "Include full transcript segments in the response. Set true when analyzing content for clip suggestions."
@@ -914,7 +917,21 @@ export function createServer(): McpServer {
         }
 
         if (include_transcript) {
-          if (state.transcript) {
+          // Prefer packed markdown (10x smaller, phrase-grouped, LLM-readable).
+          // Auto-generated during transcription — see backend/services/transcript_packer.py.
+          const transcriptCache = new TranscriptCache();
+          let packed: string | null = null;
+          if (state.videoPath) {
+            packed = await transcriptCache.getPackedMarkdown(state.videoPath);
+          }
+          if (!packed && state.rawTranscriptText) {
+            packed = await transcriptCache.getPackedMarkdownFromText(state.rawTranscriptText);
+          }
+          if (packed) {
+            lines.push("");
+            lines.push("=== PACKED TRANSCRIPT ===");
+            lines.push(packed);
+          } else if (state.transcript) {
             const segments = state.transcript.segments || [];
             if (segments.length) {
               lines.push("");
