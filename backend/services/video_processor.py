@@ -65,6 +65,8 @@ def crop_to_vertical(
     - face: Detect face position, center crop on face (falls back to center)
     - speaker: Like face, but switches to the active speaker using transcript
                word-level speaker labels. Falls back to face then center.
+    - speaker-hardcut: Prefer precomputed face_map positions and snap between
+                       speakers without pan animation. Falls back to speaker.
 
     transcript_words: Word dicts with 'speaker', 'start', 'end' keys (from Whisper+pyannote).
                       Used by 'face' strategy when speaker data is available.
@@ -76,7 +78,41 @@ def crop_to_vertical(
 
     source_ratio = width / height
 
-    if strategy in ("face", "speaker"):
+    if strategy == "speaker-hardcut" and face_map:
+        crop_h = height
+        crop_y = max(0, (height - crop_h) // 2)
+        x_expr = _use_face_map(
+            face_map=face_map,
+            transcript_words=transcript_words,
+            clip_start=clip_start,
+            width=width,
+            height=height,
+            target_ratio=target_ratio,
+            crop_h=crop_h,
+            hard_cut=True,
+        )
+        if x_expr:
+            crop_w = int(crop_h * target_ratio)
+            crop_w = min(crop_w, width)
+            vf = f"crop={crop_w}:{crop_h}:{x_expr}:{crop_y},scale={target_w}:{target_h}"
+            return _run_ffmpeg_with_fallback(
+                cmd_parts_before_enc=[
+                    "ffmpeg", "-y",
+                    "-i", input_path,
+                    "-vf", vf,
+                ],
+                cmd_parts_after_enc=[
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-ar", "44100",
+                    "-movflags", "+faststart",
+                ],
+                output_path=output_path,
+                label="crop_speaker_hardcut",
+            )
+        strategy = "speaker"
+
+    if strategy in ("face", "speaker", "speaker-hardcut"):
         speakers_in_clip = {
             w.get("speaker") for w in (transcript_words or []) if w.get("speaker")
         }
@@ -1703,6 +1739,7 @@ def _use_face_map(
     height: int,
     target_ratio: float,
     crop_h: int = None,
+    hard_cut: bool = False,
 ) -> Optional[str]:
     """
     Use pre-computed face_map from transcription to determine crop position.
@@ -1795,8 +1832,8 @@ def _use_face_map(
     default_ci = speaker_mappings.get(dominant, 0)
     default_x = clusters[min(default_ci, len(clusters) - 1)]["crop_x"]
 
-    # Build keyframes — instant cut for split-screen, smooth pan otherwise
-    pan_duration = 0.0 if is_split_screen else 0.4
+    # Build keyframes — instant cut for split-screen/hard-cut, smooth pan otherwise
+    pan_duration = 0.0 if hard_cut or is_split_screen else 0.4
     duration = segments[-1][1] if segments else 1.0
     keyframes = []
     prev_x = default_x
@@ -1816,6 +1853,13 @@ def _use_face_map(
 
     if not keyframes:
         return str(default_x)
+
+    if pan_duration == 0.0:
+        expr = str(default_x)
+        for i in range(len(keyframes) - 1, -1, -1):
+            start_t, x = keyframes[i]
+            expr = f"if(gte(t\\,{start_t:.2f})\\,{x}\\,{expr})"
+        return expr
 
     # Build FFmpeg expression
     expr_parts = []

@@ -564,6 +564,7 @@ def generate_clip(
     clean_fillers: bool = True,
     keep_segments: list[dict] = None,
     allow_ass_fallback: bool = False,
+    use_ass_captions: bool = False,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """
@@ -574,7 +575,7 @@ def generate_clip(
         start_second: Clip start time
         end_second: Clip end time
         caption_style: "hormozi", "karaoke", "subtle", or "branded"
-        crop_strategy: "center", "face", or "speaker"
+        crop_strategy: "center", "face", "speaker", or "speaker-hardcut"
         transcript_words: Word-level timestamps from transcription
         title: Clip title (used in filename)
         output_dir: Where to save the final clip (defaults to temp)
@@ -744,14 +745,16 @@ def generate_clip(
 
                 captioned_path = os.path.join(work_dir, "captioned.mp4")
 
-                remotion_ok = _render_with_remotion(
-                    video_path=cropped_path,
-                    words=clip_words,
-                    caption_style=caption_style,
-                    output_path=captioned_path,
-                    time_offset=caption_time_offset,
-                    logo_path=logo_path if (style_config.get("logo_support", False) and logo_path) else None,
-                )
+                remotion_ok = False
+                if not use_ass_captions:
+                    remotion_ok = _render_with_remotion(
+                        video_path=cropped_path,
+                        words=clip_words,
+                        caption_style=caption_style,
+                        output_path=captioned_path,
+                        time_offset=caption_time_offset,
+                        logo_path=logo_path if (style_config.get("logo_support", False) and logo_path) else None,
+                    )
 
                 if not remotion_ok and not allow_ass_fallback:
                     raise RuntimeError(

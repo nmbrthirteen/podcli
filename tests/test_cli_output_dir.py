@@ -1,6 +1,8 @@
 import os
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -98,6 +100,35 @@ class CliOutputDirTests(unittest.TestCase):
         )
 
         self.assertTrue(should_enter)
+
+    def test_thumbnail_lead_timestamp_uses_frame_before_clip(self):
+        self.assertAlmostEqual(
+            cli_mod._thumbnail_lead_timestamp(10.0, frame_offset=0.04),
+            9.96,
+        )
+
+    def test_thumbnail_lead_timestamp_clamps_at_zero(self):
+        self.assertEqual(cli_mod._thumbnail_lead_timestamp(0.01, frame_offset=0.04), 0.0)
+
+    def test_extract_thumbnail_lead_frame_returns_path_on_success(self):
+        with tempfile.TemporaryDirectory() as td:
+            output_path = os.path.join(td, "lead.jpg")
+
+            def fake_run(cmd, timeout, check):
+                with open(output_path, "wb") as f:
+                    f.write(b"jpg")
+                return mock.Mock(returncode=0)
+
+            with mock.patch("utils.proc.run", side_effect=fake_run) as run_mock:
+                result = cli_mod._extract_thumbnail_lead_frame(
+                    "/tmp/source.mp4",
+                    output_path,
+                    start_second=12.0,
+                )
+
+        self.assertEqual(result, output_path)
+        cmd = run_mock.call_args.args[0]
+        self.assertIn("11.967", cmd)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ else
   PYTHON="python3"
 fi
 
-# ── PodStack slash commands → redirect to Claude Code ──
+# ── PodStack slash commands → launch an AI agent ──
 CMD="$1"
 # Strip leading / or -- prefix (user might try /prep-episode, --prep-episode, or prep-episode)
 CMD_CLEAN="${CMD#/}"
@@ -25,18 +25,144 @@ CMD_CLEAN="${CMD_CLEAN#--}"
 
 PODSTACK_COMMANDS="auto prep-episode process-transcript generate-titles generate-descriptions plan-thumbnails review-content publish-checklist retro-episode plan-episode produce-shorts"
 
+launch_auto() {
+  ACCENT="\033[38;2;212;135;74m"
+  GREEN="\033[38;2;74;222;128m"
+  YELLOW="\033[38;2;250;204;21m"
+  BOLD="\033[1m"
+  DIM="\033[2m"
+  RESET="\033[0m"
+
+  shift
+  AI_ENGINE="${PODCLI_AI:-auto}"
+  PROMPT_ARGS=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --codex)
+        AI_ENGINE="codex"
+        shift
+        ;;
+      --claude)
+        AI_ENGINE="claude"
+        shift
+        ;;
+      --ai)
+        shift
+        if [ -z "${1:-}" ]; then
+          echo -e "  ${BOLD}Missing value for --ai.${RESET} Use: --ai codex|claude|auto"
+          exit 1
+        fi
+        AI_ENGINE="$1"
+        shift
+        ;;
+      --ai=*)
+        AI_ENGINE="${1#--ai=}"
+        shift
+        ;;
+      *)
+        PROMPT_ARGS+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  case "$AI_ENGINE" in
+    auto|claude|codex) ;;
+    *)
+      echo -e "  ${BOLD}Invalid AI engine:${RESET} $AI_ENGINE"
+      echo -e "  ${DIM}Use: --codex, --claude, or --ai codex|claude|auto${RESET}"
+      exit 1
+      ;;
+  esac
+
+  PROMPT="/auto"
+  if [ "${#PROMPT_ARGS[@]}" -gt 0 ]; then
+    PROMPT="$PROMPT ${PROMPT_ARGS[*]}"
+  fi
+  CODEX_PROMPT="Run the PodStack workflow from .claude/commands/auto.md with these arguments, then follow that workflow exactly: $PROMPT"
+
+  CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"
+  CODEX_BIN="$(command -v codex 2>/dev/null || true)"
+
+  if [ "$AI_ENGINE" = "codex" ]; then
+    if [ -z "$CODEX_BIN" ]; then
+      echo ""
+      echo -e "  ${BOLD}Codex not found in PATH.${RESET}"
+      echo -e "  ${DIM}Install Codex, then run:${RESET}"
+      echo -e "    ${ACCENT}codex --cd \"$SCRIPT_DIR\" \"$CODEX_PROMPT\"${RESET}"
+      echo ""
+      exit 1
+    fi
+  elif [ "$AI_ENGINE" = "claude" ]; then
+    if [ -z "$CLAUDE_BIN" ]; then
+      echo ""
+      echo -e "  ${BOLD}Claude Code not found in PATH.${RESET}"
+      echo -e "  ${DIM}Install it, then run:${RESET}"
+      echo -e "    ${ACCENT}claude \"$PROMPT\"${RESET}"
+      echo ""
+      exit 1
+    fi
+  fi
+
+  if [ "$AI_ENGINE" != "codex" ] && [ -n "$CLAUDE_BIN" ]; then
+    echo ""
+    echo -e "  ${GREEN}▶${RESET} Launching Claude Code with: ${ACCENT}$PROMPT${RESET}"
+    echo -e "  ${DIM}cwd: $SCRIPT_DIR${RESET}"
+    echo ""
+    (cd "$SCRIPT_DIR" && "$CLAUDE_BIN" "$PROMPT")
+    STATUS=$?
+    if [ "$STATUS" -eq 0 ]; then
+      exit 0
+    fi
+    if [ "$AI_ENGINE" = "claude" ]; then
+      exit "$STATUS"
+    fi
+    if [ -z "$CODEX_BIN" ]; then
+      exit "$STATUS"
+    fi
+    echo ""
+    echo -e "  ${YELLOW}⚠${RESET} Claude exited with code $STATUS; trying Codex..."
+  elif [ "$AI_ENGINE" != "claude" ] && [ -z "$CODEX_BIN" ]; then
+    echo ""
+    echo -e "  ${BOLD}No AI agent CLI found in PATH.${RESET}"
+    echo -e "  ${DIM}Install Claude Code or Codex, then run one of:${RESET}"
+    echo -e "    ${ACCENT}claude \"$PROMPT\"${RESET}"
+    echo -e "    ${ACCENT}codex --cd \"$SCRIPT_DIR\" \"$CODEX_PROMPT\"${RESET}"
+    echo ""
+    exit 0
+  else
+    echo ""
+    if [ "$AI_ENGINE" = "codex" ]; then
+      echo -e "  ${DIM}Using Codex because it was requested.${RESET}"
+    else
+      echo -e "  ${DIM}Claude Code not found; using Codex.${RESET}"
+    fi
+  fi
+
+  echo ""
+  echo -e "  ${GREEN}▶${RESET} Launching Codex with: ${ACCENT}$PROMPT${RESET}"
+  echo -e "  ${DIM}cwd: $SCRIPT_DIR${RESET}"
+  echo ""
+  exec "$CODEX_BIN" --cd "$SCRIPT_DIR" "$CODEX_PROMPT"
+}
+
 for pc in $PODSTACK_COMMANDS; do
   if [ "$CMD_CLEAN" = "$pc" ]; then
+    if [ "$pc" = "auto" ]; then
+      launch_auto "$@"
+    fi
     ACCENT="\033[38;2;212;135;74m"
     BOLD="\033[1m"
     DIM="\033[2m"
     RESET="\033[0m"
     echo ""
-    echo -e "  ${BOLD}/$pc${RESET} is a PodStack command — it runs inside ${ACCENT}Claude Code${RESET}, not the terminal."
+    echo -e "  ${BOLD}/$pc${RESET} is a PodStack command — it runs inside ${ACCENT}Claude Code or Codex${RESET}, not the terminal."
     echo ""
     echo -e "  ${BOLD}How to use:${RESET}"
     echo -e "    1. Open Claude Code:  ${DIM}claude${RESET}"
+    echo -e "       Or open Codex:     ${DIM}codex --cd \"$SCRIPT_DIR\"${RESET}"
     echo -e "    2. Type:              ${ACCENT}/$pc${RESET}"
+    echo -e "       Force /auto Codex: ${ACCENT}./podcli /auto --codex <video>${RESET}"
     echo ""
     echo -e "  ${DIM}PodStack commands use AI to generate titles, descriptions, thumbnails, etc.${RESET}"
     echo -e "  ${DIM}They need Claude Code's LLM context to work.${RESET}"

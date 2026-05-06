@@ -113,6 +113,7 @@ def handle_create_clip(task_id: str, params: dict):
         face_map=params.get("face_map"),
         keep_segments=params.get("keep_segments"),
         allow_ass_fallback=params.get("allow_ass_fallback", False),
+        use_ass_captions=params.get("use_ass_captions", False),
         progress_callback=lambda pct, msg: emit_progress(task_id, "processing", pct, msg),
     )
     emit_result(task_id, "success", data=result)
@@ -149,6 +150,7 @@ def handle_batch_clips(task_id: str, params: dict):
                 face_map=params.get("face_map"),
                 keep_segments=clip.get("keep_segments"),
                 allow_ass_fallback=clip.get("allow_ass_fallback", params.get("allow_ass_fallback", False)),
+                use_ass_captions=clip.get("use_ass_captions", params.get("use_ass_captions", False)),
                 progress_callback=lambda pct, msg, _i=i: emit_progress(
                     task_id, "batch", int((_i / total) * 100 + pct / total), msg
                 ),

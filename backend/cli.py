@@ -49,6 +49,34 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 
 
+def _thumbnail_lead_timestamp(start_second: float, frame_offset: float = 1 / 30) -> float:
+    """Timestamp for the still frame that leads into a rendered clip."""
+    try:
+        start = float(start_second)
+    except (TypeError, ValueError):
+        start = 0.0
+    return max(0.0, start - max(0.0, frame_offset))
+
+
+def _extract_thumbnail_lead_frame(video_path: str, output_path: str, start_second: float) -> str | None:
+    """Extract the frame just before a clip start for thumbnail generation."""
+    from utils.proc import run as proc_run
+
+    timestamp = _thumbnail_lead_timestamp(start_second)
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", f"{timestamp:.3f}",
+        "-i", video_path,
+        "-frames:v", "1",
+        "-q:v", "2",
+        output_path,
+    ]
+    result = proc_run(cmd, timeout=60, check=False)
+    if result.returncode == 0 and os.path.exists(output_path):
+        return output_path
+    return None
+
+
 def _ensure_ssl_certs():
     """Fix SSL certificate issues automatically (macOS + corporate proxies)."""
     import ssl
@@ -252,6 +280,27 @@ def cmd_process(args):
         config["no_cache"] = True
     if args.quality:
         config["quality"] = args.quality
+    if getattr(args, "allow_ass_fallback", False):
+        config["allow_ass_fallback"] = True
+
+    if getattr(args, "fast", False):
+        # Fast mode is a draft-render path inspired by Clipify: skip the
+        # slowest analysis and polish passes while preserving explicit flags.
+        config["fast_mode"] = True
+        config["whisper_model"] = "tiny.en"
+        config["top_clips"] = args.top or min(config.get("top_clips", 5), 3)
+        config["energy_boost"] = False
+        config["no_speakers"] = True
+        config["quality"] = args.quality or "low"
+        config["crop_strategy"] = args.crop or "center"
+        config["allow_ass_fallback"] = True
+        config["use_ass_captions"] = True
+        config["generate_thumbnails"] = False
+        config["generate_content"] = False
+        config["ai_select"] = False
+        if not args.outro:
+            config["outro_path"] = ""
+        os.environ["PODCLI_TRANSITION_AUTOFIX_PASSES"] = "0"
 
     # Set quality env var before importing video_processor
     quality = config.get("quality", os.environ.get("PODCLI_QUALITY", "max"))
@@ -271,6 +320,8 @@ def cmd_process(args):
     print(f"\n  podcli — processing")
     print(f"  Encoder: {enc_info['best']} ({enc_info['system']})")
     print(f"  Quality: {quality}")
+    if config.get("fast_mode"):
+        print("  Mode:    fast draft")
     print(f"  Video:   {os.path.basename(video_path)}")
     print()
 
@@ -431,7 +482,7 @@ def cmd_process(args):
     from services.claude_suggest import suggest_initial_with_claude, _engine_label, _find_ai_cli
 
     ai_path, ai_engine = _find_ai_cli()
-    if ai_path:
+    if ai_path and config.get("ai_select", True):
         ai_label = _engine_label(ai_engine)
         print(f"  [3/4] Selecting moments with {ai_label} (PodStack)...")
         clips = suggest_initial_with_claude(
@@ -444,6 +495,8 @@ def cmd_process(args):
             print(f"         ✓ {_engine_label(actual_engine)} selected {len(clips)} clips")
         else:
             print("         ⚠ AI CLI unavailable, falling back to heuristics")
+    elif not config.get("ai_select", True):
+        print(f"  [3/4] Scoring clips (fast heuristic mode)...")
     else:
         print(f"  [3/4] Scoring clips (heuristic mode)...")
         print(f"         ℹ Install Claude Code or Codex for smarter selection")
@@ -472,14 +525,20 @@ def cmd_process(args):
     # ── Step 4: Export ──
     # Check if thumbnail generation is enabled
     thumb_dir = os.path.join(output_dir, "thumbnails")
-    _thumb_enabled = True
+    _thumb_enabled = bool(config.get("generate_thumbnails", True))
+    _thumb_intro_duration = 0.8
     _tc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "thumbnail-config.json")
-    if os.path.exists(_tc_path):
+    if _thumb_enabled and os.path.exists(_tc_path):
         try:
             with open(_tc_path) as _tcf:
-                _thumb_enabled = json.load(_tcf).get("enabled", True)
+                _thumb_cfg = json.load(_tcf)
+                _thumb_enabled = _thumb_cfg.get("enabled", True)
+                _thumb_intro_duration = float(
+                    _thumb_cfg.get("intro_duration", _thumb_cfg.get("clip_start_duration", _thumb_intro_duration))
+                )
         except Exception:
             pass
+    _thumb_intro_duration = max(0.5, min(_thumb_intro_duration, 1.0))
 
     # Check if AI CLI is available for per-clip content generation
     from services.claude_suggest import _find_ai_cli
@@ -503,7 +562,7 @@ def cmd_process(args):
         except Exception:
             _thumb_enabled = False
 
-    _ai_label = " (+ AI titles)" if _ai_cli_path else ""
+    _ai_label = " (+ AI titles)" if (_ai_cli_path and config.get("generate_content", True)) else ""
     print(f"\n  [4/4] Exporting {len(clips)} clips{_ai_label} to {output_dir}/")
     results = []
     t0 = time.time()
@@ -529,6 +588,8 @@ def cmd_process(args):
                         outro_path=config.get("outro_path") or None,
                         keep_segments=clip.get("segments"),
                         face_map=face_map,
+                        allow_ass_fallback=config.get("allow_ass_fallback", False),
+                        use_ass_captions=config.get("use_ass_captions", False),
                     )
                     results.append(result)
                     ok = True
@@ -539,34 +600,40 @@ def cmd_process(args):
             if ok:
                 print(f"         ✓ Clip {i+1}/{len(clips)}: {result['file_size_mb']}MB")
 
-            # Generate thumbnail and hard-cut append to clip end
+            # Generate thumbnail from the lead-in frame and hard-cut prepend it.
             if _thumb_enabled and _thumb_gen and result.get("output_path"):
                 try:
                     clip_thumb_dir = os.path.join(thumb_dir, f"clip_{i+1}")
+                    os.makedirs(clip_thumb_dir, exist_ok=True)
+                    lead_frame = _extract_thumbnail_lead_frame(
+                        video_path=video_path,
+                        output_path=os.path.join(clip_thumb_dir, "_lead_frame.jpg"),
+                        start_second=result.get("start_second", clip.get("start_second", 0)),
+                    )
                     paths = _thumb_gen(
                         title=clip.get("title", f"Clip {i+1}"),
                         output_dir=clip_thumb_dir,
-                        photo_path=_thumb_photo,
+                        photo_path=lead_frame or _thumb_photo,
                         video_path=video_path,
-                        start_second=clip.get("start_second"),
-                        end_second=clip.get("end_second"),
+                        start_second=result.get("start_second", clip.get("start_second")),
+                        end_second=result.get("end_second", clip.get("end_second")),
                         logo_path=_thumb_logo,
                     )
                     if paths:
                         thumb_video = os.path.join(clip_thumb_dir, "thumb_frame.mp4")
-                        _thumb_to_video(paths[0], thumb_video, duration=1.5)
+                        _thumb_to_video(paths[0], thumb_video, duration=_thumb_intro_duration)
                         from services.video_processor import concat_outro
                         final_with_thumb = result["output_path"].replace(".mp4", "_with_thumb.mp4")
-                        # Hard cut — no crossfade, so thumbnail appears cleanly
-                        # after outro ends, no overlap with captions
-                        concat_outro(result["output_path"], thumb_video, final_with_thumb, crossfade_duration=0.0)
+                        # Hard cut — thumbnail uses the frame just before content,
+                        # so playback feels like the clip has started.
+                        concat_outro(thumb_video, result["output_path"], final_with_thumb, crossfade_duration=0.0)
                         os.replace(final_with_thumb, result["output_path"])
-                        print(f"                 + thumbnail appended ({len(paths)} variations in {os.path.basename(clip_thumb_dir)}/)")
+                        print(f"                 + thumbnail prepended ({_thumb_intro_duration:.2f}s, {len(paths)} variations in {os.path.basename(clip_thumb_dir)}/)")
                 except Exception as e:
                     print(f"                 ⚠ thumbnail: {e}")
 
             # Generate titles, descriptions, tags for this clip immediately
-            if _ai_cli_path and result.get("output_path"):
+            if _ai_cli_path and config.get("generate_content", True) and result.get("output_path"):
                 try:
                     from services.content_generator import generate_clip_content
                     content_result = generate_clip_content(
@@ -734,6 +801,8 @@ def cmd_process(args):
                                 outro_path=config.get("outro_path") or None,
                                 keep_segments=clip.get("segments"),
                                 face_map=face_map,
+                                allow_ass_fallback=config.get("allow_ass_fallback", False),
+                                use_ass_captions=config.get("use_ass_captions", False),
                             )
                             results[-1] = result
                             print(f"         ✓ Re-rendered: {result['file_size_mb']}MB")
@@ -1190,6 +1259,8 @@ def _post_render_loop(
                     outro_path=config.get("outro_path") or None,
                     keep_segments=clip.get("segments"),
                     face_map=face_map,
+                    allow_ass_fallback=config.get("allow_ass_fallback", False),
+                    use_ass_captions=config.get("use_ass_captions", False),
                 )
                 r["result"] = new_result
                 ok = True
@@ -1373,6 +1444,8 @@ def _post_render_loop(
                                         outro_path=config.get("outro_path") or None,
                                         keep_segments=f_clip.get("segments"),
                                         face_map=face_map,
+                                        allow_ass_fallback=config.get("allow_ass_fallback", False),
+                                        use_ass_captions=config.get("use_ass_captions", False),
                                     )
                                     rendered.append({"clip": f_clip, "result": new_result, "index": len(clips)})
                                     clips.append(f_clip)
@@ -1425,6 +1498,8 @@ def _post_render_loop(
                                         outro_path=config.get("outro_path") or None,
                                         keep_segments=nc.get("segments"),
                                         face_map=face_map,
+                                        allow_ass_fallback=config.get("allow_ass_fallback", False),
+                                        use_ass_captions=config.get("use_ass_captions", False),
                                     )
                                     rendered.append({"clip": nc, "result": new_result, "index": len(clips)})
                                     clips.append(nc)
@@ -2458,13 +2533,15 @@ def print_help():
     print(f"    {green}-o{reset}, {green}--output{reset} {gray}<dir>{reset}        Output directory {dim}(default: ./clips){reset}")
     print(f"    {green}-p{reset}, {green}--preset{reset} {gray}<name>{reset}       Load a saved preset")
     print(f"    {green}--caption-style{reset} {gray}<style>{reset}  branded | hormozi | karaoke | subtle")
-    print(f"    {green}--crop{reset} {gray}<strategy>{reset}       speaker | face | center")
+    print(f"    {green}--crop{reset} {gray}<strategy>{reset}       speaker | speaker-hardcut | face | center")
+    print(f"    {green}--fast{reset}                 Draft mode: tiny Whisper, heuristic clips, low quality")
     print(f"    {green}--logo{reset} {gray}<asset|path>{reset}     Overlay logo image")
     print(f"    {green}--outro{reset} {gray}<asset|path>{reset}    Append outro video")
     print(f"    {green}--quality{reset} {gray}<level>{reset}       low | medium | high | max")
     print(f"    {green}--no-energy{reset}            Skip audio energy analysis")
     print(f"    {green}--no-speakers{reset}          Skip speaker detection (faster)")
     print(f"    {green}--no-cache{reset}             Force re-transcription")
+    print(f"    {green}--allow-ass-fallback{reset}   Use ASS captions if Remotion fails")
     print()
     print(f"  {bold}Examples:{reset}")
     print(f"    {dim}${reset} podcli process episode.mp4")
@@ -2506,8 +2583,9 @@ def main():
     proc.add_argument("-n", "--top", type=int, help="Number of top clips to export (default: 5)")
     proc.add_argument("-o", "--output", help="Output directory (default: ./clips)")
     proc.add_argument("-p", "--preset", help="Load a saved preset")
+    proc.add_argument("--fast", action="store_true", help="Draft mode: tiny Whisper, heuristic selection, center crop, low quality")
     proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
-    proc.add_argument("--crop", choices=["center", "face", "speaker"])
+    proc.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
     proc.add_argument("--logo", help="Logo image (asset name or path)")
     proc.add_argument("--outro", help="Outro video (asset name or path)")
     proc.add_argument("--time-adjust", type=float, help="Timestamp offset in seconds")
@@ -2515,6 +2593,7 @@ def main():
     proc.add_argument("--no-speakers", action="store_true", help="Skip speaker detection (faster, uses face detection only)")
     proc.add_argument("--no-cache", action="store_true", help="Force re-transcription (ignore cached transcript)")
     proc.add_argument("--quality", choices=["low", "medium", "high", "max"], help="Output quality (default: high)")
+    proc.add_argument("--allow-ass-fallback", action="store_true", help="Use ASS captions if Remotion rendering fails")
     proc.add_argument("--review-each", action="store_true", help="Review each rendered clip interactively")
     proc.add_argument("--post-review", action="store_true", help="Open the post-render review loop after export")
 
@@ -2530,7 +2609,7 @@ def main():
     pre_save.add_argument("--transcript", help="Default transcript path")
     pre_save.add_argument("--output", help="Default output directory")
     pre_save.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
-    pre_save.add_argument("--crop", choices=["center", "face", "speaker"])
+    pre_save.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
     pre_save.add_argument("--logo", help="Logo (asset name or path)")
     pre_save.add_argument("--outro", help="Outro (asset name or path)")
     pre_save.add_argument("--top", type=int, help="Default top clips count")
@@ -2779,8 +2858,94 @@ def _ask(prompt, default=None, validate=None, required=False, is_path=False):
         return val
 
 
+def _codex_podstack_prompt(prompt: str) -> str:
+    """Wrap a PodStack slash prompt so Codex can run the same command file."""
+    return (
+        "Run the PodStack workflow from .claude/commands/auto.md with these "
+        f"arguments, then follow that workflow exactly: {prompt}"
+    )
+
+
+def _launch_podstack_auto(prompt: str, ai_engine: str = "auto") -> int | None:
+    """Launch /auto in Claude, Codex, or auto fallback order."""
+    import shutil
+    import subprocess as _sp
+
+    accent = "\033[38;2;212;135;74m"
+    green = "\033[38;2;74;222;128m"
+    yellow = "\033[38;2;250;204;21m"
+    gray = "\033[38;5;245m"
+    dim = "\033[2m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if ai_engine not in {"auto", "claude", "codex"}:
+        print()
+        print(f"  {bold}Invalid AI engine:{reset} {ai_engine}")
+        print(f"  {dim}Use PODCLI_AI=codex, PODCLI_AI=claude, or PODCLI_AI=auto.{reset}")
+        print()
+        return None
+
+    claude_bin = shutil.which("claude")
+    codex_bin = shutil.which("codex")
+
+    if ai_engine == "codex" and not codex_bin:
+        print()
+        print(f"  {bold}Codex not found in PATH.{reset}")
+        print(f"  {dim}Install Codex, then run:{reset}")
+        print(f"    {accent}codex --cd \"{project_root}\" \"{_codex_podstack_prompt(prompt)}\"{reset}")
+        print()
+        return 1
+    if ai_engine == "claude" and not claude_bin:
+        print()
+        print(f"  {bold}Claude Code not found in PATH.{reset}")
+        print(f"  {dim}Install it, then run:{reset}")
+        print(f"    {accent}claude \"{prompt}\"{reset}")
+        print()
+        return 1
+
+    if ai_engine != "codex" and claude_bin:
+        print()
+        print(f"  {green}▶{reset} Launching Claude Code with: {accent}{prompt}{reset}")
+        print(f"  {dim}cwd: {project_root}{reset}")
+        print()
+        sys.stdout.flush()
+        code = _sp.call([claude_bin, prompt], cwd=project_root)
+        if code == 0:
+            return code
+        if ai_engine == "claude":
+            return code
+        if not codex_bin:
+            return code
+        print()
+        print(f"  {yellow}⚠{reset} Claude exited with code {code}; trying Codex...")
+    elif ai_engine != "claude" and not codex_bin:
+        print()
+        print(f"  {bold}No AI agent CLI found in PATH.{reset}")
+        print(f"  {dim}Install Claude Code or Codex, then run one of:{reset}")
+        print(f"    {accent}claude \"{prompt}\"{reset}")
+        print(f"    {accent}codex --cd \"{project_root}\" \"{_codex_podstack_prompt(prompt)}\"{reset}")
+        print()
+        return None
+    else:
+        print()
+        if ai_engine == "codex":
+            print(f"  {gray}Using Codex because it was requested.{reset}")
+        else:
+            print(f"  {gray}Claude Code not found; using Codex.{reset}")
+
+    codex_prompt = _codex_podstack_prompt(prompt)
+    print()
+    print(f"  {green}▶{reset} Launching Codex with: {accent}{prompt}{reset}")
+    print(f"  {dim}cwd: {project_root}{reset}")
+    print()
+    sys.stdout.flush()
+    return _sp.call([codex_bin, "--cd", project_root, codex_prompt], cwd=project_root)
+
+
 def _interactive_auto():
-    """Pick a video (preset or new), then launch Claude Code with /auto <path>."""
+    """Pick a video (preset or new), then launch /auto in Claude or Codex."""
     import questionary
     from questionary import Style
 
@@ -2876,24 +3041,9 @@ def _interactive_auto():
         prompt_parts.append(f"— {brief.strip()}")
     prompt = " ".join(prompt_parts)
 
-    import shutil
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        print()
-        print(f"  {bold}Claude Code not found in PATH.{reset}")
-        print(f"  {dim}Install it, then run:{reset}")
-        print(f"    {accent}claude \"{prompt}\"{reset}")
-        print()
-        return
-
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    print()
-    print(f"  {green}▶{reset} Launching Claude Code with: {accent}{prompt}{reset}")
-    print(f"  {dim}cwd: {project_root}{reset}")
-    print()
-    sys.stdout.flush()
-    import subprocess as _sp
-    sys.exit(_sp.call([claude_bin, prompt], cwd=project_root))
+    code = _launch_podstack_auto(prompt, os.environ.get("PODCLI_AI", "auto"))
+    if code is not None:
+        sys.exit(code)
 
 
 def _interactive_process():
