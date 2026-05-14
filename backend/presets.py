@@ -28,7 +28,7 @@ TARGET_CLIP_DURATION_MAX = 35  # Claude targets this range
 
 DEFAULT_PRESET = {
     "caption_style": "branded",
-    "crop_strategy": "speaker",
+    "crop_strategy": "face",
     "time_adjust": -1.0,
     "logo_path": "",
     "outro_path": "",

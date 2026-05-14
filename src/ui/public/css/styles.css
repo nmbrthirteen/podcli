@@ -135,6 +135,224 @@ h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.1
 .preview-tag strong { color: var(--text); font-weight: 600; text-transform: capitalize; }
 .preview-tag.changed { border-color: var(--accent); background: var(--accent-subtle); }
 
+/* ─── Live Phone Preview ─── */
+.phone-frame {
+  width: 100%; max-width: 280px; margin: 0 auto;
+  aspect-ratio: 9/16; position: relative;
+  background: #000; border-radius: 28px;
+  border: 8px solid #1a1a1a;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+.phone-frame video,
+.phone-frame .phone-poster {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; background: #000;
+}
+.phone-frame .phone-notch {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  width: 84px; height: 22px; background: #000;
+  border-radius: 100px; z-index: 5;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+}
+.phone-frame .phone-caption {
+  position: absolute; left: 10px; right: 10px;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 0 8px; text-align: center; pointer-events: none;
+  font-family: Arial, Helvetica, sans-serif; line-height: 1.3;
+  z-index: 2; transition: all 0.2s var(--ease);
+  max-height: 32%;  /* never grow beyond the lower-third caption zone */
+  overflow: hidden;
+}
+.phone-frame .phone-caption .pc-word {
+  display: inline; transition: all 0.2s var(--ease);
+}
+.phone-frame .phone-gradient {
+  position: absolute; inset: auto 0 0 0; height: 50%;
+  background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.35) 45%, transparent 100%);
+  pointer-events: none; z-index: 1;
+}
+.phone-frame .phone-logo {
+  position: absolute; top: 28px; left: 12px; width: 28px; height: 28px;
+  border-radius: 6px; overflow: hidden; z-index: 3;
+  background: rgba(0,0,0,0.5);
+}
+.phone-frame .phone-empty {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+  color: rgba(255,255,255,0.4); font-size: 11px; text-align: center; padding: 0 24px;
+}
+
+/* ─── TikTok Wireframe Overlay ─── */
+.phone-frame .tt-overlay {
+  position: absolute; inset: 0; pointer-events: none; z-index: 4;
+  color: rgba(255,255,255,0.95); font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.phone-frame .tt-top {
+  position: absolute; top: 38px; left: 0; right: 0;
+  display: flex; justify-content: center; align-items: center; gap: 14px;
+  font-size: 13px; font-weight: 700;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.45);
+}
+.phone-frame .tt-top .tt-tab { opacity: 0.65; position: relative; padding-bottom: 4px; }
+.phone-frame .tt-top .tt-tab.active { opacity: 1; }
+.phone-frame .tt-top .tt-tab.active::after {
+  content: ""; position: absolute; left: 25%; right: 25%; bottom: 0;
+  height: 2px; border-radius: 2px; background: #fff;
+}
+.phone-frame .tt-top .tt-divider {
+  width: 1px; height: 12px; background: rgba(255,255,255,0.4);
+}
+.phone-frame .tt-top .tt-following-dot {
+  position: absolute; top: -2px; right: -6px;
+  width: 5px; height: 5px; border-radius: 50%; background: #ff3b5c;
+}
+.phone-frame .tt-search {
+  position: absolute; top: 38px; right: 12px;
+  width: 18px; height: 18px;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.55));
+}
+
+/* Right action rail */
+.phone-frame .tt-rail {
+  position: absolute; right: 8px; bottom: 44px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.phone-frame .tt-rail .tt-action {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-size: 10px; font-weight: 700;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.75);
+  color: #fff;
+}
+.phone-frame .tt-rail .tt-icon {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  filter: drop-shadow(0 1px 4px rgba(0,0,0,0.7));
+}
+
+/* Avatar with +follow badge */
+.phone-frame .tt-rail .tt-avatar-wrap {
+  position: relative; width: 34px; height: 34px; margin-bottom: 4px;
+}
+.phone-frame .tt-rail .tt-avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: #2a2a2a;
+  border: 2px solid #fff;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+}
+.phone-frame .tt-rail .tt-avatar svg {
+  width: 22px; height: 22px; opacity: 0.45;
+}
+.phone-frame .tt-rail .tt-follow {
+  position: absolute; bottom: -7px; left: 50%; transform: translateX(-50%);
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #ff3b5c; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 900; font-size: 12px; line-height: 1;
+  border: 1.5px solid rgba(0,0,0,0); /* spacing illusion */
+}
+
+/* Music disc at bottom of rail */
+.phone-frame .tt-rail .tt-disc {
+  width: 32px; height: 32px; border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, #555 0 5px, #1a1a1a 5px 14px, #2a2a2a 14px);
+  border: 1.5px solid rgba(255,255,255,0.18);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  animation: tt-spin 6s linear infinite;
+}
+@keyframes tt-spin { to { transform: rotate(360deg); } }
+
+/* Bottom-left text block */
+.phone-frame .tt-bottom {
+  position: absolute; left: 12px; right: 56px; bottom: 42px;
+  display: flex; flex-direction: column; gap: 3px;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.7); color: #fff;
+}
+.phone-frame .tt-bottom .tt-handle {
+  font-weight: 800; font-size: 12px; line-height: 1.2;
+  letter-spacing: 0.3px;
+}
+.phone-frame .tt-bottom .tt-desc {
+  font-size: 10.5px; line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.phone-frame .tt-bottom .tt-desc .tt-hash { color: #fff; }
+.phone-frame .tt-bottom .tt-desc .tt-more { opacity: 0.7; font-weight: 600; margin-left: 2px; }
+.phone-frame .tt-bottom .tt-translate {
+  font-size: 10px; opacity: 0.55;
+}
+.phone-frame .tt-bottom .tt-music {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10px; opacity: 0.95; margin-top: 1px;
+}
+.phone-frame .tt-bottom .tt-music-note { font-size: 11px; line-height: 1; }
+
+/* Bottom nav */
+.phone-frame .tt-nav {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; justify-content: space-around; align-items: center;
+  height: 36px; padding: 0 6px;
+  background: rgba(0,0,0,0.65);
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.phone-frame .tt-nav .tt-nav-item {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-size: 8px; font-weight: 700; opacity: 0.78;
+}
+.phone-frame .tt-nav .tt-nav-item.active { opacity: 1; }
+.phone-frame .tt-nav .tt-nav-icon { width: 18px; height: 18px; }
+.phone-frame .tt-nav .tt-plus {
+  width: 36px; height: 22px; border-radius: 6px;
+  position: relative; display: flex; align-items: center; justify-content: center;
+  background: #fff; color: #000;
+  font-weight: 900; font-size: 14px; line-height: 1;
+  box-shadow:
+    -3px 0 0 #25f4ee,
+    3px 0 0 #fe2c55;
+}
+
+/* Wireframe toggle button under the phone */
+.preview-toggle-row {
+  display: flex; justify-content: center; align-items: center;
+  gap: 12px; margin-top: 10px; font-size: 11px; color: var(--text2);
+}
+.preview-toggle-row label {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  user-select: none;
+}
+.preview-toggle-row input[type="checkbox"] {
+  width: 14px; height: 14px; accent-color: var(--accent);
+}
+
+/* ─── Spec Recap Card ─── */
+.spec-recap {
+  margin-top: 14px; padding: 12px 14px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); font-size: 11px;
+}
+.spec-recap .sr-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 5px 0; border-bottom: 1px dashed var(--border);
+}
+.spec-recap .sr-row:last-child { border-bottom: none; }
+.spec-recap .sr-key {
+  color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px;
+  font-weight: 600; font-size: 10px;
+}
+.spec-recap .sr-val {
+  color: var(--text); font-weight: 600; font-family: var(--font-mono);
+  font-size: 11px; max-width: 60%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.spec-recap .sr-swatch {
+  display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+  border: 1px solid var(--border); margin-right: 6px; vertical-align: middle;
+}
+
 /* ─── Sections ─── */
 .section { margin-bottom: 24px; }
 .section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.8px; color: var(--text2); margin-bottom: 10px; text-transform: uppercase; }

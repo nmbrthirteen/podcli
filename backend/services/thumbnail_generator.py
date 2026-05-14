@@ -26,13 +26,18 @@ except ImportError:
 # ── Default config (overridden by .podcli/thumbnail-config.json) ──
 
 DEFAULT_CONFIG = {
+    # These defaults are intentionally a plain black/white placeholder.
+    # The "real" look comes from the user's `.podcli/thumbnail-config.json`,
+    # which they create by running `podcli init-thumbnail` (or by copying
+    # `docs/thumbnail-config.example.json`). If you see white-bg / black-
+    # text thumbnails you forgot to create your config - that's by design.
     "width": 1080,
     "height": 1920,
 
-    # Colors — change these to match your brand
-    "bg_color": "#1A1A1A",
-    "text_color": "#FFFFFF",
-    "accent_color": "#00CED1",
+    # Colors - placeholder palette. Override in your brand config.
+    "bg_color": "#FFFFFF",
+    "text_color": "#000000",
+    "accent_color": "#000000",
 
     # Text
     "font_size_line1": 80,

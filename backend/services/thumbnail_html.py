@@ -40,10 +40,12 @@ def _load_config() -> dict:
         "width": 1080,
         "height": 1920,
 
-        # Colors
-        "bg_color": "#1A1A2E",
-        "text_color": "#FFFFFF",
-        "accent_color": "#E94560",
+        # Colors - placeholder palette. Override in your brand config
+        # at `.podcli/thumbnail-config.json` (run `podcli init-thumbnail`
+        # to scaffold one).
+        "bg_color": "#FFFFFF",
+        "text_color": "#000000",
+        "accent_color": "#000000",
 
         # Frame border (around entire thumbnail)
         "frame_border_width": 3,
@@ -57,7 +59,7 @@ def _load_config() -> dict:
         "box_min_height": "180px",
         "box_border_width": 3,
         "box_border_color": None,  # None = accent
-        "box_fill_color": "rgba(26,26,46,0.90)",
+        "box_fill_color": "rgba(255,255,255,0.92)",
         "box_padding": "24px 32px",
 
         # Line 1 (top line — typically white text)
@@ -67,7 +69,7 @@ def _load_config() -> dict:
         "line1_line_height": 1.15,
         "line1_margin_bottom": "8px",
         "line1_uppercase": True,
-        "line1_color": "#FFFFFF",
+        "line1_color": "#000000",
         "line1_nowrap": True,
 
         # Line 2 (bottom line — highlighted)
@@ -78,7 +80,7 @@ def _load_config() -> dict:
         "line2_line_height": 1.15,
         "line2_uppercase": True,
         "line2_highlight_color": None,  # None = accent
-        "line2_text_color": "#1A1A2E",
+        "line2_text_color": "#FFFFFF",
         "line2_highlight_padding": "4px 16px",
 
         # Photo
@@ -89,7 +91,7 @@ def _load_config() -> dict:
         "gradient_top_start_color": "rgba(0,0,0,0.5)",
         "gradient_top_end_color": "transparent",
         "gradient_bottom_start": "50%",
-        "gradient_bottom_end_color": "#1A1A2E",
+        "gradient_bottom_end_color": "#FFFFFF",
         "gradient_bottom_fade_point": "70%",
 
         # Logo

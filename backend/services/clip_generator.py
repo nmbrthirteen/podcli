@@ -29,10 +29,12 @@ from services.video_processor import (
 from config.caption_styles import get_style
 from presets import MAX_CLIP_DURATION
 
-# Filler words to strip from captions (not aggressive — just obvious fillers)
 _FILLER_WORDS = frozenset([
     "um", "uh", "uhh", "uhm", "umm", "hmm", "hm", "mhm",
     "ah", "er", "erm", "eh",
+    "ummm", "ummmm", "ummmmm", "uhhh", "uhhhh", "uhhhhh",
+    "hmmm", "hmmmm", "uhmm", "uhmmm",
+    "mmm", "mmmm", "mhmm", "mmhm",
 ])
 
 # Weak lead-in markers that often add setup without adding viral value.
@@ -266,39 +268,33 @@ def _snap_to_sentence_end(
     transcript_words: list[dict], start_second: float, end_second: float,
     max_extension: float = 3.0,
 ) -> float:
-    """
-    Snap clip end_second to the nearest sentence boundary (. ! ?).
-    Searches forward up to max_extension seconds. If no boundary found,
-    searches backward within the clip. Returns adjusted end_second.
+    """Snap clip end_second forward to the nearest sentence boundary.
+
+    Forward-only. Stops at speaker changes to avoid bleeding into a reply.
     """
     SENTENCE_ENDINGS = ".!?"
 
-    # Get the last word in the clip range
     clip_words = [w for w in transcript_words if w["end"] > start_second and w["start"] < end_second]
     if not clip_words:
         return end_second
 
     last_clip_word = clip_words[-1]
     last_word_text = last_clip_word.get("word", "").strip()
+    last_speaker = last_clip_word.get("speaker")
 
-    # Already ends on a sentence boundary — extend to include full word
     if last_word_text and last_word_text[-1] in SENTENCE_ENDINGS:
         return max(end_second, last_clip_word["end"])
 
-    # Search forward: find next sentence-ending word within max_extension
     for w in sorted(transcript_words, key=lambda x: x["start"]):
-        if w["start"] >= last_clip_word["end"] and w["end"] <= end_second + max_extension:
-            text = w.get("word", "").strip()
-            if text and text[-1] in SENTENCE_ENDINGS:
-                return w["end"]
-
-    # Search backward: find last sentence-ending word within the clip
-    for w in reversed(clip_words):
+        if w["start"] < last_clip_word["end"]:
+            continue
+        if w["end"] > end_second + max_extension:
+            break
+        if last_speaker is not None and w.get("speaker") is not None and w.get("speaker") != last_speaker:
+            break
         text = w.get("word", "").strip()
         if text and text[-1] in SENTENCE_ENDINGS:
-            # Only snap backward if we don't lose more than 30% of the clip
-            if w["end"] > start_second + (end_second - start_second) * 0.7:
-                return w["end"]
+            return w["end"]
 
     return end_second
 
@@ -326,7 +322,7 @@ def _build_tight_segments(
     words: list[dict],
     start_second: float,
     end_second: float,
-    silence_threshold: float = 0.8,
+    silence_threshold: float = 0.55,
 ) -> list[dict]:
     """
     Build tight keep-segments from transcript words, cutting out:
@@ -563,6 +559,7 @@ def generate_clip(
     outro_path: Optional[str] = None,
     clean_fillers: bool = True,
     keep_segments: list[dict] = None,
+    trim_opening: Optional[bool] = None,
     allow_ass_fallback: bool = False,
     use_ass_captions: bool = False,
     progress_callback: Optional[Callable[[int, str], None]] = None,
@@ -596,6 +593,15 @@ def generate_clip(
     if end_second <= start_second:
         raise ValueError("end_second must be greater than start_second")
 
+    if trim_opening is None:
+        trim_opening = not (keep_segments and len(keep_segments) > 0)
+
+    llm_start_second, llm_end_second = start_second, end_second
+    if keep_segments and len(keep_segments) > 0:
+        llm_start_second = keep_segments[0]["start"]
+        llm_end_second = keep_segments[-1]["end"]
+    llm_total = max(0.01, llm_end_second - llm_start_second)
+
     # Multi-segment cutting: if keep_segments provided, use those ranges.
     # Otherwise auto-detect silences/fillers and build tight segments.
     if keep_segments and len(keep_segments) > 0:
@@ -603,8 +609,7 @@ def generate_clip(
         keep_segments = [s for s in keep_segments if s["end"] > s["start"]]
         keep_segments.sort(key=lambda s: s["start"])
 
-        # Tighten the opening of the first kept segment to reduce setup/preamble.
-        if transcript_words:
+        if trim_opening and transcript_words:
             trimmed_start = _trim_weak_opening(
                 transcript_words,
                 keep_segments[0]["start"],
@@ -612,6 +617,15 @@ def generate_clip(
             )
             if trimmed_start < keep_segments[0]["end"] - 0.5:
                 keep_segments[0]["start"] = trimmed_start
+
+        if transcript_words:
+            snapped_end = _snap_to_sentence_end(
+                transcript_words,
+                keep_segments[-1]["start"],
+                keep_segments[-1]["end"],
+            )
+            if snapped_end > keep_segments[-1]["end"]:
+                keep_segments[-1]["end"] = snapped_end
 
         start_second = keep_segments[0]["start"]
         end_second = keep_segments[-1]["end"]
@@ -627,11 +641,9 @@ def generate_clip(
 
         duration = sum(s["end"] - s["start"] for s in keep_segments)
     else:
-        # Tighten weak setup at the head before sentence/end trimming.
-        if transcript_words:
+        if trim_opening and transcript_words:
             start_second = _trim_weak_opening(transcript_words, start_second, end_second)
 
-        # Snap clip boundaries to sentence endings
         if transcript_words:
             end_second = _snap_to_sentence_end(transcript_words, start_second, end_second)
 
@@ -649,6 +661,17 @@ def generate_clip(
         else:
             keep_segments = None
             duration = end_second - start_second
+
+    if duration < 0.75 * llm_total and llm_total >= 8.0:
+        print(
+            f"  Boundary revert: post-trim duration {duration:.1f}s < "
+            f"75% of asked {llm_total:.1f}s - using original range",
+            flush=True,
+        )
+        start_second = llm_start_second
+        end_second = llm_end_second
+        keep_segments = None
+        duration = end_second - start_second
 
     if duration > MAX_CLIP_DURATION:
         raise ValueError(f"Clip too long ({duration:.0f}s). Max {MAX_CLIP_DURATION} seconds for shorts.")

@@ -4,12 +4,43 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>podcli</title>
+
+  <title>Podcli - AI Podcast Clip Studio</title>
+  <meta name="description" content="Transcribe podcast videos, find viral moments, and export branded vertical clips with burned captions. Open-source local-first studio for YouTube Shorts, TikTok, and Reels.">
+  <meta name="author" content="Podcli">
+  <meta name="application-name" content="Podcli">
+  <meta name="generator" content="Podcli">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="format-detection" content="telephone=no">
+
+  <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="color-scheme" content="dark light">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Podcli">
+  <meta property="og:title" content="Podcli - AI Podcast Clip Studio">
+  <meta property="og:description" content="Transcribe podcast videos, find viral moments, and export branded vertical clips with burned captions.">
+  <meta property="og:image" content="/podcli-logo-transparent.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Podcli - AI Podcast Clip Studio">
+  <meta name="twitter:description" content="Transcribe podcast videos, find viral moments, and export branded vertical clips with burned captions.">
+  <meta name="twitter:image" content="/podcli-logo-transparent.png">
+
   <link rel="icon" type="image/png" href="/podcli-icon.png">
+  <link rel="apple-touch-icon" href="/podcli-icon.png">
+  <link rel="mask-icon" href="/podcli-icon-transparent.png" color="#0d0d0d">
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Podcli">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
-    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -21,7 +52,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef, useCallback } = React;
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
     const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
     const api = async (path, opts = {}) => (await fetch(`/api${path}`, { headers: { 'Content-Type': 'application/json', ...opts.headers }, ...opts })).json();
@@ -75,73 +106,391 @@
     const CheckIcon = () => (<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>);
     const CheckSmall = ({ color = 'var(--green)' }) => (<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>);
 
-    /* ── Style Preview Component ── */
+    const PREVIEW_SCALE = 0.27;
+    const px = (n) => Math.round(n * PREVIEW_SCALE);
+    const PROD_TO_PCT = (margin) => ((margin / 1920) * 100).toFixed(1) + '%';
+
     const STYLE_CONFIGS = {
       branded: {
-        words: ['Did you ever,', 'felt', 'like I\u2019m in the', 'wrong place'],
-        fontSize: 19, fontWeight: 800, bottom: '30%',
-        lineHeight: 1.3, textShadow: 'none',
-        activeStyle: { background: '#1a1a1a', borderRadius: 5, padding: '2px 6px', color: '#fff' },
-        normalStyle: { background: 'transparent', borderRadius: 5, padding: '2px 6px', color: '#fff' },
-        gradient: true,
+        fontSize: px(100), fontWeight: 700, bottom: PROD_TO_PCT(420),
+        lineHeight: 1.2, uppercase: false,
+        wordsPerChunk: 3, maxCharsPerChunk: 18, splitLines: true,
+        color: '#fff', activeColor: '#fff',
+        activePill: { background: 'rgba(0,0,0,0.85)', borderRadius: 8, paddingX: 8 },
+        chunkBg: null, gradient: true,
+        sample: ['Did', 'you', 'ever', 'felt', 'like', 'this'],
       },
       hormozi: {
-        words: ['LOOKING', 'FOR', 'HIGH ENERGY'],
-        fontSize: 22, fontWeight: 900, bottom: '22%',
-        lineHeight: 1.25, textShadow: '0 2px 8px rgba(0,0,0,0.7)',
-        activeStyle: { color: '#ffff00' },
-        normalStyle: { color: '#fff' },
+        fontSize: px(90), fontWeight: 800, bottom: PROD_TO_PCT(400),
+        lineHeight: 1.2, uppercase: true,
+        wordsPerChunk: 3, maxCharsPerChunk: 22, splitLines: false,
+        color: '#fff', activeColor: '#ffff00',
+        activePill: null,
+        chunkBg: { background: 'rgba(0,0,0,0.8)', borderRadius: 5, paddingX: 10, paddingY: 5 },
         gradient: false,
+        sample: ['LOOKING', 'FOR', 'HIGH', 'ENERGY', 'CONTENT'],
       },
       karaoke: {
-        words: ['the secret to', 'building', 'something', 'people', 'actually want'],
-        fontSize: 15, fontWeight: 600, bottom: '22%',
-        lineHeight: 1.4, textShadow: '0 1px 6px rgba(0,0,0,0.6)',
-        activeStyle: { color: '#fff' },
-        normalStyle: { color: 'rgba(255,255,255,0.35)' },
-        gradient: false,
+        fontSize: px(80), fontWeight: 600, bottom: PROD_TO_PCT(400),
+        lineHeight: 1.25, uppercase: false,
+        wordsPerChunk: 5, maxCharsPerChunk: 28, splitLines: false,
+        color: 'rgba(255,255,255,0.4)', activeColor: '#fff',
+        activePill: null, chunkBg: null, gradient: false,
+        sample: ['the', 'secret', 'to', 'building', 'something'],
       },
       subtle: {
-        words: ['the secret to building something people actually want'],
-        fontSize: 13, fontWeight: 400, bottom: '12%',
-        lineHeight: 1.5, textShadow: '0 1px 4px rgba(0,0,0,0.8)',
-        activeStyle: { color: 'rgba(255,255,255,0.9)' },
-        normalStyle: { color: 'rgba(255,255,255,0.9)' },
-        gradient: false,
+        fontSize: px(64), fontWeight: 400, bottom: PROD_TO_PCT(200),
+        lineHeight: 1.3, uppercase: false,
+        wordsPerChunk: 6, maxCharsPerChunk: 36, splitLines: false,
+        color: 'rgba(255,255,255,0.95)', activeColor: 'rgba(255,255,255,0.95)',
+        activePill: null, chunkBg: null, gradient: false,
+        sample: ['the', 'secret', 'to', 'building', 'something', 'people'],
       },
     };
 
-    function StylePreview({ style, logoPath }) {
-      const [activeIdx, setActiveIdx] = useState(0);
-      const cfg = STYLE_CONFIGS[style] || STYLE_CONFIGS.branded;
+    function buildPreviewChunks(words, perChunk, maxChars) {
+      const out = [];
+      let i = 0;
+      while (i < words.length) {
+        let end = i, count = 0;
+        while (end < words.length && end - i < perChunk) {
+          const w = words[end];
+          const next = count === 0 ? w.length : count + 1 + w.length;
+          if (end > i && maxChars && next > maxChars) break;
+          count = next; end++;
+        }
+        if (end === i) end = i + 1;
+        if (words.length - end === 1 && end - i > 2) end -= 1;
+        out.push(words.slice(i, end));
+        i = end;
+      }
+      return out;
+    }
+    function splitBrandedLines(chunk) {
+      if (chunk.length <= 2) return [chunk, []];
+      return [chunk.slice(0, 2), chunk.slice(2)];
+    }
 
-      useEffect(() => {
-        if (cfg.words.length <= 1) return;
-        const iv = setInterval(() => setActiveIdx(i => (i + 1) % cfg.words.length), 800);
-        return () => clearInterval(iv);
-      }, [style]);
 
-      useEffect(() => setActiveIdx(0), [style]);
-
-      const showLogo = style === 'branded' && logoPath;
-
+    function TikTokWireframe({ activeClip, captionStyle }) {
+      const Heart = () => (
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="#fff">
+          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+        </svg>
+      );
+      const Comment = () => (
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="#fff">
+          <path d="M20 2H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3l5 4 5-4h3a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/>
+        </svg>
+      );
+      const Bookmark = () => (
+        <svg width="24" height="28" viewBox="0 0 24 24" fill="#fff">
+          <path d="M17 3H7a2 2 0 0 0-2 2v17l7-3.5L19 22V5a2 2 0 0 0-2-2z"/>
+        </svg>
+      );
+      const Share = () => (
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="#fff">
+          <path d="M22 12L12 4v5c-7 0-10 4-10 11 2-4 5-6 10-6v5l10-7z"/>
+        </svg>
+      );
+      const MusicNote = () => (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="#fff">
+          <path d="M9 17V5l12-2v12a4 4 0 1 1-2-3.46V6.18L11 7.82V19a4 4 0 1 1-2-3.46z"/>
+        </svg>
+      );
+      const Person = () => (
+        <svg viewBox="0 0 24 24" fill="#fff">
+          <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 6v2h16v-2c0-4-4-6-8-6z"/>
+        </svg>
+      );
+      const Search = () => (
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '100%', height: '100%' }}>
+          <circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/>
+        </svg>
+      );
+      const NavHome = () => (
+        <svg viewBox="0 0 24 24" fill="#fff" className="tt-nav-icon"><path d="M3 11l9-8 9 8v10h-6v-6h-6v6H3z"/></svg>
+      );
+      const NavFriends = () => (
+        <svg viewBox="0 0 24 24" fill="#fff" className="tt-nav-icon"><circle cx="9" cy="8" r="4"/><circle cx="17" cy="9" r="3"/><path d="M2 20c0-4 4-6 7-6s7 2 7 6v1H2v-1zm14-5c2 0 6 1 6 5v1h-6"/></svg>
+      );
+      const NavInbox = () => (
+        <svg viewBox="0 0 24 24" fill="#fff" className="tt-nav-icon"><path d="M3 6h18l-2 8h-7l-2 3-2-3H5z"/></svg>
+      );
+      const NavProfile = () => (
+        <svg viewBox="0 0 24 24" fill="#fff" className="tt-nav-icon"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-5 4-7 8-7s8 2 8 7"/></svg>
+      );
+      const fmtCount = (n) => {
+        if (n >= 100000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+        if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+        return String(n);
+      };
+      const likes = fmtCount(999000);
+      const comments = fmtCount(2463);
+      const saves = fmtCount(60500);
+      const shares = fmtCount(2230);
+      const caption = activeClip ? activeClip.title : 'Description #shorts #podcast';
       return (
-        <div className="style-preview fade-in" key={style}>
-          <div className="sp-bg" />
-          <div className="sp-person" />
-          {cfg.gradient && <div className="sp-gradient" />}
-          {showLogo && (
-            <div className="sp-logo">
-              <img src={`/api/stream-source?path=${encodeURIComponent(logoPath)}`} style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 6 }} />
+        <div className="tt-overlay">
+          <div className="tt-top">
+            <span className="tt-tab">
+              Following
+              <span className="tt-following-dot" />
+            </span>
+            <span className="tt-divider" />
+            <span className="tt-tab active">For You</span>
+          </div>
+          <div className="tt-search"><Search /></div>
+          <div className="tt-rail">
+            <div className="tt-avatar-wrap">
+              <div className="tt-avatar"><Person /></div>
+              <div className="tt-follow">+</div>
             </div>
-          )}
-          <div className="sp-captions" style={{ bottom: cfg.bottom, fontSize: cfg.fontSize, fontWeight: cfg.fontWeight, lineHeight: cfg.lineHeight, textShadow: cfg.textShadow }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '4px 6px' }}>
-              {cfg.words.map((w, i) => (
-                <span key={w} className="sp-word" style={i === activeIdx ? cfg.activeStyle : cfg.normalStyle}>{w}</span>
-              ))}
+            <div className="tt-action"><div className="tt-icon"><Heart /></div><span>{likes}</span></div>
+            <div className="tt-action"><div className="tt-icon"><Comment /></div><span>{comments}</span></div>
+            <div className="tt-action"><div className="tt-icon"><Bookmark /></div><span>{saves}</span></div>
+            <div className="tt-action"><div className="tt-icon"><Share /></div><span>{shares}</span></div>
+            <div className="tt-disc" />
+          </div>
+          <div className="tt-bottom">
+            <div className="tt-handle">USERNAME</div>
+            <div className="tt-desc">{caption}<span className="tt-more"> more</span></div>
+            <div className="tt-translate">see translation</div>
+            <div className="tt-music">
+              <span className="tt-music-note"><MusicNote /></span>
+              <span>Original Sound</span>
             </div>
           </div>
+          <div className="tt-nav">
+            <div className="tt-nav-item active"><NavHome /><span>Home</span></div>
+            <div className="tt-nav-item"><NavFriends /><span>Friends</span></div>
+            <div className="tt-nav-item"><div className="tt-plus">+</div></div>
+            <div className="tt-nav-item"><NavInbox /><span>Inbox</span></div>
+            <div className="tt-nav-item"><NavProfile /><span>Profile</span></div>
+          </div>
+        </div>
+      );
+    }
+
+    function PhoneCaptionBody({ chunk, activeWordInChunk, cfg }) {
+      if (!chunk || !chunk.length) return null;
+      const fmt = (w) => (cfg.uppercase ? w.toUpperCase() : w);
+
+      const renderWord = (w, i, isActive) => {
+        if (cfg.activePill && isActive) {
+          // Branded: black rounded pill behind the active word.
+          return (
+            <span key={`${w}-${i}`} style={{ position: 'relative', display: 'inline-block' }}>
+              <span style={{
+                position: 'absolute',
+                top: -2, bottom: -2,
+                left: -cfg.activePill.paddingX, right: -cfg.activePill.paddingX,
+                background: cfg.activePill.background,
+                borderRadius: cfg.activePill.borderRadius,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.45)',
+                pointerEvents: 'none',
+              }} />
+              <span style={{ position: 'relative', color: cfg.activeColor, zIndex: 1 }}>{fmt(w)}</span>
+            </span>
+          );
+        }
+        return (
+          <span key={`${w}-${i}`} style={{
+            color: isActive ? cfg.activeColor : cfg.color,
+            textShadow: isActive && cfg.activeColor === '#ffff00'
+              ? '0 0 12px rgba(255,255,0,0.5)' : '0 1px 4px rgba(0,0,0,0.6)',
+            transition: 'color 0.15s var(--ease)',
+          }}>{fmt(w)}</span>
+        );
+      };
+
+      // Branded: split chunk into [first 2 words, rest], render as 2 lines.
+      if (cfg.splitLines) {
+        const [line1, line2] = splitBrandedLines(chunk);
+        const startIdx2 = line1.length;
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <div style={{ whiteSpace: 'nowrap' }}>
+              {line1.map((w, i) => (
+                <React.Fragment key={`l1-${i}`}>
+                  {i > 0 && ' '}
+                  {renderWord(w, i, i === activeWordInChunk)}
+                </React.Fragment>
+              ))}
+            </div>
+            {line2.length > 0 && (
+              <div style={{ whiteSpace: 'nowrap' }}>
+                {line2.map((w, i) => (
+                  <React.Fragment key={`l2-${i}`}>
+                    {i > 0 && ' '}
+                    {renderWord(w, startIdx2 + i, startIdx2 + i === activeWordInChunk)}
+                  </React.Fragment>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // Hormozi: whole chunk inside a single black box, active word yellow.
+      // Karaoke / subtle: no box, just inline words.
+      const inner = chunk.map((w, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && ' '}
+          {renderWord(w, i, i === activeWordInChunk)}
+        </React.Fragment>
+      ));
+
+      if (cfg.chunkBg) {
+        return (
+          <div style={{
+            display: 'inline-block',
+            background: cfg.chunkBg.background,
+            borderRadius: cfg.chunkBg.borderRadius,
+            padding: `${cfg.chunkBg.paddingY}px ${cfg.chunkBg.paddingX}px`,
+            whiteSpace: 'nowrap',
+          }}>{inner}</div>
+        );
+      }
+      return <div style={{ whiteSpace: 'normal' }}>{inner}</div>;
+    }
+
+    function LivePhonePreview({ videoUrl, videoRef, captionStyle, activeClip, transcriptWords, logoPath, previewSrc, showTikTokFrame, onToggleFrame }) {
+      const cfg = STYLE_CONFIGS[captionStyle] || STYLE_CONFIGS.branded;
+      const [logoBroken, setLogoBroken] = useState(false);
+      useEffect(() => { setLogoBroken(false); }, [logoPath]);
+
+      // Pull all transcribed words from the active clip (or first N from the
+      // whole transcript). The chunker decides how many show at once.
+      const sourcePool = useMemo(() => {
+        if (!transcriptWords || !transcriptWords.length) return null;
+        let pool = transcriptWords;
+        if (activeClip) {
+          pool = transcriptWords.filter(w =>
+            w.end > activeClip.start_second && w.start < activeClip.end_second
+          );
+        }
+        if (!pool.length) return null;
+        const out = pool.slice(0, 80).map(w => (w.word || w.text || '').trim()).filter(Boolean);
+        return out.length >= 2 ? out : null;
+      }, [activeClip, transcriptWords]);
+
+      const usingSample = !sourcePool;
+      const poolWords = sourcePool || cfg.sample;
+
+      // Chunk the same way the Remotion renderer does. The active chunk
+      // is what appears on screen; the active word inside it gets the
+      // pill / accent color.
+      const chunks = useMemo(
+        () => buildPreviewChunks(poolWords, cfg.wordsPerChunk, cfg.maxCharsPerChunk),
+        [poolWords, cfg.wordsPerChunk, cfg.maxCharsPerChunk]
+      );
+
+      const [cursor, setCursor] = useState(0); // global word index
+      useEffect(() => {
+        setCursor(0);
+        if (poolWords.length <= 1) return;
+        const tick = captionStyle === 'karaoke' ? 320 : 420;
+        const iv = setInterval(() => setCursor(i => (i + 1) % poolWords.length), tick);
+        return () => clearInterval(iv);
+      }, [captionStyle, poolWords.length, poolWords[0]]);
+
+      // Find which chunk the cursor is currently in, and which word within it.
+      let activeChunkIdx = 0, activeWordInChunk = 0, consumed = 0;
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const len = chunks[ci].length;
+        if (cursor < consumed + len) {
+          activeChunkIdx = ci;
+          activeWordInChunk = cursor - consumed;
+          break;
+        }
+        consumed += len;
+      }
+      const activeChunk = chunks[activeChunkIdx] || [];
+
+      return (
+       <>
+        <div className="phone-frame fade-in">
+          <div className="phone-notch" />
+          {videoUrl ? (
+            <video key={videoUrl} ref={videoRef} src={videoUrl}
+              muted playsInline preload="auto"
+              className={previewSrc ? '' : ''} />
+          ) : (
+            <div className="phone-empty">
+              <div style={{ fontSize: 22, opacity: 0.4 }}>{'▶'}</div>
+              <div>Drop a video to see live caption preview</div>
+            </div>
+          )}
+          {videoUrl && cfg.gradient && <div className="phone-gradient" />}
+          {videoUrl && captionStyle === 'branded' && logoPath && !logoBroken && (
+            <div className="phone-logo">
+              <img src={`/api/stream-source?path=${encodeURIComponent(logoPath)}`}
+                onError={() => setLogoBroken(true)}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            </div>
+          )}
+          {videoUrl && (
+            <div className="phone-caption" style={{
+              bottom: cfg.bottom,
+              fontSize: cfg.fontSize, fontWeight: cfg.fontWeight,
+              lineHeight: cfg.lineHeight,
+              fontFamily: "'DM Sans', 'Inter', Arial, sans-serif",
+            }}>
+              <PhoneCaptionBody
+                chunk={activeChunk}
+                activeWordInChunk={activeWordInChunk}
+                cfg={cfg}
+              />
+              {usingSample && (
+                <div style={{
+                  marginTop: 6, fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.55)',
+                  textShadow: '0 1px 3px rgba(0,0,0,0.6)', letterSpacing: '0.5px',
+                  textTransform: 'uppercase', pointerEvents: 'none',
+                }}>
+                  Placeholder · transcribe to see your captions
+                </div>
+              )}
+            </div>
+          )}
+          {videoUrl && showTikTokFrame && (
+            <TikTokWireframe activeClip={activeClip} captionStyle={captionStyle} />
+          )}
+        </div>
+        <div className="preview-toggle-row">
+          <label>
+            <input type="checkbox" checked={!!showTikTokFrame} onChange={onToggleFrame} />
+            TikTok wireframe
+          </label>
+        </div>
+       </>
+      );
+    }
+
+    /* ── Spec Recap ── re-renders form state as a reviewable card. */
+    function SpecRecap({ captionStyle, cropStrategy, logoPath, outroPath, activePreset, quality, cleanFillers }) {
+      const cfg = STYLE_CONFIGS[captionStyle] || STYLE_CONFIGS.branded;
+      // Sample "color" comes from the active-word style of the caption preset.
+      const swatch = (cfg.activeStyle && (cfg.activeStyle.color || cfg.activeStyle.background)) || '#ffffff';
+      const rows = [
+        ['Caption style', captionStyle],
+        ['Crop', cropStrategy],
+        ['Font size', `${cfg.fontSize}px`],
+        ['Highlight', <span><span className="sr-swatch" style={{ background: swatch }} />{swatch}</span>],
+        ['Quality', quality || 'standard'],
+        ['Clean fillers', cleanFillers ? 'on' : 'off'],
+      ];
+      if (logoPath) rows.push(['Logo', logoPath.split('/').pop()]);
+      if (outroPath) rows.push(['Outro', outroPath.split('/').pop()]);
+      if (activePreset) rows.push(['Preset', activePreset]);
+      return (
+        <div className="spec-recap fade-in">
+          {rows.map(([k, v]) => (
+            <div className="sr-row" key={k}>
+              <span className="sr-key">{k}</span>
+              <span className="sr-val">{v}</span>
+            </div>
+          ))}
         </div>
       );
     }
@@ -209,7 +558,8 @@
       const [timeAdjust, setTimeAdjust] = useState(-1);
       const [whisperModel, setWhisperModel] = useState('base');
       const [captionStyle, setCaptionStyle] = useState('branded');
-      const [cropStrategy, setCropStrategy] = useState('speaker');
+      const [cropStrategy, setCropStrategy] = useState('face');
+      const [showTikTokFrame, setShowTikTokFrame] = useState(false);
       const [logoPath, setLogoPath] = useState('');
       const logoRef = useRef();
       const [outroPath, setOutroPath] = useState('');
@@ -256,7 +606,7 @@
 
       // Advanced settings
       const [advancedOpen, setAdvancedOpen] = useState(false);
-      const [cleanFillers, setCleanFillers] = useState(false);
+      const [cleanFillers, setCleanFillers] = useState(true);
       const [quality, setQuality] = useState('max');
       const [topClips, setTopClips] = useState(8);
       const [minDuration, setMinDuration] = useState(20);
@@ -1380,8 +1730,9 @@
             <div className="preview-col">
               <div className="preview-panel">
 
-                {/* Video player (when video loaded) */}
-                {videoUrl && (
+                {/* Old video player - used ONLY for playing a rendered clip.
+                    Source-video preview now lives inside <LivePhonePreview/>. */}
+                {videoUrl && previewSrc && (
                   <div className="preview-player fade-in" style={{ marginBottom: 12 }}>
                     <video
                       key={videoUrl}
@@ -1407,8 +1758,19 @@
                 )}
 
                 {/* Style preview mockup — hidden when rendered clip is playing */}
-                {!previewSrc && <StylePreview style={captionStyle} logoPath={logoPath} />}
-
+                {!previewSrc && (
+                  <LivePhonePreview
+                    videoUrl={videoUrl}
+                    videoRef={videoRef}
+                    captionStyle={captionStyle}
+                    activeClip={activeClip}
+                    transcriptWords={transcript ? transcript.words : null}
+                    logoPath={logoPath}
+                    previewSrc={previewSrc}
+                    showTikTokFrame={showTikTokFrame}
+                    onToggleFrame={() => setShowTikTokFrame(v => !v)}
+                  />
+                )}
                 {/* Settings tags */}
                 <div className="preview-settings">
                   <div className={`preview-tag ${settingsFlash === 'caption' ? 'changed' : ''}`}
@@ -1440,6 +1802,17 @@
                     </div>
                   )}
                 </div>
+
+                {/* Spec recap \u2014 form state as a reviewable summary card */}
+                <SpecRecap
+                  captionStyle={captionStyle}
+                  cropStrategy={cropStrategy}
+                  logoPath={logoPath}
+                  outroPath={outroPath}
+                  activePreset={activePreset}
+                  quality={quality}
+                  cleanFillers={cleanFillers}
+                />
               </div>
             </div>
           </div>

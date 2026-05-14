@@ -46,6 +46,9 @@ from services.captions_burn import (
     burn_captions,
     create_gradient_png as _create_gradient_png,
 )
+from services.local_reframe import (
+    detect_local_speaker_reframe_plan as _detect_local_speaker_reframe_plan,
+)
 import sys
 
 
@@ -116,6 +119,45 @@ def crop_to_vertical(
         speakers_in_clip = {
             w.get("speaker") for w in (transcript_words or []) if w.get("speaker")
         }
+
+        is_pure_split = (
+            face_map
+            and face_map.get("is_split_screen")
+            and not face_map.get("is_mixed_layout")
+            and len(face_map.get("clusters") or []) == 2
+        )
+        if is_pure_split:
+            plan = _detect_local_speaker_reframe_plan(input_path, face_map)
+            if plan and plan["mode"] == "pan":
+                crop_y = max(0, (height - plan["crop_h"]) // 2)
+                vf = (
+                    f"crop={plan['crop_w']}:{plan['crop_h']}"
+                    f":x='{plan['x_expression']}':y={crop_y},"
+                    f"scale={target_w}:{target_h}"
+                )
+                print(
+                    f"  Reframe: local mouth-motion, {len(plan['timeline'])} segs, "
+                    f"{plan['scene_cuts']} cuts",
+                    flush=True,
+                )
+                result = _run_ffmpeg_with_fallback(
+                    cmd_parts_before_enc=[
+                        "ffmpeg", "-y",
+                        "-i", input_path,
+                        "-vf", vf,
+                    ],
+                    cmd_parts_after_enc=[
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        "-ar", "44100",
+                        "-movflags", "+faststart",
+                    ],
+                    output_path=output_path,
+                    label="crop_local_reframe",
+                )
+                if result:
+                    return result
+
         # Any clip with speaker labels should prefer clip-local tracking over the
         # episode-wide face_map. Global speaker→side mappings are too coarse for
         # monologues and mixed-layout edits; they can pin a single-speaker clip

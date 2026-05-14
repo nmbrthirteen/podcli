@@ -13,6 +13,7 @@ One-command processing:
 import argparse
 import json
 import os
+import shutil
 
 # Load .env file (for HF_TOKEN, etc.)
 try:
@@ -292,7 +293,7 @@ def cmd_process(args):
         config["energy_boost"] = False
         config["no_speakers"] = True
         config["quality"] = args.quality or "low"
-        config["crop_strategy"] = args.crop or "center"
+        config["crop_strategy"] = args.crop or "face"
         config["allow_ass_fallback"] = True
         config["use_ass_captions"] = True
         config["generate_thumbnails"] = False
@@ -525,9 +526,21 @@ def cmd_process(args):
     # ── Step 4: Export ──
     # Check if thumbnail generation is enabled
     thumb_dir = os.path.join(output_dir, "thumbnails")
-    _thumb_enabled = bool(config.get("generate_thumbnails", True))
     _thumb_intro_duration = 0.8
     _tc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "thumbnail-config.json")
+
+    # Opt-in: a brand config must exist before podcli generates thumbnails.
+    # New users get no auto-thumbnails until they run `podcli init-thumbnail`
+    # (or write their own .podcli/thumbnail-config.json). Existing users who
+    # already have the file keep working - the file is the opt-in signal.
+    # An explicit `generate_thumbnails` flag in the runtime config still
+    # overrides either way for scripted runs.
+    _explicit = config.get("generate_thumbnails")
+    if _explicit is not None:
+        _thumb_enabled = bool(_explicit)
+    else:
+        _thumb_enabled = os.path.exists(_tc_path)
+
     if _thumb_enabled and os.path.exists(_tc_path):
         try:
             with open(_tc_path) as _tcf:
@@ -580,7 +593,7 @@ def cmd_process(args):
                         start_second=clip["start_second"],
                         end_second=clip["end_second"],
                         caption_style=config.get("caption_style", "branded"),
-                        crop_strategy=config.get("crop_strategy", "speaker"),
+                        crop_strategy=config.get("crop_strategy", "face"),
                         transcript_words=words,
                         title=clip.get("title", f"clip_{i+1}"),
                         output_dir=output_dir,
@@ -793,7 +806,7 @@ def cmd_process(args):
                                 start_second=clip["start_second"],
                                 end_second=clip["end_second"],
                                 caption_style=config.get("caption_style", "branded"),
-                                crop_strategy=config.get("crop_strategy", "speaker"),
+                                crop_strategy=config.get("crop_strategy", "face"),
                                 transcript_words=words,
                                 title=clip.get("title", f"clip_{i+1}"),
                                 output_dir=output_dir,
@@ -1251,7 +1264,7 @@ def _post_render_loop(
                     start_second=clip["start_second"],
                     end_second=clip["end_second"],
                     caption_style=config.get("caption_style", "branded"),
-                    crop_strategy=config.get("crop_strategy", "speaker"),
+                    crop_strategy=config.get("crop_strategy", "face"),
                     transcript_words=words,
                     title=clip.get("title", "clip"),
                     output_dir=output_dir,
@@ -1436,7 +1449,7 @@ def _post_render_loop(
                                         start_second=f_clip["start_second"],
                                         end_second=f_clip["end_second"],
                                         caption_style=config.get("caption_style", "branded"),
-                                        crop_strategy=config.get("crop_strategy", "speaker"),
+                                        crop_strategy=config.get("crop_strategy", "face"),
                                         transcript_words=words,
                                         title=f_clip.get("title", "clip"),
                                         output_dir=output_dir,
@@ -1490,7 +1503,7 @@ def _post_render_loop(
                                         start_second=nc["start_second"],
                                         end_second=nc["end_second"],
                                         caption_style=config.get("caption_style", "branded"),
-                                        crop_strategy=config.get("crop_strategy", "speaker"),
+                                        crop_strategy=config.get("crop_strategy", "face"),
                                         transcript_words=words,
                                         title=nc.get("title", "clip"),
                                         output_dir=output_dir,
@@ -1951,6 +1964,54 @@ def cmd_assets(args):
         else:
             print(f"  Not found: {args.name}", file=sys.stderr)
             sys.exit(1)
+
+
+def cmd_init_thumbnail(args):
+    """Scaffold .podcli/thumbnail-config.json from the example template.
+
+    Opting in to thumbnail generation means having this file exist. Until
+    then podcli skips the thumbnail step entirely (see crop_to_vertical
+    in cli.py (opt-in is gated on file existence).
+    """
+    accent = "\033[38;2;212;135;74m"
+    green = "\033[38;2;74;222;128m"
+    yellow = "\033[38;2;250;204;21m"
+    gray = "\033[38;5;245m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    repo_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    example_path = os.path.abspath(os.path.join(repo_root, "docs", "thumbnail-config.example.json"))
+    target_dir = os.path.abspath(os.path.join(repo_root, ".podcli"))
+    target_path = os.path.join(target_dir, "thumbnail-config.json")
+
+    if not os.path.exists(example_path):
+        print(
+            f"\n  {yellow}✗ Missing {example_path}{reset}\n"
+            f"  {gray}Reinstall or pull latest from the repo.{reset}\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if os.path.exists(target_path) and not getattr(args, "force", False):
+        print(
+            f"\n  {yellow}⚠ {target_path} already exists.{reset}\n"
+            f"  {gray}Re-run with --force to overwrite, or edit the file directly.{reset}\n"
+        )
+        sys.exit(2)
+
+    os.makedirs(target_dir, exist_ok=True)
+    shutil.copyfile(example_path, target_path)
+
+    print(
+        f"\n  {green}✓ Wrote{reset} {bold}{target_path}{reset}\n"
+        f"  {gray}Next:{reset}\n"
+        f"    1. Open it and change {accent}bg_color{reset} / {accent}text_color{reset} / {accent}accent_color{reset} to your brand.\n"
+        f"    2. Tune {accent}line1_*{reset} / {accent}line2_*{reset} font sizes if needed.\n"
+        f"    3. Run {accent}podcli thumbnails \"Your test title\"{reset} to preview.\n"
+        f"  {gray}While this file exists, podcli auto-generates thumbnails on every clip.{reset}\n"
+        f"  {gray}Delete it (or set enabled: false) to disable.{reset}\n"
+    )
 
 
 def cmd_thumbnails(args):
@@ -2697,6 +2758,16 @@ def main():
     # ── info ──
     sub.add_parser("info", help="Show system info (encoder, etc.)")
 
+    init_thumb = sub.add_parser(
+        "init-thumbnail",
+        help="Scaffold .podcli/thumbnail-config.json so podcli generates thumbnails for you",
+    )
+    init_thumb.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing .podcli/thumbnail-config.json",
+    )
+
     args = parser.parse_args()
 
     if getattr(args, "show_help", False) and args.command is None:
@@ -2723,6 +2794,8 @@ def main():
         cmd_cache(args)
     elif args.command == "info":
         cmd_info(args)
+    elif args.command == "init-thumbnail":
+        cmd_init_thumbnail(args)
     else:
         interactive_menu()
 
@@ -3389,7 +3462,7 @@ def _interactive_presets():
     crop = questionary.select(
         "Crop strategy:",
         choices=["speaker", "face", "center"],
-        default=config.get("crop_strategy", "speaker"),
+        default=config.get("crop_strategy", "face"),
         style=qstyle,
     ).ask()
     if crop:

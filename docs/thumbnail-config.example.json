@@ -1,0 +1,80 @@
+{
+  "_comment_about": "Copy this file to .podcli/thumbnail-config.json (or run `podcli init-thumbnail`). Every field is overridable; missing fields fall back to placeholder defaults. _comment_* keys are ignored by the loader -leave them in or strip them.",
+
+  "_comment_opt_in": "Set enabled to false to skip thumbnail generation even when this file exists.",
+  "enabled": true,
+
+  "_comment_canvas": "1080x1920 is YouTube Shorts / TikTok / Reels. Don't change unless you know why.",
+  "width": 1080,
+  "height": 1920,
+
+  "_comment_palette": "Three colors do most of the work. bg_color shows through the photo gradient at the bottom. text_color is line 1. accent_color is the highlight pill behind line 2 (or the frame border).",
+  "bg_color": "#0D0D0D",
+  "text_color": "#FFFFFF",
+  "accent_color": "#FF3366",
+
+  "_comment_frame": "Thin border around the whole 9:16 canvas. Set width to 0 to disable.",
+  "frame_border_width": 3,
+  "frame_border_color": null,
+
+  "_comment_text_box": "The white-ish card that sits over the bottom of the photo. box_y / box_y_with_photo are CSS top values - fraction or px.",
+  "box_x": "55px",
+  "box_y": "73%",
+  "box_y_with_photo": "76%",
+  "box_width": "970px",
+  "box_min_height": "180px",
+  "box_border_width": 3,
+  "box_border_color": null,
+  "box_fill_color": "rgba(13,13,13,0.85)",
+  "box_padding": "24px 32px",
+
+  "_comment_line1": "Top headline. Typically white. Keep short - line1_nowrap will scale text down to fit.",
+  "line1_font_size": "64px",
+  "line1_font_weight": "700",
+  "line1_letter_spacing": "1px",
+  "line1_line_height": 1.15,
+  "line1_margin_bottom": "10px",
+  "line1_uppercase": true,
+  "line1_color": "#FFFFFF",
+  "line1_nowrap": false,
+
+  "_comment_line2": "Second line - usually the punchline / hook. line2_text_color sits on top of the accent-colored highlight pill.",
+  "line2_font_size": "58px",
+  "line2_font_weight": "600",
+  "line2_font_style": "italic",
+  "line2_letter_spacing": "1px",
+  "line2_line_height": 1.15,
+  "line2_uppercase": true,
+  "line2_text_color": "#0D0D0D",
+  "line2_highlight_color": null,
+  "line2_highlight_padding": "6px 20px",
+
+  "_comment_photo": "Guest photo brightness multiplier (1.0 = unchanged). Drop it to 0.7 for moody, raise toward 1.0 for crisp.",
+  "photo_brightness": 0.85,
+
+  "_comment_gradient": "Vertical gradient over the photo. Top gradient softens any logo area; bottom gradient fades into bg_color behind the text box.",
+  "gradient_top_height": "25%",
+  "gradient_top_start_color": "rgba(0,0,0,0.5)",
+  "gradient_top_end_color": "transparent",
+  "gradient_bottom_start": "50%",
+  "gradient_bottom_end_color": "#0D0D0D",
+  "gradient_bottom_fade_point": "70%",
+
+  "_comment_logo": "Position one of: top-left, top-right, top-center, bottom-center, none. Logo image lives under .podcli/assets/ (register via manage_assets).",
+  "logo_position": "bottom-center",
+  "logo_height": "50px",
+  "logo_margin": "50px",
+  "logo_opacity": 0.35,
+
+  "_comment_font": "Use any Google Font or system font. font_import_url is fetched by the rendering browser. Strip both fields to use whatever's local.",
+  "font_family": "'Inter', 'Helvetica Neue', 'Arial', sans-serif",
+  "font_import_url": "https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&display=swap",
+
+  "_comment_variations": "Number of variations rendered per clip. variation_offset_up/down vertically shifts the text block in alternate variants.",
+  "variations": 3,
+  "variation_offset_up": "3%",
+  "variation_offset_down": "2%",
+
+  "_comment_pre_clip_thumbnail": "How long the still thumbnail plays at the start of the rendered short before the live video begins. 0.5–1.0s is the sweet spot.",
+  "intro_duration": 0.8
+}
