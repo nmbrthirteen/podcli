@@ -20,8 +20,11 @@
 </p>
 
 <p align="center">
-  <video src="https://github.com/nmbrthirteen/podcli/releases/download/v0.1.0/podcli-promo-1080p.mp4" controls muted></video>
+  <a href="https://x.com/nikasiradze_/status/2056061654664708570">
+    <img src="public/promo-thumbnail.jpg" alt="Watch the demo" width="720" />
+  </a>
 </p>
+<p align="center"><sub>▶ <a href="https://x.com/nikasiradze_/status/2056061654664708570">Watch the 40-second demo</a></sub></p>
 
 ```bash
 ./podcli process episode.mp4
