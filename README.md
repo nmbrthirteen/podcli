@@ -1,9 +1,33 @@
 <p align="center">
   <img src="public/podcli-logo-transparent.png" height="36" alt="podcli" />
 </p>
+
 <p align="center">
-  AI-powered podcast content studio. Transcribe episodes, find viral moments, render upload-ready Shorts with burned captions — then generate titles, descriptions, thumbnails, and a full publish-ready content package. All from your terminal.
+  <strong>Open-source AI podcast clipper.</strong><br/>
+  Generate vertical clips with face tracking and burned-in captions. CLI, MCP server, and web app.
 </p>
+
+<p align="center">
+  <a href="https://podcli.com"><strong>podcli.com</strong></a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#mcp-server-claude-integration">MCP</a> ·
+  <a href="#features">Features</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/nmbrthirteen/podcli/blob/main/LICENSE"><img src="https://img.shields.io/github/license/nmbrthirteen/podcli" alt="license" /></a>
+  <a href="https://github.com/nmbrthirteen/podcli/stargazers"><img src="https://img.shields.io/github/stars/nmbrthirteen/podcli?style=social" alt="stars" /></a>
+</p>
+
+<p align="center">
+  <video src="https://github.com/nmbrthirteen/podcli/releases/download/v0.1.0/podcli-promo-1080p.mp4" controls muted></video>
+</p>
+
+```bash
+./podcli process episode.mp4
+```
+
+One command transcribes, picks the best moments, crops to the face, and burns captions in. Nothing leaves your machine.
 
 ---
 
@@ -43,7 +67,7 @@ The first half is **video processing** — podcli's core engine. The second half
 Drag your video into the Web UI, or use the CLI:
 
 ```bash
-./podcli process episode.mp4 --transcript transcript.txt --top 8
+./podcli process episode.mp4
 ```
 
 ### 2. Get clips automatically
@@ -117,7 +141,7 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 - **Preset system** — save named configurations per show
 - **MCP server** — 17 tools for Claude Desktop / Claude Code integration
 - **Web UI** — single-page flow at `localhost:3847`
-- **CLI** — one-command processing: `./podcli process video.mp4 --top 5`
+- **CLI** — one-command processing: `./podcli process episode.mp4`
 
 ---
 
@@ -179,14 +203,18 @@ This will:
 ### CLI
 
 ```bash
-# Auto-transcribe + suggest top 5 clips + export
-./podcli process video.mp4
+# One command. Auto-transcribes, picks moments, renders clips.
+./podcli process episode.mp4
+```
 
-# With existing transcript
-./podcli process video.mp4 --transcript transcript.txt --top 5
+With more control:
+
+```bash
+# Use an existing transcript instead of transcribing
+./podcli process episode.mp4 --transcript transcript.txt --top 5
 
 # Full options
-./podcli process video.mp4 \
+./podcli process episode.mp4 \
   --transcript transcript.txt \
   --top 8 \
   --caption-style branded \
