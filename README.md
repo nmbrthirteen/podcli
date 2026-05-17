@@ -21,10 +21,10 @@
 
 <p align="center">
   <a href="https://x.com/nikasiradze_/status/2056061654664708570">
-    <img src="public/promo-thumbnail.jpg" alt="Watch the demo" width="720" />
+    <img src="public/promo.gif" alt="Podcli demo" width="720" />
   </a>
 </p>
-<p align="center"><sub>▶ <a href="https://x.com/nikasiradze_/status/2056061654664708570">Watch the 40-second demo</a></sub></p>
+<p align="center"><sub>▶ <a href="https://x.com/nikasiradze_/status/2056061654664708570">Watch with sound on X</a></sub></p>
 
 ```bash
 ./podcli process episode.mp4
