@@ -2013,6 +2013,19 @@ def _build_speaker_aware_crop(
         has_single = len(single_frames) >= 3
         is_mixed_layout = has_split and has_single
 
+        # TRUE split-screen requires presence on both halves AND a real
+        # horizontal gap between the leftmost and rightmost face (median
+        # gap > 20% of source width). This filters out in-person podcasts
+        # where two heads share one camera near the middle — applying the
+        # seam clamp there would push centered crops to the edge.
+        true_split = False
+        if has_split:
+            sorted_frames = [sorted(faces, key=lambda f: f[0]) for _, faces in split_frames]
+            lefts = [sf[0][0] for sf in sorted_frames]
+            rights = [sf[-1][0] for sf in sorted_frames]
+            gap = int(np.median(rights)) - int(np.median(lefts))
+            true_split = gap > width * 0.20
+
         # Get unique speakers and build speaker segments
         speakers = sorted(set(w.get("speaker") for w in transcript_words if w.get("speaker")))
 
@@ -2122,9 +2135,33 @@ def _build_speaker_aware_crop(
             # Single face or no side mapping: use the best (most confident) face
             return max(faces, key=lambda f: f[3])
 
-        def _crop_xy_for_face(cx, cy):
-            """Compute crop_x and crop_y for a face at (cx, cy)."""
+        def _crop_xy_for_face(cx, cy, side=None):
+            """Compute crop_x and crop_y for a face at (cx, cy).
+
+            On TRUE split-screen sources (faces on both halves with a real
+            gap between them — Riverside/Squadcast tiles, not in-person
+            shots), clamp crop_x so the frame seam stays outside the 9:16
+            window. Otherwise the other speaker bleeds into the crop and
+            the median across frames can land on the gap.
+
+            For square/near-square sources where the 9:16 crop is wider
+            than the winner's half, the clamp falls through (seam_limit < 0
+            or seam_floor + adj_w > width) and the crop will still include
+            the seam. That case requires shrinking adj_w upstream, which
+            this per-frame helper can't do — leave it to the thumbnail
+            path, which can resize.
+            """
             crop_x = cx - adj_w // 2
+            if true_split and side in ("left", "right"):
+                seam_margin = 20
+                if side == "left":
+                    seam_limit = mid_x - adj_w - seam_margin
+                    if seam_limit >= 0:
+                        crop_x = min(crop_x, seam_limit)
+                else:
+                    seam_floor = mid_x + seam_margin
+                    if seam_floor + adj_w <= width:
+                        crop_x = max(crop_x, seam_floor)
             crop_x = max(0, min(crop_x, width - adj_w))
             crop_y = max(0, (height - adjusted_h) // 2)
             return crop_x, crop_y
@@ -2139,7 +2176,8 @@ def _build_speaker_aware_crop(
             if face is None:
                 continue
             cx, cy, fw, conf = face
-            crop_x, crop_y = _crop_xy_for_face(cx, cy)
+            side_hint = speaker_side.get(speaker) if len(faces) >= 2 else None
+            crop_x, crop_y = _crop_xy_for_face(cx, cy, side_hint)
             reliable = len(faces) >= 2 or speaker not in speaker_side
             timed_crops.append((t, crop_x, crop_y, speaker, reliable))
 

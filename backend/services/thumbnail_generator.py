@@ -274,6 +274,13 @@ def extract_face_frame(
         best_face_w = 0
         best_face_h = 0
 
+        # Track per-frame leftmost/rightmost face centers so we can later
+        # tell a TRUE split-screen (two video tiles with a gap between
+        # subjects, like Riverside) from an in-person podcast with two
+        # heads sharing one camera close to center.
+        split_left_cxs = []
+        split_right_cxs = []
+
         # Sample frames from the clip's time range, or middle 80% of video
         if start_second is not None and end_second is not None and end_second > start_second:
             start_t = max(0.0, float(start_second))
@@ -292,6 +299,7 @@ def extract_face_frame(
             h, w = frame.shape[:2]
             faces_detected = detect_faces(detector, frame, src_w, src_h)
 
+            qualifying = []
             for f in faces_detected:
                 conf = f["confidence"]
                 face_w = f["fw"]
@@ -299,6 +307,8 @@ def extract_face_frame(
 
                 if face_w < w * 0.08:
                     continue
+
+                qualifying.append(f)
 
                 # Score: confidence × face size (prefer larger/closer faces)
                 score = conf * (face_w * face_h)
@@ -310,26 +320,77 @@ def extract_face_frame(
                     best_face_w = face_w
                     best_face_h = face_h
 
+            if len(qualifying) >= 2:
+                qualifying.sort(key=lambda f: f["cx"])
+                split_left_cxs.append(qualifying[0]["cx"])
+                split_right_cxs.append(qualifying[-1]["cx"])
+
         cap.release()
 
         if best_frame is None:
             return None
 
         h, w = best_frame.shape[:2]
+        mid_x = w // 2
+        seam_margin = 20
 
-        # Crop a vertical (9:16) slice centered on the face.
-        # The HTML template shows the photo in the top ~78% (1498px of 1920px),
-        # so we need the face well-centered in that visible zone.
+        # TRUE split-screen detection requires BOTH conditions:
+        #   1. ≥3 sampled frames had ≥2 qualifying faces
+        #   2. Median horizontal gap between leftmost and rightmost face
+        #      across those frames exceeds 20% of source width
+        # Pure presence on both halves (#1) is not enough — an in-person
+        # podcast with two heads sharing one camera will satisfy #1 but
+        # not #2, and applying the seam clamp there would push a centered
+        # face to the crop edge.
+        is_split_screen = False
+        winner_side = "left" if best_face_cx < mid_x else "right"
+        if len(split_left_cxs) >= 3:
+            gap = int(np.median(split_right_cxs)) - int(np.median(split_left_cxs))
+            if gap > w * 0.20:
+                is_split_screen = True
+
+        # Compute the natural 9:16 crop window.
         target_ratio = target_width / target_height  # 0.5625
-
         crop_h = h
         crop_w = int(crop_h * target_ratio)
         if crop_w > w:
             crop_w = w
             crop_h = int(crop_w / target_ratio)
 
-        # Center horizontally on face exactly
+        # Seam-exclusion strategy for split-screen sources:
+        #   a) Natural crop already fits inside the winner's half → no-op
+        #      and clamp will be a no-op too
+        #   b) Crop is too wide for one half (square/near-square sources)
+        #      → shrink crop window to fit, then the resize step below
+        #      stretches it back to 1080×1920 (tighter zoom, no bleed)
+        #   c) Shrinking would produce a hyper-zoomed image (< 30% of
+        #      source width or < 200px) → bail on seam exclusion; some
+        #      bleed is better than a degenerate thumbnail
+        MIN_CROP_W = max(200, int(w * 0.30))
+        if is_split_screen:
+            half_room = (mid_x - seam_margin) if winner_side == "left" else (w - mid_x - seam_margin)
+            if half_room < MIN_CROP_W:
+                is_split_screen = False
+            elif crop_w > half_room:
+                shrunk_w = half_room
+                shrunk_h = int(shrunk_w / target_ratio)
+                if shrunk_h <= h and shrunk_w >= MIN_CROP_W:
+                    crop_w = shrunk_w
+                    crop_h = shrunk_h
+                else:
+                    is_split_screen = False
+
+        # Center horizontally on face, then clamp to keep the seam outside
+        # the crop window on true split-screen sources. When the winner
+        # face sits very close to the seam, the clamp will push it toward
+        # the crop's inner edge — that's intentional and a strictly better
+        # failure mode than showing the other speaker's tile bleed.
         crop_x = best_face_cx - crop_w // 2
+        if is_split_screen:
+            if winner_side == "left":
+                crop_x = min(crop_x, mid_x - crop_w - seam_margin)
+            else:
+                crop_x = max(crop_x, mid_x + seam_margin)
         crop_x = max(0, min(crop_x, w - crop_w))
 
         # Place face at ~25% from top so it's centered in the visible photo
