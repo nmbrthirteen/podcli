@@ -436,4 +436,6 @@ Content workflow powered by [PodStack](https://github.com/nmbrthirteen/podstack)
 
 ## License
 
-MIT
+AGPL-3.0. See [LICENSE](LICENSE).
+
+**Need to use Podcli without AGPL terms?** A commercial license is available — email [siradze@nikusha.me](mailto:siradze@nikusha.me) with a one-line description of your use case.

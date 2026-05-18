@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "AI-powered podcast clip generator for TikTok/YouTube Shorts. Transcribe, find viral moments, export vertical clips with burned captions.",
   "type": "module",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "main": "dist/index.js",
   "bin": {
     "podcli": "./podcli"
