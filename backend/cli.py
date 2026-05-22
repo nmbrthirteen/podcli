@@ -43,6 +43,55 @@ from config.paths import paths
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 
 
+def _suggestions_session_path(cache_hash: str) -> str:
+    return os.path.join(paths["home"], "sessions", f"clips-{cache_hash}.json")
+
+
+def _load_suggestions_session(cache_hash: str, top_n: int) -> list | None:
+    if not cache_hash:
+        return None
+    path = _suggestions_session_path(cache_hash)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or payload.get("top_n") != top_n:
+        return None
+    clips = payload.get("clips")
+    if not isinstance(clips, list) or not clips:
+        return None
+    return clips
+
+
+def _save_suggestions_session(cache_hash: str, top_n: int, engine: str | None, clips: list) -> None:
+    if not cache_hash or not clips:
+        return
+    path = _suggestions_session_path(cache_hash)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(
+                {"cache_hash": cache_hash, "top_n": top_n, "engine": engine, "clips": clips},
+                f,
+            )
+    except Exception:
+        pass
+
+
+def _clear_suggestions_session(cache_hash: str) -> None:
+    if not cache_hash:
+        return
+    path = _suggestions_session_path(cache_hash)
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+    except Exception:
+        pass
+
+
 def _should_auto_migrate_cli(args) -> bool:
     if getattr(args, "show_help", False):
         return False
@@ -353,6 +402,15 @@ def cmd_process(args):
     print(f"  Video:   {os.path.basename(video_path)}")
     print()
 
+    # Cache hash for resume — keyed by video size+mtime, shared with transcript cache.
+    cache_hash = ""
+    try:
+        from services.transcript_packer import compute_cache_hash as _compute_cache_hash
+
+        cache_hash = _compute_cache_hash(video_path)
+    except Exception:
+        cache_hash = ""
+
     # ── Step 1: Get transcript ──
     transcript = None
     words = []
@@ -479,12 +537,20 @@ def cmd_process(args):
     # ── Step 3: Score and select clips ──
     top_n = config.get("top_clips", 5)
     clips = None
+    resumed_from_session = False
+
+    if not getattr(args, "no_resume", False):
+        resumed = _load_suggestions_session(cache_hash, top_n)
+        if resumed:
+            print(f"  [3/4] Resumed {len(resumed)} cached suggestions (use --no-resume to regenerate)")
+            clips = resumed
+            resumed_from_session = True
 
     # Try an AI CLI first (uses PodStack knowledge base for intelligent selection)
     from services.claude_suggest import suggest_initial_with_claude, _engine_label, _find_ai_cli
 
     ai_path, ai_engine = _find_ai_cli()
-    if ai_path and config.get("ai_select", True):
+    if not clips and ai_path and config.get("ai_select", True):
         ai_label = _engine_label(ai_engine)
         print(f"  [3/4] Selecting moments with {ai_label} (PodStack)...")
         clips = suggest_initial_with_claude(
@@ -495,6 +561,7 @@ def cmd_process(args):
         if clips:
             actual_engine = next((c.get("_ai_engine") for c in clips if c.get("_ai_engine")), ai_engine)
             print(f"         ✓ {_engine_label(actual_engine)} selected {len(clips)} clips")
+            _save_suggestions_session(cache_hash, top_n, actual_engine, clips)
         else:
             print("         ⚠ AI CLI unavailable, falling back to heuristics")
     elif not config.get("ai_select", True):
@@ -512,6 +579,8 @@ def cmd_process(args):
             min_dur=config.get("min_clip_duration", MIN_CLIP_DURATION),
             max_dur=config.get("max_clip_duration", MAX_CLIP_DURATION),
         )
+        if clips and not resumed_from_session:
+            _save_suggestions_session(cache_hash, top_n, "heuristic", clips)
 
     if not clips:
         print("  No clips found. Try a longer transcript or lower --min-duration.", file=sys.stderr)
@@ -2767,6 +2836,7 @@ def main():
     proc.add_argument("--no-energy", action="store_true", help="Skip audio energy analysis")
     proc.add_argument("--no-speakers", action="store_true", help="Skip speaker detection (faster, uses face detection only)")
     proc.add_argument("--no-cache", action="store_true", help="Force re-transcription (ignore cached transcript)")
+    proc.add_argument("--no-resume", action="store_true", help="Ignore cached AI suggestions for this video and regenerate")
     proc.add_argument("--quality", choices=["low", "medium", "high", "max"], help="Output quality (default: high)")
     proc.add_argument("--allow-ass-fallback", action="store_true", help="Use ASS captions if Remotion rendering fails")
     proc.add_argument("--review-each", action="store_true", help="Review each rendered clip interactively")
