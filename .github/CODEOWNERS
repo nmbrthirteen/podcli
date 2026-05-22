@@ -1,0 +1,9 @@
+# podcli code owners
+# Lines added here are auto-requested for review on PRs touching matching paths.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+#
+# Every PR is reviewed by @nmbrthirteen until additional maintainers are promoted.
+# Promote a trusted contributor by adding them here (and granting Write access in
+# Settings → Collaborators); from then on either reviewer can approve.
+
+*    @nmbrthirteen
