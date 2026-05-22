@@ -9,9 +9,19 @@ import {
   jobStatusToolDef,
   handleJobStatus,
 } from "./handlers/transcribe.handler.js";
-import { suggestClipsToolDef, handleSuggestClips } from "./handlers/suggest-clips.handler.js";
-import { createClipToolDef, handleCreateClip } from "./handlers/create-clip.handler.js";
-import { batchClipsToolDef, handleBatchClips } from "./handlers/batch-clips.handler.js";
+import {
+  suggestClipsToolDef,
+  handleSuggestClips,
+} from "./handlers/suggest-clips.handler.js";
+import {
+  createClipToolDef,
+  handleCreateClip,
+} from "./handlers/create-clip.handler.js";
+import {
+  batchClipsToolDef,
+  handleBatchClips,
+} from "./handlers/batch-clips.handler.js";
+import { registerIntegrationMcpTools } from "./handlers/integrations.handler.js";
 import { FileManager } from "./services/file-manager.js";
 import { KnowledgeBase } from "./services/knowledge-base.js";
 import { AssetManager } from "./services/asset-manager.js";
@@ -166,43 +176,43 @@ async function getWorkflowGuidance(): Promise<string> {
   if (!hasVideo) {
     lines.push(
       "NEXT: No video loaded yet. To begin:\n" +
-      "  → Use transcribe_podcast(file_path: \"/path/to/episode.mp4\") to transcribe and set the video in one step\n" +
-      "  → Or use set_video(file_path: ...) if you'll import a transcript separately"
+        '  → Use transcribe_podcast(file_path: "/path/to/episode.mp4") to transcribe and set the video in one step\n' +
+        "  → Or use set_video(file_path: ...) if you'll import a transcript separately",
     );
   } else if (!hasTranscript && !hasRawTranscript) {
     lines.push(
       `NEXT: Video is loaded but no transcript yet.\n` +
-      `  → Use transcribe_podcast(file_path: \"${state.videoPath}\") to auto-transcribe with Whisper\n` +
-      `  → Or the user can paste a transcript in the Web UI and you can read it with get_ui_state(include_transcript: true)`
+        `  → Use transcribe_podcast(file_path: \"${state.videoPath}\") to auto-transcribe with Whisper\n` +
+        `  → Or the user can paste a transcript in the Web UI and you can read it with get_ui_state(include_transcript: true)`,
     );
   } else if (hasRawTranscript && !hasTranscript) {
     lines.push(
       "NEXT: Raw transcript text is available but not yet parsed.\n" +
-      "  → Use get_ui_state(include_transcript: true) to read the raw text\n" +
-      "  → Then use parse_transcript to get word-level timestamps\n" +
-      "  → Or analyze the text directly and call suggest_clips with your findings"
+        "  → Use get_ui_state(include_transcript: true) to read the raw text\n" +
+        "  → Then use parse_transcript to get word-level timestamps\n" +
+        "  → Or analyze the text directly and call suggest_clips with your findings",
     );
   } else if (hasTranscript && suggestions.length === 0) {
     lines.push(
       `NEXT: Transcript is ready (${wordCount} words). Time to find viral moments!\n` +
-      "  → Use get_ui_state(include_transcript: true) to read the full transcript\n" +
-      "  → Analyze it for the most engaging, viral-worthy moments\n" +
-      "  → Then call suggest_clips with your suggestions (title, start_second, end_second, reasoning)"
+        "  → Use get_ui_state(include_transcript: true) to read the full transcript\n" +
+        "  → Analyze it for the most engaging, viral-worthy moments\n" +
+        "  → Then call suggest_clips with your suggestions (title, start_second, end_second, reasoning)",
     );
   } else if (phase === "review" && selectedCount > 0) {
     lines.push(
       `NEXT: ${selectedCount} clips are ready for export!\n` +
-      "  → Use batch_create_clips(export_selected: true) to export all selected clips at once\n" +
-      "  → Or use create_clip(clip_number: N) to export a specific one\n" +
-      "  → Use modify_clip to adjust timing or titles before export\n" +
-      "  → Use toggle_clip to select/deselect clips"
+        "  → Use batch_create_clips(export_selected: true) to export all selected clips at once\n" +
+        "  → Or use create_clip(clip_number: N) to export a specific one\n" +
+        "  → Use modify_clip to adjust timing or titles before export\n" +
+        "  → Use toggle_clip to select/deselect clips",
     );
-  } else if (phase === "done" || phase === "idle" && suggestions.length > 0) {
+  } else if (phase === "done" || (phase === "idle" && suggestions.length > 0)) {
     lines.push(
       "DONE: Clips have been exported!\n" +
-      "  → Use list_outputs to see all rendered clips\n" +
-      "  → Use get_ui_state(include_transcript: true) to find more moments\n" +
-      "  → Try different caption styles (hormozi, karaoke, subtle, branded) for variety"
+        "  → Use list_outputs to see all rendered clips\n" +
+        "  → Use get_ui_state(include_transcript: true) to find more moments\n" +
+        "  → Try different caption styles (hormozi, karaoke, subtle, branded) for variety",
     );
   }
 
@@ -237,11 +247,25 @@ export function createServer(): McpServer {
       num_speakers: z
         .number()
         .optional()
-        .describe("Exact number of speakers if known (e.g. 2). Auto-detects if omitted."),
+        .describe(
+          "Exact number of speakers if known (e.g. 2). Auto-detects if omitted.",
+        ),
     },
-    async ({ file_path, model_size, language, enable_diarization, num_speakers }) => {
+    async ({
+      file_path,
+      model_size,
+      language,
+      enable_diarization,
+      num_speakers,
+    }) => {
       try {
-        const result = await handleTranscribe({ file_path, model_size, language, enable_diarization, num_speakers });
+        const result = await handleTranscribe({
+          file_path,
+          model_size,
+          language,
+          enable_diarization,
+          num_speakers,
+        });
 
         // Push FULL transcript (words[] + segments[]) to Web UI state from the
         // on-disk cache — NOT the trimmed MCP response. Without words in UI
@@ -265,7 +289,7 @@ export function createServer(): McpServer {
         const text = withNextStep(
           await withKnowledge(result),
           "Transcript is ready! Now read it with get_ui_state(include_transcript: true), " +
-          "analyze it for viral moments, then call suggest_clips with your findings."
+            "analyze it for viral moments, then call suggest_clips with your findings.",
         );
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
@@ -275,7 +299,7 @@ export function createServer(): McpServer {
           isError: true,
         };
       }
-    }
+    },
   );
 
   // =============================================
@@ -286,7 +310,10 @@ export function createServer(): McpServer {
     transcribeStartToolDef.description,
     {
       file_path: z.string(),
-      model_size: z.enum(["tiny", "base", "small", "medium", "large"]).optional().default("base"),
+      model_size: z
+        .enum(["tiny", "base", "small", "medium", "large"])
+        .optional()
+        .default("base"),
       language: z.string().optional(),
       enable_diarization: z.boolean().optional().default(true),
       num_speakers: z.number().optional(),
@@ -302,7 +329,7 @@ export function createServer(): McpServer {
           isError: true,
         };
       }
-    }
+    },
   );
 
   // =============================================
@@ -326,7 +353,7 @@ export function createServer(): McpServer {
           isError: true,
         };
       }
-    }
+    },
   );
 
   // =============================================
@@ -345,7 +372,9 @@ export function createServer(): McpServer {
             segments: z
               .array(z.object({ start: z.number(), end: z.number() }))
               .optional()
-              .describe("Multi-cut keep-ranges. Omit for a single continuous clip."),
+              .describe(
+                "Multi-cut keep-ranges. Omit for a single continuous clip.",
+              ),
             reasoning: z.string(),
             preview_text: z.string().optional(),
             content_type: z.string().optional(),
@@ -353,7 +382,7 @@ export function createServer(): McpServer {
             suggested_caption_style: z
               .enum(["hormozi", "karaoke", "subtle", "branded"])
               .optional(),
-          })
+          }),
         )
         .describe("Array of suggested clip moments"),
     },
@@ -375,9 +404,12 @@ export function createServer(): McpServer {
         const existing = await history.list(20);
         let text = await withKnowledge(result);
         if (existing.length > 0) {
-          const summary = existing.map(
-            (e) => `  - "${e.title}" ${e.start_second}s–${e.end_second}s (${e.caption_style})`
-          ).join("\n");
+          const summary = existing
+            .map(
+              (e) =>
+                `  - "${e.title}" ${e.start_second}s–${e.end_second}s (${e.caption_style})`,
+            )
+            .join("\n");
           text += `\n\n[Previously Created Clips — avoid duplicates]\n${summary}`;
         }
 
@@ -386,10 +418,10 @@ export function createServer(): McpServer {
         text = withNextStep(
           text,
           `${clipCount} clips suggested and sent to the UI! The user can review them in the Web UI.\n` +
-          "  → To export all at once: batch_create_clips(export_selected: true)\n" +
-          "  → To export specific ones: create_clip(clip_number: 1) or batch_create_clips(clip_numbers: [1, 3, 5])\n" +
-          "  → To adjust: modify_clip(clip_number: N, updates: {start_second: ..., end_second: ...})\n" +
-          "  → To remove one: toggle_clip(clip_number: N, selected: false)"
+            "  → To export all at once: batch_create_clips(export_selected: true)\n" +
+            "  → To export specific ones: create_clip(clip_number: 1) or batch_create_clips(clip_numbers: [1, 3, 5])\n" +
+            "  → To adjust: modify_clip(clip_number: N, updates: {start_second: ..., end_second: ...})\n" +
+            "  → To remove one: toggle_clip(clip_number: N, selected: false)",
         );
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
@@ -399,7 +431,7 @@ export function createServer(): McpServer {
           isError: true,
         };
       }
-    }
+    },
   );
 
   // =============================================
@@ -409,10 +441,30 @@ export function createServer(): McpServer {
     createClipToolDef.name,
     createClipToolDef.description,
     {
-      clip_number: z.number().optional().describe("Export a suggested clip by its number (from suggest_clips). Auto-fills video_path, start/end times, title, and transcript_words from session state."),
-      video_path: z.string().optional().describe("Path to the original podcast video. Auto-loaded from session state if clip_number is provided."),
-      start_second: z.number().optional().describe("Clip start time in seconds. Auto-loaded from clip_number if omitted."),
-      end_second: z.number().optional().describe("Clip end time in seconds. Auto-loaded from clip_number if omitted."),
+      clip_number: z
+        .number()
+        .optional()
+        .describe(
+          "Export a suggested clip by its number (from suggest_clips). Auto-fills video_path, start/end times, title, and transcript_words from session state.",
+        ),
+      video_path: z
+        .string()
+        .optional()
+        .describe(
+          "Path to the original podcast video. Auto-loaded from session state if clip_number is provided.",
+        ),
+      start_second: z
+        .number()
+        .optional()
+        .describe(
+          "Clip start time in seconds. Auto-loaded from clip_number if omitted.",
+        ),
+      end_second: z
+        .number()
+        .optional()
+        .describe(
+          "Clip end time in seconds. Auto-loaded from clip_number if omitted.",
+        ),
       caption_style: z
         .enum(["hormozi", "karaoke", "subtle", "branded"])
         .optional()
@@ -427,7 +479,9 @@ export function createServer(): McpServer {
         .boolean()
         .optional()
         .default(false)
-        .describe("Allow ASS caption fallback if Remotion rendering fails (default: false)"),
+        .describe(
+          "Allow ASS caption fallback if Remotion rendering fails (default: false)",
+        ),
       transcript_words: z
         .array(
           z.object({
@@ -435,19 +489,30 @@ export function createServer(): McpServer {
             start: z.number(),
             end: z.number(),
             confidence: z.number().optional().default(0),
-          })
+          }),
         )
         .optional()
-        .describe("Word-level timestamps. Auto-loaded from session state if omitted."),
+        .describe(
+          "Word-level timestamps. Auto-loaded from session state if omitted.",
+        ),
       title: z.string().optional().default("clip").describe("Clip title"),
       logo_path: z
         .string()
         .optional()
-        .describe("Path or registered asset name for PNG logo. Shown in top-left (branded style)."),
+        .describe(
+          "Path or registered asset name for PNG logo. Shown in top-left (branded style).",
+        ),
       outro_path: z
         .string()
         .optional()
         .describe("Path to an outro video to append at the end of the clip"),
+      keep_caption_overlay: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Keep ProRes 4444 alpha caption overlay beside the render (for DaVinci Resolve export). Returns caption_overlay_path and cropped_source_path.",
+        ),
     },
     async (params) => {
       try {
@@ -459,33 +524,49 @@ export function createServer(): McpServer {
 
         // Resolve clip_number from UI state BEFORE routing
         let keepSegments: Array<{ start: number; end: number }> | null = null;
-        if (params.clip_number != null && (params.start_second == null || params.end_second == null)) {
+        if (
+          params.clip_number != null &&
+          (params.start_second == null || params.end_second == null)
+        ) {
           const uiState = await readUIState();
           const suggestions = uiState?.suggestions ?? [];
           const settings = uiState?.settings ?? {};
           const idx = (params.clip_number as number) - 1;
           if (idx < 0 || idx >= suggestions.length) {
             return {
-              content: [{
-                type: "text" as const,
-                text: `Clip #${params.clip_number} not found. Available: 1-${suggestions.length}`,
-              }],
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Clip #${params.clip_number} not found. Available: 1-${suggestions.length}`,
+                },
+              ],
             };
           }
           const suggestion = suggestions[idx];
-          if (params.start_second == null) params.start_second = suggestion.start_second as number;
-          if (params.end_second == null) params.end_second = suggestion.end_second as number;
-          if (!params.video_path) params.video_path = (uiState?.videoPath || uiState?.filePath || "") as string;
-          if (!params.title || params.title === "clip") params.title = (suggestion.title as string) || "clip";
+          if (params.start_second == null)
+            params.start_second = suggestion.start_second as number;
+          if (params.end_second == null)
+            params.end_second = suggestion.end_second as number;
+          if (!params.video_path)
+            params.video_path = (uiState?.videoPath ||
+              uiState?.filePath ||
+              "") as string;
+          if (!params.title || params.title === "clip")
+            params.title = (suggestion.title as string) || "clip";
           if (!params.caption_style || params.caption_style === "hormozi") {
-            params.caption_style = ((suggestion.suggested_caption_style as string) || settings.captionStyle || "hormozi") as typeof params.caption_style;
+            params.caption_style =
+              ((suggestion.suggested_caption_style as string) ||
+                settings.captionStyle ||
+                "hormozi") as typeof params.caption_style;
           }
           if (!params.transcript_words) {
             const transcript = uiState?.transcript;
             if (transcript?.words) params.transcript_words = transcript.words;
           }
           // Pull multi-cut segments from suggestion
-          const segs = suggestion.segments as Array<{ start: number; end: number }> | undefined;
+          const segs = suggestion.segments as
+            | Array<{ start: number; end: number }>
+            | undefined;
           if (segs && segs.length > 0) {
             keepSegments = segs;
           }
@@ -497,14 +578,16 @@ export function createServer(): McpServer {
           params.start_second as number,
           params.end_second as number,
           (params.caption_style || "hormozi") as string,
-          (params.crop_strategy || "speaker") as string
+          (params.crop_strategy || "speaker") as string,
         );
         if (dup) {
           return {
-            content: [{
-              type: "text" as const,
-              text: `Duplicate found! This clip was already created on ${dup.created_at}.\nOutput: ${dup.output_path}\nUse a different time range or style to create a new clip.`,
-            }],
+            content: [
+              {
+                type: "text" as const,
+                text: `Duplicate found! This clip was already created on ${dup.created_at}.\nOutput: ${dup.output_path}\nUse a different time range or style to create a new clip.`,
+              },
+            ],
           };
         }
 
@@ -517,15 +600,17 @@ export function createServer(): McpServer {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               video_path: params.video_path,
-              clips: [{
-                start_second: params.start_second,
-                end_second: params.end_second,
-                title: (params.title || "clip") as string,
-                caption_style: params.caption_style || "hormozi",
-                crop_strategy: params.crop_strategy || "speaker",
-                allow_ass_fallback: params.allow_ass_fallback === true,
-                ...(keepSegments && { segments: keepSegments }),
-              }],
+              clips: [
+                {
+                  start_second: params.start_second,
+                  end_second: params.end_second,
+                  title: (params.title || "clip") as string,
+                  caption_style: params.caption_style || "hormozi",
+                  crop_strategy: params.crop_strategy || "speaker",
+                  allow_ass_fallback: params.allow_ass_fallback === true,
+                  ...(keepSegments && { segments: keepSegments }),
+                },
+              ],
               transcript_words: params.transcript_words,
               logo_path: params.logo_path || null,
               outro_path: params.outro_path || null,
@@ -539,7 +624,9 @@ export function createServer(): McpServer {
             const deadline = Date.now() + 3600_000;
             while (Date.now() < deadline) {
               await new Promise((r) => setTimeout(r, 2000));
-              const pollRes = await fetch(`http://localhost:3847/api/job/${jobId}`);
+              const pollRes = await fetch(
+                `http://localhost:3847/api/job/${jobId}`,
+              );
               if (!pollRes.ok) break;
               const job = (await pollRes.json()) as WebJob;
               if (job.status === "done") {
@@ -556,8 +643,12 @@ export function createServer(): McpServer {
             }
           }
         } catch (webErr: unknown) {
-          const webMsg = webErr instanceof Error ? webErr.message : String(webErr);
-          if (!webMsg.includes("ECONNREFUSED") && !webMsg.includes("fetch failed")) {
+          const webMsg =
+            webErr instanceof Error ? webErr.message : String(webErr);
+          if (
+            !webMsg.includes("ECONNREFUSED") &&
+            !webMsg.includes("fetch failed")
+          ) {
             // Unexpected error — still try direct fallback
           }
         }
@@ -590,9 +681,9 @@ export function createServer(): McpServer {
         const clipText = withNextStep(
           finalResult,
           "Clip exported to data/output/! You can:\n" +
-          "  → Export more: create_clip(clip_number: N) or batch_create_clips(export_selected: true)\n" +
-          "  → List all outputs: list_outputs\n" +
-          "  → Try a different style: create_clip(clip_number: N, caption_style: \"karaoke\")"
+            "  → Export more: create_clip(clip_number: N) or batch_create_clips(export_selected: true)\n" +
+            "  → List all outputs: list_outputs\n" +
+            '  → Try a different style: create_clip(clip_number: N, caption_style: "karaoke")',
         );
         return { content: [{ type: "text" as const, text: clipText }] };
       } catch (err: unknown) {
@@ -602,7 +693,7 @@ export function createServer(): McpServer {
           isError: true,
         };
       }
-    }
+    },
   );
 
   // =============================================
@@ -612,20 +703,36 @@ export function createServer(): McpServer {
     batchClipsToolDef.name,
     batchClipsToolDef.description,
     {
-      video_path: z.string().optional().describe("Path to the original podcast video. Auto-loaded from session state if omitted."),
+      video_path: z
+        .string()
+        .optional()
+        .describe(
+          "Path to the original podcast video. Auto-loaded from session state if omitted.",
+        ),
       clips: z
         .array(
           z.object({
             start_second: z.number(),
             end_second: z.number(),
             title: z.string().optional(),
-            caption_style: z.enum(["hormozi", "karaoke", "subtle", "branded"]).optional(),
+            caption_style: z
+              .enum(["hormozi", "karaoke", "subtle", "branded"])
+              .optional(),
             crop_strategy: z.enum(["center", "face", "speaker"]).optional(),
             allow_ass_fallback: z.boolean().optional(),
-          })
+            keep_caption_overlay: z.boolean().optional(),
+          }),
         )
         .optional()
-        .describe("Array of clips to create. Auto-loaded from suggestions if omitted."),
+        .describe(
+          "Array of clips to create. Auto-loaded from suggestions if omitted.",
+        ),
+      keep_caption_overlay: z
+        .boolean()
+        .optional()
+        .describe(
+          "Keep ProRes 4444 alpha caption overlays for DaVinci Resolve export (batch-level default; per-clip overrides).",
+        ),
       transcript_words: z
         .array(
           z.object({
@@ -633,19 +740,29 @@ export function createServer(): McpServer {
             start: z.number(),
             end: z.number(),
             confidence: z.number().optional().default(0),
-          })
+          }),
         )
         .optional()
-        .describe("Word-level timestamps. Auto-loaded from session state if omitted."),
-      export_selected: z.boolean().optional().describe("If true, export all selected suggestions from the UI."),
-      clip_numbers: z.array(z.number()).optional().describe("Export specific clip numbers from suggestions (e.g. [1, 3, 5])."),
+        .describe(
+          "Word-level timestamps. Auto-loaded from session state if omitted.",
+        ),
+      export_selected: z
+        .boolean()
+        .optional()
+        .describe("If true, export all selected suggestions from the UI."),
+      clip_numbers: z
+        .array(z.number())
+        .optional()
+        .describe(
+          "Export specific clip numbers from suggestions (e.g. [1, 3, 5]).",
+        ),
       async_mode: z
         .boolean()
         .optional()
         .default(false)
         .describe(
           "Return a job_id immediately and render in background. Use for multi-clip batches " +
-          "so Claude can poll job_status and emit live progress. Requires Web UI running."
+            "so Claude can poll job_status and emit live progress. Requires Web UI running.",
         ),
     },
     async (params) => {
@@ -659,7 +776,10 @@ export function createServer(): McpServer {
           const suggestions = uiState?.suggestions ?? [];
           const settings = uiState?.settings ?? {};
           const deselected = (uiState?.deselectedIndices as number[]) || [];
-          if (!resolvedVideoPath) resolvedVideoPath = (uiState?.videoPath || uiState?.filePath || "") as string;
+          if (!resolvedVideoPath)
+            resolvedVideoPath = (uiState?.videoPath ||
+              uiState?.filePath ||
+              "") as string;
           if (!resolvedTranscriptWords) {
             const transcript = uiState?.transcript;
             if (transcript?.words) resolvedTranscriptWords = transcript.words;
@@ -672,10 +792,14 @@ export function createServer(): McpServer {
                 start_second: s.start_second,
                 end_second: s.end_second,
                 title: s.title || `clip_${i + 1}`,
-                caption_style: s.suggested_caption_style || settings.captionStyle || "hormozi",
+                caption_style:
+                  s.suggested_caption_style ||
+                  settings.captionStyle ||
+                  "hormozi",
                 crop_strategy: settings.cropStrategy || "speaker",
                 allow_ass_fallback: false,
-                ...(s.segments && s.segments.length > 0 && { keep_segments: s.segments }),
+                ...(s.segments &&
+                  s.segments.length > 0 && { keep_segments: s.segments }),
               })) as any;
           } else if (params.clip_numbers) {
             resolvedClips = (params.clip_numbers as number[])
@@ -686,10 +810,14 @@ export function createServer(): McpServer {
                   start_second: s.start_second,
                   end_second: s.end_second,
                   title: s.title || `clip_${n}`,
-                  caption_style: s.suggested_caption_style || settings.captionStyle || "hormozi",
+                  caption_style:
+                    s.suggested_caption_style ||
+                    settings.captionStyle ||
+                    "hormozi",
                   crop_strategy: settings.cropStrategy || "speaker",
                   allow_ass_fallback: false,
-                  ...(s.segments && s.segments.length > 0 && { keep_segments: s.segments }),
+                  ...(s.segments &&
+                    s.segments.length > 0 && { keep_segments: s.segments }),
                 };
               }) as any;
           }
@@ -735,7 +863,9 @@ export function createServer(): McpServer {
             const deadline = Date.now() + 3600_000;
             while (Date.now() < deadline) {
               await new Promise((r) => setTimeout(r, 2000));
-              const pollRes = await fetch(`http://localhost:3847/api/job/${jobId}`);
+              const pollRes = await fetch(
+                `http://localhost:3847/api/job/${jobId}`,
+              );
               if (!pollRes.ok) break;
               const job = (await pollRes.json()) as WebJob;
               if (job.status === "done") {
@@ -752,8 +882,12 @@ export function createServer(): McpServer {
             }
           }
         } catch (webErr: unknown) {
-          const webMsg = webErr instanceof Error ? webErr.message : String(webErr);
-          if (!webMsg.includes("ECONNREFUSED") && !webMsg.includes("fetch failed")) {
+          const webMsg =
+            webErr instanceof Error ? webErr.message : String(webErr);
+          if (
+            !webMsg.includes("ECONNREFUSED") &&
+            !webMsg.includes("fetch failed")
+          ) {
             // Unexpected error — still try fallback
           }
         }
@@ -790,22 +924,24 @@ export function createServer(): McpServer {
         const batchText = withNextStep(
           finalResult,
           "Batch export complete! Clips are in data/output/. You can:\n" +
-          "  → Use list_outputs to see all rendered clips with file sizes\n" +
-          "  → Find more moments: get_ui_state(include_transcript: true) and suggest_clips again\n" +
-          "  → Re-export with different styles: update_settings then batch_create_clips(export_selected: true)"
+            "  → Use list_outputs to see all rendered clips with file sizes\n" +
+            "  → Find more moments: get_ui_state(include_transcript: true) and suggest_clips again\n" +
+            "  → Re-export with different styles: update_settings then batch_create_clips(export_selected: true)",
         );
         return { content: [{ type: "text" as const, text: batchText }] };
       } catch (err: unknown) {
         // Notify UI of error
         await uiPing({ phase: "review" });
-        log.error("batch_create_clips failed", { err: err instanceof Error ? err.stack : String(err) });
+        log.error("batch_create_clips failed", {
+          err: err instanceof Error ? err.stack : String(err),
+        });
         const msg = err instanceof Error ? err.message : String(err);
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
         };
       }
-    }
+    },
   );
 
   // =============================================
@@ -815,16 +951,31 @@ export function createServer(): McpServer {
     "knowledge_base",
     "Read or manage the podcli knowledge base. These are .md files that provide context about the podcast (hosts, style, audience, etc). Always read the knowledge base before suggesting or creating clips.",
     {
-      action: z.enum(["read_all", "list", "read", "write", "delete"]).describe("Action to perform"),
-      filename: z.string().optional().describe("Filename for read/write/delete (e.g. 'style.md')"),
-      content: z.string().optional().describe("Markdown content for write action"),
+      action: z
+        .enum(["read_all", "list", "read", "write", "delete"])
+        .describe("Action to perform"),
+      filename: z
+        .string()
+        .optional()
+        .describe("Filename for read/write/delete (e.g. 'style.md')"),
+      content: z
+        .string()
+        .optional()
+        .describe("Markdown content for write action"),
     },
     async ({ action, filename, content }) => {
       try {
         if (action === "read_all" || action === "list") {
           const files = await kb.listFiles();
           if (files.length === 0) {
-            return { content: [{ type: "text" as const, text: "Knowledge base is empty. Add .md files to .podcli/knowledge/ in the project directory." }] };
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: "Knowledge base is empty. Add .md files to .podcli/knowledge/ in the project directory.",
+                },
+              ],
+            };
           }
           const summaries: string[] = [];
           for (const f of files) {
@@ -832,7 +983,9 @@ export function createServer(): McpServer {
             try {
               const content = await kb.readFile(f.filename);
               // First non-empty, non-heading line as preview
-              const lines = content.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
+              const lines = content
+                .split("\n")
+                .filter((l: string) => l.trim() && !l.startsWith("#"));
               preview = lines[0]?.trim().slice(0, 100) || "";
             } catch (err) {
               log.debug("Failed to read KB file for preview", {
@@ -840,9 +993,18 @@ export function createServer(): McpServer {
                 err: err instanceof Error ? err.message : String(err),
               });
             }
-            summaries.push(`- ${f.filename} (updated ${f.updatedAt})${preview ? `\n  ${preview}` : ""}`);
+            summaries.push(
+              `- ${f.filename} (updated ${f.updatedAt})${preview ? `\n  ${preview}` : ""}`,
+            );
           }
-          return { content: [{ type: "text" as const, text: `Knowledge base (${files.length} files) — use read action with filename to get full content:\n${summaries.join("\n")}` }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Knowledge base (${files.length} files) — use read action with filename to get full content:\n${summaries.join("\n")}`,
+              },
+            ],
+          };
         }
         if (action === "read" && filename) {
           const text = await kb.readFile(filename);
@@ -850,18 +1012,32 @@ export function createServer(): McpServer {
         }
         if (action === "write" && filename && content) {
           await kb.writeFile(filename, content);
-          return { content: [{ type: "text" as const, text: `Saved ${filename}` }] };
+          return {
+            content: [{ type: "text" as const, text: `Saved ${filename}` }],
+          };
         }
         if (action === "delete" && filename) {
           await kb.deleteFile(filename);
-          return { content: [{ type: "text" as const, text: `Deleted ${filename}` }] };
+          return {
+            content: [{ type: "text" as const, text: `Deleted ${filename}` }],
+          };
         }
-        return { content: [{ type: "text" as const, text: "Invalid action or missing parameters." }] };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Invalid action or missing parameters.",
+            },
+          ],
+        };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -871,41 +1047,88 @@ export function createServer(): McpServer {
     "manage_assets",
     "Register and manage reusable assets (logos, videos). Registered assets can be referenced by name in create_clip instead of full paths.",
     {
-      action: z.enum(["list", "register", "unregister", "resolve", "import"]).describe("Action to perform"),
+      action: z
+        .enum(["list", "register", "unregister", "resolve", "import"])
+        .describe("Action to perform"),
       name: z.string().optional().describe("Asset name (e.g. 'podcast-logo')"),
       path: z.string().optional().describe("Absolute file path (for register)"),
-      type: z.enum(["logo", "video", "image", "other"]).optional().describe("Asset type (for register/list filter)"),
+      type: z
+        .enum(["logo", "video", "image", "other"])
+        .optional()
+        .describe("Asset type (for register/list filter)"),
     },
     async ({ action, name, path, type }) => {
       try {
         if (action === "list") {
           const items = await assets.list(type || undefined);
-          if (items.length === 0) return { content: [{ type: "text" as const, text: "No assets registered." }] };
-          const text = items.map((a) => `- ${a.name} (${a.type}): ${a.path}`).join("\n");
+          if (items.length === 0)
+            return {
+              content: [
+                { type: "text" as const, text: "No assets registered." },
+              ],
+            };
+          const text = items
+            .map((a) => `- ${a.name} (${a.type}): ${a.path}`)
+            .join("\n");
           return { content: [{ type: "text" as const, text }] };
         }
         if (action === "register" && name && path) {
           const asset = await assets.register(name, path, type || "other");
-          return { content: [{ type: "text" as const, text: `Registered "${asset.name}" → ${asset.path}` }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Registered "${asset.name}" → ${asset.path}`,
+              },
+            ],
+          };
         }
         if (action === "unregister" && name) {
           await assets.unregister(name);
-          return { content: [{ type: "text" as const, text: `Unregistered "${name}"` }] };
+          return {
+            content: [
+              { type: "text" as const, text: `Unregistered "${name}"` },
+            ],
+          };
         }
         if (action === "resolve" && name) {
           const resolved = await assets.resolve(name);
-          return { content: [{ type: "text" as const, text: resolved || `Asset "${name}" not found.` }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: resolved || `Asset "${name}" not found.`,
+              },
+            ],
+          };
         }
         if (action === "import" && path && name) {
           const asset = await assets.importFile(path, name, type || "other");
-          return { content: [{ type: "text" as const, text: `Imported "${asset.name}" → ${asset.path}` }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Imported "${asset.name}" → ${asset.path}`,
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: "Invalid action or missing parameters." }] };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Invalid action or missing parameters.",
+            },
+          ],
+        };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -915,42 +1138,101 @@ export function createServer(): McpServer {
     "clip_history",
     "View previously created clips to avoid duplicates. Check before creating new clips.",
     {
-      action: z.enum(["list", "check"]).describe("list = recent clips, check = find duplicate"),
-      source_video: z.string().optional().describe("Source video path (for check or filter)"),
+      action: z
+        .enum(["list", "check"])
+        .describe("list = recent clips, check = find duplicate"),
+      source_video: z
+        .string()
+        .optional()
+        .describe("Source video path (for check or filter)"),
       start_second: z.number().optional().describe("Start time (for check)"),
       end_second: z.number().optional().describe("End time (for check)"),
-      caption_style: z.string().optional().describe("Caption style (for check)"),
-      crop_strategy: z.string().optional().describe("Crop strategy (for check)"),
+      caption_style: z
+        .string()
+        .optional()
+        .describe("Caption style (for check)"),
+      crop_strategy: z
+        .string()
+        .optional()
+        .describe("Crop strategy (for check)"),
       limit: z.number().optional().default(20).describe("Max results for list"),
     },
-    async ({ action, source_video, start_second, end_second, caption_style, crop_strategy, limit }) => {
+    async ({
+      action,
+      source_video,
+      start_second,
+      end_second,
+      caption_style,
+      crop_strategy,
+      limit,
+    }) => {
       try {
         if (action === "list") {
           const entries = source_video
             ? await history.getBySource(source_video)
             : await history.list(limit || 20);
-          if (entries.length === 0) return { content: [{ type: "text" as const, text: "No clips in history." }] };
+          if (entries.length === 0)
+            return {
+              content: [
+                { type: "text" as const, text: "No clips in history." },
+              ],
+            };
           const text = entries
-            .map((e) => `- "${e.title}" ${e.start_second}s–${e.end_second}s | ${e.caption_style} | ${e.created_at} | ${e.output_path}`)
+            .map(
+              (e) =>
+                `- "${e.title}" ${e.start_second}s–${e.end_second}s | ${e.caption_style} | ${e.created_at} | ${e.output_path}`,
+            )
             .join("\n");
           return { content: [{ type: "text" as const, text }] };
         }
-        if (action === "check" && source_video && start_second !== undefined && end_second !== undefined) {
+        if (
+          action === "check" &&
+          source_video &&
+          start_second !== undefined &&
+          end_second !== undefined
+        ) {
           const dup = await history.findDuplicate(
-            source_video, start_second, end_second,
-            caption_style || "hormozi", crop_strategy || "speaker"
+            source_video,
+            start_second,
+            end_second,
+            caption_style || "hormozi",
+            crop_strategy || "speaker",
           );
           if (dup) {
-            return { content: [{ type: "text" as const, text: `Duplicate found: "${dup.title}" created ${dup.created_at}\nOutput: ${dup.output_path}` }] };
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Duplicate found: "${dup.title}" created ${dup.created_at}\nOutput: ${dup.output_path}`,
+                },
+              ],
+            };
           }
-          return { content: [{ type: "text" as const, text: "No duplicate found. Safe to create." }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "No duplicate found. Safe to create.",
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: "Invalid action or missing parameters." }] };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Invalid action or missing parameters.",
+            },
+          ],
+        };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -959,17 +1241,21 @@ export function createServer(): McpServer {
   server.tool(
     "get_ui_state",
     "Read the current podcli session state and get guidance on what to do next. " +
-    "Returns: video path, transcript status, clip suggestions, settings, and workflow next steps.\n\n" +
-    "IMPORTANT: Call this FIRST when starting a new conversation to understand the current state.\n" +
-    "Clips are numbered #1, #2, etc. Use these numbers with create_clip(clip_number), " +
-    "batch_create_clips(clip_numbers), modify_clip, and toggle_clip.\n\n" +
-    "Set include_transcript=true to analyze transcript content. Returns a compact phrase-grouped " +
-    "markdown view (~10x smaller than raw segments) with speaker attribution, silence gaps, and " +
-    "optional energy peaks — the primary surface for reasoning about clip boundaries.",
+      "Returns: video path, transcript status, clip suggestions, settings, and workflow next steps.\n\n" +
+      "IMPORTANT: Call this FIRST when starting a new conversation to understand the current state.\n" +
+      "Clips are numbered #1, #2, etc. Use these numbers with create_clip(clip_number), " +
+      "batch_create_clips(clip_numbers), modify_clip, and toggle_clip.\n\n" +
+      "Set include_transcript=true to analyze transcript content. Returns a compact phrase-grouped " +
+      "markdown view (~10x smaller than raw segments) with speaker attribution, silence gaps, and " +
+      "optional energy peaks — the primary surface for reasoning about clip boundaries.",
     {
-      include_transcript: z.boolean().optional().default(false).describe(
-        "Include full transcript segments in the response. Set true when analyzing content for clip suggestions."
-      ),
+      include_transcript: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Include full transcript segments in the response. Set true when analyzing content for clip suggestions.",
+        ),
     },
     async ({ include_transcript }) => {
       try {
@@ -980,29 +1266,38 @@ export function createServer(): McpServer {
         const lines: string[] = [];
         lines.push(`Phase: ${state.phase}`);
         lines.push(`Video: ${state.videoPath || state.filePath || "(none)"}`);
-        lines.push(`Settings: caption=${state.settings?.captionStyle}, crop=${state.settings?.cropStrategy}, logo=${state.settings?.logoPath || "none"}`);
+        lines.push(
+          `Settings: caption=${state.settings?.captionStyle}, crop=${state.settings?.cropStrategy}, logo=${state.settings?.logoPath || "none"}`,
+        );
         lines.push(`Transcript: ${state.transcriptWordCount ?? 0} words`);
 
         const allSuggestions = state.suggestions ?? [];
         const deselected = state.deselectedIndices ?? [];
         const selectedCount = allSuggestions.length - deselected.length;
-        lines.push(`Clips: ${selectedCount} selected, ${allSuggestions.length} total`);
+        lines.push(
+          `Clips: ${selectedCount} selected, ${allSuggestions.length} total`,
+        );
 
         if (allSuggestions.length) {
           lines.push("");
-          lines.push("Clips (use these numbers with create_clip/batch_create_clips):");
+          lines.push(
+            "Clips (use these numbers with create_clip/batch_create_clips):",
+          );
           for (let i = 0; i < allSuggestions.length; i++) {
             const clip = allSuggestions[i];
             const num = i + 1;
             const title = clip.title || "untitled";
             const start = clip.start_second ?? "?";
             const end = clip.end_second ?? "?";
-            const duration = typeof start === "number" && typeof end === "number"
-              ? `${Math.round(end - start)}s`
-              : "?";
+            const duration =
+              typeof start === "number" && typeof end === "number"
+                ? `${Math.round(end - start)}s`
+                : "?";
             const style = clip.suggested_caption_style || "hormozi";
             const tag = deselected.includes(i) ? " [DESELECTED]" : "";
-            lines.push(`  #${num}: "${title}" (${start}s–${end}s, ${duration}) [${style}]${tag}`);
+            lines.push(
+              `  #${num}: "${title}" (${start}s–${end}s, ${duration}) [${style}]${tag}`,
+            );
           }
         }
 
@@ -1014,7 +1309,9 @@ export function createServer(): McpServer {
             packed = await transcriptCache.getPackedMarkdown(state.videoPath);
           }
           if (!packed && state.rawTranscriptText) {
-            packed = await transcriptCache.getPackedMarkdownFromText(state.rawTranscriptText);
+            packed = await transcriptCache.getPackedMarkdownFromText(
+              state.rawTranscriptText,
+            );
           }
           if (packed) {
             lines.push("");
@@ -1035,7 +1332,9 @@ export function createServer(): McpServer {
             }
           } else if (state.rawTranscriptText) {
             lines.push("");
-            lines.push("=== RAW TRANSCRIPT (not yet parsed — use this to analyze and suggest clips) ===");
+            lines.push(
+              "=== RAW TRANSCRIPT (not yet parsed — use this to analyze and suggest clips) ===",
+            );
             lines.push(state.rawTranscriptText);
           }
         }
@@ -1052,15 +1351,22 @@ export function createServer(): McpServer {
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           const guidance = await getWorkflowGuidance();
           return {
-            content: [{ type: "text" as const, text: `Web UI is not running. Start with: npm run ui\n\n${guidance}` }],
+            content: [
+              {
+                type: "text" as const,
+                text: `Web UI is not running. Start with: npm run ui\n\n${guidance}`,
+              },
+            ],
           };
         }
         return {
-          content: [{ type: "text" as const, text: `Error reading UI state: ${msg}` }],
+          content: [
+            { type: "text" as const, text: `Error reading UI state: ${msg}` },
+          ],
           isError: true,
         };
       }
-    }
+    },
   );
 
   // =============================================
@@ -1069,20 +1375,40 @@ export function createServer(): McpServer {
   server.tool(
     "modify_clip",
     "Adjust a suggested clip before exporting. Change timing, title, or caption style. " +
-    "Use action='delete' to remove a clip entirely. Reference clips by clip_number (from get_ui_state).",
+      "Use action='delete' to remove a clip entirely. Reference clips by clip_number (from get_ui_state).",
     {
-      clip_number: z.number().optional().describe("Clip number (1-based, from get_ui_state)"),
-      clip_id: z.string().optional().describe("UUID of the clip (alternative to clip_number)"),
-      index: z.number().optional().describe("0-based index (deprecated, use clip_number)"),
-      action: z.enum(["update", "delete"]).optional().default("update").describe("Action: 'update' (default) or 'delete'"),
-      updates: z.object({
-        title: z.string().optional(),
-        start_second: z.number().optional(),
-        end_second: z.number().optional(),
-        reasoning: z.string().optional(),
-        preview_text: z.string().optional(),
-        suggested_caption_style: z.enum(["hormozi", "karaoke", "subtle", "branded"]).optional(),
-      }).optional().describe("Partial fields to update on the clip (ignored when action='delete')"),
+      clip_number: z
+        .number()
+        .optional()
+        .describe("Clip number (1-based, from get_ui_state)"),
+      clip_id: z
+        .string()
+        .optional()
+        .describe("UUID of the clip (alternative to clip_number)"),
+      index: z
+        .number()
+        .optional()
+        .describe("0-based index (deprecated, use clip_number)"),
+      action: z
+        .enum(["update", "delete"])
+        .optional()
+        .default("update")
+        .describe("Action: 'update' (default) or 'delete'"),
+      updates: z
+        .object({
+          title: z.string().optional(),
+          start_second: z.number().optional(),
+          end_second: z.number().optional(),
+          reasoning: z.string().optional(),
+          preview_text: z.string().optional(),
+          suggested_caption_style: z
+            .enum(["hormozi", "karaoke", "subtle", "branded"])
+            .optional(),
+        })
+        .optional()
+        .describe(
+          "Partial fields to update on the clip (ignored when action='delete')",
+        ),
     },
     async ({ clip_number, clip_id, index, action, updates }) => {
       try {
@@ -1093,7 +1419,11 @@ export function createServer(): McpServer {
         const suggestions = state.suggestions ?? [];
 
         if (!suggestions.length) {
-          return { content: [{ type: "text" as const, text: "No suggestions in UI state." }] };
+          return {
+            content: [
+              { type: "text" as const, text: "No suggestions in UI state." },
+            ],
+          };
         }
 
         // 2. Find target clip (clip_number is 1-based)
@@ -1107,7 +1437,14 @@ export function createServer(): McpServer {
         }
 
         if (targetIdx < 0 || targetIdx >= suggestions.length) {
-          return { content: [{ type: "text" as const, text: `Clip not found. Use get_ui_state to see available clips.` }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Clip not found. Use get_ui_state to see available clips.`,
+              },
+            ],
+          };
         }
 
         // --- DELETE ---
@@ -1127,29 +1464,45 @@ export function createServer(): McpServer {
           });
 
           return {
-            content: [{
-              type: "text" as const,
-              text: `Deleted clip #${targetIdx + 1}: "${removed.title}". ${suggestions.length} clips remaining.`,
-            }],
+            content: [
+              {
+                type: "text" as const,
+                text: `Deleted clip #${targetIdx + 1}: "${removed.title}". ${suggestions.length} clips remaining.`,
+              },
+            ],
           };
         }
 
         // --- UPDATE ---
         const upd = updates || {};
         if (Object.keys(upd).length === 0) {
-          return { content: [{ type: "text" as const, text: "No updates provided. Specify at least one field: title, start_second, end_second, reasoning, preview_text, or suggested_caption_style." }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "No updates provided. Specify at least one field: title, start_second, end_second, reasoning, preview_text, or suggested_caption_style.",
+              },
+            ],
+          };
         }
         const clip = suggestions[targetIdx];
         if (upd.title !== undefined) clip.title = upd.title;
-        if (upd.start_second !== undefined) clip.start_second = upd.start_second;
+        if (upd.start_second !== undefined)
+          clip.start_second = upd.start_second;
         if (upd.end_second !== undefined) clip.end_second = upd.end_second;
         if (upd.reasoning !== undefined) clip.reasoning = upd.reasoning;
-        if (upd.preview_text !== undefined) clip.preview_text = upd.preview_text;
-        if (upd.suggested_caption_style !== undefined) clip.suggested_caption_style = upd.suggested_caption_style;
+        if (upd.preview_text !== undefined)
+          clip.preview_text = upd.preview_text;
+        if (upd.suggested_caption_style !== undefined)
+          clip.suggested_caption_style = upd.suggested_caption_style;
 
         // Recalculate derived fields
-        clip.duration = Math.round((clip.end_second - clip.start_second) * 10) / 10;
-        const fmtTime = (s: number) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
+        clip.duration =
+          Math.round((clip.end_second - clip.start_second) * 10) / 10;
+        const fmtTime = (s: number) =>
+          `${Math.floor(s / 60)}:${Math.floor(s % 60)
+            .toString()
+            .padStart(2, "0")}`;
         clip.timestamp_display = `${fmtTime(clip.start_second)} → ${fmtTime(clip.end_second)}`;
 
         suggestions[targetIdx] = clip;
@@ -1160,19 +1513,31 @@ export function createServer(): McpServer {
         });
 
         return {
-          content: [{
-            type: "text" as const,
-            text: `Updated clip #${targetIdx + 1}: "${clip.title}" (${clip.start_second}s–${clip.end_second}s, ${clip.duration}s)`,
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Updated clip #${targetIdx + 1}: "${clip.title}" (${clip.start_second}s–${clip.end_second}s, ${clip.duration}s)`,
+            },
+          ],
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Web UI is not running. Start with: npm run ui",
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -1182,9 +1547,18 @@ export function createServer(): McpServer {
     "toggle_clip",
     "Select or deselect a suggested clip by clip_number. Selected clips are exported with export_selected.",
     {
-      clip_number: z.number().optional().describe("Clip number (1-based, from get_ui_state)"),
-      clip_id: z.string().optional().describe("UUID of the clip (alternative to clip_number)"),
-      index: z.number().optional().describe("0-based index (deprecated, use clip_number)"),
+      clip_number: z
+        .number()
+        .optional()
+        .describe("Clip number (1-based, from get_ui_state)"),
+      clip_id: z
+        .string()
+        .optional()
+        .describe("UUID of the clip (alternative to clip_number)"),
+      index: z
+        .number()
+        .optional()
+        .describe("0-based index (deprecated, use clip_number)"),
       selected: z.boolean().describe("true = select, false = deselect"),
     },
     async ({ clip_number, clip_id, index, selected }) => {
@@ -1206,14 +1580,23 @@ export function createServer(): McpServer {
         }
 
         if (targetIdx < 0 || targetIdx >= suggestions.length) {
-          return { content: [{ type: "text" as const, text: "Clip not found. Use get_ui_state to see available clips." }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Clip not found. Use get_ui_state to see available clips.",
+              },
+            ],
+          };
         }
 
         let updated: number[];
         if (selected) {
           updated = deselected.filter((i: number) => i !== targetIdx);
         } else {
-          updated = deselected.includes(targetIdx) ? deselected : [...deselected, targetIdx];
+          updated = deselected.includes(targetIdx)
+            ? deselected
+            : [...deselected, targetIdx];
         }
 
         await fetch("http://localhost:3847/api/ui-state", {
@@ -1224,19 +1607,31 @@ export function createServer(): McpServer {
 
         const clip = suggestions[targetIdx];
         return {
-          content: [{
-            type: "text" as const,
-            text: `Clip #${targetIdx + 1} "${clip.title}" is now ${selected ? "selected" : "deselected"}. (${suggestions.length - updated.length}/${suggestions.length} selected)`,
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Clip #${targetIdx + 1} "${clip.title}" is now ${selected ? "selected" : "deselected"}. (${suggestions.length - updated.length}/${suggestions.length} selected)`,
+            },
+          ],
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Web UI is not running. Start with: npm run ui",
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -1246,10 +1641,22 @@ export function createServer(): McpServer {
     "update_settings",
     "Update rendering settings (caption style, crop strategy, logo, outro) in the Web UI.",
     {
-      caption_style: z.enum(["hormozi", "karaoke", "subtle", "branded"]).optional().describe("Caption style"),
-      crop_strategy: z.enum(["center", "face", "speaker"]).optional().describe("Cropping strategy"),
-      logo_path: z.string().optional().describe("Path or registered asset name for PNG logo"),
-      outro_path: z.string().optional().describe("Path or registered asset name for outro video"),
+      caption_style: z
+        .enum(["hormozi", "karaoke", "subtle", "branded"])
+        .optional()
+        .describe("Caption style"),
+      crop_strategy: z
+        .enum(["center", "face", "speaker"])
+        .optional()
+        .describe("Cropping strategy"),
+      logo_path: z
+        .string()
+        .optional()
+        .describe("Path or registered asset name for PNG logo"),
+      outro_path: z
+        .string()
+        .optional()
+        .describe("Path or registered asset name for outro video"),
     },
     async ({ caption_style, crop_strategy, logo_path, outro_path }) => {
       try {
@@ -1266,7 +1673,14 @@ export function createServer(): McpServer {
         }
 
         if (Object.keys(settings).length === 0) {
-          return { content: [{ type: "text" as const, text: "No settings provided. Specify at least one of: caption_style, crop_strategy, logo_path, outro_path." }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "No settings provided. Specify at least one of: caption_style, crop_strategy, logo_path, outro_path.",
+              },
+            ],
+          };
         }
 
         await fetch("http://localhost:3847/api/ui-state", {
@@ -1276,15 +1690,32 @@ export function createServer(): McpServer {
         });
 
         const parts = Object.entries(settings).map(([k, v]) => `${k}=${v}`);
-        return { content: [{ type: "text" as const, text: `Settings updated: ${parts.join(", ")}` }] };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Settings updated: ${parts.join(", ")}`,
+            },
+          ],
+        };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Web UI is not running. Start with: npm run ui",
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -1301,7 +1732,11 @@ export function createServer(): McpServer {
         const clips = (await res.json()) as OutputClip[];
 
         if (!clips.length) {
-          return { content: [{ type: "text" as const, text: "No rendered clips found." }] };
+          return {
+            content: [
+              { type: "text" as const, text: "No rendered clips found." },
+            ],
+          };
         }
 
         const lines = clips.map((c) => {
@@ -1310,16 +1745,31 @@ export function createServer(): McpServer {
         });
 
         return {
-          content: [{ type: "text" as const, text: `${clips.length} rendered clip${clips.length === 1 ? "" : "s"}:\n${lines.join("\n")}` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `${clips.length} rendered clip${clips.length === 1 ? "" : "s"}:\n${lines.join("\n")}`,
+            },
+          ],
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Web UI is not running. Start with: npm run ui",
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -1329,19 +1779,37 @@ export function createServer(): McpServer {
     "manage_presets",
     "Save, load, list, or delete rendering presets. Presets store caption_style, crop_strategy, logo_path, and outro_path for quick reuse.",
     {
-      action: z.enum(["list", "save", "load", "delete"]).describe("Preset action"),
-      name: z.string().optional().describe("Preset name (required for save/load/delete)"),
-      config: z.object({
-        caption_style: z.enum(["hormozi", "karaoke", "subtle", "branded"]).optional(),
-        crop_strategy: z.enum(["center", "face", "speaker"]).optional(),
-        logo_path: z.string().optional(),
-        outro_path: z.string().optional(),
-      }).optional().describe("Preset config (for save action)"),
+      action: z
+        .enum(["list", "save", "load", "delete"])
+        .describe("Preset action"),
+      name: z
+        .string()
+        .optional()
+        .describe("Preset name (required for save/load/delete)"),
+      config: z
+        .object({
+          caption_style: z
+            .enum(["hormozi", "karaoke", "subtle", "branded"])
+            .optional(),
+          crop_strategy: z.enum(["center", "face", "speaker"]).optional(),
+          logo_path: z.string().optional(),
+          outro_path: z.string().optional(),
+        })
+        .optional()
+        .describe("Preset config (for save action)"),
     },
     async ({ action, name, config }) => {
       try {
         if (["save", "load", "delete"].includes(action) && !name) {
-          return { content: [{ type: "text" as const, text: `Error: 'name' is required for action '${action}'.` }], isError: true };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Error: 'name' is required for action '${action}'.`,
+              },
+            ],
+            isError: true,
+          };
         }
 
         const res = await fetch("http://localhost:3847/api/presets", {
@@ -1353,22 +1821,38 @@ export function createServer(): McpServer {
         const data = (await res.json()) as PresetResult;
 
         if (data.error) {
-          return { content: [{ type: "text" as const, text: `Error: ${data.error}` }], isError: true };
+          return {
+            content: [{ type: "text" as const, text: `Error: ${data.error}` }],
+            isError: true,
+          };
         }
 
         if (action === "list") {
           const presets = data.presets ?? [];
-          if (!presets.length) return { content: [{ type: "text" as const, text: "No presets saved." }] };
-          return { content: [{ type: "text" as const, text: `Presets:\n${presets.map((p) => `  - ${typeof p === "string" ? p : p.name || JSON.stringify(p)}`).join("\n")}` }] };
+          if (!presets.length)
+            return {
+              content: [{ type: "text" as const, text: "No presets saved." }],
+            };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Presets:\n${presets.map((p) => `  - ${typeof p === "string" ? p : p.name || JSON.stringify(p)}`).join("\n")}`,
+              },
+            ],
+          };
         }
 
         if (action === "load" && data.config) {
           // Push loaded config to UI settings
           const settings: Record<string, string> = {};
-          if (data.config.caption_style) settings.captionStyle = data.config.caption_style;
-          if (data.config.crop_strategy) settings.cropStrategy = data.config.crop_strategy;
+          if (data.config.caption_style)
+            settings.captionStyle = data.config.caption_style;
+          if (data.config.crop_strategy)
+            settings.cropStrategy = data.config.crop_strategy;
           if (data.config.logo_path) settings.logoPath = data.config.logo_path;
-          if (data.config.outro_path) settings.outroPath = data.config.outro_path;
+          if (data.config.outro_path)
+            settings.outroPath = data.config.outro_path;
           if (Object.keys(settings).length) {
             await fetch("http://localhost:3847/api/ui-state", {
               method: "POST",
@@ -1376,26 +1860,53 @@ export function createServer(): McpServer {
               body: JSON.stringify({ settings }),
             });
           }
-          return { content: [{ type: "text" as const, text: `Loaded preset "${name}" and applied to UI settings.` }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Loaded preset "${name}" and applied to UI settings.`,
+              },
+            ],
+          };
         }
 
         if (action === "save") {
-          return { content: [{ type: "text" as const, text: `Saved preset "${name}".` }] };
+          return {
+            content: [
+              { type: "text" as const, text: `Saved preset "${name}".` },
+            ],
+          };
         }
 
         if (action === "delete") {
-          return { content: [{ type: "text" as const, text: `Deleted preset "${name}".` }] };
+          return {
+            content: [
+              { type: "text" as const, text: `Deleted preset "${name}".` },
+            ],
+          };
         }
 
-        return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(data) }],
+        };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Web UI is not running. Start with: npm run ui",
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -1405,11 +1916,21 @@ export function createServer(): McpServer {
     "analyze_energy",
     "Analyze audio energy levels for a video or specific segments. Useful for finding high-energy moments. Defaults to the current UI video and suggestions if not specified.",
     {
-      video_path: z.string().optional().describe("Path to video file (defaults to current UI video)"),
-      segments: z.array(z.object({
-        start: z.number(),
-        end: z.number(),
-      })).optional().describe("Specific segments to analyze (defaults to current suggestions)"),
+      video_path: z
+        .string()
+        .optional()
+        .describe("Path to video file (defaults to current UI video)"),
+      segments: z
+        .array(
+          z.object({
+            start: z.number(),
+            end: z.number(),
+          }),
+        )
+        .optional()
+        .describe(
+          "Specific segments to analyze (defaults to current suggestions)",
+        ),
     },
     async ({ video_path, segments }) => {
       try {
@@ -1424,17 +1945,34 @@ export function createServer(): McpServer {
             if (!vPath) vPath = state.videoPath || state.filePath;
             if (!segs) {
               const suggestions = state.suggestions ?? [];
-              segs = suggestions.map((s) => ({ start: s.start_second, end: s.end_second }));
+              segs = suggestions.map((s) => ({
+                start: s.start_second,
+                end: s.end_second,
+              }));
             }
           }
         }
 
         if (!vPath) {
-          return { content: [{ type: "text" as const, text: "No video path. Set a video first or provide video_path." }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "No video path. Set a video first or provide video_path.",
+              },
+            ],
+          };
         }
 
         if (!segs || segs.length === 0) {
-          return { content: [{ type: "text" as const, text: "No segments to analyze. Provide segments explicitly or suggest clips first." }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "No segments to analyze. Provide segments explicitly or suggest clips first.",
+              },
+            ],
+          };
         }
 
         const res = await fetch("http://localhost:3847/api/analyze-energy", {
@@ -1446,18 +1984,35 @@ export function createServer(): McpServer {
         const data = (await res.json()) as ApiError & Record<string, unknown>;
 
         if (data.error) {
-          return { content: [{ type: "text" as const, text: `Error: ${data.error}` }], isError: true };
+          return {
+            content: [{ type: "text" as const, text: `Error: ${data.error}` }],
+            isError: true,
+          };
         }
 
-        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(data, null, 2) },
+          ],
+        };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Web UI is not running. Start with: npm run ui",
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -1466,7 +2021,7 @@ export function createServer(): McpServer {
   server.tool(
     "set_video",
     "Set the working video file without transcribing. Use this when you'll import a transcript separately. " +
-    "After this, either transcribe_podcast or import a transcript via import_transcript / parse_transcript.",
+      "After this, either transcribe_podcast or import a transcript via import_transcript / parse_transcript.",
     {
       file_path: z.string().describe("Absolute path to the video file"),
     },
@@ -1480,7 +2035,15 @@ export function createServer(): McpServer {
         });
         if (!selectRes.ok) {
           const err = (await selectRes.json()) as ApiError;
-          return { content: [{ type: "text" as const, text: `Error: ${err.error || "File not found"}` }], isError: true };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Error: ${err.error || "File not found"}`,
+              },
+            ],
+            isError: true,
+          };
         }
         const fileInfo = (await selectRes.json()) as FileInfo;
 
@@ -1494,17 +2057,27 @@ export function createServer(): McpServer {
         const setText = withNextStep(
           `Video set: ${fileInfo.filename} (${fileInfo.size_mb} MB)`,
           `Now transcribe it: transcribe_podcast(file_path: "${file_path}")\n` +
-          "  Or if the user pastes a transcript in the UI, read it with get_ui_state(include_transcript: true)"
+            "  Or if the user pastes a transcript in the UI, read it with get_ui_state(include_transcript: true)",
         );
         return { content: [{ type: "text" as const, text: setText }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Web UI is not running. Start with: npm run ui",
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -1514,24 +2087,37 @@ export function createServer(): McpServer {
     "import_transcript",
     "Import an external transcript (e.g. from a transcription service) into the UI. Skips Whisper entirely. The transcript must include word-level timestamps.",
     {
-      file_path: z.string().describe("Path to the video file the transcript belongs to"),
-      transcript: z.object({
-        words: z.array(z.object({
-          word: z.string(),
-          start: z.number(),
-          end: z.number(),
-          speaker: z.string().optional(),
-        })).describe("Word-level timestamps"),
-        segments: z.array(z.object({
-          text: z.string(),
-          start: z.number(),
-          end: z.number(),
-          speaker: z.string().optional(),
-        })).optional().describe("Segment-level transcript"),
-        duration: z.number().optional().describe("Total duration in seconds"),
-        language: z.string().optional().describe("ISO language code"),
-        text: z.string().optional().describe("Full transcript text"),
-      }).describe("Transcript data with word-level timestamps"),
+      file_path: z
+        .string()
+        .describe("Path to the video file the transcript belongs to"),
+      transcript: z
+        .object({
+          words: z
+            .array(
+              z.object({
+                word: z.string(),
+                start: z.number(),
+                end: z.number(),
+                speaker: z.string().optional(),
+              }),
+            )
+            .describe("Word-level timestamps"),
+          segments: z
+            .array(
+              z.object({
+                text: z.string(),
+                start: z.number(),
+                end: z.number(),
+                speaker: z.string().optional(),
+              }),
+            )
+            .optional()
+            .describe("Segment-level transcript"),
+          duration: z.number().optional().describe("Total duration in seconds"),
+          language: z.string().optional().describe("ISO language code"),
+          text: z.string().optional().describe("Full transcript text"),
+        })
+        .describe("Transcript data with word-level timestamps"),
     },
     async ({ file_path, transcript }) => {
       try {
@@ -1542,7 +2128,15 @@ export function createServer(): McpServer {
         });
         if (!res.ok) {
           const err = (await res.json()) as ApiError;
-          return { content: [{ type: "text" as const, text: `Error: ${err.error || "Import failed"}` }], isError: true };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Error: ${err.error || "Import failed"}`,
+              },
+            ],
+            isError: true,
+          };
         }
         const result = (await res.json()) as ImportTranscriptResult;
 
@@ -1564,17 +2158,27 @@ export function createServer(): McpServer {
         const importText = withNextStep(
           `Transcript imported: ${wordCount} words, ${Math.round(duration)}s duration.`,
           "Now read the transcript with get_ui_state(include_transcript: true), " +
-          "analyze it for viral moments, then call suggest_clips with your picks."
+            "analyze it for viral moments, then call suggest_clips with your picks.",
         );
         return { content: [{ type: "text" as const, text: importText }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Web UI is not running. Start with: npm run ui",
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
 
   // =============================================
@@ -1584,21 +2188,43 @@ export function createServer(): McpServer {
     "parse_transcript",
     "Parse a raw speaker-labeled plain text transcript into word-level timestamps. Input format: 'Speaker (MM:SS)\\ntext...\\n\\nSpeaker2 (MM:SS)\\ntext...'. Uses the Python backend to generate accurate word timings.",
     {
-      file_path: z.string().describe("Path to the video file the transcript belongs to"),
+      file_path: z
+        .string()
+        .describe("Path to the video file the transcript belongs to"),
       raw_text: z.string().describe("Raw speaker-labeled transcript text"),
-      total_duration: z.number().optional().describe("Total video duration in seconds (helps accuracy)"),
-      time_adjust: z.number().optional().default(0).describe("Offset in seconds to add to all timestamps"),
+      total_duration: z
+        .number()
+        .optional()
+        .describe("Total video duration in seconds (helps accuracy)"),
+      time_adjust: z
+        .number()
+        .optional()
+        .default(0)
+        .describe("Offset in seconds to add to all timestamps"),
     },
     async ({ file_path, raw_text, total_duration, time_adjust }) => {
       try {
         const res = await fetch("http://localhost:3847/api/parse-transcript", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file_path, raw_text, total_duration, time_adjust }),
+          body: JSON.stringify({
+            file_path,
+            raw_text,
+            total_duration,
+            time_adjust,
+          }),
         });
         if (!res.ok) {
           const err = (await res.json()) as ApiError;
-          return { content: [{ type: "text" as const, text: `Error: ${err.error || "Parse failed"}` }], isError: true };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Error: ${err.error || "Parse failed"}`,
+              },
+            ],
+            isError: true,
+          };
         }
         const result = (await res.json()) as ImportTranscriptResult;
 
@@ -1620,18 +2246,30 @@ export function createServer(): McpServer {
         const parseText = withNextStep(
           `Transcript parsed: ${wordCount} words, ${segCount} segments.`,
           "Now read the transcript with get_ui_state(include_transcript: true), " +
-          "analyze it for viral moments, then call suggest_clips with your picks."
+            "analyze it for viral moments, then call suggest_clips with your picks.",
         );
         return { content: [{ type: "text" as const, text: parseText }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Web UI is not running. Start with: npm run ui",
+              },
+            ],
+          };
         }
-        return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
       }
-    }
+    },
   );
+
+  registerIntegrationMcpTools(server);
 
   // =============================================
   // MCP Prompt: workflow guide
@@ -1640,57 +2278,63 @@ export function createServer(): McpServer {
     "workflow",
     "Complete podcli workflow guide — from podcast file to finished clips",
     async () => ({
-      messages: [{
-        role: "user" as const,
-        content: {
-          type: "text" as const,
-          text: [
-            "You are a podcast clip extraction assistant using podcli MCP tools.",
-            "Follow this workflow to create viral short-form clips from podcasts:",
-            "",
-            "## Step 1: Check current state",
-            "Call get_ui_state() to see what's already loaded (video, transcript, clips).",
-            "",
-            "## Step 2: Load the podcast",
-            "If no video is set, use transcribe_podcast(file_path: \"/path/to/file.mp4\") to transcribe.",
-            "This both sets the video AND generates a transcript with word-level timestamps.",
-            "If the user already pasted a transcript in the UI, you can skip to Step 3.",
-            "",
-            "## Step 3: Read the transcript",
-            "Call get_ui_state(include_transcript: true) to read the full transcript.",
-            "Also check if there's a knowledge base with podcast context (host names, show style, etc).",
-            "",
-            "## Step 4: Analyze and suggest clips",
-            "Read through the transcript carefully. Look for:",
-            "- Controversial or surprising statements",
-            "- Strong emotional moments (laughter, passion, anger)",
-            "- Clear actionable advice or insights",
-            "- Story hooks and cliffhangers",
-            "- Quotable one-liners",
-            "- Questions that hook the viewer",
-            "",
-            "For each moment, note the start/end timestamps and craft a catchy title.",
-            "Aim for 15-45 second clips (target 20-35s). Then call suggest_clips with your picks.",
-            "",
-            "## Step 5: Export",
-            "Call batch_create_clips(export_selected: true) to render all clips.",
-            "Or use create_clip(clip_number: N) for individual clips.",
-            "",
-            "## Available caption styles:",
-            "- branded: Professional look with dark highlight box, gradient, optional logo",
-            "- hormozi: Bold uppercase, yellow highlight, high energy pop-on reveal",
-            "- karaoke: Full sentence visible, words progressively highlight",
-            "- subtle: Clean minimal white text, no effects",
-            "",
-            "## Tips:",
-            "- Use modify_clip to adjust timing before export",
-            "- Use toggle_clip to select/deselect clips",
-            "- Use update_settings to change the default caption style or crop strategy",
-            "- The user can review and adjust clips in the Web UI at http://localhost:3847",
-          ].join("\n"),
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: [
+              "You are a podcast clip extraction assistant using podcli MCP tools.",
+              "Follow this workflow to create viral short-form clips from podcasts:",
+              "",
+              "## Step 1: Check current state",
+              "Call get_ui_state() to see what's already loaded (video, transcript, clips).",
+              "",
+              "## Step 2: Load the podcast",
+              'If no video is set, use transcribe_podcast(file_path: "/path/to/file.mp4") to transcribe.',
+              "This both sets the video AND generates a transcript with word-level timestamps.",
+              "If the user already pasted a transcript in the UI, you can skip to Step 3.",
+              "",
+              "## Step 3: Read the transcript",
+              "Call get_ui_state(include_transcript: true) to read the full transcript.",
+              "Also check if there's a knowledge base with podcast context (host names, show style, etc).",
+              "",
+              "## Step 4: Analyze and suggest clips",
+              "Read through the transcript carefully. Look for:",
+              "- Controversial or surprising statements",
+              "- Strong emotional moments (laughter, passion, anger)",
+              "- Clear actionable advice or insights",
+              "- Story hooks and cliffhangers",
+              "- Quotable one-liners",
+              "- Questions that hook the viewer",
+              "",
+              "For each moment, note the start/end timestamps and craft a catchy title.",
+              "Aim for 15-45 second clips (target 20-35s). Then call suggest_clips with your picks.",
+              "",
+              "## Step 5: Export",
+              "Call batch_create_clips(export_selected: true) to render all clips.",
+              "Or use create_clip(clip_number: N) for individual clips.",
+              "",
+              "## Optional: DaVinci Resolve",
+              "manage_integrations(action=enable, name=davinci_resolve) then export_to_davinci_resolve with source + caption overlay paths.",
+              "Use manage_config(action=migrate) once after upgrading if transcription cache seems empty.",
+              "",
+              "## Available caption styles:",
+              "- branded: Professional look with dark highlight box, gradient, optional logo",
+              "- hormozi: Bold uppercase, yellow highlight, high energy pop-on reveal",
+              "- karaoke: Full sentence visible, words progressively highlight",
+              "- subtle: Clean minimal white text, no effects",
+              "",
+              "## Tips:",
+              "- Use modify_clip to adjust timing before export",
+              "- Use toggle_clip to select/deselect clips",
+              "- Use update_settings to change the default caption style or crop strategy",
+              "- The user can review and adjust clips in the Web UI at http://localhost:3847",
+            ].join("\n"),
+          },
         },
-      }],
-    })
+      ],
+    }),
   );
 
   return server;

@@ -14,6 +14,7 @@ import re
 from typing import Optional, Callable
 
 from utils.proc import run as proc_run, ProcError
+from config.paths import paths
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -389,6 +390,11 @@ def _build_tight_segments(
 _remotion_available = None  # True/False/None — environment availability, not per-clip success
 
 
+def _kept_caption_overlay_path(output_path: str) -> str:
+    base, _ = os.path.splitext(os.path.abspath(output_path))
+    return f"{base}_captions.mov"
+
+
 def _render_with_remotion(
     video_path: str,
     words: list[dict],
@@ -396,9 +402,10 @@ def _render_with_remotion(
     output_path: str,
     time_offset: float = 0.0,
     logo_path: Optional[str] = None,
-) -> bool:
+    keep_caption_overlay: bool = False,
+) -> tuple[bool, Optional[str]]:
     """
-    Render captions using Remotion. Returns True on success, False to fall back to ASS.
+    Render captions using Remotion. Returns (success, optional_prores_overlay_path).
     """
     global _remotion_available
     import subprocess
@@ -407,37 +414,41 @@ def _render_with_remotion(
     # Quick bail only if the environment is known unavailable for this session.
     # Transient per-clip render failures should not poison the rest of the batch.
     if _remotion_available is False:
-        return False
+        return False, None
 
     # Find the render script
-    project_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    project_root = paths["project_root"]
     render_script = os.path.join(project_root, "remotion", "render.mjs")
     if not os.path.exists(render_script):
         _remotion_available = False
-        return False
+        return False, None
 
     # Check node is available
     node_path = shutil.which("node")
     if not node_path:
         _remotion_available = False
-        return False
+        return False, None
 
-    # Pre-check: ensure bundle exists (prebundle if not)
-    cache_dir = os.path.join(project_root, ".podcli", "cache", "remotion-bundle")
+    remotion_env = {**os.environ, "PODCLI_CACHE_DIR": paths["cache"]}
+
+    cache_dir = os.path.join(paths["cache"], "remotion-bundle")
     bundle_index = os.path.join(cache_dir, "index.html")
     if not os.path.exists(bundle_index):
-        # Try a quick prebundle
         try:
-            r = proc_run(
+            r = subprocess.run(
                 [node_path, render_script, "--prebundle"],
-                timeout=30, check=False, cwd=project_root,
+                timeout=30,
+                cwd=project_root,
+                env=remotion_env,
+                capture_output=True,
+                text=True,
             )
             if r.returncode != 0 or not os.path.exists(bundle_index):
                 _remotion_available = False
-                return False
+                return False, None
         except Exception:
             _remotion_available = False
-            return False
+            return False, None
 
     # Prepare words JSON (adjust timestamps by offset)
     adjusted_words = []
@@ -505,6 +516,8 @@ def _render_with_remotion(
         ]
         if logo_path and os.path.exists(logo_path):
             cmd.extend(["--logo", os.path.abspath(logo_path)])
+        if keep_caption_overlay:
+            cmd.append("--keep-overlay")
 
         # Redirect stderr to devnull to suppress Chrome/FFmpeg noise
         # (avoids buffer deadlock and terminal spam)
@@ -516,13 +529,18 @@ def _render_with_remotion(
                 text=True,
                 timeout=600,
                 cwd=project_root,
+                env=remotion_env,
             )
 
         if result.returncode == 0 and os.path.exists(output_path):
             _remotion_available = True
-            return True
+            overlay_path = None
+            if keep_caption_overlay:
+                overlay_path = _kept_caption_overlay_path(output_path)
+                if not os.path.exists(overlay_path):
+                    overlay_path = None
+            return True, overlay_path
 
-        # Log errors
         stdout = result.stdout or ""
         if stdout:
             lines = [l.strip() for l in stdout.strip().split("\n") if l.strip()]
@@ -530,14 +548,14 @@ def _render_with_remotion(
                 print(f"  Remotion: {lines[-1][:120]}", flush=True)
 
         print("  Remotion: falling back to ASS for this clip", flush=True)
-        return False
+        return False, None
 
     except subprocess.TimeoutExpired:
         print("  Remotion: timed out, using ASS for this clip", flush=True)
-        return False
-    except Exception as e:
+        return False, None
+    except Exception:
         print("  Remotion: render error, using ASS for this clip", flush=True)
-        return False
+        return False, None
     finally:
         try:
             os.unlink(words_file)
@@ -562,6 +580,7 @@ def generate_clip(
     trim_opening: Optional[bool] = None,
     allow_ass_fallback: bool = False,
     use_ass_captions: bool = False,
+    keep_caption_overlay: bool = False,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """
@@ -587,6 +606,15 @@ def generate_clip(
             "title": str,
         }
     """
+    # Auto-enable caption overlay export when an editor integration that needs it is on.
+    if not keep_caption_overlay:
+        try:
+            from services.integrations.manager import IntegrationsManager
+            if IntegrationsManager().is_enabled("davinci_resolve"):
+                keep_caption_overlay = True
+        except Exception:
+            pass
+
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
 
@@ -681,6 +709,7 @@ def generate_clip(
 
     # Create temp working directory
     work_dir = tempfile.mkdtemp(prefix="podcast_clip_")
+    caption_overlay_path = None
 
     try:
         total_steps = 4 + (1 if outro_path and os.path.exists(str(outro_path)) else 0)
@@ -769,14 +798,16 @@ def generate_clip(
                 captioned_path = os.path.join(work_dir, "captioned.mp4")
 
                 remotion_ok = False
+                caption_overlay_path = None
                 if not use_ass_captions:
-                    remotion_ok = _render_with_remotion(
+                    remotion_ok, caption_overlay_path = _render_with_remotion(
                         video_path=cropped_path,
                         words=clip_words,
                         caption_style=caption_style,
                         output_path=captioned_path,
                         time_offset=caption_time_offset,
                         logo_path=logo_path if (style_config.get("logo_support", False) and logo_path) else None,
+                        keep_caption_overlay=keep_caption_overlay,
                     )
 
                 if not remotion_ok and not allow_ass_fallback:
@@ -866,7 +897,7 @@ def generate_clip(
         if progress_callback:
             progress_callback(100, "Clip complete!")
 
-        return {
+        out = {
             "output_path": final_path,
             "duration": round(duration, 2),
             "file_size_mb": file_size_mb,
@@ -876,6 +907,10 @@ def generate_clip(
             "caption_style": caption_style,
             "crop_strategy": crop_strategy,
         }
+        if keep_caption_overlay and caption_overlay_path and os.path.exists(caption_overlay_path):
+            out["caption_overlay_path"] = caption_overlay_path
+            out["cropped_source_path"] = cropped_path
+        return out
 
     finally:
         # Clean up temp files (but not if output is in work_dir)

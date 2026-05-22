@@ -114,6 +114,7 @@ def handle_create_clip(task_id: str, params: dict):
         keep_segments=params.get("keep_segments"),
         allow_ass_fallback=params.get("allow_ass_fallback", False),
         use_ass_captions=params.get("use_ass_captions", False),
+        keep_caption_overlay=params.get("keep_caption_overlay", False),
         progress_callback=lambda pct, msg: emit_progress(task_id, "processing", pct, msg),
     )
     emit_result(task_id, "success", data=result)
@@ -151,6 +152,9 @@ def handle_batch_clips(task_id: str, params: dict):
                 keep_segments=clip.get("keep_segments"),
                 allow_ass_fallback=clip.get("allow_ass_fallback", params.get("allow_ass_fallback", False)),
                 use_ass_captions=clip.get("use_ass_captions", params.get("use_ass_captions", False)),
+                keep_caption_overlay=clip.get(
+                    "keep_caption_overlay", params.get("keep_caption_overlay", False)
+                ),
                 progress_callback=lambda pct, msg, _i=i: emit_progress(
                     task_id, "batch", int((_i / total) * 100 + pct / total), msg
                 ),
@@ -379,6 +383,77 @@ def handle_generate_content(task_id: str, params: dict):
     emit_result(task_id, "success", data=result)
 
 
+def handle_manage_integrations(task_id: str, params: dict):
+    from services.integrations import IntegrationsManager
+
+    manager = IntegrationsManager()
+    action = params.get("action", "list")
+
+    if action == "list":
+        emit_result(task_id, "success", data={"integrations": manager.list_all()})
+        return
+
+    name = params.get("name", "")
+    if action in ("enable", "disable"):
+        try:
+            manager.set_enabled(name, action == "enable")
+            emit_result(task_id, "success", data={"name": name, "enabled": action == "enable"})
+        except ValueError as e:
+            emit_result(task_id, "error", error=str(e))
+        return
+
+    emit_result(task_id, "error", error=f"Unknown action: {action}")
+
+
+def handle_manage_config(task_id: str, params: dict):
+    from config_bundle import run_config_action
+
+    try:
+        data = run_config_action(
+            params.get("action", "status"),
+            bundle_path=params.get("bundle_path") or params.get("bundle"),
+            home=params.get("home"),
+            activate=bool(params.get("activate", False)),
+            dry_run=bool(params.get("dry_run", False)),
+        )
+        emit_result(task_id, "success", data=data)
+    except ValueError as e:
+        emit_result(task_id, "error", error=str(e))
+
+
+def handle_run_integration_tool(task_id: str, params: dict):
+    from services.integrations import IntegrationRegistry, IntegrationsManager
+
+    integration_name = params.get("integration", "")
+    tool_name = params.get("tool", "")
+    tool_params = params.get("params", {})
+
+    manager = IntegrationsManager()
+    if not manager.is_enabled(integration_name):
+        emit_result(
+            task_id,
+            "error",
+            error=f"Integration '{integration_name}' is disabled. Enable via manage_integrations.",
+        )
+        return
+
+    integration = IntegrationRegistry.get(integration_name)
+    if integration is None:
+        emit_result(task_id, "error", error=f"Unknown integration: {integration_name}")
+        return
+
+    tool = next((t for t in integration.tools() if t.name == tool_name), None)
+    if tool is None:
+        emit_result(task_id, "error", error=f"Unknown tool '{tool_name}' on '{integration_name}'")
+        return
+
+    try:
+        result = tool.handler(tool_params)
+        emit_result(task_id, "success", data=result)
+    except Exception as e:
+        emit_result(task_id, "error", error=f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+
+
 TASK_HANDLERS = {
     "ping": handle_ping,
     "transcribe": handle_transcribe,
@@ -392,7 +467,20 @@ TASK_HANDLERS = {
     "corrections": handle_corrections,
     "suggest_clips": handle_suggest_clips,
     "generate_content": handle_generate_content,
+    "manage_integrations": handle_manage_integrations,
+    "run_integration_tool": handle_run_integration_tool,
+    "manage_config": handle_manage_config,
 }
+
+
+def _maybe_auto_migrate_backend(task_type: str, params: dict) -> None:
+    if task_type == "manage_config":
+        action = params.get("action", "status")
+        if action == "status" or (action == "migrate" and params.get("dry_run")):
+            return
+    from config_bundle import auto_migrate_legacy_if_pending
+
+    auto_migrate_legacy_if_pending(quiet=True)
 
 
 def main():
@@ -406,6 +494,8 @@ def main():
         task_id = request.get("task_id", "unknown")
         task_type = request.get("task_type", "")
         params = request.get("params", {})
+
+        _maybe_auto_migrate_backend(task_type, params)
 
         handler = TASK_HANDLERS.get(task_type)
         if not handler:

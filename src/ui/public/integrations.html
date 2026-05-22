@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Podcli — Integrations</title>
+  <meta name="robots" content="noindex,nofollow" />
+  <link rel="icon" type="image/png" href="/podcli-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    .app { max-width: 860px; }
+    .header { margin-bottom: 32px; }
+    .header h1 { margin: 0 0 8px 0; }
+    .header p { margin: 0; opacity: 0.7; }
+
+    .int-grid { display: flex; flex-direction: column; gap: 16px; }
+
+    .int-card {
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 20px 22px;
+      background: rgba(255, 255, 255, 0.02);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    @media (prefers-color-scheme: light) {
+      .int-card { border-color: rgba(0,0,0,0.08); background: rgba(0,0,0,0.02); }
+    }
+
+    .int-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    .int-name { font-size: 18px; font-weight: 600; margin: 0; }
+    .int-cat {
+      display: inline-block;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(120, 180, 255, 0.15);
+      color: #6aa3ff;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .int-desc { opacity: 0.75; font-size: 14px; line-height: 1.45; margin: 0; }
+    .int-tools { font-family: "JetBrains Mono", monospace; font-size: 12px; opacity: 0.55; }
+    .int-tool-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      margin-right: 6px;
+    }
+    @media (prefers-color-scheme: light) {
+      .int-tool-pill { background: rgba(0,0,0,0.05); }
+    }
+
+    .toggle {
+      position: relative;
+      width: 48px;
+      height: 28px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+      cursor: pointer;
+      transition: background 120ms;
+      flex-shrink: 0;
+    }
+    .toggle::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 120ms;
+    }
+    .toggle.on { background: #4ade80; }
+    .toggle.on::after { transform: translateX(20px); }
+    .toggle.busy { opacity: 0.5; pointer-events: none; }
+
+    .empty-state, .error-state {
+      padding: 32px;
+      text-align: center;
+      border: 1px dashed rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      opacity: 0.6;
+    }
+    .error-state { color: #ff8b8b; border-color: rgba(255, 0, 0, 0.3); }
+
+    .footer-note {
+      margin-top: 24px;
+      font-size: 13px;
+      opacity: 0.55;
+      line-height: 1.5;
+    }
+    .footer-note code { font-family: "JetBrains Mono", monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="app fade-in">
+    <div class="nav">
+      <a href="/"><img src="/podcli-logo-transparent.png" alt="podcli" style="height:22px"></a>
+      <a href="/" class="nav-link">Back to app</a>
+      <a href="/config.html" class="nav-link">Config profiles</a>
+      <a href="/integration.html" class="nav-link">MCP client setup</a>
+    </div>
+
+    <div class="header">
+      <h1>Output integrations</h1>
+      <p>Enable the destinations you want podcli to push to. Disabled integrations error out with a hint when called from MCP.</p>
+    </div>
+
+    <div id="root" class="int-grid">
+      <div class="empty-state">Loading…</div>
+    </div>
+
+    <p class="footer-note">
+      State persists at the active config home (<code>integrations.json</code>, gitignored).
+      Adding a new integration: drop a subpackage in
+      <code>backend/services/integrations/</code> and it appears here automatically.
+    </p>
+  </div>
+
+  <script>
+    const root = document.getElementById("root");
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    }
+
+    function categoryLabel(cat) {
+      return {
+        editor_export: "Editor export",
+        platform_upload: "Platform upload",
+        productivity: "Productivity",
+        ai_helper: "AI helper",
+      }[cat] || cat;
+    }
+
+    function renderCard(int) {
+      const tools = (int.tools || [])
+        .map(t => `<span class="int-tool-pill">${escapeHtml(t.name)}</span>`)
+        .join("");
+      return `
+        <div class="int-card" data-name="${escapeHtml(int.name)}">
+          <div class="int-card-head">
+            <div>
+              <h2 class="int-name">
+                ${escapeHtml(int.name)}
+                <span class="int-cat">${escapeHtml(categoryLabel(int.category))}</span>
+              </h2>
+              <p class="int-desc">${escapeHtml(int.description || "")}</p>
+            </div>
+            <div class="toggle ${int.enabled ? "on" : ""}" role="switch"
+                 aria-checked="${int.enabled}" data-name="${escapeHtml(int.name)}"></div>
+          </div>
+          <div class="int-tools">${tools}</div>
+        </div>
+      `;
+    }
+
+    async function load() {
+      try {
+        const resp = await fetch("/api/integrations");
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const list = data.integrations || [];
+        if (!list.length) {
+          root.innerHTML = '<div class="empty-state">No integrations installed.</div>';
+          return;
+        }
+        root.innerHTML = list.map(renderCard).join("");
+        document.querySelectorAll(".toggle").forEach(el => {
+          el.addEventListener("click", onToggle);
+        });
+      } catch (err) {
+        root.innerHTML = `<div class="error-state">Failed to load: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    async function onToggle(e) {
+      const el = e.currentTarget;
+      const name = el.dataset.name;
+      const next = !el.classList.contains("on");
+      el.classList.add("busy");
+      try {
+        const resp = await fetch(`/api/integrations/${encodeURIComponent(name)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: next }),
+        });
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          throw new Error(body.error || `HTTP ${resp.status}`);
+        }
+        el.classList.toggle("on", next);
+        el.setAttribute("aria-checked", String(next));
+      } catch (err) {
+        alert(`Failed to ${next ? "enable" : "disable"} ${name}: ${err.message}`);
+      } finally {
+        el.classList.remove("busy");
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>
