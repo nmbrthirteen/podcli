@@ -18,15 +18,11 @@ from __future__ import annotations
 import os
 import tempfile
 
+from config.paths import paths
+
 
 def _tmp_dir() -> str:
-    base = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "..",
-        "..",
-        ".podcli",
-        "tmp",
-    )
+    base = os.path.join(paths["home"], "tmp")
     os.makedirs(base, exist_ok=True)
     return base
 

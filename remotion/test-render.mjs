@@ -19,7 +19,10 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const CACHE_DIR = path.join(PROJECT_ROOT, ".podcli", "cache", "remotion-bundle");
+const CACHE_ROOT = process.env.PODCLI_CACHE_DIR
+  ? path.resolve(process.env.PODCLI_CACHE_DIR)
+  : path.join(PROJECT_ROOT, "data", "cache");
+const CACHE_DIR = path.join(CACHE_ROOT, "remotion-bundle");
 const BUNDLE_HASH_FILE = path.join(CACHE_DIR, ".hash");
 const ENTRY_POINT = path.join(__dirname, "src", "index.ts");
 
@@ -41,7 +44,10 @@ async function getCachedBundle() {
   const currentHash = hashSrcDir();
   if (fs.existsSync(BUNDLE_HASH_FILE)) {
     const cachedHash = fs.readFileSync(BUNDLE_HASH_FILE, "utf-8").trim();
-    if (cachedHash === currentHash && fs.existsSync(path.join(CACHE_DIR, "index.html"))) {
+    if (
+      cachedHash === currentHash &&
+      fs.existsSync(path.join(CACHE_DIR, "index.html"))
+    ) {
       return CACHE_DIR;
     }
   }
@@ -71,14 +77,26 @@ const words = [
 
 const fps = 30;
 const durationInFrames = Math.ceil(5.5 * fps);
-const outputPath = path.join(process.env.HOME, "Downloads", `remotion-test-${styleName}.mp4`);
+const outputPath = path.join(
+  process.env.HOME,
+  "Downloads",
+  `remotion-test-${styleName}.mp4`,
+);
 
 // Try to load logo from podcli asset registry
 let logoPath = "";
 try {
-  const registry = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, ".podcli", "assets", "registry.json"), "utf-8"));
-  const logo = registry.assets?.find((a) => a.type === "logo");
-  if (logo?.path && fs.existsSync(logo.path)) logoPath = logo.path;
+  const home = process.env.PODCLI_HOME
+    ? path.resolve(process.env.PODCLI_HOME)
+    : path.join(PROJECT_ROOT, ".podcli");
+  const registryPath = path.join(home, "assets", "registry.json");
+  if (!fs.existsSync(registryPath)) {
+    console.warn("No assets registry at", registryPath);
+  } else {
+    const registry = JSON.parse(fs.readFileSync(registryPath, "utf-8"));
+    const logo = registry.assets?.find((a) => a.type === "logo");
+    if (logo?.path && fs.existsSync(logo.path)) logoPath = logo.path;
+  }
 } catch {}
 
 let logoSrc;
@@ -111,7 +129,13 @@ async function main() {
 
   console.log(`Rendering ${styleName} → ${outputPath}`);
   await renderMedia({
-    composition: { ...composition, durationInFrames, fps, width: 2160, height: 3840 },
+    composition: {
+      ...composition,
+      durationInFrames,
+      fps,
+      width: 2160,
+      height: 3840,
+    },
     serveUrl: bundleLocation,
     codec: "h264",
     outputLocation: outputPath,

@@ -12,12 +12,9 @@ import os
 import json
 from typing import Optional
 
-# Default to .podcli/ in the project root (two levels up from backend/)
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PRESETS_DIR = os.path.join(
-    os.environ.get("PODCLI_HOME", os.path.join(_PROJECT_ROOT, ".podcli")),
-    "presets",
-)
+from config.paths import paths
+
+PRESETS_DIR = os.path.join(paths["home"], "presets")
 
 # ── Clip duration constants (single source of truth) ──
 # These are for clip CONTENT only — outro is appended separately.

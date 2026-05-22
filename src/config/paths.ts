@@ -1,19 +1,28 @@
-import { join, dirname } from "path";
+import { join, dirname, resolve, isAbsolute } from "path";
 import { fileURLToPath } from "url";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Project root (next to package.json)
-const projectRoot = join(__dirname, "..", "..");
+const projectRoot = resolve(__dirname, "..", "..");
+const homeMarker = join(projectRoot, ".podcli-home");
+const dataDir = resolve(process.env.PODCLI_DATA || join(projectRoot, "data"));
 
-// Visible data/ directory for outputs and user-facing data
-const dataDir = process.env.PODCLI_DATA || join(projectRoot, "data");
+function resolveHome(): string {
+  if (process.env.PODCLI_HOME) {
+    return resolve(process.env.PODCLI_HOME);
+  }
+  if (existsSync(homeMarker)) {
+    const marker = readFileSync(homeMarker, "utf-8").trim();
+    if (marker) {
+      return isAbsolute(marker) ? resolve(marker) : resolve(projectRoot, marker);
+    }
+  }
+  return resolve(projectRoot, ".podcli");
+}
 
-// Internal .podcli directory for caches, state, and config
-const home = process.env.PODCLI_HOME || join(projectRoot, ".podcli");
+const home = resolveHome();
 
-// Auto-detect venv python (same logic as the bash wrapper)
 function detectPython(): string {
   if (process.env.PYTHON_PATH) return process.env.PYTHON_PATH;
   const venvPython = join(projectRoot, "venv", "bin", "python3");
@@ -24,6 +33,8 @@ function detectPython(): string {
 export const paths = {
   home,
   projectRoot,
+  homeMarker,
+  dataDir,
   cache: join(dataDir, "cache"),
   transcripts: join(dataDir, "cache", "transcripts"),
   packed: join(home, "packed"),
@@ -36,7 +47,10 @@ export const paths = {
   clipsHistory: join(home, "history", "clips.json"),
   knowledge: join(home, "knowledge"),
   uiState: join(home, "ui-state.json"),
-  pythonBackend: join(__dirname, "..", "..", "backend", "main.py"),
+  corrections: join(home, "corrections.json"),
+  thumbnailConfig: join(home, "thumbnail-config.json"),
+  integrations: join(home, "integrations.json"),
+  pythonBackend: join(projectRoot, "backend", "main.py"),
   pythonPath: detectPython(),
   ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
   ffprobePath: process.env.FFPROBE_PATH || "ffprobe",

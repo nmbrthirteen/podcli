@@ -36,6 +36,8 @@ export class PythonExecutor {
         env: {
           ...process.env,
           PYTHONUNBUFFERED: "1",
+          PODCLI_HOME: paths.home,
+          PODCLI_DATA: paths.dataDir,
         },
       });
 
