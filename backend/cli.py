@@ -187,6 +187,10 @@ def _has_successful_results(results: list) -> bool:
 
 def _should_enter_post_render_loop(config: dict, interrupted: bool, results: list) -> bool:
     """Open the post-render rerender flow on explicit config or partial interrupt recovery."""
+    # The post-render loop is interactive (prompt_toolkit); never enter it
+    # without a real terminal or it crashes with OSError [Errno 22].
+    if not sys.stdin.isatty():
+        return False
     return bool(config.get("post_render_review", False) or (interrupted and _has_successful_results(results)))
 
 
@@ -579,7 +583,7 @@ def cmd_process(args):
     print(f"\n  [4/4] Exporting {len(clips)} clips{_ai_label} to {output_dir}/")
     results = []
     t0 = time.time()
-    _skip_review = not config.get("review_each_clip", False)
+    _skip_review = not config.get("review_each_clip", False) or not sys.stdin.isatty()
     interrupted = False
 
     try:
@@ -1077,6 +1081,13 @@ Transcript:
 
 def _review_clips(clips: list, segments: list, energy_scores: list | None, config: dict) -> list:
     """Interactive clip review — user can select/deselect, ask for more, or find specific moments."""
+    # Non-interactive (piped/scripted/no TTY): skip the picker and render all
+    # suggested clips. The picker uses prompt_toolkit, which raises
+    # OSError [Errno 22] when stdin isn't a real terminal.
+    if not sys.stdin.isatty():
+        print(f"\n         Non-interactive run — rendering all {len(clips)} suggested clips.")
+        return clips
+
     import questionary
     from questionary import Style
 
