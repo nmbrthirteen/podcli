@@ -10,14 +10,13 @@ import subprocess
 import tempfile
 from typing import Optional, Callable
 
+from config.paths import paths
 from services.claude_suggest import _engine_label, _find_ai_cli_candidates, _run_ai_command
 
 
 def _load_kb_context() -> str:
     """Load PodStack knowledge base files for content generation."""
-    kb_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", ".podcli", "knowledge"
-    )
+    kb_dir = paths["knowledge"]
     kb_context = ""
     for fname, max_chars in [
         ("05-title-formulas.md", 3000),

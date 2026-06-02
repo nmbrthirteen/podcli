@@ -2,8 +2,8 @@
 /**
  * Remotion render script — called by Python backend.
  *
- * Caches the bundle to .podcli/cache/remotion-bundle/ so subsequent renders
- * skip the ~15-20s bundling step.
+ * Caches the bundle under PODCLI_CACHE_DIR/remotion-bundle/ (default data/cache/)
+ * so subsequent renders skip the ~15-20s bundling step.
  *
  * Usage:
  *   node remotion/render.mjs \
@@ -27,20 +27,26 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const CACHE_DIR = path.join(PROJECT_ROOT, ".podcli", "cache", "remotion-bundle");
+const CACHE_ROOT = process.env.PODCLI_CACHE_DIR
+  ? path.resolve(process.env.PODCLI_CACHE_DIR)
+  : path.join(PROJECT_ROOT, "data", "cache");
+const CACHE_DIR = path.join(CACHE_ROOT, "remotion-bundle");
 const BUNDLE_HASH_FILE = path.join(CACHE_DIR, ".hash");
 const ENTRY_POINT = path.join(__dirname, "src", "index.ts");
+
+const BOOLEAN_FLAGS = new Set(["prebundle", "keep-overlay"]);
 
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--prebundle") {
-      opts.prebundle = true;
+    const key = args[i].replace(/^--/, "");
+    if (BOOLEAN_FLAGS.has(key)) {
+      opts[key] = true;
       continue;
     }
     if (args[i].startsWith("--") && i + 1 < args.length) {
-      opts[args[i].replace(/^--/, "")] = args[i + 1];
+      opts[key] = args[i + 1];
       i++;
     }
   }
@@ -210,13 +216,17 @@ async function main() {
       inputProps,
     });
 
-    // Render captions as transparent WebM overlay (no video = 10x faster)
     const cpus = os.cpus().length;
     const concurrency = Math.max(2, Math.min(cpus, 8));
-    // Store overlay in /tmp to survive temp dir cleanup
-    const overlaySeed = `${path.resolve(opts.output)}:${process.pid}:${Date.now()}`;
-    const overlayId = crypto.createHash("md5").update(overlaySeed).digest("hex").slice(0, 12);
-    const captionOverlay = path.join(os.tmpdir(), `remotion_overlay_${overlayId}.mov`);
+    let captionOverlay;
+    if (opts["keep-overlay"]) {
+      const outBase = opts.output.replace(/\.[^.]+$/, "");
+      captionOverlay = `${outBase}_captions.mov`;
+    } else {
+      const overlaySeed = `${path.resolve(opts.output)}:${process.pid}:${Date.now()}`;
+      const overlayId = crypto.createHash("md5").update(overlaySeed).digest("hex").slice(0, 12);
+      captionOverlay = path.join(os.tmpdir(), `remotion_overlay_${overlayId}.mov`);
+    }
 
     let lastPct = -1;
     await renderMedia({
@@ -254,8 +264,11 @@ async function main() {
       { stdio: ["pipe", "pipe", "pipe"], timeout: 300000 }
     );
 
-    // Clean up overlay
-    try { fs.unlinkSync(captionOverlay); } catch {}
+    if (opts["keep-overlay"]) {
+      console.log(`PODCLI_OVERLAY_PATH=${captionOverlay}`);
+    } else {
+      try { fs.unlinkSync(captionOverlay); } catch {}
+    }
     console.log(`Done: ${opts.output}`);
   } finally {
     closeAssetServer();

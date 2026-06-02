@@ -2,7 +2,7 @@
 
 export interface TaskRequest {
   task_id: string;
-  task_type: "transcribe" | "parse_transcript" | "create_clip" | "batch_clips" | "analyze_energy" | "pack_transcript" | "detect_encoder" | "presets" | "ping" | "suggest_clips" | "generate_content" | "corrections";
+  task_type: "transcribe" | "parse_transcript" | "create_clip" | "batch_clips" | "analyze_energy" | "pack_transcript" | "detect_encoder" | "presets" | "ping" | "suggest_clips" | "generate_content" | "corrections" | "manage_integrations" | "run_integration_tool" | "manage_config";
   params: Record<string, unknown>;
 }
 
@@ -84,6 +84,8 @@ export interface ClipResult {
   output_path: string;
   duration: number;
   file_size_mb: number;
+  caption_overlay_path?: string;
+  cropped_source_path?: string;
 }
 
 export interface SuggestedClip {
@@ -131,6 +133,7 @@ export interface CreateClipInput {
   transcript_words?: WordTimestamp[];
   clean_fillers?: boolean;
   allow_ass_fallback?: boolean;
+  keep_caption_overlay?: boolean;
 }
 
 export interface BatchClipSpec {
@@ -141,6 +144,7 @@ export interface BatchClipSpec {
   crop_strategy?: string;
   logo_path?: string | null;
   allow_ass_fallback?: boolean;
+  keep_caption_overlay?: boolean;
   keep_segments?: Array<{ start: number; end: number }>;
 }
 
@@ -152,6 +156,7 @@ export interface BatchClipsInput {
   export_selected?: boolean;
   clean_fillers?: boolean;
   allow_ass_fallback?: boolean;
+  keep_caption_overlay?: boolean;
   /**
    * When true, POST to the Web UI's /api/batch-clips and return a job_id
    * immediately so the caller can poll job_status and emit live progress.

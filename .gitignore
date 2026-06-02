@@ -8,6 +8,7 @@ dist/
 # Data directory
 data/
 .podcli/
+.podcli-home
 presets/
 
 # Environment

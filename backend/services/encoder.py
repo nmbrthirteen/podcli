@@ -18,6 +18,8 @@ import os
 import functools
 import sys
 
+from config.paths import paths
+
 
 @functools.lru_cache(maxsize=1)
 def detect_encoders() -> dict:
@@ -151,10 +153,7 @@ def get_video_encode_flags() -> list[str]:
 
 
 def _encoder_cache_path() -> str:
-    return os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "..", "..", ".podcli", "cache", "encoder.json",
-    )
+    return os.path.join(paths["cache"], "encoder.json")
 
 
 def _ffmpeg_fingerprint() -> str:
@@ -171,7 +170,7 @@ def _ffmpeg_fingerprint() -> str:
 def get_encoder_info() -> dict:
     """Get full encoder detection info (for UI/logging).
 
-    Cached at .podcli/cache/encoder.json keyed by ffmpeg binary fingerprint.
+    Cached under paths["cache"]/encoder.json keyed by ffmpeg binary fingerprint.
     Encoder probing runs ffmpeg twice (~1.6s on macOS) — huge startup win.
     """
     import json

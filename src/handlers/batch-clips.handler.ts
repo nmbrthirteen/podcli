@@ -89,6 +89,12 @@ export const batchClipsToolDef = {
           "Allow fallback to legacy ASS captions if Remotion caption rendering fails. Default: false.",
         default: false,
       },
+      keep_caption_overlay: {
+        type: "boolean",
+        description:
+          "Keep ProRes 4444 alpha caption overlays for DaVinci Resolve export. Default: false.",
+        default: false,
+      },
       transcript_words: {
         type: "array",
         description:
@@ -144,8 +150,8 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     caption_style: s.suggested_caption_style || settings.captionStyle || "hormozi",
     crop_strategy: settings.cropStrategy || "speaker",
     allow_ass_fallback: input.allow_ass_fallback === true,
+    keep_caption_overlay: input.keep_caption_overlay === true,
     logo_path: settings.logoPath || null,
-    // Preserve multi-cut segments from suggestion
     ...(s.segments && s.segments.length > 0 && { keep_segments: s.segments }),
   });
 
@@ -188,6 +194,10 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     });
   }
 
+  if (input.keep_caption_overlay === true) {
+    clips = clips.map((c) => ({ ...c, keep_caption_overlay: c.keep_caption_overlay ?? true }));
+  }
+
   // Async path — route through Web UI so caller can poll job_status for
   // live progress during a multi-minute render. Falls back to sync if the
   // UI isn't running.
@@ -203,6 +213,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
           clean_fillers: input.clean_fillers !== false,
           logo_path: settings.logoPath || null,
           outro_path: settings.outroPath || null,
+          keep_caption_overlay: input.keep_caption_overlay === true,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
@@ -230,6 +241,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     transcript_words: transcriptWords,
     clean_fillers: input.clean_fillers !== false,
     allow_ass_fallback: input.allow_ass_fallback === true,
+    keep_caption_overlay: input.keep_caption_overlay === true,
     output_dir: paths.output,
     logo_path: settings.logoPath || null,
   });

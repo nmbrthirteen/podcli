@@ -15,10 +15,12 @@ import os
 import shutil
 from typing import Optional
 
+from config.paths import paths
+
 
 def _registry_path() -> str:
     """Path to the asset registry JSON file."""
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".podcli", "assets")
+    base = paths["assets"]
     os.makedirs(base, exist_ok=True)
     return os.path.join(base, "registry.json")
 

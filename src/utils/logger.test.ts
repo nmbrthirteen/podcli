@@ -17,6 +17,14 @@ describe("logger", () => {
 
   it("respects PODCLI_LOG_LEVEL default (debug in dev)", () => {
     // level is set at import time; just verify it's a known winston level
-    expect(["silly", "debug", "verbose", "http", "info", "warn", "error"]).toContain(logger.level);
+    expect([
+      "silly",
+      "debug",
+      "verbose",
+      "http",
+      "info",
+      "warn",
+      "error",
+    ]).toContain(logger.level);
   });
 });

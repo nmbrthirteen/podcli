@@ -5,8 +5,8 @@ The goal: give an LLM everything it needs to reason about clip selection and
 cut points without watching video. Words, speakers, silences, and optional
 energy peaks fit into ~10-20KB of text.
 
-Input:  cached transcription JSON (.podcli/cache/<hash>.json)
-Output: .podcli/packed/<hash>.md
+Input:  cached transcription JSON (data/cache/transcripts/<hash>.json)
+Output: packed/<hash>.md under the active config home
 """
 
 from __future__ import annotations
@@ -14,14 +14,23 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
-from typing import Optional
+from typing import Any, Optional
 
-PROJECT_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
-)
-CACHE_DIR = os.path.join(PROJECT_ROOT, ".podcli", "cache")
-PACKED_DIR = os.path.join(PROJECT_ROOT, ".podcli", "packed")
+from config.paths import paths
+
+def _transcripts_cache_dir() -> str:
+    return paths["transcripts"]
+
+
+def _legacy_cache_dir() -> str:
+    return paths["cache"]
+
+
+def _packed_dir() -> str:
+    return paths["packed"]
+_HASH16_RE = re.compile(r"^[a-f0-9]{16}$", re.I)
 
 # Phrase construction tuning
 SILENCE_SPLIT_SEC = 0.5      # split a phrase on word gap >= this
@@ -45,6 +54,62 @@ def compute_cache_hash(video_path: str) -> str:
             remaining -= len(chunk)
     h.update(f"size:{size}".encode())
     return h.hexdigest()[:16]
+
+
+def legacy_md5_cache_path(video_path: str) -> str:
+    stat = os.stat(video_path)
+    raw = f"{os.path.abspath(video_path)}:{stat.st_size}:{stat.st_mtime}"
+    return os.path.join(_legacy_cache_dir(), hashlib.md5(raw.encode()).hexdigest() + ".json")
+
+
+def transcript_json_path(cache_hash: str) -> str:
+    return os.path.join(_transcripts_cache_dir(), f"{cache_hash}.json")
+
+
+def load_cached_transcript_for_video(video_path: str) -> dict[str, Any] | None:
+    cache_hash = compute_cache_hash(video_path)
+    canonical = transcript_json_path(cache_hash)
+    if os.path.exists(canonical):
+        with open(canonical, encoding="utf-8") as f:
+            return json.load(f)
+    legacy = legacy_md5_cache_path(video_path)
+    if os.path.exists(legacy):
+        with open(legacy, encoding="utf-8") as f:
+            data = json.load(f)
+        save_cached_transcript_for_video(video_path, data)
+        return data
+    return None
+
+
+def save_cached_transcript_for_video(video_path: str, data: dict[str, Any]) -> str:
+    cache_hash = compute_cache_hash(video_path)
+    path = transcript_json_path(cache_hash)
+    os.makedirs(_transcripts_cache_dir(), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    return path
+
+
+def migrate_transcript_cache_layout() -> dict[str, Any]:
+    result = {"moved_to_transcripts": 0, "skipped": 0}
+    os.makedirs(_transcripts_cache_dir(), exist_ok=True)
+    legacy_dir = _legacy_cache_dir()
+    if not os.path.isdir(legacy_dir):
+        return result
+    for fname in os.listdir(legacy_dir):
+        if not fname.endswith(".json") or fname == "encoder.json":
+            continue
+        stem = fname[:-5]
+        if not _HASH16_RE.match(stem):
+            continue
+        src = os.path.join(legacy_dir, fname)
+        dest = os.path.join(_transcripts_cache_dir(), fname)
+        if os.path.exists(dest):
+            result["skipped"] += 1
+            continue
+        os.rename(src, dest)
+        result["moved_to_transcripts"] += 1
+    return result
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -273,13 +338,19 @@ def pack_transcript(
 
 
 def load_cache(cache_hash: str) -> dict:
-    path = os.path.join(CACHE_DIR, f"{cache_hash}.json")
-    with open(path, "r") as f:
+    path = transcript_json_path(cache_hash)
+    if not os.path.exists(path):
+        legacy = os.path.join(_legacy_cache_dir(), f"{cache_hash}.json")
+        if os.path.exists(legacy):
+            path = legacy
+        else:
+            raise FileNotFoundError(f"Transcript cache not found: {cache_hash}")
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def packed_path_for(cache_hash: str) -> str:
-    return os.path.join(PACKED_DIR, f"{cache_hash}.md")
+    return os.path.join(_packed_dir(), f"{cache_hash}.md")
 
 
 def write_packed(
@@ -291,7 +362,7 @@ def write_packed(
     """Pack a transcript dict and write to .podcli/packed/<hash>.md."""
     label = source_label or cache_hash
     md = pack_transcript(transcript, label, energy_data=energy_data)
-    os.makedirs(PACKED_DIR, exist_ok=True)
+    os.makedirs(_packed_dir(), exist_ok=True)
     out_path = packed_path_for(cache_hash)
     with open(out_path, "w") as f:
         f.write(md)
