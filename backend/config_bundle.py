@@ -192,7 +192,7 @@ def export_config(bundle_path: str, source_home: str | None = None) -> dict[str,
 
         zf.writestr("assets/registry.json", json.dumps({"assets": registry_export}, indent=2) + "\n")
         manifest["path_map"] = path_map
-        manifest["asset_count"] = len(registry_export) + len(extra_sources)
+        manifest["asset_count"] = len(path_map)
         zf.writestr("manifest.json", json.dumps(manifest, indent=2) + "\n")
 
     return {"bundle": str(bundle), "home": str(home), "asset_count": manifest["asset_count"]}
@@ -205,13 +205,13 @@ def _safe_extract_zip(zf: zipfile.ZipFile, target: Path) -> None:
     root = target.resolve()
     for info in zf.infolist():
         name = info.filename
-        if name.endswith("/"):
-            continue
         if name.startswith("/") or name.startswith("\\"):
             raise ValueError(f"Unsafe absolute path in bundle: {name}")
-        # Reject symlink entries — Resolve would happily follow them outside `root`.
+        # Reject symlink entries — extraction would follow them outside `root`.
         if (info.external_attr >> 28) & 0xF == _ZIP_SYMLINK_TYPE:
             raise ValueError(f"Symlink entries not allowed in bundle: {name}")
+        # Validate directory entries too: extractall creates them, so a "../x/"
+        # entry would otherwise escape root before any file is checked.
         dest = (root / name).resolve()
         if os.path.commonpath([str(root), str(dest)]) != str(root):
             raise ValueError(f"Unsafe path in bundle: {name}")
@@ -408,7 +408,9 @@ def _restore_from_backup(home: Path, backup: Path) -> None:
 
 
 def _cleanup_managed_paths(home: Path) -> None:
-    for file_name in MANAGED_FILES:
+    # manifest.json isn't a managed file but the importer extracts it; clear it
+    # here so a rollback restores a home identical to the pre-import state.
+    for file_name in MANAGED_FILES + ["manifest.json"]:
         path = home / file_name
         if path.exists():
             path.unlink()
@@ -492,6 +494,10 @@ def import_config(bundle_path: str, target_home: str | None = None, activate: bo
             _write_json(registry_path, {"assets": rewritten})
 
         _rewrite_asset_paths(target, manifest.get("path_map", {}) if isinstance(manifest, dict) else {})
+
+        # The extracted manifest carries the exporter's absolute source paths;
+        # drop it so they don't sit in the imported home.
+        (target / "manifest.json").unlink(missing_ok=True)
 
         if activate:
             _marker_path().write_text(str(target) + "\n", encoding="utf-8")

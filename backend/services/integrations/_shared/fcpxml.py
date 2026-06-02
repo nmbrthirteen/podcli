@@ -8,8 +8,28 @@ from pathlib import Path
 from typing import Optional
 
 
+_NTSC_FRACTIONS = {
+    23.976: Fraction(24000, 1001),
+    29.97: Fraction(30000, 1001),
+    47.952: Fraction(48000, 1001),
+    59.94: Fraction(60000, 1001),
+    119.88: Fraction(120000, 1001),
+}
+
+
+def fps_fraction(fps: float) -> Fraction:
+    # NTSC rates have exact rational forms FCPXML/Resolve key the timeline rate
+    # off; limit_denominator(1000) yields non-canonical values (29.97 -> 2997/100)
+    # that Resolve silently snaps or rejects on import.
+    return _NTSC_FRACTIONS.get(round(fps, 3)) or Fraction(fps).limit_denominator(1000000)
+
+
+def tc_format(fps: float) -> str:
+    return "DF" if round(fps, 2) in (29.97, 59.94) else "NDF"
+
+
 def frames_to_seconds(frames: int, fps: float) -> Fraction:
-    return Fraction(frames) / Fraction(fps).limit_denominator(1000)
+    return Fraction(frames) / fps_fraction(fps)
 
 
 def seconds_to_time(seconds: Fraction) -> str:
@@ -29,7 +49,7 @@ def file_uri(p: Path) -> str:
 
 
 def make_format(format_id: str, fps: float, width: int, height: int) -> ET.Element:
-    fps_frac = Fraction(fps).limit_denominator(1000)
+    fps_frac = fps_fraction(fps)
     return ET.Element("format", {
         "id": format_id,
         "name": f"FFVideoFormat{width}x{height}p{int(round(fps))}",
@@ -78,6 +98,7 @@ def make_compound_media(
     media_id: str,
     name: str,
     format_id: str,
+    fps: float,
     source_duration: Fraction,
     v1_asset_id: str,
     v1_has_audio: bool,
@@ -88,7 +109,7 @@ def make_compound_media(
     seq = ET.SubElement(media, "sequence", {
         "format": format_id,
         "tcStart": "0s",
-        "tcFormat": "NDF",
+        "tcFormat": tc_format(fps),
         "duration": seconds_to_time(source_duration),
     })
     spine = ET.SubElement(seq, "spine")
@@ -128,6 +149,7 @@ def make_project_library(
     project_name: str,
     event_name: str,
     format_id: str,
+    fps: float,
     compounds: list[tuple[str, str, Fraction]],
 ) -> ET.Element:
     total = sum((d for _, _, d in compounds), Fraction(0))
@@ -137,7 +159,7 @@ def make_project_library(
     seq = ET.SubElement(project, "sequence", {
         "format": format_id,
         "tcStart": "0s",
-        "tcFormat": "NDF",
+        "tcFormat": tc_format(fps),
         "duration": seconds_to_time(total),
     })
     spine = ET.SubElement(seq, "spine")

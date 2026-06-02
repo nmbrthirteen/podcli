@@ -85,6 +85,7 @@ def emit(project: Project, out_path: Path) -> Path:
             media_id=cmpd_id,
             name=short.title,
             format_id=fmt_id,
+            fps=project.fps,
             source_duration=source_duration,
             v1_asset_id=src_id,
             v1_has_audio=short.source.has_audio,
@@ -96,6 +97,7 @@ def emit(project: Project, out_path: Path) -> Path:
         project_name=project.name,
         event_name="podcli",
         format_id=fmt_id,
+        fps=project.fps,
         compounds=compounds,
     )
 

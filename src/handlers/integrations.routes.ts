@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import multer from "multer";
 import { existsSync } from "fs";
-import { mkdir } from "fs/promises";
+import { mkdir, unlink } from "fs/promises";
 import { join, extname } from "path";
 import { v4 as uuidv4 } from "uuid";
 import type { PythonExecutor } from "../services/python-executor.js";
@@ -54,7 +54,9 @@ export function registerConfigIntegrationRoutes(
         res.status(500).json({ error: "Export failed: bundle not created" });
         return;
       }
-      res.download(file, "podcli-profile.zip");
+      res.download(file, "podcli-profile.zip", () => {
+        void unlink(file).catch(() => {});
+      });
     } catch (err) {
       res.status(500).json({ error: routeError(err) });
     }
@@ -93,6 +95,8 @@ export function registerConfigIntegrationRoutes(
       res.json(result.data ?? {});
     } catch (err) {
       res.status(500).json({ error: routeError(err) });
+    } finally {
+      if (req.file?.path) void unlink(req.file.path).catch(() => {});
     }
   });
 

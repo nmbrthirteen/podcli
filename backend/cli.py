@@ -47,7 +47,18 @@ def _suggestions_session_path(cache_hash: str) -> str:
     return os.path.join(paths["home"], "sessions", f"clips-{cache_hash}.json")
 
 
-def _load_suggestions_session(cache_hash: str, top_n: int) -> list | None:
+def _selection_signature(config: dict) -> str:
+    """Flags that change which clips get selected. A cached session is only
+    valid for a re-run with the same signature, otherwise it would serve clips
+    that ignore the new --no-ai / --min-duration / --max-duration flags."""
+    return "|".join(str(x) for x in (
+        bool(config.get("ai_select", True)),
+        config.get("min_clip_duration", MIN_CLIP_DURATION),
+        config.get("max_clip_duration", MAX_CLIP_DURATION),
+    ))
+
+
+def _load_suggestions_session(cache_hash: str, top_n: int, signature: str) -> list | None:
     if not cache_hash:
         return None
     path = _suggestions_session_path(cache_hash)
@@ -60,13 +71,15 @@ def _load_suggestions_session(cache_hash: str, top_n: int) -> list | None:
         return None
     if not isinstance(payload, dict) or payload.get("top_n") != top_n:
         return None
+    if payload.get("signature") != signature:
+        return None
     clips = payload.get("clips")
     if not isinstance(clips, list) or not clips:
         return None
     return clips
 
 
-def _save_suggestions_session(cache_hash: str, top_n: int, engine: str | None, clips: list) -> None:
+def _save_suggestions_session(cache_hash: str, top_n: int, engine: str | None, clips: list, signature: str) -> None:
     if not cache_hash or not clips:
         return
     path = _suggestions_session_path(cache_hash)
@@ -74,7 +87,8 @@ def _save_suggestions_session(cache_hash: str, top_n: int, engine: str | None, c
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(
-                {"cache_hash": cache_hash, "top_n": top_n, "engine": engine, "clips": clips},
+                {"cache_hash": cache_hash, "top_n": top_n, "signature": signature,
+                 "engine": engine, "clips": clips},
                 f,
             )
     except Exception:
@@ -536,11 +550,14 @@ def cmd_process(args):
 
     # ── Step 3: Score and select clips ──
     top_n = config.get("top_clips", 5)
+    selection_sig = _selection_signature(config)
     clips = None
     resumed_from_session = False
 
-    if not getattr(args, "no_resume", False):
-        resumed = _load_suggestions_session(cache_hash, top_n)
+    if getattr(args, "no_resume", False) or config.get("no_cache", False):
+        _clear_suggestions_session(cache_hash)
+    else:
+        resumed = _load_suggestions_session(cache_hash, top_n, selection_sig)
         if resumed:
             print(f"  [3/4] Resumed {len(resumed)} cached suggestions (use --no-resume to regenerate)")
             clips = resumed
@@ -561,7 +578,7 @@ def cmd_process(args):
         if clips:
             actual_engine = next((c.get("_ai_engine") for c in clips if c.get("_ai_engine")), ai_engine)
             print(f"         ✓ {_engine_label(actual_engine)} selected {len(clips)} clips")
-            _save_suggestions_session(cache_hash, top_n, actual_engine, clips)
+            _save_suggestions_session(cache_hash, top_n, actual_engine, clips, selection_sig)
         else:
             print("         ⚠ AI CLI unavailable, falling back to heuristics")
     elif not config.get("ai_select", True):
@@ -580,7 +597,7 @@ def cmd_process(args):
             max_dur=config.get("max_clip_duration", MAX_CLIP_DURATION),
         )
         if clips and not resumed_from_session:
-            _save_suggestions_session(cache_hash, top_n, "heuristic", clips)
+            _save_suggestions_session(cache_hash, top_n, "heuristic", clips, selection_sig)
 
     if not clips:
         print("  No clips found. Try a longer transcript or lower --min-duration.", file=sys.stderr)

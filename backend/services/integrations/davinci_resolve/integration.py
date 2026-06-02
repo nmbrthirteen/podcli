@@ -61,6 +61,8 @@ class DaVinciResolveIntegration(IntegrationBase):
         ]
 
     def _handle_export(self, params: dict[str, Any]) -> dict[str, Any]:
+        if not params.get("shorts"):
+            raise ValueError("export_to_davinci_resolve requires at least one short")
         shorts: list[Short] = []
         for s in params["shorts"]:
             src_info = probe_media(s["source_path"])
