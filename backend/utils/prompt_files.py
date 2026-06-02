@@ -6,9 +6,8 @@ these to the repo root (as several call sites used to do via
 directory with `tmp*.txt` files whenever a process crashes before the
 cleanup block runs — which is how we accumulated 150+ stale files.
 
-Route them through `.podcli/tmp/` instead:
-- Gitignored by the existing `.podcli/` rule, so no risk of accidental
-  commits.
+Route them through `<podcli_home>/tmp/` instead:
+- Under the gitignored config home, so no risk of accidental commits.
 - Easy to wipe as a single directory on a cold start.
 - Still a real filesystem path the AI CLIs can read.
 """
@@ -28,10 +27,10 @@ def _tmp_dir() -> str:
 
 
 def write_prompt_file(prompt: str, suffix: str = ".txt") -> str:
-    """Write a prompt to `.podcli/tmp/` and return the absolute path.
+    """Write a prompt to `<podcli_home>/tmp/` and return the absolute path.
 
     Caller is responsible for deleting the file when done (wrap in
-    try/finally). The `.podcli/tmp/` directory stays around across
+    try/finally). The `<podcli_home>/tmp/` directory stays around across
     runs; only the file is per-call.
     """
     with tempfile.NamedTemporaryFile(

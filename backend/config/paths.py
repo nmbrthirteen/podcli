@@ -40,28 +40,40 @@ def _resolve_home() -> Path:
     return (_project_root() / ".podcli").resolve()
 
 
-home = _resolve_home()
-project_root = _project_root()
-data_dir = Path(os.environ.get("PODCLI_DATA", str(project_root / "data"))).expanduser().resolve()
+def _build_paths() -> dict[str, str]:
+    home = _resolve_home()
+    project_root = _project_root()
+    data_dir = Path(os.environ.get("PODCLI_DATA", str(project_root / "data"))).expanduser().resolve()
+    return {
+        "home": str(home),
+        "project_root": str(project_root),
+        "cache": str(data_dir / "cache"),
+        "transcripts": str(data_dir / "cache" / "transcripts"),
+        "packed": str(home / "packed"),
+        "working": str(data_dir / "working"),
+        "output": str(data_dir / "output"),
+        "logs": str(data_dir / "logs"),
+        "assets": str(home / "assets"),
+        "assetsRegistry": str(home / "assets" / "registry.json"),
+        "history": str(home / "history"),
+        "clipsHistory": str(home / "history" / "clips.json"),
+        "knowledge": str(home / "knowledge"),
+        "uiState": str(home / "ui-state.json"),
+        "thumbnailConfig": str(home / "thumbnail-config.json"),
+        "corrections": str(home / "corrections.json"),
+        "integrations": str(home / "integrations.json"),
+        "profileMarker": str(_marker_path()),
+    }
 
-paths = {
-    "home": str(home),
-    "project_root": str(project_root),
-    "cache": str(data_dir / "cache"),
-    "transcripts": str(data_dir / "cache" / "transcripts"),
-    "packed": str(home / "packed"),
-    "working": str(data_dir / "working"),
-    "output": str(data_dir / "output"),
-    "logs": str(data_dir / "logs"),
-    "assets": str(home / "assets"),
-    "assetsRegistry": str(home / "assets" / "registry.json"),
-    "history": str(home / "history"),
-    "clipsHistory": str(home / "history" / "clips.json"),
-    "knowledge": str(home / "knowledge"),
-    "uiState": str(home / "ui-state.json"),
-    "thumbnailConfig": str(home / "thumbnail-config.json"),
-    "corrections": str(home / "corrections.json"),
-    "integrations": str(home / "integrations.json"),
-    "profileMarker": str(_marker_path()),
-}
+
+paths = _build_paths()
+
+
+def reload_paths() -> dict[str, str]:
+    """Recompute paths in place after the active-home marker changes, so existing
+    `from config.paths import paths` references reflect the new home without a
+    process restart."""
+    paths.clear()
+    paths.update(_build_paths())
+    return paths
 

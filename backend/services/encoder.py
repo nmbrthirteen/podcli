@@ -170,7 +170,7 @@ def _ffmpeg_fingerprint() -> str:
 def get_encoder_info() -> dict:
     """Get full encoder detection info (for UI/logging).
 
-    Cached at data/cache/encoder.json keyed by ffmpeg binary fingerprint.
+    Cached under paths["cache"]/encoder.json keyed by ffmpeg binary fingerprint.
     Encoder probing runs ffmpeg twice (~1.6s on macOS) — huge startup win.
     """
     import json

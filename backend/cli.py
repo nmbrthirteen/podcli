@@ -416,14 +416,17 @@ def cmd_process(args):
     print(f"  Video:   {os.path.basename(video_path)}")
     print()
 
-    # Cache hash for resume — keyed by video size+mtime, shared with transcript cache.
+    # Cache hash for resume — keyed by video size+mtime. Disabled when a custom
+    # transcript is supplied, since the hash ignores transcript contents and
+    # would otherwise resume suggestions made from a different transcript.
     cache_hash = ""
-    try:
-        from services.transcript_packer import compute_cache_hash as _compute_cache_hash
+    if not args.transcript:
+        try:
+            from services.transcript_packer import compute_cache_hash as _compute_cache_hash
 
-        cache_hash = _compute_cache_hash(video_path)
-    except Exception:
-        cache_hash = ""
+            cache_hash = _compute_cache_hash(video_path)
+        except Exception:
+            cache_hash = ""
 
     # ── Step 1: Get transcript ──
     transcript = None

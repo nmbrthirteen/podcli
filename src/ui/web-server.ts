@@ -909,9 +909,12 @@ app.get("/api/stream-source", (req, res) => {
   const resolvedPath = path.resolve(filePath);
   const isSessionVideo =
     uiState.videoPath && resolvedPath === path.resolve(uiState.videoPath);
-  const isUploadedFile = resolvedPath.startsWith(
-    path.resolve(join(paths.working, "uploads")),
-  );
+  const uploadsRoot = path.resolve(join(paths.working, "uploads"));
+  const relativeToUploads = path.relative(uploadsRoot, resolvedPath);
+  const isUploadedFile =
+    relativeToUploads !== "" &&
+    !relativeToUploads.startsWith("..") &&
+    !path.isAbsolute(relativeToUploads);
   if (!isSessionVideo && !isUploadedFile) {
     res
       .status(403)
@@ -1641,7 +1644,7 @@ app.get("/api/ui-state", (_req, res) => {
     totalSuggestions: uiState.suggestions.length,
     deselectedCount: uiState.deselectedIndices.length,
     transcriptWordCount: Array.isArray(uiState.transcript?.words)
-      ? (uiState.transcript?.words ?? [].length)
+      ? (uiState.transcript?.words ?? []).length
       : 0,
     transcript: uiState.transcript,
     rawTranscriptText: uiState.rawTranscriptText,

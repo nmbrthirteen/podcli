@@ -44,6 +44,9 @@ class IntegrationRegistry:
 
     @classmethod
     def register(cls, integration: IntegrationBase) -> None:
+        existing = cls._instances.get(integration.name)
+        if existing is not None and type(existing) is not type(integration):
+            raise ValueError(f"Integration name already registered: {integration.name}")
         cls._instances[integration.name] = integration
 
     @classmethod

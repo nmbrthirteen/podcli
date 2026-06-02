@@ -608,12 +608,14 @@ export function createServer(): McpServer {
                   caption_style: params.caption_style || "hormozi",
                   crop_strategy: params.crop_strategy || "speaker",
                   allow_ass_fallback: params.allow_ass_fallback === true,
+                  keep_caption_overlay: params.keep_caption_overlay === true,
                   ...(keepSegments && { segments: keepSegments }),
                 },
               ],
               transcript_words: params.transcript_words,
               logo_path: params.logo_path || null,
               outro_path: params.outro_path || null,
+              keep_caption_overlay: params.keep_caption_overlay === true,
             }),
           });
           if (webRes.ok) {

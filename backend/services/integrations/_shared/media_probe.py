@@ -9,9 +9,11 @@ from typing import Any
 
 def _run_ffprobe(cmd: list[str], path: str) -> dict[str, Any]:
     try:
-        return json.loads(subprocess.check_output(cmd, text=True, stderr=subprocess.PIPE))
+        return json.loads(subprocess.check_output(cmd, text=True, stderr=subprocess.PIPE, timeout=30))
     except FileNotFoundError:
         raise RuntimeError("ffprobe not found — install ffmpeg to use editor-export integrations")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"ffprobe timed out for {path}")
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"ffprobe failed for {path}: {(e.stderr or '').strip() or e}")
     except json.JSONDecodeError:

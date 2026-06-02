@@ -13,9 +13,13 @@ function resolveHome(): string {
     return resolve(process.env.PODCLI_HOME);
   }
   if (existsSync(homeMarker)) {
-    const marker = readFileSync(homeMarker, "utf-8").trim();
-    if (marker) {
-      return isAbsolute(marker) ? resolve(marker) : resolve(projectRoot, marker);
+    try {
+      const marker = readFileSync(homeMarker, "utf-8").trim();
+      if (marker) {
+        return isAbsolute(marker) ? resolve(marker) : resolve(projectRoot, marker);
+      }
+    } catch {
+      // Unreadable marker — fall through to the default home.
     }
   }
   return resolve(projectRoot, ".podcli");

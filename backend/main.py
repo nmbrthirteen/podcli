@@ -451,7 +451,8 @@ def handle_run_integration_tool(task_id: str, params: dict):
         result = tool.handler(tool_params)
         emit_result(task_id, "success", data=result)
     except Exception as e:
-        emit_result(task_id, "error", error=f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        emit_result(task_id, "error", error=f"{type(e).__name__}: {e}")
 
 
 TASK_HANDLERS = {
@@ -478,9 +479,12 @@ def _maybe_auto_migrate_backend(task_type: str, params: dict) -> None:
         action = params.get("action", "status")
         if action == "status" or (action == "migrate" and params.get("dry_run")):
             return
-    from config_bundle import auto_migrate_legacy_if_pending
+    try:
+        from config_bundle import auto_migrate_legacy_if_pending
 
-    auto_migrate_legacy_if_pending(quiet=True)
+        auto_migrate_legacy_if_pending(quiet=True)
+    except Exception as e:
+        print(f"Warning: auto-migrate skipped: {e}", file=sys.stderr, flush=True)
 
 
 def main():

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config.paths import paths
+from config.paths import paths, reload_paths
 
 MIGRATION_MARKER_NAME = ".paths-migrated-v1"
 
@@ -501,6 +501,7 @@ def import_config(bundle_path: str, target_home: str | None = None, activate: bo
 
         if activate:
             _marker_path().write_text(str(target) + "\n", encoding="utf-8")
+            reload_paths()
     except Exception:
         if backup_dir and backup_dir.exists():
             _restore_from_backup(target, backup_dir)
@@ -519,6 +520,7 @@ def set_active_home(home_path: str) -> str:
     target = Path(home_path).expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
     _marker_path().write_text(str(target) + "\n", encoding="utf-8")
+    reload_paths()
     return str(target)
 
 

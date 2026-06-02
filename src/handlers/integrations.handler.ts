@@ -129,6 +129,9 @@ export function registerIntegrationMcpTools(server: McpServer): void {
     },
     async ({ action, name }) => {
       try {
+        if ((action === "enable" || action === "disable") && !name?.trim()) {
+          return mcpText("`name` is required when action is enable or disable.", true);
+        }
         const text = await handleManageIntegrations({ action, name });
         return mcpText(text);
       } catch (err) {
