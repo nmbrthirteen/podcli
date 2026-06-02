@@ -75,13 +75,24 @@ class CliOutputDirTests(unittest.TestCase):
         )
 
     def test_should_enter_post_render_loop_when_interrupted_with_completed_results(self):
-        should_enter = cli_mod._should_enter_post_render_loop(
-            config={"post_render_review": False},
-            interrupted=True,
-            results=[{"output_path": "/tmp/clip.mp4"}],
-        )
+        with mock.patch("sys.stdin.isatty", return_value=True):
+            should_enter = cli_mod._should_enter_post_render_loop(
+                config={"post_render_review": False},
+                interrupted=True,
+                results=[{"output_path": "/tmp/clip.mp4"}],
+            )
 
         self.assertTrue(should_enter)
+
+    def test_should_not_enter_post_render_loop_without_tty(self):
+        with mock.patch("sys.stdin.isatty", return_value=False):
+            should_enter = cli_mod._should_enter_post_render_loop(
+                config={"post_render_review": True},
+                interrupted=True,
+                results=[{"output_path": "/tmp/clip.mp4"}],
+            )
+
+        self.assertFalse(should_enter)
 
     def test_should_not_enter_post_render_loop_when_interrupted_without_completed_results(self):
         should_enter = cli_mod._should_enter_post_render_loop(
@@ -93,11 +104,12 @@ class CliOutputDirTests(unittest.TestCase):
         self.assertFalse(should_enter)
 
     def test_should_enter_post_render_loop_when_config_enabled(self):
-        should_enter = cli_mod._should_enter_post_render_loop(
-            config={"post_render_review": True},
-            interrupted=False,
-            results=[],
-        )
+        with mock.patch("sys.stdin.isatty", return_value=True):
+            should_enter = cli_mod._should_enter_post_render_loop(
+                config={"post_render_review": True},
+                interrupted=False,
+                results=[],
+            )
 
         self.assertTrue(should_enter)
 
