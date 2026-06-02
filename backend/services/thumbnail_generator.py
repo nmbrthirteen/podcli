@@ -16,6 +16,8 @@ import os
 import sys
 from typing import Optional
 
+from config.paths import paths
+
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 except ImportError:
@@ -93,9 +95,7 @@ DEFAULT_CONFIG = {
 def _load_config() -> dict:
     """Load thumbnail config from .podcli/thumbnail-config.json, merged with defaults."""
     config = {**DEFAULT_CONFIG}
-    config_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", ".podcli", "thumbnail-config.json"
-    )
+    config_path = paths["thumbnailConfig"]
     if os.path.exists(config_path):
         try:
             with open(config_path) as f:

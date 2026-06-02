@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import subprocess
+from config.paths import paths
 from utils.proc import run as proc_run, ProcError
 import sys
 import tempfile
@@ -112,9 +113,7 @@ def _load_config() -> dict:
         "playwright_timeout_ms": 150000,
     }
 
-    config_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", ".podcli", "thumbnail-config.json"
-    )
+    config_path = paths["thumbnailConfig"]
     if os.path.exists(config_path):
         try:
             with open(config_path) as f:

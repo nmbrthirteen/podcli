@@ -31,6 +31,13 @@ class ClipGeneratorTests(unittest.TestCase):
             return real_exists(path)
         return _exists
 
+    def test_kept_caption_overlay_path_matches_remotion_contract(self):
+        with tempfile.TemporaryDirectory() as td:
+            output_path = os.path.join(td, "captioned.mp4")
+            expected = cg._kept_caption_overlay_path(output_path)
+            self.assertTrue(expected.endswith("_captions.mov"))
+            self.assertIn("captioned", expected)
+
     def test_remotion_runtime_failure_does_not_disable_future_clips(self):
         real_exists = os.path.exists
         fail_result = subprocess.CompletedProcess(
@@ -62,8 +69,8 @@ class ClipGeneratorTests(unittest.TestCase):
                     output_path=output_path,
                 )
 
-        self.assertFalse(first)
-        self.assertFalse(second)
+        self.assertEqual(first, (False, None))
+        self.assertEqual(second, (False, None))
         self.assertIsNone(cg._remotion_available)
         self.assertGreaterEqual(mock_run.call_count, 4)
 
@@ -93,8 +100,8 @@ class ClipGeneratorTests(unittest.TestCase):
                     output_path=output_path,
                 )
 
-        self.assertFalse(first)
-        self.assertFalse(second)
+        self.assertEqual(first, (False, None))
+        self.assertEqual(second, (False, None))
         self.assertIsNone(cg._remotion_available)
         self.assertGreaterEqual(mock_run.call_count, 4)
 

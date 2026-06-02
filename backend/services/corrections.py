@@ -18,10 +18,9 @@ import os
 import re
 from typing import Optional
 
+from config.paths import paths
 
-_CORRECTIONS_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", ".podcli", "corrections.json"
-)
+_CORRECTIONS_PATH = paths["corrections"]
 
 
 def _load_corrections() -> dict[str, str]:

@@ -104,12 +104,12 @@ Run `/publish-checklist` when uploading. A week later, run `/retro-episode` with
 
 ## The Two Halves
 
-| | Video Engine (podcli core) | Content Workflow (PodStack) |
-|---|---|---|
-| **What** | Transcription, clip detection, rendering | Titles, descriptions, thumbnails, publishing |
-| **How** | Python + FFmpeg + Whisper + OpenCV + Claude/Codex | Claude Code slash commands |
-| **Interface** | Web UI, CLI, MCP tools | `/slash-commands` in Claude Code |
-| **Output** | `.mp4` files ready to upload | Content packages ready to paste into YouTube |
+|               | Video Engine (podcli core)                        | Content Workflow (PodStack)                  |
+| ------------- | ------------------------------------------------- | -------------------------------------------- |
+| **What**      | Transcription, clip detection, rendering          | Titles, descriptions, thumbnails, publishing |
+| **How**       | Python + FFmpeg + Whisper + OpenCV + Claude/Codex | Claude Code slash commands                   |
+| **Interface** | Web UI, CLI, MCP tools                            | `/slash-commands` in Claude Code             |
+| **Output**    | `.mp4` files ready to upload                      | Content packages ready to paste into YouTube |
 
 Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your show's brand, voice, title formulas, episode database, and style guide. Set it up once, everything stays on-brand.
 
@@ -118,6 +118,7 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 ## Features
 
 ### Video Processing
+
 - **AI clip suggestion** — Claude/Codex-powered moment detection with knowledge base context, multi-cut segments, 4-dimension scoring
 - **Face tracking** — YuNet face detection, exponential-smoothing camera, split-screen support, speaker-aware tracking with snap cooldown
 - **Burned-in captions** — 4 styles: branded, hormozi, karaoke, subtle
@@ -128,6 +129,7 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 - **Transcript import** — paste `Speaker (MM:SS)`, JSON, drag-drop `.txt` / `.srt` / `.vtt`
 
 ### Content Workflow (PodStack)
+
 - **`/process-transcript`** — extract and score best moments from any transcript
 - **`/generate-titles`** — 8 titles per clip with 6-point verification checklist
 - **`/generate-descriptions`** — descriptions + hashtags + SEO keywords
@@ -138,6 +140,7 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 - **`/retro-episode`** — performance analysis after publishing
 
 ### Infrastructure
+
 - **Knowledge base** — `.md` files that teach the AI your brand, voice, and style
 - **Asset management** — register logos and videos for quick reuse
 - **Clip history** — tracks everything to avoid duplicates
@@ -150,13 +153,13 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 
 ## Prerequisites
 
-| Tool | Install |
-|------|---------|
-| **Node.js** >= 18 | [nodejs.org](https://nodejs.org) |
-| **Python** >= 3.10 | [python.org](https://python.org) |
-| **FFmpeg** | `brew install ffmpeg` / `sudo apt install ffmpeg` |
-| **Claude Code** (optional) | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) — needed for PodStack slash commands |
-| **Codex** (optional) | [openai.com/codex](https://openai.com/index/introducing-codex/) — alternative AI engine for clip suggestion (auto-detected if Claude is unavailable) |
+| Tool                       | Install                                                                                                                                              |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Node.js** >= 18          | [nodejs.org](https://nodejs.org)                                                                                                                     |
+| **Python** >= 3.10         | [python.org](https://python.org)                                                                                                                     |
+| **FFmpeg**                 | `brew install ffmpeg` / `sudo apt install ffmpeg`                                                                                                    |
+| **Claude Code** (optional) | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) — needed for PodStack slash commands                                            |
+| **Codex** (optional)       | [openai.com/codex](https://openai.com/index/introducing-codex/) — alternative AI engine for clip suggestion (auto-detected if Claude is unavailable) |
 
 ## Quick Start
 
@@ -257,25 +260,25 @@ Or just paste a transcript — Claude auto-detects the input and runs the right 
 
 ## Knowledge Base
 
-The knowledge base is what makes podcli understand *your* show. Drop `.md` files into `.podcli/knowledge/` and both the video engine and content workflow use them. The clip suggestion engine reads 8 of these files (prioritized by relevance), checks the episode database for duplicate avoidance, and applies your voice rules and title formulas when generating suggestions.
+The knowledge base is what makes podcli understand _your_ show. Drop `.md` files into `.podcli/knowledge/` and both the video engine and content workflow use them. The clip suggestion engine reads 8 of these files (prioritized by relevance), checks the episode database for duplicate avoidance, and applies your voice rules and title formulas when generating suggestions.
 
 PodStack ships with **13 starter templates** that you fill in with your show's details:
 
-| File | What It Teaches The AI |
-|------|----------------------|
-| `00-master-instructions.md` | Auto-detection rules, decision tree, quality gates |
-| `01-brand-identity.md` | Show name, positioning, tagline, hosts, format |
-| `02-voice-and-tone.md` | Voice fingerprint, banned words, the Coffee Test |
-| `03-episodes-database.md` | Episode tracking, existing shorts (for dedup) |
+| File                          | What It Teaches The AI                               |
+| ----------------------------- | ---------------------------------------------------- |
+| `00-master-instructions.md`   | Auto-detection rules, decision tree, quality gates   |
+| `01-brand-identity.md`        | Show name, positioning, tagline, hosts, format       |
+| `02-voice-and-tone.md`        | Voice fingerprint, banned words, the Coffee Test     |
+| `03-episodes-database.md`     | Episode tracking, existing shorts (for dedup)        |
 | `04-shorts-creation-guide.md` | Moment types, selection criteria, extraction process |
-| `05-title-formulas.md` | Title shapes, rules, templates by content type |
-| `06-descriptions-template.md` | Description formulas, hashtag library, SEO keywords |
-| `07-thumbnail-guide.md` | Layouts, brand colors, typography, visual specs |
-| `08-topics-themes.md` | Core topics, cross-cutting themes, audience map |
-| `09-content-workflow.md` | End-to-end workflow phases, handoff specs |
-| `10-internal-processing.md` | Auto-execution rules, internal quality gates |
-| `11-inspiration-channels.md` | Reference channels, viral hooks, hybrid formulas |
-| `12-quick-reference.md` | Copy-paste hooks, hashtags, CTAs, checklists |
+| `05-title-formulas.md`        | Title shapes, rules, templates by content type       |
+| `06-descriptions-template.md` | Description formulas, hashtag library, SEO keywords  |
+| `07-thumbnail-guide.md`       | Layouts, brand colors, typography, visual specs      |
+| `08-topics-themes.md`         | Core topics, cross-cutting themes, audience map      |
+| `09-content-workflow.md`      | End-to-end workflow phases, handoff specs            |
+| `10-internal-processing.md`   | Auto-execution rules, internal quality gates         |
+| `11-inspiration-channels.md`  | Reference channels, viral hooks, hybrid formulas     |
+| `12-quick-reference.md`       | Copy-paste hooks, hashtags, CTAs, checklists         |
 
 Manage via the web UI at `/knowledge.html` (drag & drop, inline editor) or through the `knowledge_base` MCP tool.
 
@@ -311,36 +314,36 @@ Run `./setup.sh --mcp` to get the exact config with your paths filled in.
 
 ### MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `transcribe_podcast` | Transcribe audio/video with Whisper + speaker detection |
-| `suggest_clips` | Submit clip suggestions (includes duplicate check) |
-| `create_clip` | Render a single short-form clip as a vertical short |
-| `batch_create_clips` | Render multiple clips in one batch |
-| `knowledge_base` | Read/manage podcast context files (hosts, style, audience, etc.) |
-| `manage_assets` | Register/list reusable assets (logos, videos) |
-| `clip_history` | View previously created clips, check for duplicates |
-| `get_ui_state` | Read current session state and get workflow next-step guidance |
-| `modify_clip` | Adjust a suggested clip's timing, title, or caption style (or delete it) |
-| `toggle_clip` | Select or deselect a suggested clip for export |
-| `update_settings` | Update rendering settings (caption style, crop strategy, logo, outro) |
-| `list_outputs` | List all rendered clip files in the output directory |
-| `manage_presets` | Save, load, list, or delete rendering presets |
-| `analyze_energy` | Analyze audio energy levels to find high-energy moments |
-| `set_video` | Set the working video file without transcribing |
-| `import_transcript` | Import an external transcript with word-level timestamps (skips Whisper) |
-| `parse_transcript` | Parse raw speaker-labeled plain text into word-level timestamps |
+| Tool                 | Description                                                              |
+| -------------------- | ------------------------------------------------------------------------ |
+| `transcribe_podcast` | Transcribe audio/video with Whisper + speaker detection                  |
+| `suggest_clips`      | Submit clip suggestions (includes duplicate check)                       |
+| `create_clip`        | Render a single short-form clip as a vertical short                      |
+| `batch_create_clips` | Render multiple clips in one batch                                       |
+| `knowledge_base`     | Read/manage podcast context files (hosts, style, audience, etc.)         |
+| `manage_assets`      | Register/list reusable assets (logos, videos)                            |
+| `clip_history`       | View previously created clips, check for duplicates                      |
+| `get_ui_state`       | Read current session state and get workflow next-step guidance           |
+| `modify_clip`        | Adjust a suggested clip's timing, title, or caption style (or delete it) |
+| `toggle_clip`        | Select or deselect a suggested clip for export                           |
+| `update_settings`    | Update rendering settings (caption style, crop strategy, logo, outro)    |
+| `list_outputs`       | List all rendered clip files in the output directory                     |
+| `manage_presets`     | Save, load, list, or delete rendering presets                            |
+| `analyze_energy`     | Analyze audio energy levels to find high-energy moments                  |
+| `set_video`          | Set the working video file without transcribing                          |
+| `import_transcript`  | Import an external transcript with word-level timestamps (skips Whisper) |
+| `parse_transcript`   | Parse raw speaker-labeled plain text into word-level timestamps          |
 
 ---
 
 ## Caption Styles
 
-| Style | Look |
-|-------|------|
+| Style       | Look                                                                                |
+| ----------- | ----------------------------------------------------------------------------------- |
 | **branded** | Large bold text, dark box highlight on active word, gradient overlay, optional logo |
-| **hormozi** | Bold uppercase pop-on text, yellow active word (Alex Hormozi style) |
-| **karaoke** | Full sentence visible, words highlight progressively |
-| **subtle** | Clean minimal white text at bottom |
+| **hormozi** | Bold uppercase pop-on text, yellow active word (Alex Hormozi style)                 |
+| **karaoke** | Full sentence visible, words highlight progressively                                |
+| **subtle**  | Clean minimal white text at bottom                                                  |
 
 ---
 
@@ -393,28 +396,60 @@ podcli/
 │   └── config/
 │       └── caption_styles.py
 │
-└── .podcli/                  # local data (gitignored)
-    ├── knowledge/            # .md context files for AI (13 templates)
-    ├── assets/               # registered logos, videos
-    ├── cache/transcripts/    # cached transcriptions
-    ├── history/              # generated clip history
+├── .podcli/                  # config home (gitignored) — knowledge, presets, assets
+│   ├── knowledge/
+│   ├── assets/
+│   ├── presets/
+│   └── history/
+└── data/                     # runtime data (gitignored) — cache, output, working
+    ├── cache/                # CLI transcription cache + remotion bundle
+    │   └── transcripts/      # MCP/UI transcript cache
     ├── output/               # rendered clips
-    ├── presets/              # saved configurations
-    └── working/              # temp files
+    └── working/              # temp uploads and task dirs
 ```
 
 ## Configuration
 
 Copy `.env.example` to `.env` (setup.sh does this automatically):
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WHISPER_MODEL` | `base` | Whisper model size (tiny, base, small, medium, large) |
-| `WHISPER_DEVICE` | `auto` | `cpu`, `cuda`, or `auto` |
-| `PYTHON_PATH` | (venv) | Path to Python binary |
-| `PODCLI_HOME` | `.podcli/` | Data directory (relative to project root) |
-| `FFMPEG_PATH` | `ffmpeg` | Custom FFmpeg path |
-| `LOG_LEVEL` | `info` | Logging verbosity |
+| Variable         | Default    | Description                                           |
+| ---------------- | ---------- | ----------------------------------------------------- |
+| `WHISPER_MODEL`  | `base`     | Whisper model size (tiny, base, small, medium, large) |
+| `WHISPER_DEVICE` | `auto`     | `cpu`, `cuda`, or `auto`                              |
+| `PYTHON_PATH`    | (venv)     | Path to Python binary                                 |
+| `PODCLI_HOME`    | `.podcli/` | Config home (knowledge, presets, assets, settings)    |
+| `PODCLI_DATA`    | `data/`    | Runtime data (cache, output, working, logs)           |
+| `FFMPEG_PATH`    | `ffmpeg`   | Custom FFmpeg path                                    |
+| `LOG_LEVEL`      | `info`     | Logging verbosity                                     |
+
+### Config profiles (multi-show / multi-machine)
+
+Portable bundles zip your config home (not cache or rendered clips):
+
+```bash
+podcli config export ~/backups/myshow.zip
+podcli config import ~/backups/myshow.zip --home ~/.podcli-myshow --activate
+podcli config status
+```
+
+Activate a config root without importing: `podcli config use ~/.podcli-myshow` (writes `.podcli-home` in the project).
+
+### Upgrading from older layouts
+
+Older releases stored transcription cache under `project/.podcli/cache/` (now `data/cache/`) and presets under `project/presets/` (now `.podcli/presets/`). After upgrading, migration runs automatically when legacy files are still present (CLI, Web UI, MCP). To preview or run manually:
+
+```bash
+podcli config migrate --dry-run   # preview only
+podcli config migrate             # apply (same as auto when legacy cache exists)
+```
+
+**One source of truth:** settings live in **config home** (`PODCLI_HOME` or `.podcli/`, tracked by `.podcli-home`); heavy/runtime files live under **data** (`PODCLI_DATA` or `data/`). The marker file only points at which config home is active — it does not replace either root.
+
+MCP: `manage_config(action=migrate)`.
+
+Web UI: [Config profiles](http://localhost:3847/config.html) (when `npm run ui` is running).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development conventions.
 
 ## Transcript Format
 

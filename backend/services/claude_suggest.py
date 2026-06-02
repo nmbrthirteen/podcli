@@ -15,6 +15,8 @@ import sys
 import tempfile
 from typing import Optional, Callable
 
+from config.paths import paths
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 
@@ -169,9 +171,7 @@ def _build_prompt(
 
     # Load knowledge base files inline — prioritized by relevance to clip selection
     kb_context = ""
-    kb_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", ".podcli", "knowledge"
-    )
+    kb_dir = paths["knowledge"]
     # (filename, max_chars) — higher priority files get more budget
     _kb_files = [
         ("04-shorts-creation-guide.md", 4000),   # moment selection criteria, content types

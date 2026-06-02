@@ -14,23 +14,15 @@ import argparse
 import json
 import os
 import shutil
-
-# Load .env file (for HF_TOKEN, etc.)
-try:
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
-except ImportError:
-    pass
 import sys
 import time
 
-# Suppress macOS ObjC duplicate class warnings from OpenCV's bundled dylibs
-os.environ["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
-if sys.platform == "darwin":
-    os.environ.setdefault("DYLD_LIBRARY_PATH", "")
-
-# Load .env file into os.environ (HF_TOKEN, PODCLI_QUALITY, etc.)
 _env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_env_file)
+except ImportError:
+    pass
 if os.path.exists(_env_file):
     with open(_env_file) as _f:
         for _line in _f:
@@ -41,13 +33,111 @@ if os.path.exists(_env_file):
                 if _key and _val:
                     os.environ.setdefault(_key, _val)
 
-# Quality defaults (can be overridden via .env or shell env).
-# Keep transition autofix enabled by default with a strict hard cap in renderer.
+os.environ["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
+if sys.platform == "darwin":
+    os.environ.setdefault("DYLD_LIBRARY_PATH", "")
 os.environ.setdefault("PODCLI_TRANSITION_AUTOFIX_PASSES", "2")
 
-# Add parent dir to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config.paths import paths
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
+
+
+def _suggestions_session_path(cache_hash: str) -> str:
+    return os.path.join(paths["home"], "sessions", f"clips-{cache_hash}.json")
+
+
+def _selection_signature(config: dict) -> str:
+    """Flags that change which clips get selected. A cached session is only
+    valid for a re-run with the same signature, otherwise it would serve clips
+    that ignore the new --no-ai / --min-duration / --max-duration flags."""
+    return "|".join(str(x) for x in (
+        bool(config.get("ai_select", True)),
+        config.get("min_clip_duration", MIN_CLIP_DURATION),
+        config.get("max_clip_duration", MAX_CLIP_DURATION),
+    ))
+
+
+def _load_suggestions_session(cache_hash: str, top_n: int, signature: str) -> list | None:
+    if not cache_hash:
+        return None
+    path = _suggestions_session_path(cache_hash)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or payload.get("top_n") != top_n:
+        return None
+    if payload.get("signature") != signature:
+        return None
+    clips = payload.get("clips")
+    if not isinstance(clips, list) or not clips:
+        return None
+    return clips
+
+
+def _save_suggestions_session(cache_hash: str, top_n: int, engine: str | None, clips: list, signature: str) -> None:
+    if not cache_hash or not clips:
+        return
+    path = _suggestions_session_path(cache_hash)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(
+                {"cache_hash": cache_hash, "top_n": top_n, "signature": signature,
+                 "engine": engine, "clips": clips},
+                f,
+            )
+    except Exception:
+        pass
+
+
+def _clear_suggestions_session(cache_hash: str) -> None:
+    if not cache_hash:
+        return
+    path = _suggestions_session_path(cache_hash)
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+    except Exception:
+        pass
+
+
+def _should_auto_migrate_cli(args) -> bool:
+    if getattr(args, "show_help", False):
+        return False
+    if args.command == "config":
+        action = getattr(args, "config_action", None) or "status"
+        if action == "status":
+            return False
+        if action == "migrate" and getattr(args, "dry_run", False):
+            return False
+    return True
+
+
+def _auto_migrate_cli(args) -> None:
+    if not _should_auto_migrate_cli(args):
+        return
+    from config_bundle import auto_migrate_legacy_if_pending
+
+    summary = auto_migrate_legacy_if_pending(quiet=True)
+    if not summary:
+        return
+    moved_cache = summary.get("moved_json") or summary.get("moved_remotion_bundle")
+    moved_presets = (summary.get("presets_migration") or {}).get("moved")
+    if moved_cache or moved_presets:
+        gray = "\033[38;5;245m"
+        green = "\033[38;2;74;222;128m"
+        reset = "\033[0m"
+        if moved_cache:
+            print(f"  {green}✓{reset} {gray}Migrated legacy cache → {summary.get('target_dir')}{reset}")
+        if moved_presets:
+            pm = summary.get("presets_migration") or {}
+            print(f"  {green}✓{reset} {gray}Migrated presets → {pm.get('target_dir')}{reset}")
+        print()
 
 
 def _thumbnail_lead_timestamp(start_second: float, frame_offset: float = 1 / 30) -> float:
@@ -326,42 +416,28 @@ def cmd_process(args):
     print(f"  Video:   {os.path.basename(video_path)}")
     print()
 
+    # Cache hash for resume — keyed by video size+mtime. Disabled when a custom
+    # transcript is supplied, since the hash ignores transcript contents and
+    # would otherwise resume suggestions made from a different transcript.
+    cache_hash = ""
+    if not args.transcript:
+        try:
+            from services.transcript_packer import compute_cache_hash as _compute_cache_hash
+
+            cache_hash = _compute_cache_hash(video_path)
+        except Exception:
+            cache_hash = ""
+
     # ── Step 1: Get transcript ──
     transcript = None
     words = []
     segments = []
     result = {}
 
-    # Transcription cache: keyed by video file path + size + mtime.
-    # Saves ~2-5 min on re-runs by skipping Whisper + speaker detection.
-    import hashlib
-    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "cache")
-
-    def _cache_key(path):
-        stat = os.stat(path)
-        raw = f"{os.path.abspath(path)}:{stat.st_size}:{stat.st_mtime}"
-        return hashlib.md5(raw.encode()).hexdigest()
-
-    def _load_cache(path):
-        try:
-            key = _cache_key(path)
-            cache_file = os.path.join(cache_dir, f"{key}.json")
-            if os.path.exists(cache_file):
-                with open(cache_file) as f:
-                    return json.load(f)
-        except Exception:
-            pass
-        return None
-
-    def _save_cache(path, data):
-        try:
-            os.makedirs(cache_dir, exist_ok=True)
-            key = _cache_key(path)
-            cache_file = os.path.join(cache_dir, f"{key}.json")
-            with open(cache_file, "w") as f:
-                json.dump(data, f)
-        except Exception:
-            pass
+    from services.transcript_packer import (
+        load_cached_transcript_for_video,
+        save_cached_transcript_for_video,
+    )
 
     if args.transcript:
         print("  [1/4] Loading transcript...")
@@ -390,7 +466,7 @@ def cmd_process(args):
             print(f"         Parsed: {len(segments)} segments, {len(words)} words")
     else:
         # Check cache first
-        cached = _load_cache(video_path)
+        cached = load_cached_transcript_for_video(video_path)
         if cached and not config.get("no_cache", False):
             print("  [1/4] Loaded from cache (instant)")
             words = cached["words"]
@@ -437,7 +513,7 @@ def cmd_process(args):
             print(f"         Done: {len(segments)} segments, {len(words)} words")
 
             # Save to cache for next run
-            _save_cache(video_path, result)
+            save_cached_transcript_for_video(video_path, result)
 
     # Apply word corrections (Whisper misheard proper nouns, brand names)
     from services.corrections import apply_corrections
@@ -477,13 +553,24 @@ def cmd_process(args):
 
     # ── Step 3: Score and select clips ──
     top_n = config.get("top_clips", 5)
+    selection_sig = _selection_signature(config)
     clips = None
+    resumed_from_session = False
+
+    if getattr(args, "no_resume", False) or config.get("no_cache", False):
+        _clear_suggestions_session(cache_hash)
+    else:
+        resumed = _load_suggestions_session(cache_hash, top_n, selection_sig)
+        if resumed:
+            print(f"  [3/4] Resumed {len(resumed)} cached suggestions (use --no-resume to regenerate)")
+            clips = resumed
+            resumed_from_session = True
 
     # Try an AI CLI first (uses PodStack knowledge base for intelligent selection)
     from services.claude_suggest import suggest_initial_with_claude, _engine_label, _find_ai_cli
 
     ai_path, ai_engine = _find_ai_cli()
-    if ai_path and config.get("ai_select", True):
+    if not clips and ai_path and config.get("ai_select", True):
         ai_label = _engine_label(ai_engine)
         print(f"  [3/4] Selecting moments with {ai_label} (PodStack)...")
         clips = suggest_initial_with_claude(
@@ -494,6 +581,7 @@ def cmd_process(args):
         if clips:
             actual_engine = next((c.get("_ai_engine") for c in clips if c.get("_ai_engine")), ai_engine)
             print(f"         ✓ {_engine_label(actual_engine)} selected {len(clips)} clips")
+            _save_suggestions_session(cache_hash, top_n, actual_engine, clips, selection_sig)
         else:
             print("         ⚠ AI CLI unavailable, falling back to heuristics")
     elif not config.get("ai_select", True):
@@ -511,6 +599,8 @@ def cmd_process(args):
             min_dur=config.get("min_clip_duration", MIN_CLIP_DURATION),
             max_dur=config.get("max_clip_duration", MAX_CLIP_DURATION),
         )
+        if clips and not resumed_from_session:
+            _save_suggestions_session(cache_hash, top_n, "heuristic", clips, selection_sig)
 
     if not clips:
         print("  No clips found. Try a longer transcript or lower --min-duration.", file=sys.stderr)
@@ -527,7 +617,7 @@ def cmd_process(args):
     # Check if thumbnail generation is enabled
     thumb_dir = os.path.join(output_dir, "thumbnails")
     _thumb_intro_duration = 0.8
-    _tc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "thumbnail-config.json")
+    _tc_path = paths["thumbnailConfig"]
 
     # Opt-in: a brand config must exist before podcli generates thumbnails.
     # New users get no auto-thumbnails until they run `podcli init-thumbnail`
@@ -623,7 +713,7 @@ def cmd_process(args):
                         output_path=os.path.join(clip_thumb_dir, "_lead_frame.jpg"),
                         start_second=result.get("start_second", clip.get("start_second", 0)),
                     )
-                    paths = _thumb_gen(
+                    thumb_paths = _thumb_gen(
                         title=clip.get("title", f"Clip {i+1}"),
                         output_dir=clip_thumb_dir,
                         photo_path=lead_frame or _thumb_photo,
@@ -632,16 +722,16 @@ def cmd_process(args):
                         end_second=result.get("end_second", clip.get("end_second")),
                         logo_path=_thumb_logo,
                     )
-                    if paths:
+                    if thumb_paths:
                         thumb_video = os.path.join(clip_thumb_dir, "thumb_frame.mp4")
-                        _thumb_to_video(paths[0], thumb_video, duration=_thumb_intro_duration)
+                        _thumb_to_video(thumb_paths[0], thumb_video, duration=_thumb_intro_duration)
                         from services.video_processor import concat_outro
                         final_with_thumb = result["output_path"].replace(".mp4", "_with_thumb.mp4")
                         # Hard cut — thumbnail uses the frame just before content,
                         # so playback feels like the clip has started.
                         concat_outro(thumb_video, result["output_path"], final_with_thumb, crossfade_duration=0.0)
                         os.replace(final_with_thumb, result["output_path"])
-                        print(f"                 + thumbnail prepended ({_thumb_intro_duration:.2f}s, {len(paths)} variations in {os.path.basename(clip_thumb_dir)}/)")
+                        print(f"                 + thumbnail prepended ({_thumb_intro_duration:.2f}s, {len(thumb_paths)} variations in {os.path.basename(clip_thumb_dir)}/)")
                 except Exception as e:
                     print(f"                 ⚠ thumbnail: {e}")
 
@@ -1982,7 +2072,7 @@ def cmd_init_thumbnail(args):
 
     repo_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     example_path = os.path.abspath(os.path.join(repo_root, "docs", "thumbnail-config.example.json"))
-    target_dir = os.path.abspath(os.path.join(repo_root, ".podcli"))
+    target_dir = paths["home"]
     target_path = os.path.join(target_dir, "thumbnail-config.json")
 
     if not os.path.exists(example_path):
@@ -2248,8 +2338,8 @@ def cmd_corrections(args):
 
 
 def cmd_knowledge(args):
-    """Manage knowledge base files (.podcli/knowledge/)."""
-    kb_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "knowledge")
+    """Manage knowledge base files."""
+    kb_dir = paths["knowledge"]
 
     accent = "\033[38;2;212;135;74m"
     gray = "\033[38;5;245m"
@@ -2339,9 +2429,105 @@ def cmd_knowledge(args):
             print(f"  {red}✗{reset} Not found: {name}", file=sys.stderr)
 
 
+def _print_config_result(action: str, data: dict) -> None:
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    green = "\033[38;2;74;222;128m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    if action == "status":
+        yellow = "\033[38;2;250;204;21m"
+        print(f"\n  {bold}Paths (two roots){reset}")
+        print(f"  {gray}config home{reset}: {accent}{data.get('home')}{reset}")
+        print(f"    {gray}→ knowledge, presets, assets, corrections, integrations{reset}")
+        print(f"  {gray}data cache{reset}: {data.get('cache')}")
+        print(f"    {gray}→ transcripts, remotion bundle (override with PODCLI_DATA){reset}")
+        print(f"  {gray}profile marker{reset}: {data.get('profile_marker')}")
+        if data.get("legacy_cache_pending"):
+            print(f"  {yellow}legacy cache{reset}: project/.podcli/cache still has files — run Migrate below")
+        else:
+            print(f"  {green}✓{reset} legacy cache: nothing pending under project/.podcli/cache")
+        if data.get("legacy_presets_pending"):
+            print(f"  {yellow}legacy presets{reset}: project/presets/ still has files — run Migrate below")
+        else:
+            print(f"  {green}✓{reset} legacy presets: nothing pending under project/presets/")
+        print()
+        return
+
+    if action == "migrate":
+        print(f"\n  {bold}Legacy migration{reset}")
+        print(f"  {gray}cache{reset}")
+        print(f"    {gray}from{reset}: {data.get('legacy_dir')}")
+        print(f"    {gray}to{reset}:   {data.get('target_dir')}")
+        print(f"    {gray}moved json{reset}: {data.get('moved_json')}")
+        if data.get("skipped_json"):
+            print(f"    {gray}skipped{reset}:   {data['skipped_json']} (already in target)")
+        if data.get("moved_remotion_bundle"):
+            print(f"    {gray}remotion{reset}:  bundle moved")
+        if data.get("removed_duplicate_remotion_bundle"):
+            print(f"    {gray}remotion{reset}:  removed duplicate legacy bundle")
+        presets = data.get("presets_migration") or {}
+        if presets:
+            print(f"  {gray}presets{reset}")
+            print(f"    {gray}from{reset}: {presets.get('legacy_dir')}")
+            print(f"    {gray}to{reset}:   {presets.get('target_dir')}")
+            print(f"    {gray}moved{reset}:    {presets.get('moved')}")
+            if presets.get("skipped"):
+                print(f"    {gray}skipped{reset}:  {presets['skipped']} (already in target)")
+        if not data.get("dry_run"):
+            print(f"\n  {green}✓{reset} Migration complete")
+        print()
+        return
+
+    if action == "export":
+        print(f"\n  {green}✓{reset} Exported config bundle")
+        print(f"    {gray}{data.get('bundle')}{reset}")
+        print(f"    {gray}assets:{reset} {data.get('asset_count')}")
+        print()
+        return
+
+    if action == "import":
+        print(f"\n  {green}✓{reset} Imported config bundle")
+        print(f"    {gray}{data.get('home')}{reset}")
+        if data.get("activated"):
+            print(f"    {gray}activated{reset}: yes")
+        if data.get("backup"):
+            print(f"    {gray}backup{reset}: {data['backup']}")
+        print()
+        return
+
+    if action == "use":
+        print(f"\n  {green}✓{reset} Activated config root")
+        print(f"    {gray}{data.get('home')}{reset}\n")
+
+
+def cmd_config(args):
+    """Export, import, and activate config profiles."""
+    from config_bundle import run_config_action
+
+    yellow = "\033[38;2;250;204;21m"
+    reset = "\033[0m"
+    action = getattr(args, "config_action", None) or "status"
+
+    try:
+        data = run_config_action(
+            action,
+            bundle_path=getattr(args, "bundle", None),
+            home=getattr(args, "home", None),
+            activate=getattr(args, "activate", False),
+            dry_run=getattr(args, "dry_run", False),
+        )
+    except ValueError as e:
+        print(f"  {yellow}✗{reset} {e}", file=sys.stderr)
+        sys.exit(1)
+
+    _print_config_result(action, data)
+
+
 def cmd_cache(args):
     """Manage transcription cache."""
-    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "cache")
+    cache_dir = paths["cache"]
 
     accent = "\033[38;2;212;135;74m"
     gray = "\033[38;5;245m"
@@ -2352,10 +2538,19 @@ def cmd_cache(args):
     action = getattr(args, "cache_action", None) or "status"
 
     if action == "clear":
-        if os.path.exists(cache_dir):
-            import shutil
-            count = len([f for f in os.listdir(cache_dir) if f.endswith(".json")])
-            shutil.rmtree(cache_dir)
+        count = 0
+        if os.path.isdir(cache_dir):
+            for fname in os.listdir(cache_dir):
+                if fname.endswith(".json"):
+                    os.unlink(os.path.join(cache_dir, fname))
+                    count += 1
+        transcripts_dir = os.path.join(cache_dir, "transcripts")
+        if os.path.isdir(transcripts_dir):
+            for fname in os.listdir(transcripts_dir):
+                if fname.endswith(".json"):
+                    os.unlink(os.path.join(transcripts_dir, fname))
+                    count += 1
+        if count:
             print(f"\n  {green}✓{reset} Cleared {count} cached transcription(s)")
         else:
             print(f"\n  {gray}Cache is already empty{reset}")
@@ -2371,6 +2566,13 @@ def cmd_cache(args):
         return
 
     files = [f for f in os.listdir(cache_dir) if f.endswith(".json")]
+    transcripts_dir = os.path.join(cache_dir, "transcripts")
+    if os.path.isdir(transcripts_dir):
+        files.extend(
+            os.path.join("transcripts", f)
+            for f in os.listdir(transcripts_dir)
+            if f.endswith(".json")
+        )
     if not files:
         print(f"  {gray}Empty — no cached transcriptions{reset}\n")
         return
@@ -2471,7 +2673,7 @@ def print_banner():
         encoder_label = "CPU"
 
     # Count knowledge base files
-    kb_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "knowledge")
+    kb_path = paths["knowledge"]
     kb_count = len([f for f in os.listdir(kb_path) if f.endswith(".md")]) if os.path.isdir(kb_path) else 0
 
     gray = "\033[38;5;245m"
@@ -2503,7 +2705,7 @@ def print_banner():
     print(f"  {bold}podcli{reset} v{VERSION}")
 
     # Cache info
-    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "cache")
+    cache_dir = paths["cache"]
     cache_count = 0
     if os.path.isdir(cache_dir):
         cache_count = len([f for f in os.listdir(cache_dir) if f.endswith(".json")])
@@ -2584,6 +2786,7 @@ def print_help():
     print(f"    {accent}presets{reset} {gray}<action>{reset}      Save/load rendering presets")
     print(f"    {accent}thumbnails{reset} {gray}<title>{reset}   Generate thumbnail variations")
     print(f"    {accent}knowledge{reset} {gray}<action>{reset}    Manage knowledge base (.podcli/knowledge/)")
+    print(f"    {accent}config{reset} {gray}<action>{reset}        Export/import/migrate config profiles")
     print(f"    {accent}corrections{reset} {gray}<action>{reset}  Fix Whisper misheard words (Boxel→Voxel)")
     print(f"    {accent}cache{reset}  {gray}[clear]{reset}       Show/clear transcription cache")
     print(f"    {accent}info{reset}                 Show system info (encoder, codecs)")
@@ -2653,6 +2856,7 @@ def main():
     proc.add_argument("--no-energy", action="store_true", help="Skip audio energy analysis")
     proc.add_argument("--no-speakers", action="store_true", help="Skip speaker detection (faster, uses face detection only)")
     proc.add_argument("--no-cache", action="store_true", help="Force re-transcription (ignore cached transcript)")
+    proc.add_argument("--no-resume", action="store_true", help="Ignore cached AI suggestions for this video and regenerate")
     proc.add_argument("--quality", choices=["low", "medium", "high", "max"], help="Output quality (default: high)")
     proc.add_argument("--allow-ass-fallback", action="store_true", help="Use ASS captions if Remotion rendering fails")
     proc.add_argument("--review-each", action="store_true", help="Review each rendered clip interactively")
@@ -2749,6 +2953,22 @@ def main():
     kb_del = kb_sub.add_parser("delete", help="Delete a knowledge file")
     kb_del.add_argument("filename", help="File name to delete")
 
+    # ── config ──
+    cfg = sub.add_parser("config", help="Export, import, and activate config profiles")
+    cfg_sub = cfg.add_subparsers(dest="config_action")
+    cfg_sub.add_parser("status", help="Show the active config root")
+    cfg_migrate = cfg_sub.add_parser("migrate", help="Move legacy .podcli/cache into data/cache")
+    cfg_migrate.add_argument("--dry-run", action="store_true", help="Show what would be moved without changing files")
+    cfg_export = cfg_sub.add_parser("export", help="Export the active config root to a zip bundle")
+    cfg_export.add_argument("bundle", help="Output .zip bundle path")
+    cfg_export.add_argument("--home", help="Export from a specific config root instead of the active one")
+    cfg_import = cfg_sub.add_parser("import", help="Import a config bundle into a config root")
+    cfg_import.add_argument("bundle", help="Input .zip bundle path")
+    cfg_import.add_argument("--home", help="Import into a specific config root")
+    cfg_import.add_argument("--activate", action="store_true", help="Make the imported config root active")
+    cfg_use = cfg_sub.add_parser("use", help="Activate a config root for future runs")
+    cfg_use.add_argument("home", help="Path to the config root to activate")
+
     # ── cache ──
     cache_p = sub.add_parser("cache", help="Manage transcription cache")
     cache_sub = cache_p.add_subparsers(dest="cache_action")
@@ -2770,6 +2990,8 @@ def main():
 
     args = parser.parse_args()
 
+    _auto_migrate_cli(args)
+
     if getattr(args, "show_help", False) and args.command is None:
         print_help()
         return
@@ -2790,6 +3012,8 @@ def main():
         cmd_corrections(args)
     elif args.command == "knowledge":
         cmd_knowledge(args)
+    elif args.command == "config":
+        cmd_config(args)
     elif args.command == "cache":
         cmd_cache(args)
     elif args.command == "info":
@@ -2843,6 +3067,7 @@ def interactive_menu():
                 questionary.Choice("Presets", value="presets"),
                 questionary.Choice("Assets", value="assets"),
                 questionary.Choice("Knowledge base", value="knowledge"),
+                questionary.Choice("Config profiles", value="config"),
                 questionary.Choice("Corrections", value="corrections"),
                 questionary.Separator(),
                 questionary.Choice("Thumbnails", value="thumbnails"),
@@ -2873,6 +3098,8 @@ def interactive_menu():
             _interactive_presets()
         elif choice == "knowledge":
             _interactive_knowledge()
+        elif choice == "config":
+            _interactive_config()
         elif choice == "corrections":
             _interactive_corrections()
         elif choice == "thumbnails":
@@ -3291,6 +3518,97 @@ def _interactive_process():
     sys.exit(_sp.call(cmd))
 
 
+def _interactive_config():
+    """Interactive config profiles: status, migrate, export/import, switch home."""
+    import argparse as _ap
+    import questionary
+    from questionary import Style
+    from config_bundle import run_config_action
+
+    gray = "\033[38;5;245m"
+    dim = "\033[2m"
+    reset = "\033[0m"
+
+    qstyle = Style([
+        ("qmark", "fg:#d4874a bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d4874a bold"),
+        ("highlighted", "fg:#d4874a bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
+    while True:
+        _print_config_result("status", run_config_action("status"))
+
+        choices = [
+            questionary.Choice("Migrate legacy cache → data/cache", value="migrate"),
+            questionary.Choice("Export config bundle (.zip)", value="export"),
+            questionary.Choice("Import config bundle (.zip)", value="import"),
+            questionary.Choice("Switch active config home", value="use"),
+            questionary.Choice("Open Web UI config page", value="webui"),
+            questionary.Choice("← Back", value="_back"),
+        ]
+
+        action = questionary.select("Config profiles:", choices=choices, style=qstyle).ask()
+        if action is None or action == "_back":
+            return
+
+        if action == "migrate":
+            if questionary.confirm("Preview migration (dry run)?", default=True, style=qstyle).ask():
+                cmd_config(_ap.Namespace(config_action="migrate", dry_run=True))
+            if questionary.confirm("Run migration now?", default=True, style=qstyle).ask():
+                cmd_config(_ap.Namespace(config_action="migrate", dry_run=False))
+            continue
+
+        if action == "export":
+            bundle = questionary.text("Bundle path (.zip):", style=qstyle).ask()
+            if not bundle:
+                continue
+            bundle = _clean_path(bundle)
+            cmd_config(_ap.Namespace(config_action="export", bundle=bundle, home=None, activate=False, dry_run=False))
+            continue
+
+        if action == "import":
+            bundle = questionary.text("Bundle path (.zip):", style=qstyle).ask()
+            if not bundle:
+                continue
+            bundle = _clean_path(bundle)
+            home = questionary.text(
+                "Import into (leave empty = active home):",
+                style=qstyle,
+            ).ask()
+            home = _clean_path(home) if home else None
+            activate = questionary.confirm("Activate this home after import?", default=True, style=qstyle).ask()
+            cmd_config(_ap.Namespace(
+                config_action="import",
+                bundle=bundle,
+                home=home,
+                activate=bool(activate),
+                dry_run=False,
+            ))
+            continue
+
+        if action == "use":
+            home = questionary.text("Config home path:", style=qstyle).ask()
+            if not home:
+                continue
+            cmd_config(_ap.Namespace(config_action="use", bundle=None, home=_clean_path(home), activate=False, dry_run=False))
+            continue
+
+        if action == "webui":
+            import webbrowser
+
+            port = os.environ.get("PORT", "3847")
+            url = f"http://localhost:{port}/config.html"
+            print(f"\n  {gray}Config UI:{reset} {url}")
+            print(f"  {dim}Start the UI first if needed: npm run ui{reset}\n")
+            webbrowser.open(url)
+            questionary.press_any_key_to_continue(style=qstyle).ask()
+            continue
+
+
 def _interactive_cache():
     """Interactive cache management using questionary."""
     import argparse as _ap
@@ -3546,7 +3864,7 @@ def _interactive_knowledge():
         ("instruction", "fg:#a1a1aa"),
     ])
 
-    kb_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".podcli", "knowledge")
+    kb_dir = paths["knowledge"]
     files = sorted(f for f in os.listdir(kb_dir) if f.endswith(".md")) if os.path.isdir(kb_dir) else []
 
     # Show current files

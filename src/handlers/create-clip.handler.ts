@@ -27,7 +27,8 @@ export const createClipToolDef = {
     "Output: H.264 MP4 with burned-in captions, normalized audio (-14 LUFS).\n\n" +
     "For batch export, use batch_create_clips instead.\n" +
     "Caption styles: branded (professional), hormozi (bold/yellow), karaoke (progressive highlight), subtle (minimal).\n" +
-    "Crop modes: speaker (speaker-aware), face (face tracking), center (fixed center crop).",
+    "Crop modes: speaker (speaker-aware), face (face tracking), center (fixed center crop).\n" +
+    "Set keep_caption_overlay=true to retain a ProRes alpha overlay for DaVinci Resolve (export_to_davinci_resolve).",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -104,6 +105,12 @@ export const createClipToolDef = {
         type: "string",
         description: "Path to an outro video to append at the end of the clip",
       },
+      keep_caption_overlay: {
+        type: "boolean",
+        description:
+          "Keep ProRes 4444 alpha caption overlay for DaVinci Resolve. Returns caption_overlay_path and cropped_source_path.",
+        default: false,
+      },
     },
     required: [],
   },
@@ -168,6 +175,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     output_dir: paths.output,
     clean_fillers: input.clean_fillers !== false,
     allow_ass_fallback: input.allow_ass_fallback === true,
+    keep_caption_overlay: input.keep_caption_overlay === true,
     logo_path: logoPath,
     outro_path: outroPath,
     ...(keepSegments && { keep_segments: keepSegments }),

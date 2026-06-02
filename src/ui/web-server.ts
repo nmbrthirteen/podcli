@@ -11,7 +11,13 @@
 
 import express from "express";
 import multer from "multer";
-import { createReadStream, existsSync, statSync, readFileSync, writeFileSync } from "fs";
+import {
+  createReadStream,
+  existsSync,
+  statSync,
+  readFileSync,
+  writeFileSync,
+} from "fs";
 import { mkdir, readdir, unlink } from "fs/promises";
 import path from "path";
 import { join, dirname, basename, extname, resolve } from "path";
@@ -26,6 +32,7 @@ import { AssetManager } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths } from "../config/paths.js";
+import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
 import type {
   BatchClipsResult,
@@ -124,12 +131,16 @@ function loadPersistedState(): UIState {
           outroPath: saved.settings?.outroPath || "",
         },
         // Never restore mid-export phases
-        phase: ["exporting", "parsing", "suggesting"].includes(saved.phase) ? "idle" : (saved.phase || "idle"),
+        phase: ["exporting", "parsing", "suggesting"].includes(saved.phase)
+          ? "idle"
+          : saved.phase || "idle",
         lastUpdated: saved.lastUpdated || 0,
       };
     }
   } catch (err) {
-    log.warn("Failed to load persisted UI state; using defaults", { err: errMsg(err) });
+    log.warn("Failed to load persisted UI state; using defaults", {
+      err: errMsg(err),
+    });
   }
   return {
     videoPath: "",
@@ -138,7 +149,12 @@ function loadPersistedState(): UIState {
     rawTranscriptText: "",
     suggestions: [],
     deselectedIndices: [],
-    settings: { captionStyle: "branded", cropStrategy: "speaker", logoPath: "", outroPath: "" },
+    settings: {
+      captionStyle: "branded",
+      cropStrategy: "speaker",
+      logoPath: "",
+      outroPath: "",
+    },
     phase: "idle",
     lastUpdated: 0,
   };
@@ -195,12 +211,28 @@ const upload = multer({
   }),
   limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // 10 GB
   fileFilter: (_req, file, cb) => {
-    const allowed = [".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a", ".png", ".jpg", ".jpeg", ".svg"];
+    const allowed = [
+      ".mp4",
+      ".mov",
+      ".mkv",
+      ".webm",
+      ".mp3",
+      ".wav",
+      ".m4a",
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".svg",
+    ];
     const ext = extname(file.originalname).toLowerCase();
     if (allowed.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error(`Unsupported format: ${ext}. Use MP4, MOV, MKV, WebM, MP3, WAV, M4A.`));
+      cb(
+        new Error(
+          `Unsupported format: ${ext}. Use MP4, MOV, MKV, WebM, MP3, WAV, M4A.`,
+        ),
+      );
     }
   },
 });
@@ -247,12 +279,15 @@ app.get("/api/browse-file", (_req, res) => {
     let filePath: string;
     if (process.platform === "darwin") {
       const script = `osascript -e 'POSIX path of (choose file of type {"mp4","mov","mkv","webm","mp3","wav","m4a"})'`;
-      filePath = execSync(script, { encoding: "utf-8", timeout: 120_000 }).trim();
+      filePath = execSync(script, {
+        encoding: "utf-8",
+        timeout: 120_000,
+      }).trim();
     } else {
       // Linux fallback
       filePath = execSync(
         `zenity --file-selection --file-filter="Media files|*.mp4 *.mov *.mkv *.webm *.mp3 *.wav *.m4a"`,
-        { encoding: "utf-8", timeout: 120_000 }
+        { encoding: "utf-8", timeout: 120_000 },
       ).trim();
     }
 
@@ -290,19 +325,23 @@ app.post("/api/import-transcript", (req, res) => {
   }
   if (!transcript || !transcript.words || !Array.isArray(transcript.words)) {
     res.status(400).json({
-      error: "transcript must include a 'words' array with { word, start, end } objects",
+      error:
+        "transcript must include a 'words' array with { word, start, end } objects",
     });
     return;
   }
 
   // Build a full transcript result from the imported data
   const result: Record<string, unknown> = {
-    transcript: transcript.text || transcript.words.map((w: any) => w.word).join(" "),
+    transcript:
+      transcript.text || transcript.words.map((w: any) => w.word).join(" "),
     words: transcript.words,
     segments: transcript.segments || [],
-    duration: transcript.duration || (transcript.words.length > 0
-      ? transcript.words[transcript.words.length - 1].end
-      : 0),
+    duration:
+      transcript.duration ||
+      (transcript.words.length > 0
+        ? transcript.words[transcript.words.length - 1].end
+        : 0),
     language: transcript.language || "en",
     speakers: transcript.speakers || null,
     speaker_segments: transcript.speaker_segments || null,
@@ -344,7 +383,10 @@ app.post("/api/parse-transcript", async (req, res) => {
     });
 
     if (result.data) {
-      sessionTranscripts.set(file_path, result.data as unknown as ServerTranscript);
+      sessionTranscripts.set(
+        file_path,
+        result.data as unknown as ServerTranscript,
+      );
     }
 
     res.json({
@@ -353,7 +395,9 @@ app.post("/api/parse-transcript", async (req, res) => {
       data: result.data,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message || "Failed to parse transcript" });
+    res
+      .status(500)
+      .json({ error: err.message || "Failed to parse transcript" });
   }
 });
 
@@ -361,7 +405,13 @@ app.post("/api/parse-transcript", async (req, res) => {
  * POST /api/transcribe — Start transcription job
  */
 app.post("/api/transcribe", async (req, res) => {
-  const { file_path, model_size = "base", language, enable_diarization = false, num_speakers } = req.body;
+  const {
+    file_path,
+    model_size = "base",
+    language,
+    enable_diarization = false,
+    num_speakers,
+  } = req.body;
 
   if (!file_path || !existsSync(file_path)) {
     res.status(400).json({ error: "File not found" });
@@ -403,14 +453,17 @@ app.post("/api/transcribe", async (req, res) => {
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
-      }
+      },
     )
     .then(async (result) => {
       job.status = "done";
       job.progress = 100;
       job.message = "Transcription complete";
       job.result = result.data;
-      sessionTranscripts.set(file_path, result.data as unknown as ServerTranscript);
+      sessionTranscripts.set(
+        file_path,
+        result.data as unknown as ServerTranscript,
+      );
       // Populate uiState.transcript with the FULL result so downstream
       // batch_create_clips can resolve transcript_words for caption burn-in.
       uiState.transcript = result.data as unknown as typeof uiState.transcript;
@@ -457,16 +510,22 @@ app.post("/api/create-clip", async (req, res) => {
 
   // Validate clip params before spawning Python
   if (typeof start_second !== "number" || typeof end_second !== "number") {
-    res.status(400).json({ error: "start_second and end_second must be numbers" });
+    res
+      .status(400)
+      .json({ error: "start_second and end_second must be numbers" });
     return;
   }
   if (end_second <= start_second) {
-    res.status(400).json({ error: "end_second must be greater than start_second" });
+    res
+      .status(400)
+      .json({ error: "end_second must be greater than start_second" });
     return;
   }
   const duration = end_second - start_second;
   if (duration > 180) {
-    res.status(400).json({ error: `Clip too long (${Math.round(duration)}s). Max 180 seconds.` });
+    res.status(400).json({
+      error: `Clip too long (${Math.round(duration)}s). Max 180 seconds.`,
+    });
     return;
   }
   if (logo_path && !existsSync(logo_path)) {
@@ -479,12 +538,16 @@ app.post("/api/create-clip", async (req, res) => {
   }
   const validStyles = ["hormozi", "karaoke", "subtle", "branded"];
   if (!validStyles.includes(caption_style)) {
-    res.status(400).json({ error: `Invalid caption style. Use: ${validStyles.join(", ")}` });
+    res
+      .status(400)
+      .json({ error: `Invalid caption style. Use: ${validStyles.join(", ")}` });
     return;
   }
   const validCrops = ["center", "face", "speaker"];
   if (!validCrops.includes(crop_strategy)) {
-    res.status(400).json({ error: `Invalid crop strategy. Use: ${validCrops.join(", ")}` });
+    res
+      .status(400)
+      .json({ error: `Invalid crop strategy. Use: ${validCrops.join(", ")}` });
     return;
   }
 
@@ -523,7 +586,7 @@ app.post("/api/create-clip", async (req, res) => {
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
-      }
+      },
     )
     .then(async (result) => {
       job.status = "done";
@@ -536,15 +599,21 @@ app.post("/api/create-clip", async (req, res) => {
         const d = result.data;
         await clipsHistory.record({
           source_video: video_path,
-          start_second, end_second,
-          caption_style, crop_strategy,
+          start_second,
+          end_second,
+          caption_style,
+          crop_strategy,
           logo_path: logo_path || undefined,
-          title, output_path: d?.output_path || "",
+          title,
+          output_path: d?.output_path || "",
           file_size_mb: d?.file_size_mb || 0,
           duration: d?.duration || 0,
         });
       } catch (err) {
-        log.warn("Failed to record clip to history", { title, err: errMsg(err) });
+        log.warn("Failed to record clip to history", {
+          title,
+          err: errMsg(err),
+        });
       }
     })
     .catch((err) => {
@@ -559,7 +628,15 @@ app.post("/api/create-clip", async (req, res) => {
  * POST /api/batch-clips — Create multiple clips
  */
 app.post("/api/batch-clips", async (req, res) => {
-  const { video_path, clips, transcript_words = [], logo_path = null, outro_path = null, clean_fillers = false } = req.body;
+  const {
+    video_path,
+    clips,
+    transcript_words = [],
+    logo_path = null,
+    outro_path = null,
+    clean_fillers = false,
+    keep_caption_overlay = false,
+  } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
     res.status(400).json({ error: "Video file not found" });
@@ -578,7 +655,9 @@ app.post("/api/batch-clips", async (req, res) => {
       return;
     }
     if (dur > 180) {
-      res.status(400).json({ error: `Clip ${i + 1}: too long (${Math.round(dur)}s). Max 180s.` });
+      res.status(400).json({
+        error: `Clip ${i + 1}: too long (${Math.round(dur)}s). Max 180s.`,
+      });
       return;
     }
   }
@@ -614,12 +693,26 @@ app.post("/api/batch-clips", async (req, res) => {
   executor
     .execute<BatchClipsResult>(
       "batch_clips",
-      { video_path, clips, transcript_words, output_dir: paths.output, logo_path, outro_path, clean_fillers, face_map: uiState.transcript?.face_map },
+      {
+        video_path,
+        clips,
+        transcript_words,
+        output_dir: paths.output,
+        logo_path,
+        outro_path,
+        clean_fillers,
+        keep_caption_overlay: keep_caption_overlay === true,
+        face_map: uiState.transcript?.face_map,
+      },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
-        broadcastSSE("job-update", { jobId, progress: event.percent, message: event.message });
-      }
+        broadcastSSE("job-update", {
+          jobId,
+          progress: event.percent,
+          message: event.message,
+        });
+      },
     )
     .then(async (result) => {
       job.status = "done";
@@ -648,7 +741,9 @@ app.post("/api/batch-clips", async (req, res) => {
           }
         }
       } catch (err) {
-        log.warn("Failed to record batch clips to history", { err: errMsg(err) });
+        log.warn("Failed to record batch clips to history", {
+          err: errMsg(err),
+        });
       }
     })
     .catch((err) => {
@@ -703,7 +798,7 @@ app.get("/api/job/:id/stream", (req, res) => {
         message: current.message,
         result: current.result,
         error: current.error,
-      })}\n\n`
+      })}\n\n`,
     );
 
     if (current.status === "done" || current.status === "error") {
@@ -734,7 +829,9 @@ app.get("/api/outputs", async (_req, res) => {
           created: stat.mtime.toISOString(),
         };
       })
-      .sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+      .sort(
+        (a, b) => new Date(b.created).getTime() - new Date(a.created).getTime(),
+      );
     res.json(clips);
   } catch {
     res.json([]);
@@ -810,10 +907,18 @@ app.get("/api/stream-source", (req, res) => {
   }
   // Validate the path is the current session video or within the uploads directory
   const resolvedPath = path.resolve(filePath);
-  const isSessionVideo = uiState.videoPath && resolvedPath === path.resolve(uiState.videoPath);
-  const isUploadedFile = resolvedPath.startsWith(path.resolve(join(paths.working, "uploads")));
+  const isSessionVideo =
+    uiState.videoPath && resolvedPath === path.resolve(uiState.videoPath);
+  const uploadsRoot = path.resolve(join(paths.working, "uploads"));
+  const relativeToUploads = path.relative(uploadsRoot, resolvedPath);
+  const isUploadedFile =
+    relativeToUploads !== "" &&
+    !relativeToUploads.startsWith("..") &&
+    !path.isAbsolute(relativeToUploads);
   if (!isSessionVideo && !isUploadedFile) {
-    res.status(403).json({ error: "Access denied: path not in allowed directories" });
+    res
+      .status(403)
+      .json({ error: "Access denied: path not in allowed directories" });
     return;
   }
 
@@ -853,19 +958,7 @@ app.get("/api/stream-source", (req, res) => {
   }
 });
 
-// --- Integration info ---
-app.get("/api/integration-info", (_req, res) => {
-  const projectRoot = join(__dirname, "..", "..");
-  const distPath = join(projectRoot, "dist", "index.js");
-  const serverOk = existsSync(distPath);
-
-  res.json({
-    dist_path: distPath,
-    project_root: projectRoot,
-    server_ok: serverOk,
-    tools_count: 4,
-  });
-});
+registerConfigIntegrationRoutes(app, { executor, uploadDir });
 
 // --- Transcript export (SRT/VTT) ---
 app.get("/api/export-transcript", (_req, res) => {
@@ -910,7 +1003,10 @@ app.get("/api/export-transcript", (_req, res) => {
     res.setHeader("Content-Disposition", "attachment; filename=transcript.vtt");
     res.send(vtt);
   } else if (format === "json") {
-    res.setHeader("Content-Disposition", "attachment; filename=transcript.json");
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=transcript.json",
+    );
     res.json(transcript);
   } else {
     // SRT
@@ -927,9 +1023,13 @@ app.get("/api/export-transcript", (_req, res) => {
 // --- Analyze audio energy ---
 app.post("/api/analyze-energy", async (req, res) => {
   const { video_path, segments } = req.body;
-  if (!video_path) return res.status(400).json({ error: "video_path required" });
+  if (!video_path)
+    return res.status(400).json({ error: "video_path required" });
   try {
-    const result = await executor.execute("analyze_energy", { video_path, segments: segments || [] });
+    const result = await executor.execute("analyze_energy", {
+      video_path,
+      segments: segments || [],
+    });
     res.json(result.data || {});
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1027,7 +1127,13 @@ app.get("/api/history", async (req, res) => {
 
 app.get("/api/history/check", async (req, res) => {
   try {
-    const { source, start, end, style = "hormozi", crop = "speaker" } = req.query;
+    const {
+      source,
+      start,
+      end,
+      style = "hormozi",
+      crop = "speaker",
+    } = req.query;
     if (!source || !start || !end) {
       res.json({ duplicate: null });
       return;
@@ -1037,7 +1143,7 @@ app.get("/api/history/check", async (req, res) => {
       parseFloat(start as string),
       parseFloat(end as string),
       style as string,
-      crop as string
+      crop as string,
     );
     res.json({ duplicate: dup });
   } catch (err: any) {
@@ -1047,7 +1153,7 @@ app.get("/api/history/check", async (req, res) => {
 
 // --- Transcript Corrections ---
 
-const correctionsPath = join(process.cwd(), ".podcli", "corrections.json");
+const correctionsPath = paths.corrections;
 
 app.get("/api/corrections", (_req, res) => {
   try {
@@ -1128,7 +1234,10 @@ const knowledgeUpload = multer({
     filename: (_req, file, cb) => cb(null, file.originalname),
   }),
   fileFilter: (_req, file, cb) => {
-    if (file.originalname.endsWith(".md") || file.originalname.endsWith(".txt")) {
+    if (
+      file.originalname.endsWith(".md") ||
+      file.originalname.endsWith(".txt")
+    ) {
       cb(null, true);
     } else {
       cb(new Error("Only .md and .txt files are allowed"));
@@ -1136,14 +1245,18 @@ const knowledgeUpload = multer({
   },
 });
 
-app.post("/api/knowledge/upload", knowledgeUpload.array("files", 50), (req, res) => {
-  const files = req.files as Express.Multer.File[];
-  if (!files || files.length === 0) {
-    res.status(400).json({ error: "No files uploaded" });
-    return;
-  }
-  res.json({ uploaded: files.map((f) => f.originalname) });
-});
+app.post(
+  "/api/knowledge/upload",
+  knowledgeUpload.array("files", 50),
+  (req, res) => {
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) {
+      res.status(400).json({ error: "No files uploaded" });
+      return;
+    }
+    res.json({ uploaded: files.map((f) => f.originalname) });
+  },
+);
 
 app.get("/api/knowledge/:filename", async (req, res) => {
   if (!safePath(paths.knowledge, req.params.filename)) {
@@ -1191,11 +1304,21 @@ function getStateContext() {
   const hasTranscript = (uiState.transcript?.words?.length ?? 0) > 0;
   const hasRawTranscript = !!uiState.rawTranscriptText?.trim();
   const hasSuggestions = uiState.suggestions.length > 0;
-  const selectedCount = uiState.suggestions.length - uiState.deselectedIndices.length;
-  return { hasVideo, hasTranscript, hasRawTranscript, hasSuggestions, selectedCount, phase: uiState.phase };
+  const selectedCount =
+    uiState.suggestions.length - uiState.deselectedIndices.length;
+  return {
+    hasVideo,
+    hasTranscript,
+    hasRawTranscript,
+    hasSuggestions,
+    selectedCount,
+    phase: uiState.phase,
+  };
 }
 
-function buildPromptForAction(action: "suggest" | "export" | "restyle"): string {
+function buildPromptForAction(
+  action: "suggest" | "export" | "restyle",
+): string {
   const ctx = getStateContext();
   const parts: string[] = [];
 
@@ -1205,26 +1328,40 @@ function buildPromptForAction(action: "suggest" | "export" | "restyle"): string 
     `Crop: ${uiState.settings.cropStrategy}`,
     uiState.settings.logoPath ? `Logo: set` : null,
     uiState.settings.outroPath ? `Outro: set` : null,
-  ].filter(Boolean).join(", ");
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   if (action === "suggest") {
     if (!ctx.hasTranscript && !ctx.hasRawTranscript) {
       // No transcript yet — prompt includes transcribe step
       if (uiState.videoPath) {
-        parts.push(`Transcribe the podcast at ${uiState.videoPath} using transcribe_podcast.`);
+        parts.push(
+          `Transcribe the podcast at ${uiState.videoPath} using transcribe_podcast.`,
+        );
       } else {
-        parts.push("Set a video path first, then transcribe it using transcribe_podcast.");
+        parts.push(
+          "Set a video path first, then transcribe it using transcribe_podcast.",
+        );
       }
-      parts.push("Then find the 5-8 best viral-worthy moments and call suggest_clips.");
+      parts.push(
+        "Then find the 5-8 best viral-worthy moments and call suggest_clips.",
+      );
     } else {
-      parts.push("Use get_ui_state with include_transcript=true to read the full transcript.");
-      parts.push("Find the 5-8 best viral-worthy moments — hot takes, strong opinions, funny moments, actionable advice, and emotional stories.");
+      parts.push(
+        "Use get_ui_state with include_transcript=true to read the full transcript.",
+      );
+      parts.push(
+        "Find the 5-8 best viral-worthy moments — hot takes, strong opinions, funny moments, actionable advice, and emotional stories.",
+      );
       parts.push("Then call suggest_clips with your suggestions.");
     }
     parts.push(`Current settings: ${settingsSummary}`);
   } else if (action === "export") {
     parts.push("Use get_ui_state to read the selected clips.");
-    parts.push(`Export all ${ctx.selectedCount} selected clip${ctx.selectedCount !== 1 ? "s" : ""} using batch_create_clips.`);
+    parts.push(
+      `Export all ${ctx.selectedCount} selected clip${ctx.selectedCount !== 1 ? "s" : ""} using batch_create_clips.`,
+    );
     parts.push(`Current settings: ${settingsSummary}`);
   } else if (action === "restyle") {
     parts.push("Use get_ui_state to read the current clips.");
@@ -1259,29 +1396,88 @@ app.get("/api/mcp-hints", (_req, res) => {
   if ((ctx.hasRawTranscript || ctx.hasTranscript) && !ctx.hasSuggestions) {
     // Transcript is ready — suggest clip-finding prompts
     hints.push(
-      { prompt: "Find the 5 best viral moments from this podcast", description: "Clips optimized for TikTok/Shorts", category: "analyze" },
-      { prompt: "Find moments with hot takes and strong opinions", description: "Controversial, high-engagement clips", category: "analyze" },
-      { prompt: "Find funny moments and quotable one-liners", description: "Entertainment-focused clips", category: "analyze" },
-      { prompt: "Find actionable advice and key insights", description: "Value-driven educational clips", category: "analyze" },
+      {
+        prompt: "Find the 5 best viral moments from this podcast",
+        description: "Clips optimized for TikTok/Shorts",
+        category: "analyze",
+      },
+      {
+        prompt: "Find moments with hot takes and strong opinions",
+        description: "Controversial, high-engagement clips",
+        category: "analyze",
+      },
+      {
+        prompt: "Find funny moments and quotable one-liners",
+        description: "Entertainment-focused clips",
+        category: "analyze",
+      },
+      {
+        prompt: "Find actionable advice and key insights",
+        description: "Value-driven educational clips",
+        category: "analyze",
+      },
     );
-  } else if (ctx.phase === "review" && ctx.hasSuggestions && ctx.selectedCount > 0) {
+  } else if (
+    ctx.phase === "review" &&
+    ctx.hasSuggestions &&
+    ctx.selectedCount > 0
+  ) {
     // Clips suggested, ready for action
     hints.push(
-      { prompt: "Export all selected clips", description: `Render ${ctx.selectedCount} clip${ctx.selectedCount !== 1 ? "s" : ""} as vertical shorts`, category: "export" },
-      { prompt: "Export clip #1", description: "Render just the first clip", category: "export" },
-      { prompt: "Change all clips to hormozi style", description: "Bold uppercase, yellow highlight", category: "refine" },
-      { prompt: "Extend clip #1 by 10 seconds", description: "Adjust timing before export", category: "refine" },
-      { prompt: "Find 5 more moments", description: "Additional clips from the transcript", category: "analyze" },
+      {
+        prompt: "Export all selected clips",
+        description: `Render ${ctx.selectedCount} clip${ctx.selectedCount !== 1 ? "s" : ""} as vertical shorts`,
+        category: "export",
+      },
+      {
+        prompt: "Export clip #1",
+        description: "Render just the first clip",
+        category: "export",
+      },
+      {
+        prompt: "Change all clips to hormozi style",
+        description: "Bold uppercase, yellow highlight",
+        category: "refine",
+      },
+      {
+        prompt: "Extend clip #1 by 10 seconds",
+        description: "Adjust timing before export",
+        category: "refine",
+      },
+      {
+        prompt: "Find 5 more moments",
+        description: "Additional clips from the transcript",
+        category: "analyze",
+      },
     );
   } else if (ctx.phase === "done") {
     hints.push(
-      { prompt: "Find more viral moments from the transcript", description: "Get another batch of clips", category: "analyze" },
-      { prompt: "Re-export all clips with karaoke style", description: "Try a different caption look", category: "refine" },
-      { prompt: "Save these settings as a preset called 'myshow'", description: "Reuse this config next time", category: "refine" },
+      {
+        prompt: "Find more viral moments from the transcript",
+        description: "Get another batch of clips",
+        category: "analyze",
+      },
+      {
+        prompt: "Re-export all clips with karaoke style",
+        description: "Try a different caption look",
+        category: "refine",
+      },
+      {
+        prompt: "Save these settings as a preset called 'myshow'",
+        description: "Reuse this config next time",
+        category: "refine",
+      },
     );
   }
 
-  res.json({ hints, phase: ctx.phase, hasVideo: ctx.hasVideo, hasTranscript: ctx.hasTranscript, hasSuggestions: ctx.hasSuggestions, selectedCount: ctx.selectedCount });
+  res.json({
+    hints,
+    phase: ctx.phase,
+    hasVideo: ctx.hasVideo,
+    hasTranscript: ctx.hasTranscript,
+    hasSuggestions: ctx.hasSuggestions,
+    selectedCount: ctx.selectedCount,
+  });
 });
 
 /**
@@ -1292,7 +1488,9 @@ app.get("/api/mcp-hints", (_req, res) => {
 app.post("/api/generate-prompt", (req, res) => {
   const action = req.body.action || "suggest";
   if (!["suggest", "export", "restyle"].includes(action)) {
-    res.status(400).json({ error: "action must be 'suggest', 'export', or 'restyle'" });
+    res
+      .status(400)
+      .json({ error: "action must be 'suggest', 'export', or 'restyle'" });
     return;
   }
   const prompt = buildPromptForAction(action);
@@ -1307,7 +1505,9 @@ app.post("/api/claude-suggest", async (req, res) => {
 
   // Need transcript in state
   if (!uiState.transcript && !uiState.rawTranscriptText) {
-    res.status(400).json({ error: "No transcript loaded. Transcribe or import one first." });
+    res
+      .status(400)
+      .json({ error: "No transcript loaded. Transcribe or import one first." });
     return;
   }
 
@@ -1324,7 +1524,11 @@ app.post("/api/claude-suggest", async (req, res) => {
     const result = await executor.execute<{ clips?: SuggestedClip[] }>(
       "suggest_clips",
       params,
-      (event) => broadcastSSE("job-update", { progress: event.percent, message: event.message }),
+      (event) =>
+        broadcastSSE("job-update", {
+          progress: event.percent,
+          message: event.message,
+        }),
     );
 
     const clips = result.data?.clips ?? [];
@@ -1351,7 +1555,9 @@ app.post("/api/claude-suggest", async (req, res) => {
     res.json({ clips, source: "python" });
   } catch (err: unknown) {
     const msg = errMsg(err);
-    res.status(500).json({ error: `Suggestion failed: ${msg.substring(0, 200)}` });
+    res
+      .status(500)
+      .json({ error: `Suggestion failed: ${msg.substring(0, 200)}` });
   }
 });
 
@@ -1372,12 +1578,18 @@ app.post("/api/generate-content", async (req, res) => {
     const result = await executor.execute(
       "generate_content",
       { clip, transcript_segments: segs },
-      (event) => broadcastSSE("job-update", { progress: event.percent, message: event.message }),
+      (event) =>
+        broadcastSSE("job-update", {
+          progress: event.percent,
+          message: event.message,
+        }),
     );
 
     res.json(result.data);
   } catch (err: any) {
-    res.status(500).json({ error: `Content generation failed: ${err.message?.substring(0, 200)}` });
+    res.status(500).json({
+      error: `Content generation failed: ${err.message?.substring(0, 200)}`,
+    });
   }
 });
 
@@ -1419,7 +1631,7 @@ app.get("/api/events", (_req, res) => {
  */
 app.get("/api/ui-state", (_req, res) => {
   const selected = uiState.suggestions.filter(
-    (_: unknown, i: number) => !uiState.deselectedIndices.includes(i)
+    (_: unknown, i: number) => !uiState.deselectedIndices.includes(i),
   );
   res.json({
     videoPath: uiState.videoPath,
@@ -1432,7 +1644,7 @@ app.get("/api/ui-state", (_req, res) => {
     totalSuggestions: uiState.suggestions.length,
     deselectedCount: uiState.deselectedIndices.length,
     transcriptWordCount: Array.isArray(uiState.transcript?.words)
-      ? uiState.transcript?.words ?? [].length
+      ? (uiState.transcript?.words ?? []).length
       : 0,
     transcript: uiState.transcript,
     rawTranscriptText: uiState.rawTranscriptText,
@@ -1451,15 +1663,21 @@ app.post("/api/ui-state", (req, res) => {
   if (body.videoPath !== undefined) uiState.videoPath = body.videoPath;
   if (body.filePath !== undefined) uiState.filePath = body.filePath;
   if (body.transcript !== undefined) uiState.transcript = body.transcript;
-  if (body.rawTranscriptText !== undefined) uiState.rawTranscriptText = body.rawTranscriptText;
+  if (body.rawTranscriptText !== undefined)
+    uiState.rawTranscriptText = body.rawTranscriptText;
   if (body.suggestions !== undefined) uiState.suggestions = body.suggestions;
-  if (body.deselectedIndices !== undefined) uiState.deselectedIndices = body.deselectedIndices;
+  if (body.deselectedIndices !== undefined)
+    uiState.deselectedIndices = body.deselectedIndices;
   if (body.phase !== undefined) uiState.phase = body.phase;
   if (body.settings) {
-    if (body.settings.captionStyle !== undefined) uiState.settings.captionStyle = body.settings.captionStyle;
-    if (body.settings.cropStrategy !== undefined) uiState.settings.cropStrategy = body.settings.cropStrategy;
-    if (body.settings.logoPath !== undefined) uiState.settings.logoPath = body.settings.logoPath;
-    if (body.settings.outroPath !== undefined) uiState.settings.outroPath = body.settings.outroPath;
+    if (body.settings.captionStyle !== undefined)
+      uiState.settings.captionStyle = body.settings.captionStyle;
+    if (body.settings.cropStrategy !== undefined)
+      uiState.settings.cropStrategy = body.settings.cropStrategy;
+    if (body.settings.logoPath !== undefined)
+      uiState.settings.logoPath = body.settings.logoPath;
+    if (body.settings.outroPath !== undefined)
+      uiState.settings.outroPath = body.settings.outroPath;
   }
   uiState.lastUpdated = Date.now();
   persistState();
@@ -1470,7 +1688,9 @@ app.post("/api/ui-state", (req, res) => {
       ...(body.videoPath !== undefined && { videoPath: body.videoPath }),
       ...(body.filePath !== undefined && { filePath: body.filePath }),
       ...(body.suggestions !== undefined && { suggestions: body.suggestions }),
-      ...(body.deselectedIndices !== undefined && { deselectedIndices: body.deselectedIndices }),
+      ...(body.deselectedIndices !== undefined && {
+        deselectedIndices: body.deselectedIndices,
+      }),
       ...(body.phase !== undefined && { phase: body.phase }),
       ...(body.transcript !== undefined && { transcript: body.transcript }),
       ...(body.settings && { settings: body.settings }),
@@ -1485,16 +1705,24 @@ app.post("/api/ui-state", (req, res) => {
  */
 app.post("/api/mcp/export", async (req, res) => {
   // Use UI state if no explicit params provided
-  const videoPath = req.body.video_path || uiState.filePath || uiState.videoPath;
-  const clips = req.body.clips || uiState.suggestions.filter(
-    (_: unknown, i: number) => !uiState.deselectedIndices.includes(i)
-  );
-  const transcriptWords = req.body.transcript_words ||
-    (Array.isArray(uiState.transcript?.words) ? uiState.transcript?.words ?? [] : []);
+  const videoPath =
+    req.body.video_path || uiState.filePath || uiState.videoPath;
+  const clips =
+    req.body.clips ||
+    uiState.suggestions.filter(
+      (_: unknown, i: number) => !uiState.deselectedIndices.includes(i),
+    );
+  const transcriptWords =
+    req.body.transcript_words ||
+    (Array.isArray(uiState.transcript?.words)
+      ? (uiState.transcript?.words ?? [])
+      : []);
   const logoPath = req.body.logo_path || uiState.settings.logoPath || null;
   const outroPath = req.body.outro_path || uiState.settings.outroPath || null;
-  const captionStyle = req.body.caption_style || uiState.settings.captionStyle || "branded";
-  const cropStrategy = req.body.crop_strategy || uiState.settings.cropStrategy || "speaker";
+  const captionStyle =
+    req.body.caption_style || uiState.settings.captionStyle || "branded";
+  const cropStrategy =
+    req.body.crop_strategy || uiState.settings.cropStrategy || "speaker";
   const allowAssFallback = req.body.allow_ass_fallback === true;
 
   if (!videoPath || !existsSync(videoPath)) {
@@ -1517,7 +1745,8 @@ app.post("/api/mcp/export", async (req, res) => {
     crop_strategy: c.crop_strategy || cropStrategy,
     allow_ass_fallback: c.allow_ass_fallback === true || allowAssFallback,
     // Preserve multi-cut segments from suggestions
-    ...(Array.isArray(c.segments) && c.segments.length > 0 && { keep_segments: c.segments }),
+    ...(Array.isArray(c.segments) &&
+      c.segments.length > 0 && { keep_segments: c.segments }),
   }));
 
   const jobId = uuidv4();
@@ -1542,12 +1771,24 @@ app.post("/api/mcp/export", async (req, res) => {
   executor
     .execute<BatchClipsResult>(
       "batch_clips",
-      { video_path: videoPath, clips: styledClips, transcript_words: transcriptWords, output_dir: paths.output, logo_path: logoPath, outro_path: outroPath, face_map: uiState.transcript?.face_map },
+      {
+        video_path: videoPath,
+        clips: styledClips,
+        transcript_words: transcriptWords,
+        output_dir: paths.output,
+        logo_path: logoPath,
+        outro_path: outroPath,
+        face_map: uiState.transcript?.face_map,
+      },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
-        broadcastSSE("job-update", { jobId, progress: event.percent, message: event.message });
-      }
+        broadcastSSE("job-update", {
+          jobId,
+          progress: event.percent,
+          message: event.message,
+        });
+      },
     )
     .then(async (result) => {
       job.status = "done";
@@ -1575,7 +1816,9 @@ app.post("/api/mcp/export", async (req, res) => {
           }
         }
       } catch (err) {
-        log.warn("Failed to record batch export clips to history", { err: errMsg(err) });
+        log.warn("Failed to record batch export clips to history", {
+          err: errMsg(err),
+        });
       }
       broadcastSSE("job-complete", { jobId, result: result.data });
     })
@@ -1601,12 +1844,29 @@ async function main() {
     log.warn("Startup temp-file cleanup failed", { err: errMsg(err) });
   }
 
+  try {
+    const status = await executor.execute<{
+      legacy_cache_pending?: boolean;
+      legacy_presets_pending?: boolean;
+    }>("manage_config", {
+      action: "status",
+    });
+    if (status.data?.legacy_cache_pending || status.data?.legacy_presets_pending) {
+      await executor.execute("manage_config", { action: "migrate" });
+      log.info("Migrated legacy transcription cache to data/cache");
+    }
+  } catch (err) {
+    log.warn("Legacy cache migration skipped", { err: errMsg(err) });
+  }
+
   app.listen(PORT, () => {
     log.info(`podcli running at http://localhost:${PORT}`);
   });
 }
 
 main().catch((err) => {
-  log.error("Fatal error during startup", { err: err instanceof Error ? err.stack : String(err) });
+  log.error("Fatal error during startup", {
+    err: err instanceof Error ? err.stack : String(err),
+  });
   process.exit(1);
 });
