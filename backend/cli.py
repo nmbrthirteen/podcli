@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import sys
+import textwrap
 import time
 
 _env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
@@ -994,8 +995,16 @@ class _Spinner:
         print(f"\r{self._indent}{'':60}\r", end="")
 
 
+def _wrap_text(text: str, indent: str) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 100)
+    return textwrap.fill(text, width=width, initial_indent=indent, subsequent_indent=indent)
+
+
 def _print_clips(clips: list):
     """Print clip list in the standard format."""
+    width = min(shutil.get_terminal_size((100, 24)).columns, 100)
+    title_indent = " " * 14
+    why_indent = " " * 14
     for i, c in enumerate(clips):
         m_s = int(c["start_second"]) // 60
         s_s = int(c["start_second"]) % 60
@@ -1007,9 +1016,10 @@ def _print_clips(clips: list):
         cuts_tag = f" ({n_segs} cuts)" if n_segs > 1 else ""
         selected = c.get("_selected", True)
         marker = "  ✓" if selected else "  ✗"
-        print(f"        {marker} {i+1}. [{m_s}:{s_s:02d} → +{c['duration']}s] {score_str}{type_tag}{cuts_tag} {c['title'][:50]}")
+        header = f"        {marker} {i+1}. [{m_s}:{s_s:02d} → +{c['duration']}s] {score_str}{type_tag}{cuts_tag} "
+        print(textwrap.fill(c.get("title", ""), width=width, initial_indent=header, subsequent_indent=title_indent))
         if c.get("why"):
-            print(f"              {c['why'][:70]}")
+            print(textwrap.fill(c["why"], width=width, initial_indent=why_indent, subsequent_indent=why_indent))
 
 
 def _find_moment_with_claude(description: str, segments: list, existing_clips: list) -> list:
@@ -1259,9 +1269,9 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
                         s_s = int(f_clip["start_second"]) % 60
                         print(f"         [{m_s}:{s_s:02d} → +{f_clip['duration']}s]")
                         if f_clip.get("quote"):
-                            print(f"         {dim}\"{f_clip['quote'][:80]}\"{reset}")
+                            print(f"{dim}{_wrap_text(chr(34) + f_clip['quote'] + chr(34), '         ')}{reset}")
                         if f_clip.get("why"):
-                            print(f"         {dim}{f_clip['why'][:80]}{reset}")
+                            print(f"{dim}{_wrap_text(f_clip['why'], '         ')}{reset}")
 
                     add = questionary.confirm(
                         f"Add {len(found)} found clip{'s' if len(found) > 1 else ''} to the list?",
@@ -1390,7 +1400,7 @@ def _post_render_loop(
 
     for idx, r in enumerate(rendered):
         clip = r["clip"]
-        print(f"\n  {accent}Clip {idx+1}/{len(rendered)}:{reset} {clip['title'][:50]}")
+        print(f"\n  {accent}Clip {idx+1}/{len(rendered)}:{reset} {clip['title']}")
         _open_clip(r)
 
         while True:
@@ -1534,7 +1544,7 @@ def _post_render_loop(
                         s_s = int(f_clip["start_second"]) % 60
                         print(f"         [{m_s}:{s_s:02d} → +{f_clip['duration']}s]")
                         if f_clip.get("quote"):
-                            print(f"         {dim}\"{f_clip['quote'][:80]}\"{reset}")
+                            print(f"{dim}{_wrap_text(chr(34) + f_clip['quote'] + chr(34), '         ')}{reset}")
 
                     render_it = questionary.confirm(
                         f"Render {len(found)} clip{'s' if len(found) > 1 else ''}?",
@@ -2513,6 +2523,113 @@ def _print_config_result(action: str, data: dict) -> None:
         print(f"    {gray}{data.get('home')}{reset}\n")
 
 
+def cmd_clips(args):
+    """Browse and edit saved clips (.podcli/history/clips.json)."""
+    from services.clips_history import (
+        list_clips,
+        get_clips_by_source,
+        find_clip,
+        update_clip,
+    )
+
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    green = "\033[38;2;74;222;128m"
+    red = "\033[38;2;248;113;113m"
+    bold = "\033[1m"
+    dim = "\033[2m"
+    reset = "\033[0m"
+
+    action = getattr(args, "clips_action", None) or "list"
+
+    if action == "list":
+        source = getattr(args, "source", None)
+        limit = getattr(args, "limit", 50)
+        clips = get_clips_by_source(source)[:limit] if source else list_clips(limit)
+        if not clips:
+            print(f"\n  {gray}No clips yet — render one with{reset} {accent}podcli process{reset}\n")
+            return
+        print(f"\n  {bold}Recent clips ({len(clips)}){reset}\n")
+        for c in clips:
+            cid = str(c.get("id", "?"))[:8]
+            ctype = c.get("content_type")
+            tag = f"  {dim}{ctype}{reset}" if ctype else ""
+            dur = c.get("duration", 0)
+            print(f"    {accent}{cid}{reset}  {bold}{c.get('title', 'untitled')}{reset}{tag}")
+            print(
+                f"      {gray}{os.path.basename(c.get('source_video', '?'))}"
+                f"  ·  {dur:.0f}s  ·  {c.get('caption_style', '?')}"
+                f"  ·  {c.get('created_at', '?')[:10]}{reset}"
+            )
+        print(f"\n  {gray}Edit:{reset} {accent}podcli clips edit <id> --title \"…\"{reset}"
+              f"   {gray}Reopen:{reset} {accent}podcli clips reopen <id>{reset}\n")
+        return
+
+    if action == "edit":
+        clip = find_clip(args.clip_id)
+        if not clip:
+            print(f"\n  {red}✗{reset} Clip not found: {args.clip_id}\n", file=sys.stderr)
+            sys.exit(1)
+        title = getattr(args, "title", None)
+        caption_style = getattr(args, "caption_style", None)
+        if title is None and caption_style is None:
+            print(f"\n  {red}✗{reset} Nothing to change — pass --title and/or --caption-style\n", file=sys.stderr)
+            sys.exit(1)
+        updated = update_clip(args.clip_id, title=title, caption_style=caption_style)
+        print(f"\n  {green}✓{reset} Updated {accent}{str(updated['id'])[:8]}{reset}  {bold}{updated.get('title')}{reset}")
+        print(f"      {gray}caption: {updated.get('caption_style')}{reset}\n")
+        return
+
+    if action == "reopen":
+        clip = find_clip(args.clip_id)
+        if not clip:
+            print(f"\n  {red}✗{reset} Clip not found: {args.clip_id}\n", file=sys.stderr)
+            sys.exit(1)
+        source_video = clip.get("source_video", "")
+        ui_state_path = paths["uiState"]
+        existing = {}
+        try:
+            if os.path.exists(ui_state_path):
+                with open(ui_state_path) as f:
+                    existing = json.load(f) or {}
+        except Exception:
+            existing = {}
+
+        # Preserve the loaded transcript only if it belongs to the same source video.
+        same_source = os.path.basename(existing.get("videoPath", "")) == os.path.basename(source_video)
+        transcript = existing.get("transcript") if same_source else None
+
+        suggestion = {
+            "clip_id": clip.get("id"),
+            "title": clip.get("title", "clip"),
+            "start_second": clip.get("start_second", 0),
+            "end_second": clip.get("end_second", 0),
+            "duration": clip.get("duration", 0),
+            "reasoning": "",
+            "preview_text": clip.get("transcript_slice", ""),
+            "suggested_caption_style": clip.get("caption_style"),
+            "content_type": clip.get("content_type"),
+        }
+        state = {
+            "videoPath": source_video,
+            "filePath": source_video,
+            "transcript": transcript,
+            "suggestions": [suggestion],
+            "deselectedIndices": [],
+            "settings": {"captionStyle": clip.get("caption_style"), "cropStrategy": clip.get("crop_strategy")},
+            "phase": "reviewing",
+        }
+        os.makedirs(os.path.dirname(ui_state_path), exist_ok=True)
+        with open(ui_state_path, "w") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+
+        print(f"\n  {green}✓{reset} Reopened {accent}{str(clip.get('id'))[:8]}{reset}  {bold}{clip.get('title')}{reset}")
+        if not transcript:
+            print(f"      {gray}Transcript not loaded — re-transcribe in the studio to edit captions.{reset}")
+        print(f"      {gray}Open the studio:{reset} {accent}http://localhost:3847/clip/{clip.get('id')}{reset}\n")
+        return
+
+
 def cmd_config(args):
     """Export, import, and activate config profiles."""
     from config_bundle import run_config_action
@@ -2964,6 +3081,23 @@ def main():
     kb_del = kb_sub.add_parser("delete", help="Delete a knowledge file")
     kb_del.add_argument("filename", help="File name to delete")
 
+    # ── clips ──
+    clips_p = sub.add_parser("clips", help="Browse and edit saved clips")
+    clips_sub = clips_p.add_subparsers(dest="clips_action")
+    clips_list = clips_sub.add_parser("list", help="List recent clips")
+    clips_list.add_argument("-n", "--limit", type=int, default=50, help="Max clips to show")
+    clips_list.add_argument("--source", help="Only clips from this source video (basename match)")
+    clips_edit = clips_sub.add_parser("edit", help="Edit a clip's metadata (title, caption style)")
+    clips_edit.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
+    clips_edit.add_argument("--title", help="New title")
+    clips_edit.add_argument(
+        "--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"], help="New caption style"
+    )
+    clips_reopen = clips_sub.add_parser(
+        "reopen", help="Load a clip back into the studio editor for re-iteration"
+    )
+    clips_reopen.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
+
     # ── config ──
     cfg = sub.add_parser("config", help="Export, import, and activate config profiles")
     cfg_sub = cfg.add_subparsers(dest="config_action")
@@ -3023,6 +3157,8 @@ def main():
         cmd_corrections(args)
     elif args.command == "knowledge":
         cmd_knowledge(args)
+    elif args.command == "clips":
+        cmd_clips(args)
     elif args.command == "config":
         cmd_config(args)
     elif args.command == "cache":
