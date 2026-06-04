@@ -2252,9 +2252,16 @@ def cmd_swap_thumbnail(args):
     start_sec = getattr(args, "start", None)
     end_sec = getattr(args, "end", None)
 
-    # If exact timestamp given, extract that specific frame
+    # A user-supplied image wins over any frame extraction.
     frame_path = None
-    if timestamp is not None:
+    custom_image = getattr(args, "image", None)
+    if custom_image:
+        if not os.path.exists(custom_image):
+            print(f"  ✗ Image not found: {custom_image}", file=sys.stderr)
+            sys.exit(1)
+        frame_path = custom_image
+        print(f"  {green}✓{reset} Using uploaded image")
+    if frame_path is None and timestamp is not None:
         import cv2
         cap = cv2.VideoCapture(source_video)
         cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
@@ -2572,10 +2579,18 @@ def cmd_clips(args):
             sys.exit(1)
         title = getattr(args, "title", None)
         caption_style = getattr(args, "caption_style", None)
-        if title is None and caption_style is None:
-            print(f"\n  {red}✗{reset} Nothing to change — pass --title and/or --caption-style\n", file=sys.stderr)
+        thumb_cfg_raw = getattr(args, "thumbnail_config", None)
+        thumbnail_config = None
+        if thumb_cfg_raw:
+            try:
+                thumbnail_config = json.loads(thumb_cfg_raw)
+            except json.JSONDecodeError as e:
+                print(f"\n  {red}✗{reset} Invalid --thumbnail-config JSON: {e}\n", file=sys.stderr)
+                sys.exit(1)
+        if title is None and caption_style is None and thumbnail_config is None:
+            print(f"\n  {red}✗{reset} Nothing to change\n", file=sys.stderr)
             sys.exit(1)
-        updated = update_clip(args.clip_id, title=title, caption_style=caption_style)
+        updated = update_clip(args.clip_id, title=title, caption_style=caption_style, thumbnail_config=thumbnail_config)
         print(f"\n  {green}✓{reset} Updated {accent}{str(updated['id'])[:8]}{reset}  {bold}{updated.get('title')}{reset}")
         print(f"      {gray}caption: {updated.get('caption_style')}{reset}\n")
         return
@@ -3050,6 +3065,7 @@ def main():
     st = sub.add_parser("swap-thumbnail", help="Regenerate thumbnail on an existing clip")
     st.add_argument("clip", help="Path to rendered clip (.mp4)")
     st.add_argument("--title", help="Title text (defaults to filename)")
+    st.add_argument("--image", help="Use this image as the thumbnail background instead of a video frame")
     st.add_argument("--source-video", required=True, help="Original source video (required — rendered clips have captions burned in)")
     st.add_argument("--start", type=float, help="Clip start time in source video (seconds)")
     st.add_argument("--end", type=float, help="Clip end time in source video (seconds)")
@@ -3093,6 +3109,7 @@ def main():
     clips_edit.add_argument(
         "--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"], help="New caption style"
     )
+    clips_edit.add_argument("--thumbnail-config", help="Per-clip thumbnail config as a JSON string")
     clips_reopen = clips_sub.add_parser(
         "reopen", help="Load a clip back into the studio editor for re-iteration"
     )

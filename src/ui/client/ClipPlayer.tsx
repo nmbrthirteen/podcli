@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 const fmt = (s: number) =>
   Number.isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` : "0:00";
 
-export default function ClipPlayer({ src }: { src: string }) {
+export default function ClipPlayer({ src, onTime }: { src: string; onTime?: (t: number) => void }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [t, setT] = useState(0);
@@ -39,7 +39,7 @@ export default function ClipPlayer({ src }: { src: string }) {
         onClick={toggle}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => { setT(e.currentTarget.currentTime); onTime?.(e.currentTarget.currentTime); }}
         onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
       />
       <div className="clip-player-bar">

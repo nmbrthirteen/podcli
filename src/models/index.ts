@@ -205,6 +205,12 @@ export interface ClipPerformanceMetrics {
   fetched_at?: string;
 }
 
+export interface ClipThumbnailConfig {
+  text?: string;
+  image_path?: string;
+  timestamp?: number; // absolute second in the source video for the frame
+}
+
 export interface ClipHistoryEntry {
   id: string;
   source_video: string;
@@ -220,6 +226,7 @@ export interface ClipHistoryEntry {
   created_at: string;
   content_type?: string;
   transcript_slice?: string;
+  thumbnail_config?: ClipThumbnailConfig;
   youtube_video_id?: string;
   metrics?: ClipPerformanceMetrics;
 }

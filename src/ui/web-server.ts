@@ -1151,10 +1151,11 @@ function runCli(args: string[]): Promise<{ code: number; stdout: string; stderr:
 }
 
 app.patch("/api/clips/:id", async (req, res) => {
-  const { title, caption_style } = req.body || {};
+  const { title, caption_style, thumbnail_config } = req.body || {};
   const args = ["clips", "edit", req.params.id];
   if (title != null) args.push("--title", String(title));
   if (caption_style != null) args.push("--caption-style", String(caption_style));
+  if (thumbnail_config != null) args.push("--thumbnail-config", JSON.stringify(thumbnail_config));
   if (args.length === 3) {
     res.status(400).json({ error: "nothing to update" });
     return;
@@ -1189,13 +1190,17 @@ app.post("/api/clips/:id/thumbnail", async (req, res) => {
     res.status(400).json({ error: "rendered file missing — re-render before swapping thumbnail" });
     return;
   }
-  const r = await runCli([
+  const tc = clip.thumbnail_config || {};
+  const args = [
     "swap-thumbnail", clip.output_path,
     "--source-video", clip.source_video,
-    "--title", clip.title,
+    "--title", tc.text || clip.title,
     "--start", String(clip.start_second),
     "--end", String(clip.end_second),
-  ]);
+  ];
+  if (tc.image_path) args.push("--image", String(tc.image_path));
+  else if (typeof tc.timestamp === "number") args.push("--timestamp", String(tc.timestamp));
+  const r = await runCli(args);
   if (r.code !== 0) {
     res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "thumbnail failed" });
     return;
