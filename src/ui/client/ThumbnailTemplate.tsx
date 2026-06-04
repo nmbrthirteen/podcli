@@ -126,6 +126,7 @@ export default function ThumbnailTemplate() {
               position: "absolute", left: `${px(cfg.box_x, SCALE, 55)}px`, right: `${px(cfg.box_x, SCALE, 55)}px`, top: boxTop,
               background: cfg.box_fill_color || "rgba(13,13,13,0.85)",
               border: `${px(cfg.box_border_width, SCALE, 3)}px solid ${accent}`, padding: padToPreview(cfg.box_padding),
+              textAlign: "center",
             }}>
               <div style={{ fontSize: px(cfg.line1_font_size, SCALE, 74), fontWeight: Number(cfg.line1_font_weight) || 700, color: headline, textTransform: cfg.line1_uppercase !== false ? "uppercase" : "none", lineHeight: Number(cfg.line1_line_height) || 1.15, letterSpacing: px(cfg.line1_letter_spacing, SCALE, 2), marginBottom: px(cfg.line1_margin_bottom, SCALE, 10) }}>
                 Intelligence is now
