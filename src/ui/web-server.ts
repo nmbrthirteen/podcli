@@ -964,6 +964,23 @@ app.get("/api/stream-source", (req, res) => {
   }
 });
 
+app.get("/api/image", (req, res) => {
+  const filePath = req.query.path as string;
+  if (!filePath || !existsSync(filePath)) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  const resolved = path.resolve(filePath);
+  const allowedRoots = [paths.output, paths.working, paths.assets, paths.home].map((p) => path.resolve(p));
+  if (!allowedRoots.some((root) => resolved === root || resolved.startsWith(root + "/"))) {
+    res.status(403).json({ error: "access denied" });
+    return;
+  }
+  const mimes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
+  res.writeHead(200, { "Content-Type": mimes[extname(filePath).toLowerCase()] || "application/octet-stream", "Cache-Control": "no-cache" });
+  createReadStream(filePath).pipe(res);
+});
+
 registerConfigIntegrationRoutes(app, { executor, uploadDir });
 
 // --- Transcript export (SRT/VTT) ---
@@ -1187,34 +1204,35 @@ app.post("/api/clips/:id/thumbnail", async (req, res) => {
     res.status(404).json({ error: "clip not found" });
     return;
   }
-  if (!existsSync(clip.output_path)) {
-    res.status(400).json({ error: "rendered file missing — re-render before swapping thumbnail" });
-    return;
-  }
   const tc = clip.thumbnail_config || {};
+  // Standalone thumbnail generation — produces variation PNGs, never touches the clip video.
+  const outDir = join(paths.output, "thumbnails", String(clip.id));
   const args = [
-    "swap-thumbnail", clip.output_path,
-    "--source-video", clip.source_video,
-    "--title", tc.text || clip.title,
+    "thumbnails", tc.text || clip.title,
+    "--output", outDir,
+    "--variations", "3",
+    "--json",
+    "--video", clip.source_video,
     "--start", String(clip.start_second),
     "--end", String(clip.end_second),
   ];
-  if (tc.image_path) args.push("--image", String(tc.image_path));
+  if (tc.image_path) args.push("--photo", String(tc.image_path));
   else if (typeof tc.timestamp === "number") args.push("--timestamp", String(tc.timestamp));
   const r = await runCli(args);
   if (r.code !== 0) {
     res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "thumbnail failed" });
     return;
   }
-  // swap-thumbnail copies the generated PNGs next to the clip (thumb_v1.png = pick 1).
-  const previewPath = join(dirname(clip.output_path), "thumb_v1.png");
-  let preview: string | undefined;
-  if (existsSync(previewPath)) {
-    preview = previewPath;
-    const merged = { ...tc, preview_path: previewPath };
-    await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
+  const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
+  let variations: string[] = [];
+  try { variations = JSON.parse(jsonLine || "{}").paths || []; } catch { /* no paths */ }
+  if (variations.length === 0) {
+    res.status(500).json({ error: "no thumbnails generated" });
+    return;
   }
-  res.json({ ok: true, preview_path: preview });
+  const merged = { ...tc, preview_path: variations[0], variations };
+  await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
+  res.json({ ok: true, preview_path: variations[0], variations });
 });
 
 app.post("/api/clips/:id/davinci", async (req, res) => {

@@ -84,7 +84,7 @@ export default function StudioHome() {
                   return (
                     <Link key={c.id} to={`/clip/${c.id}`} className="clip-card">
                       {thumb ? (
-                        <img className="clip-card-media" src={`/api/stream-source?path=${encodeURIComponent(thumb)}`} alt="" />
+                        <img className="clip-card-media" src={`/api/image?path=${encodeURIComponent(thumb)}`} alt="" />
                       ) : file ? (
                         <video className="clip-card-media" src={`/api/preview/${file}#t=0.1`} muted preload="metadata" playsInline />
                       ) : (

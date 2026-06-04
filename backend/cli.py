@@ -2153,25 +2153,44 @@ def cmd_thumbnails(args):
     if args.photo:
         photo = resolve_asset(args.photo)
 
-    print(f"\n  {bold}Generating {args.variations} thumbnail variations...{reset}")
-    print(f"  Title: {accent}{args.title}{reset}")
-
     video = getattr(args, "video", None)
+    as_json = getattr(args, "json", False)
+
+    # An exact timestamp wins: extract that frame from the video and use it as the photo.
+    timestamp = getattr(args, "timestamp", None)
+    if photo is None and video and timestamp is not None:
+        import cv2
+        os.makedirs(args.output, exist_ok=True)
+        cap = cv2.VideoCapture(video)
+        cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
+        ok, frame = cap.read()
+        cap.release()
+        if ok:
+            photo = os.path.join(args.output, "_picked_frame.png")
+            cv2.imwrite(photo, frame)
+
+    if not as_json:
+        print(f"\n  {bold}Generating {args.variations} thumbnail variations...{reset}")
+        print(f"  Title: {accent}{args.title}{reset}")
 
     paths = generate_variations(
         title=args.title,
         output_dir=args.output,
         photo_path=photo,
         video_path=video,
+        start_second=getattr(args, "start", None),
+        end_second=getattr(args, "end", None),
         logo_path=logo,
         config={"variations": args.variations},
     )
 
+    if as_json:
+        print(json.dumps({"paths": paths}))
+        return
+
     for p in paths:
         print(f"  {green}✓{reset} {p}")
-
-    print(f"\n  {gray}Open the folder to preview and pick the best one.{reset}")
-    print(f"  {gray}Edit .podcli/thumbnail-config.json to customize colors, fonts, layout.{reset}\n")
+    print(f"\n  {gray}Open the folder to preview and pick the best one.{reset}\n")
 
 
 def cmd_swap_thumbnail(args):
@@ -3060,6 +3079,10 @@ def main():
     thumb.add_argument("--video", help="Video to extract face frame from")
     thumb.add_argument("--logo", help="Logo (asset name or path)")
     thumb.add_argument("-n", "--variations", type=int, default=3, help="Number of variations")
+    thumb.add_argument("--timestamp", type=float, help="Exact second in --video to use as the frame")
+    thumb.add_argument("--start", type=float, help="Frame search window start (seconds)")
+    thumb.add_argument("--end", type=float, help="Frame search window end (seconds)")
+    thumb.add_argument("--json", action="store_true", help="Emit JSON {paths:[...]} to stdout")
 
     # ── swap-thumbnail ──
     st = sub.add_parser("swap-thumbnail", help="Regenerate thumbnail on an existing clip")

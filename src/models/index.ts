@@ -209,7 +209,8 @@ export interface ClipThumbnailConfig {
   text?: string;
   image_path?: string; // user-supplied background image
   timestamp?: number; // absolute second in the source video for the frame
-  preview_path?: string; // last generated thumbnail PNG
+  preview_path?: string; // chosen thumbnail PNG
+  variations?: string[]; // all generated thumbnail PNGs to pick from
 }
 
 export interface ClipHistoryEntry {
