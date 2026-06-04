@@ -1218,6 +1218,8 @@ app.post("/api/clips/:id/thumbnail", async (req, res) => {
   ];
   if (tc.image_path) args.push("--photo", String(tc.image_path));
   else if (typeof tc.timestamp === "number") args.push("--timestamp", String(tc.timestamp));
+  if (tc.line1) args.push("--line1", String(tc.line1));
+  if (tc.line2) args.push("--line2", String(tc.line2));
   const r = await runCli(args);
   if (r.code !== 0) {
     res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "thumbnail failed" });

@@ -207,6 +207,8 @@ export interface ClipPerformanceMetrics {
 
 export interface ClipThumbnailConfig {
   text?: string;
+  line1?: string; // explicit first line (overrides the AI split)
+  line2?: string; // explicit second line
   image_path?: string; // user-supplied background image
   timestamp?: number; // absolute second in the source video for the frame
   preview_path?: string; // chosen thumbnail PNG

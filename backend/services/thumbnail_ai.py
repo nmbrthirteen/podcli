@@ -522,10 +522,15 @@ def generate_thumbnail_with_template(
     frame_info: Optional[dict] = None,
     config: Optional[dict] = None,
     variation: int = 0,
+    line1_override: Optional[str] = None,
+    line2_override: Optional[str] = None,
 ) -> Optional[str]:
     """
     Template + AI layout. Claude decides all dynamic values per frame.
     Template provides consistent visual structure.
+
+    When line1_override is given, the two lines are used verbatim and the
+    Claude rewrite is skipped — the caller controls the exact split.
     """
     from services.thumbnail_html import generate_thumbnail, _load_config, _prepare_thumbnail_lines
 
@@ -533,10 +538,13 @@ def generate_thumbnail_with_template(
     if config:
         cfg.update(config)
 
-    # Ask Claude for ALL layout decisions
-    layout = ask_claude_for_layout(title, frame_path, frame_info, logo_path, cfg)
+    layout = None if line1_override is not None else ask_claude_for_layout(title, frame_path, frame_info, logo_path, cfg)
 
-    if layout:
+    if line1_override is not None:
+        line1, line2 = _prepare_thumbnail_lines(
+            title=title, line1=line1_override, line2=line2_override or "",
+        )
+    elif layout:
         line1, line2 = _prepare_thumbnail_lines(
             title=title,
             line1=layout.get("line1", title),
@@ -574,6 +582,8 @@ def generate_variations(
     end_second: Optional[float] = None,
     logo_path: Optional[str] = None,
     config: Optional[dict] = None,
+    line1: Optional[str] = None,
+    line2: Optional[str] = None,
 ) -> list[str]:
     """
     Generate thumbnail variations using AI.
@@ -638,6 +648,8 @@ def generate_variations(
             frame_info=frame if frame_path else None,
             config=cfg,
             variation=i,
+            line1_override=line1,
+            line2_override=line2,
         )
 
         if result:

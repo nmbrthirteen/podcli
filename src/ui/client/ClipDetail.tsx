@@ -5,6 +5,8 @@ import ClipPlayer from "./ClipPlayer";
 
 interface ThumbnailConfig {
   text?: string;
+  line1?: string;
+  line2?: string;
   image_path?: string;
   timestamp?: number;
   preview_path?: string;
@@ -42,7 +44,8 @@ export default function ClipDetail() {
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
   const [captionStyle, setCaptionStyle] = useState("");
-  const [thumbText, setThumbText] = useState("");
+  const [line1, setLine1] = useState("");
+  const [line2, setLine2] = useState("");
   const [thumbImage, setThumbImage] = useState<string | null>(null);
   const [thumbTimestamp, setThumbTimestamp] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -59,7 +62,8 @@ export default function ClipDetail() {
           setTitle(found.title);
           setCaptionStyle(found.caption_style);
           const tc = found.thumbnail_config || {};
-          setThumbText(tc.text ?? found.title);
+          setLine1(tc.line1 ?? "");
+          setLine2(tc.line2 ?? "");
           setThumbImage(tc.image_path ?? null);
           setThumbTimestamp(tc.image_path ? null : tc.timestamp ?? null);
         }
@@ -108,7 +112,7 @@ export default function ClipDetail() {
   const generate = async () => {
     setBusy("thumb"); setMsg(null);
     try {
-      const cfg: ThumbnailConfig = { text: thumbText || undefined };
+      const cfg: ThumbnailConfig = { line1: line1 || undefined, line2: line2 || undefined };
       if (thumbImage) cfg.image_path = thumbImage;
       else if (thumbTimestamp != null) cfg.timestamp = thumbTimestamp;
       const p = await patch({ thumbnail_config: cfg });
@@ -200,7 +204,8 @@ export default function ClipDetail() {
 
         <div className="section">
           <label style={labelStyle}>Thumbnail</label>
-          <input type="text" value={thumbText} onChange={(e) => setThumbText(e.target.value)} placeholder="Thumbnail text" style={{ width: "100%", fontSize: 14, padding: "10px 13px" }} />
+          <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%", fontSize: 14, padding: "10px 13px" }} />
+          <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", fontSize: 14, padding: "10px 13px", marginTop: 8 }} />
           <div className="set-actions" style={{ marginTop: 10 }}>
             <button className="btn btn-ghost btn-sm" onClick={useCurrentFrame} disabled={busy !== null}>Use current frame</button>
             <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} disabled={busy !== null}>

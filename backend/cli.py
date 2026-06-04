@@ -2182,6 +2182,8 @@ def cmd_thumbnails(args):
         end_second=getattr(args, "end", None),
         logo_path=logo,
         config={"variations": args.variations},
+        line1=getattr(args, "line1", None),
+        line2=getattr(args, "line2", None),
     )
 
     if as_json:
@@ -3082,6 +3084,8 @@ def main():
     thumb.add_argument("--timestamp", type=float, help="Exact second in --video to use as the frame")
     thumb.add_argument("--start", type=float, help="Frame search window start (seconds)")
     thumb.add_argument("--end", type=float, help="Frame search window end (seconds)")
+    thumb.add_argument("--line1", help="Explicit first thumbnail line (skips AI rewrite)")
+    thumb.add_argument("--line2", help="Explicit second thumbnail line")
     thumb.add_argument("--json", action="store_true", help="Emit JSON {paths:[...]} to stdout")
 
     # ── swap-thumbnail ──
