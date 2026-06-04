@@ -1001,3 +1001,23 @@ input[type="range"]::-webkit-slider-thumb {
 .episode-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
 .episode-head h2 { font-size: 15px; font-weight: 700; margin: 0; }
 .episode-head .sub { font-size: 11px; color: var(--text3); }
+
+/* ── Settings pages (Config / Integrations / MCP) ── */
+.set-kv { display: flex; flex-direction: column; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.set-kv:last-child { border-bottom: none; }
+.set-kv .k { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text2); }
+.set-kv .v { font-family: var(--font-mono, monospace); font-size: 13px; color: var(--text); word-break: break-all; }
+.set-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.set-note { margin-top: 14px; font-size: 12px; padding: 10px 12px; border-radius: var(--radius-sm); }
+.set-note.ok { background: var(--green-subtle); color: var(--green); }
+.set-note.err { background: var(--red-subtle); color: var(--red); }
+.set-file { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.int-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.int-row:last-child { border-bottom: none; }
+.int-row .name { font-size: 14px; font-weight: 600; }
+.int-row .desc { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+/* ── Code block (MCP setup) ── */
+.code-block { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; margin-top: 10px; }
+.code-block-head { display: flex; justify-content: space-between; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text2); font-family: var(--font-mono, monospace); }
+.code-block pre { margin: 0; padding: 13px 14px; font-family: var(--font-mono, monospace); font-size: 12.5px; line-height: 1.6; color: var(--text); overflow-x: auto; white-space: pre; }
