@@ -3236,9 +3236,19 @@ def interactive_menu():
             _interactive_process()
             return
         elif choice == "webui":
-            print(f"\n  {gray}Starting Web UI...{reset}\n")
             import subprocess as sp
-            sp.run(["npm", "run", "ui"], cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+            repo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+            spa = os.path.join(repo, "dist", "ui", "public", "index.html")
+            port = os.environ.get("PORT", "3847")
+            ok = True
+            if not os.path.exists(spa):
+                print(f"\n  {gray}Building the studio (first run)…{reset}\n")
+                ok = sp.run(["npm", "run", "build"], cwd=repo).returncode == 0
+                if not ok:
+                    print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
+            if ok:
+                print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
+                sp.run(["npm", "run", "ui:prod"], cwd=repo)
         elif choice == "assets":
             _interactive_assets()
         elif choice == "presets":
@@ -3750,7 +3760,7 @@ def _interactive_config():
             port = os.environ.get("PORT", "3847")
             url = f"http://localhost:{port}/config.html"
             print(f"\n  {gray}Config UI:{reset} {url}")
-            print(f"  {dim}Start the UI first if needed: npm run ui{reset}\n")
+            print(f"  {dim}Serve the UI first if needed: npm run build && npm run ui:prod{reset}\n")
             webbrowser.open(url)
             questionary.press_any_key_to_continue(style=qstyle).ask()
             continue

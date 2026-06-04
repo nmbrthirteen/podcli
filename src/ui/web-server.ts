@@ -21,7 +21,7 @@ import {
 import { mkdir, readdir, unlink } from "fs/promises";
 import path from "path";
 import { join, dirname, basename, extname, resolve } from "path";
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
@@ -1131,6 +1131,78 @@ app.get("/api/history", async (req, res) => {
   }
 });
 
+// Clip edits route through the Python CLI so the web UI and `podcli clips`
+// share one history writer (preserves unknown fields like Phase 2 metrics).
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").trim();
+
+function runCli(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(
+      paths.pythonPath,
+      [join(paths.projectRoot, "backend", "cli.py"), "--no-banner", ...args],
+      { env: { ...process.env, PYTHONUNBUFFERED: "1", PODCLI_HOME: paths.home, PODCLI_DATA: paths.dataDir } },
+    );
+    let stdout = "", stderr = "";
+    proc.stdout.on("data", (d) => (stdout += d));
+    proc.stderr.on("data", (d) => (stderr += d));
+    proc.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    proc.on("error", (e) => resolve({ code: 1, stdout, stderr: String(e) }));
+  });
+}
+
+app.patch("/api/clips/:id", async (req, res) => {
+  const { title, caption_style } = req.body || {};
+  const args = ["clips", "edit", req.params.id];
+  if (title != null) args.push("--title", String(title));
+  if (caption_style != null) args.push("--caption-style", String(caption_style));
+  if (args.length === 3) {
+    res.status(400).json({ error: "nothing to update" });
+    return;
+  }
+  const r = await runCli(args);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "edit failed" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/clips/:id/reopen", async (req, res) => {
+  const r = await runCli(["clips", "reopen", req.params.id]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "reopen failed" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/clips/:id/thumbnail", async (req, res) => {
+  const entries = await clipsHistory.load();
+  const clip = entries.find(
+    (e) => e.id === req.params.id || String(e.id).startsWith(req.params.id),
+  );
+  if (!clip) {
+    res.status(404).json({ error: "clip not found" });
+    return;
+  }
+  if (!existsSync(clip.output_path)) {
+    res.status(400).json({ error: "rendered file missing — re-render before swapping thumbnail" });
+    return;
+  }
+  const r = await runCli([
+    "swap-thumbnail", clip.output_path,
+    "--source-video", clip.source_video,
+    "--title", clip.title,
+    "--start", String(clip.start_second),
+    "--end", String(clip.end_second),
+  ]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "thumbnail failed" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
 app.get("/api/history/check", async (req, res) => {
   try {
     const {
@@ -1866,6 +1938,12 @@ async function main() {
   } catch (err) {
     log.warn("Legacy cache migration skipped", { err: errMsg(err) });
   }
+
+  // SPA fallback: client-side routes (/, /episode, /clip/:id) resolve to the
+  // built index.html. Registered last so it never shadows /api or static assets.
+  app.get(/^(?!\/api\/).*/, (_req, res) => {
+    res.sendFile(join(__dirname, "public", "index.html"));
+  });
 
   app.listen(PORT, () => {
     log.info(`podcli running at http://localhost:${PORT}`);

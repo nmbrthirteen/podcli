@@ -1,60 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-  <title>Podcli - AI Podcast Clip Studio</title>
-  <meta name="description" content="Transcribe podcast videos, find viral moments, and export branded vertical clips with burned captions. Open-source local-first studio for YouTube Shorts, TikTok, and Reels.">
-  <meta name="author" content="Podcli">
-  <meta name="application-name" content="Podcli">
-  <meta name="generator" content="Podcli">
-  <meta name="robots" content="noindex,nofollow">
-  <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta name="format-detection" content="telephone=no">
-
-  <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="color-scheme" content="dark light">
-
-  <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Podcli">
-  <meta property="og:title" content="Podcli - AI Podcast Clip Studio">
-  <meta property="og:description" content="Transcribe podcast videos, find viral moments, and export branded vertical clips with burned captions.">
-  <meta property="og:image" content="/podcli-logo-transparent.png">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Podcli - AI Podcast Clip Studio">
-  <meta name="twitter:description" content="Transcribe podcast videos, find viral moments, and export branded vertical clips with burned captions.">
-  <meta name="twitter:image" content="/podcli-logo-transparent.png">
-
-  <link rel="icon" type="image/png" href="/podcli-icon.png">
-  <link rel="apple-touch-icon" href="/podcli-icon.png">
-  <link rel="mask-icon" href="/podcli-icon-transparent.png" color="#0d0d0d">
-
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Podcli">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="mobile-web-app-capable" content="yes">
-
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600;700;800&display=swap"
-    rel="stylesheet">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css">
-</head>
-
-<body>
-  <div id="root"></div>
-
-  <script type="text/babel">
-    const { useState, useEffect, useRef, useCallback, useMemo } = React;
-
-    const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
     const api = async (path, opts = {}) => (await fetch(`/api${path}`, { headers: { 'Content-Type': 'application/json', ...opts.headers }, ...opts })).json();
 
     function uploadFile(file, onProgress) {
@@ -551,7 +497,7 @@
       );
     }
 
-    function App() {
+    export default function App() {
       const [videoPath, setVideoPath] = useState('');
       const [transcriptMode, setTranscriptMode] = useState('whisper');
       const [transcriptText, setTranscriptText] = useState('');
@@ -1123,8 +1069,7 @@
       return (
         <div className="app">
           <div className="header">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <img src="/podcli-logo-transparent.png" alt="podcli" style={{ height: 22 }} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {mcpConnected && (
                   <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'var(--green-subtle)', color: 'var(--green)', border: '1px solid var(--green-border)' }}>
@@ -1148,10 +1093,6 @@
                     Speakers ✓
                   </span>
                 )}
-                <a href="/knowledge.html" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', textDecoration: 'none', padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', transition: 'all 0.15s' }}>Knowledge</a>
-                <a href="/config.html" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', textDecoration: 'none', padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', transition: 'all 0.15s' }}>Config</a>
-                <a href="/integrations.html" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', textDecoration: 'none', padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', transition: 'all 0.15s' }}>Integrations</a>
-                <a href="/integration.html" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', textDecoration: 'none', padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', transition: 'all 0.15s' }}>MCP Setup</a>
               </div>
             </div>
             <h1>Podcast content studio</h1>
@@ -1871,9 +1812,3 @@
         </div>
       );
     }
-
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-  </script>
-</body>
-
-</html>
