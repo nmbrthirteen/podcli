@@ -12,6 +12,7 @@ interface Clip {
   output_path: string;
   created_at: string;
   content_type?: string;
+  thumbnail_config?: { image_path?: string; preview_path?: string };
 }
 
 interface Episode {
@@ -79,9 +80,12 @@ export default function StudioHome() {
               <div className="clip-grid">
                 {ep.clips.map((c) => {
                   const file = basename(c.output_path);
+                  const thumb = c.thumbnail_config?.preview_path;
                   return (
                     <Link key={c.id} to={`/clip/${c.id}`} className="clip-card">
-                      {file ? (
+                      {thumb ? (
+                        <img className="clip-card-media" src={`/api/stream-source?path=${encodeURIComponent(thumb)}`} alt="" />
+                      ) : file ? (
                         <video className="clip-card-media" src={`/api/preview/${file}#t=0.1`} muted preload="metadata" playsInline />
                       ) : (
                         <div className="clip-card-media empty">▶</div>

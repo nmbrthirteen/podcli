@@ -1135,13 +1135,11 @@ app.get("/api/history", async (req, res) => {
 // share one history writer (preserves unknown fields like Phase 2 metrics).
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").trim();
 
-function runCli(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+function runPy(scriptAndArgs: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const proc = spawn(
-      paths.pythonPath,
-      [join(paths.projectRoot, "backend", "cli.py"), "--no-banner", ...args],
-      { env: { ...process.env, PYTHONUNBUFFERED: "1", PODCLI_HOME: paths.home, PODCLI_DATA: paths.dataDir } },
-    );
+    const proc = spawn(paths.pythonPath, scriptAndArgs, {
+      env: { ...process.env, PYTHONUNBUFFERED: "1", PODCLI_HOME: paths.home, PODCLI_DATA: paths.dataDir },
+    });
     let stdout = "", stderr = "";
     proc.stdout.on("data", (d) => (stdout += d));
     proc.stderr.on("data", (d) => (stderr += d));
@@ -1149,6 +1147,9 @@ function runCli(args: string[]): Promise<{ code: number; stdout: string; stderr:
     proc.on("error", (e) => resolve({ code: 1, stdout, stderr: String(e) }));
   });
 }
+
+const runCli = (args: string[]) =>
+  runPy([join(paths.projectRoot, "backend", "cli.py"), "--no-banner", ...args]);
 
 app.patch("/api/clips/:id", async (req, res) => {
   const { title, caption_style, thumbnail_config } = req.body || {};
@@ -1205,7 +1206,38 @@ app.post("/api/clips/:id/thumbnail", async (req, res) => {
     res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "thumbnail failed" });
     return;
   }
-  res.json({ ok: true });
+  // swap-thumbnail copies the generated PNGs next to the clip (thumb_v1.png = pick 1).
+  const previewPath = join(dirname(clip.output_path), "thumb_v1.png");
+  let preview: string | undefined;
+  if (existsSync(previewPath)) {
+    preview = previewPath;
+    const merged = { ...tc, preview_path: previewPath };
+    await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
+  }
+  res.json({ ok: true, preview_path: preview });
+});
+
+app.post("/api/clips/:id/davinci", async (req, res) => {
+  const entries = await clipsHistory.load();
+  const clip = entries.find(
+    (e) => e.id === req.params.id || String(e.id).startsWith(req.params.id),
+  );
+  if (!clip) {
+    res.status(404).json({ error: "clip not found" });
+    return;
+  }
+  if (!existsSync(clip.output_path)) {
+    res.status(400).json({ error: "rendered file missing" });
+    return;
+  }
+  const cli = join(paths.projectRoot, "backend", "services", "integrations", "davinci_resolve", "cli.py");
+  const r = await runPy([cli, "--source", clip.output_path, "--title", clip.title]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "export failed" });
+    return;
+  }
+  const wrote = (r.stdout.match(/wrote:\s*(.+)/) || [])[1]?.trim();
+  res.json({ ok: true, path: wrote });
 });
 
 app.get("/api/history/check", async (req, res) => {

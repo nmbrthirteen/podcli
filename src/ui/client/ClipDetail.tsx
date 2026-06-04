@@ -7,6 +7,7 @@ interface ThumbnailConfig {
   text?: string;
   image_path?: string;
   timestamp?: number;
+  preview_path?: string;
 }
 
 interface Clip {
@@ -45,6 +46,13 @@ export default function ClipDetail() {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [previewBust, setPreviewBust] = useState(0);
+  const [davinciOn, setDavinciOn] = useState(false);
+
+  useEffect(() => {
+    api("/integrations")
+      .then((d) => setDavinciOn(!!(d.integrations || []).find((i: any) => i.name === "davinci_resolve" && i.enabled)))
+      .catch(() => {});
+  }, []);
 
   const load = () => {
     api("/history?limit=500")
@@ -134,6 +142,7 @@ export default function ClipDetail() {
       if (r.error) throw new Error(r.error);
       setMsg("Thumbnail applied");
       setPreviewBust(Date.now());
+      load();
     } catch (e: any) {
       setMsg(`Thumbnail failed: ${e.message}`);
     } finally {
@@ -153,6 +162,19 @@ export default function ClipDetail() {
     }
   };
 
+  const exportDavinci = async () => {
+    setBusy("davinci"); setMsg(null);
+    try {
+      const r = await api(`/clips/${clip.id}/davinci`, { method: "POST", body: "{}" });
+      if (r.error) throw new Error(r.error);
+      setMsg(r.path ? `DaVinci project written: ${r.path}` : "DaVinci project exported");
+    } catch (e: any) {
+      setMsg(`DaVinci export failed: ${e.message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const source = thumbImage ? `Image · ${basename(thumbImage)}` : thumbTimestamp != null ? `Frame @ ${fmt(thumbTimestamp)}` : "Auto (best frame)";
 
   return (
@@ -167,14 +189,11 @@ export default function ClipDetail() {
           <div className="section">
             <label style={labelStyle}>Title</label>
             <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%", fontSize: 14, padding: "10px 13px" }} />
-          </div>
-
-          <div className="section">
-            <label style={labelStyle}>Caption style</label>
+            <label style={{ ...labelStyle, marginTop: 16 }}>Caption style</label>
             <select value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value)}>
               {CAPTION_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
-            <div style={{ marginTop: 14 }}>
+            <div style={{ marginTop: 16 }}>
               <button className="btn btn-primary btn-sm" onClick={save} disabled={!dirty || busy !== null}>
                 {busy === "save" ? <div className="spinner sm" /> : "Save"}
               </button>
@@ -220,8 +239,13 @@ export default function ClipDetail() {
             <button className="btn btn-ghost btn-sm" onClick={reopen} disabled={busy !== null}>
               {busy === "reopen" ? <div className="spinner sm" /> : "Reopen in editor"}
             </button>
-            {msg && <span style={{ fontSize: 12, color: "var(--text2)" }}>{msg}</span>}
+            {davinciOn && (
+              <button className="btn btn-ghost btn-sm" onClick={exportDavinci} disabled={busy !== null}>
+                {busy === "davinci" ? <div className="spinner sm" /> : "Export for DaVinci"}
+              </button>
+            )}
           </div>
+          {msg && <div className="set-note ok" style={{ wordBreak: "break-all" }}>{msg}</div>}
         </div>
 
         <div className="preview-col">
@@ -231,6 +255,18 @@ export default function ClipDetail() {
             ) : (
               <div className="phone-empty">No rendered output</div>
             )}
+            <label style={{ ...labelStyle, marginTop: 18 }}>Thumbnail</label>
+            <div className="thumb-stage">
+              {clip.thumbnail_config?.preview_path ? (
+                <img key={`gen-${previewBust}`} src={`/api/stream-source?path=${encodeURIComponent(clip.thumbnail_config.preview_path)}&t=${previewBust}`} alt="thumbnail" />
+              ) : thumbImage ? (
+                <img src={`/api/stream-source?path=${encodeURIComponent(thumbImage)}`} alt="thumbnail source" />
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: 12, textAlign: "center", padding: 16 }}>
+                  No thumbnail yet — set the text and a frame, then Apply.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
