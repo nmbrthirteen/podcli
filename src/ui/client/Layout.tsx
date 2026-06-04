@@ -31,10 +31,10 @@ export default function Layout() {
         <NavLink to="/episode" className="sidebar-link"><Icon name="episode" /> New episode</NavLink>
 
         <div className="sidebar-section">Workspace</div>
-        <a href="/knowledge.html" className="sidebar-link"><Icon name="knowledge" /> Knowledge</a>
-        <a href="/config.html" className="sidebar-link"><Icon name="config" /> Config</a>
-        <a href="/integrations.html" className="sidebar-link"><Icon name="integrations" /> Integrations</a>
-        <a href="/integration.html" className="sidebar-link"><Icon name="config" /> MCP Setup</a>
+        <NavLink to="/knowledge" className="sidebar-link"><Icon name="knowledge" /> Knowledge</NavLink>
+        <NavLink to="/config" className="sidebar-link"><Icon name="config" /> Config</NavLink>
+        <NavLink to="/integrations" className="sidebar-link"><Icon name="integrations" /> Integrations</NavLink>
+        <NavLink to="/mcp" className="sidebar-link"><Icon name="config" /> MCP Setup</NavLink>
 
         <div className="sidebar-section">Insights</div>
         <span className="sidebar-link disabled"><Icon name="analytics" /> Analytics <span className="soon">SOON</span></span>

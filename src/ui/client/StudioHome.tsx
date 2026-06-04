@@ -47,7 +47,6 @@ export default function StudioHome() {
   }, []);
 
   const episodes = groupEpisodes(clips);
-  const rendered = clips.length;
 
   return (
     <div className="app">
@@ -58,60 +57,44 @@ export default function StudioHome() {
         </div>
       </div>
 
-      {!loading && rendered > 0 && (
-        <div className="fade-in" style={{ margin: "0 0 18px", fontSize: 13, color: "var(--text2)" }}>
-          {episodes.length} episode{episodes.length !== 1 ? "s" : ""} · {rendered} clip{rendered !== 1 ? "s" : ""} rendered
-        </div>
-      )}
-
       {loading ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text2)" }}>
-          <div className="spinner sm" /> Loading library…
+          <div className="spinner sm" /> Loading…
         </div>
       ) : episodes.length === 0 ? (
         <div className="drop-zone" style={{ textAlign: "center", padding: "48px 20px" }}>
           <div className="icon" style={{ fontSize: 28 }}>🎬</div>
           <div className="label" style={{ marginTop: 8 }}>
-            No clips yet. <Link to="/episode" style={{ color: "var(--accent)" }}>Start a new episode</Link>.
+            <Link to="/episode" style={{ color: "var(--accent)" }}>Start a new episode</Link>
           </div>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div>
           {episodes.map((ep) => (
-            <div key={ep.source} className="section fade-in">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 700 }}>{ep.source}</div>
-                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
-                    {ep.clips.length} clip{ep.clips.length !== 1 ? "s" : ""} · {timeAgo(ep.latest)}
-                  </div>
-                </div>
+            <div key={ep.source} className="episode-block fade-in">
+              <div className="episode-head">
+                <h2>{ep.source}</h2>
+                <span className="sub">{ep.clips.length} · {timeAgo(ep.latest)}</span>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {ep.clips.map((c) => (
-                  <Link
-                    key={c.id}
-                    to={`/clip/${c.id}`}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 10, padding: "9px 11px",
-                      background: "var(--surface)", borderRadius: "var(--radius-sm)",
-                      textDecoration: "none", color: "inherit",
-                    }}
-                  >
-                    <div style={{ width: 6, height: 6, borderRadius: 3, background: "var(--green)", flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {c.title}
+              <div className="clip-grid">
+                {ep.clips.map((c) => {
+                  const file = basename(c.output_path);
+                  return (
+                    <Link key={c.id} to={`/clip/${c.id}`} className="clip-card">
+                      {file ? (
+                        <video className="clip-card-media" src={`/api/preview/${file}#t=0.1`} muted preload="metadata" playsInline />
+                      ) : (
+                        <div className="clip-card-media empty">▶</div>
+                      )}
+                      <div className="clip-card-body">
+                        <div className="clip-card-title">{c.title}</div>
+                        <div className="clip-card-meta">
+                          {fmt(c.duration)} · {c.caption_style}{c.content_type ? ` · ${c.content_type}` : ""}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
-                        {fmt(c.duration)} · {c.caption_style}
-                        {c.content_type ? ` · ${c.content_type}` : ""}
-                        {c.file_size_mb ? ` · ${c.file_size_mb.toFixed(1)}MB` : ""}
-                      </div>
-                    </div>
-                    <span style={{ fontSize: 12, color: "var(--text3)" }}>›</span>
-                  </Link>
-                ))}
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           ))}

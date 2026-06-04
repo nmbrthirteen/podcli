@@ -3758,7 +3758,7 @@ def _interactive_config():
             import webbrowser
 
             port = os.environ.get("PORT", "3847")
-            url = f"http://localhost:{port}/config.html"
+            url = f"http://localhost:{port}/config"
             print(f"\n  {gray}Config UI:{reset} {url}")
             print(f"  {dim}Serve the UI first if needed: npm run build && npm run ui:prod{reset}\n")
             webbrowser.open(url)

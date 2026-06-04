@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { api, fmt, basename } from "./lib";
+import ClipPlayer from "./ClipPlayer";
 
 interface Clip {
   id: string;
@@ -134,9 +135,6 @@ export default function ClipDetail() {
             <select value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value)}>
               {CAPTION_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>
-              Changing the caption style updates metadata only. Re-render in the editor to apply it to the video.
-            </div>
           </div>
 
           <div className="section">
@@ -172,7 +170,7 @@ export default function ClipDetail() {
         <div className="preview-col">
           <div className="preview-panel">
             {previewFile ? (
-              <video key={previewUrl} src={previewUrl} controls preload="auto" className="vertical" style={{ width: "100%", borderRadius: "var(--radius)" }} />
+              <ClipPlayer key={previewUrl} src={previewUrl} />
             ) : (
               <div className="phone-empty">No rendered output</div>
             )}

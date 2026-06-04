@@ -987,3 +987,17 @@ input[type="range"]::-webkit-slider-thumb {
 .thumb-fields .full { grid-column: 1 / -1; }
 .thumb-swatch-row { display: flex; align-items: center; gap: 8px; }
 .thumb-swatch-row input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: none; cursor: pointer; }
+
+/* ── Library card grid ── */
+.clip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.clip-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; text-decoration: none; color: inherit; transition: border-color 0.12s, transform 0.12s; }
+.clip-card:hover { border-color: var(--border-hover); transform: translateY(-2px); }
+.clip-card-media { aspect-ratio: 9 / 16; width: 100%; display: block; object-fit: cover; background: #000; }
+.clip-card-media.empty { display: flex; align-items: center; justify-content: center; color: var(--text3); font-size: 22px; }
+.clip-card-body { padding: 10px 11px; }
+.clip-card-title { font-size: 12.5px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.clip-card-meta { font-size: 10.5px; color: var(--text3); margin-top: 5px; }
+.episode-block + .episode-block { margin-top: 22px; }
+.episode-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.episode-head h2 { font-size: 15px; font-weight: 700; margin: 0; }
+.episode-head .sub { font-size: 11px; color: var(--text3); }

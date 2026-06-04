@@ -5,6 +5,10 @@ import Layout from "./Layout";
 import StudioHome from "./StudioHome";
 import ClipDetail from "./ClipDetail";
 import EpisodeWorkspace from "./EpisodeWorkspace";
+import KnowledgePage from "./KnowledgePage";
+import ConfigPage from "./ConfigPage";
+import IntegrationsPage from "./IntegrationsPage";
+import McpSetupPage from "./McpSetupPage";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -14,6 +18,10 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/" element={<StudioHome />} />
           <Route path="/episode" element={<EpisodeWorkspace />} />
           <Route path="/clip/:id" element={<ClipDetail />} />
+          <Route path="/knowledge" element={<KnowledgePage />} />
+          <Route path="/config" element={<ConfigPage />} />
+          <Route path="/integrations" element={<IntegrationsPage />} />
+          <Route path="/mcp" element={<McpSetupPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
