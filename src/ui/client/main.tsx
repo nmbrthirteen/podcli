@@ -5,6 +5,7 @@ import Layout from "./Layout";
 import StudioHome from "./StudioHome";
 import ClipDetail from "./ClipDetail";
 import EpisodeWorkspace from "./EpisodeWorkspace";
+import ThumbnailTemplate from "./ThumbnailTemplate";
 import KnowledgePage from "./KnowledgePage";
 import ConfigPage from "./ConfigPage";
 import IntegrationsPage from "./IntegrationsPage";
@@ -17,6 +18,7 @@ createRoot(document.getElementById("root")!).render(
         <Route element={<Layout />}>
           <Route path="/" element={<StudioHome />} />
           <Route path="/episode" element={<EpisodeWorkspace />} />
+          <Route path="/thumbnail" element={<ThumbnailTemplate />} />
           <Route path="/clip/:id" element={<ClipDetail />} />
           <Route path="/knowledge" element={<KnowledgePage />} />
           <Route path="/config" element={<ConfigPage />} />

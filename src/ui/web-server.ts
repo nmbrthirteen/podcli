@@ -964,6 +964,26 @@ app.get("/api/stream-source", (req, res) => {
   }
 });
 
+app.get("/api/thumbnail-config", (_req, res) => {
+  try {
+    res.json(JSON.parse(readFileSync(paths.thumbnailConfig, "utf-8")));
+  } catch {
+    res.json({});
+  }
+});
+
+app.put("/api/thumbnail-config", (req, res) => {
+  try {
+    let current: Record<string, unknown> = {};
+    try { current = JSON.parse(readFileSync(paths.thumbnailConfig, "utf-8")); } catch { /* new file */ }
+    const merged = { ...current, ...(req.body || {}) };
+    writeFileSync(paths.thumbnailConfig, JSON.stringify(merged, null, 2), "utf-8");
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/api/image", (req, res) => {
   const filePath = req.query.path as string;
   if (!filePath || !existsSync(filePath)) {
