@@ -197,6 +197,14 @@ export interface AssetRegistry {
 
 // === Clip History Models ===
 
+export interface ClipPerformanceMetrics {
+  views?: number;
+  retention?: number; // averageViewPercentage, 0-100
+  ctr?: number; // impressionsClickThroughRate, 0-100
+  impressions?: number;
+  fetched_at?: string;
+}
+
 export interface ClipHistoryEntry {
   id: string;
   source_video: string;
@@ -210,6 +218,10 @@ export interface ClipHistoryEntry {
   file_size_mb: number;
   duration: number;
   created_at: string;
+  content_type?: string;
+  transcript_slice?: string;
+  youtube_video_id?: string;
+  metrics?: ClipPerformanceMetrics;
 }
 
 // === Knowledge Base Models ===

@@ -34,6 +34,7 @@ import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths } from "../config/paths.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
+import { sliceTranscript, findContentType } from "../utils/transcript.js";
 import type {
   BatchClipsResult,
   ClipResult,
@@ -501,6 +502,7 @@ app.post("/api/create-clip", async (req, res) => {
     outro_path = null,
     clean_fillers = false,
     allow_ass_fallback = false,
+    content_type = null,
   } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
@@ -608,6 +610,8 @@ app.post("/api/create-clip", async (req, res) => {
           output_path: d?.output_path || "",
           file_size_mb: d?.file_size_mb || 0,
           duration: d?.duration || 0,
+          content_type: content_type || undefined,
+          transcript_slice: sliceTranscript(transcript_words, start_second, end_second),
         });
       } catch (err) {
         log.warn("Failed to record clip to history", {
@@ -736,6 +740,8 @@ app.post("/api/batch-clips", async (req, res) => {
                 output_path: r.output_path,
                 file_size_mb: r.file_size_mb || 0,
                 duration: r.duration || 0,
+                content_type: findContentType(uiState.suggestions, r.start_second || 0, r.end_second || 0),
+                transcript_slice: sliceTranscript(transcript_words, r.start_second || 0, r.end_second || 0),
               });
             }
           }
@@ -1811,6 +1817,8 @@ app.post("/api/mcp/export", async (req, res) => {
                 output_path: r.output_path,
                 file_size_mb: r.file_size_mb || 0,
                 duration: r.duration || 0,
+                content_type: findContentType(uiState.suggestions, r.start_second || 0, r.end_second || 0),
+                transcript_slice: sliceTranscript(transcriptWords, r.start_second || 0, r.end_second || 0),
               });
             }
           }

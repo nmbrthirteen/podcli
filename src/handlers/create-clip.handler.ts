@@ -4,6 +4,7 @@ import { FileManager } from "../services/file-manager.js";
 import { paths } from "../config/paths.js";
 import type { ClipResult, CreateClipInput, SuggestedClip, UIState } from "../models/index.js";
 import { childLogger } from "../utils/logger.js";
+import { sliceTranscript } from "../utils/transcript.js";
 
 const log = childLogger("create-clip");
 const executor = new PythonExecutor();
@@ -191,6 +192,8 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     output_path: data.output_path,
     duration: data.duration,
     file_size_mb: data.file_size_mb,
+    content_type: suggestion?.content_type,
+    transcript_slice: sliceTranscript(transcriptWords, startSecond, endSecond),
     message: `Clip created successfully! ${data.duration}s, ${data.file_size_mb}MB`,
   });
 }

@@ -29,7 +29,8 @@ import { ClipsHistory } from "./services/clips-history.js";
 import { TranscriptCache } from "./services/transcript-cache.js";
 import { paths } from "./config/paths.js";
 import { childLogger } from "./utils/logger.js";
-import type { BatchClipsResult, UIState } from "./models/index.js";
+import { sliceTranscript } from "./utils/transcript.js";
+import type { BatchClipsResult, UIState, WordTimestamp } from "./models/index.js";
 
 const log = childLogger("server");
 
@@ -674,6 +675,8 @@ export function createServer(): McpServer {
             output_path: parsed.output_path,
             file_size_mb: parsed.file_size_mb,
             duration: parsed.duration,
+            content_type: parsed.content_type,
+            transcript_slice: parsed.transcript_slice,
           });
 
           // Notify UI that export is done
@@ -915,6 +918,11 @@ export function createServer(): McpServer {
                   output_path: r.output_path,
                   file_size_mb: r.file_size_mb || 0,
                   duration: r.duration || 0,
+                  transcript_slice: sliceTranscript(
+                    params.transcript_words as WordTimestamp[] | undefined,
+                    r.start_second || 0,
+                    r.end_second || 0,
+                  ),
                 });
               }
             }
