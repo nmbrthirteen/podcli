@@ -52,8 +52,9 @@ from services.local_reframe import (
 import sys
 
 
-def _manual_crop_x_expr(keyframes: list, crop_w: int, width: int, pan_duration: float = 0.4) -> str:
-    """Build an FFmpeg x-expression panning the crop window between manual keyframes.
+def _manual_crop_x_expr(keyframes: list, crop_w: int, width: int) -> str:
+    """Build an FFmpeg x-expression that HOLDS each manual keyframe's position
+    until the next keyframe, then snaps (step function — no glide).
 
     keyframes: [(t_seconds, center_x_pct 0-100), ...] in clip-relative time.
     Returns crop x (top-left) as a function of t, clamped to the frame.
@@ -65,20 +66,11 @@ def _manual_crop_x_expr(keyframes: list, crop_w: int, width: int, pan_duration: 
     kf = sorted(((float(k["t"]), cx(float(k["x_pct"]))) for k in keyframes), key=lambda p: p[0])
     if not kf:
         return str(max(0, (width - crop_w) // 2))
-    if len(kf) == 1:
-        return str(kf[0][1])
-    # Nested conditionals: before first → x0; within each pair → linear pan; after last → xn.
-    expr = str(kf[-1][1])
-    for i in range(len(kf) - 2, -1, -1):
-        t0, x0 = kf[i]
-        t1, x1 = kf[i + 1]
-        if t1 - t0 <= 0.001:
-            seg = str(x1)
-        else:
-            seg = f"({x0}+({x1}-{x0})*(t-{t0:.3f})/{t1 - t0:.3f})"
-        expr = f"if(lt(t\\,{t1:.3f})\\,{seg}\\,{expr})"
-    t0, x0 = kf[0]
-    expr = f"if(lt(t\\,{t0:.3f})\\,{x0}\\,{expr})"
+    # Hold the first position before t0; each later keyframe overrides from its time on.
+    # Built ascending so the latest-matching keyframe is the outermost test.
+    expr = str(kf[0][1])
+    for t_i, x_i in kf:
+        expr = f"if(gte(t\\,{t_i:.3f})\\,{x_i}\\,{expr})"
     return expr
 
 

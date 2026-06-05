@@ -1,7 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import { api, fmt } from "./lib";
+import { api } from "./lib";
 
 interface Keyframe { t: number; x_pct: number }
+
+const FRAME = 1 / 30; // ~33ms nudge for catching a cut
+const fmtMs = (s: number) =>
+  `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}.${String(Math.floor((s % 1) * 1000)).padStart(3, "0")}`;
 
 export default function ReframeEditor({
   clipId, start, end, caption_style, onClose, onDone,
@@ -45,7 +49,7 @@ export default function ReframeEditor({
   };
 
   const addKeyframe = () => {
-    setKeyframes((kf) => [...kf.filter((k) => Math.abs(k.t - t) > 0.05), { t: +t.toFixed(2), x_pct: +centerPct.toFixed(1) }].sort((a, b) => a.t - b.t));
+    setKeyframes((kf) => [...kf.filter((k) => Math.abs(k.t - t) > 0.02), { t: +t.toFixed(3), x_pct: +centerPct.toFixed(1) }].sort((a, b) => a.t - b.t));
   };
 
   const apply = async () => {
@@ -76,9 +80,16 @@ export default function ReframeEditor({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
-          <span style={{ fontSize: 11, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{fmt(t)}</span>
-          <input type="range" min={0} max={dur} step={0.1} value={t} onChange={(e) => seek(parseFloat(e.target.value))} style={{ flex: 1 }} />
-          <button className="btn btn-ghost btn-sm" onClick={addKeyframe}>+ Keyframe</button>
+          <span style={{ fontSize: 12, color: "var(--text)", fontVariantNumeric: "tabular-nums", minWidth: 78 }}>{fmtMs(t)}</span>
+          <input type="range" min={0} max={dur} step={0.001} value={t} onChange={(e) => seek(parseFloat(e.target.value))} style={{ flex: 1 }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
+          <button className="btn btn-ghost btn-sm" title="-1s" onClick={() => seek(t - 1)}>⏮</button>
+          <button className="btn btn-ghost btn-sm" title="-1 frame" onClick={() => seek(t - FRAME)}>◀</button>
+          <button className="btn btn-ghost btn-sm" title="+1 frame" onClick={() => seek(t + FRAME)}>▶</button>
+          <button className="btn btn-ghost btn-sm" title="+1s" onClick={() => seek(t + 1)}>⏭</button>
+          <span style={{ flex: 1 }} />
+          <button className="btn btn-primary btn-sm" onClick={addKeyframe}>+ Keyframe here</button>
         </div>
 
         <div style={{ marginTop: 12 }}>
@@ -89,7 +100,7 @@ export default function ReframeEditor({
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {keyframes.map((k) => (
                 <span key={k.t} className="pill" style={{ fontSize: 11, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }} onClick={() => seek(k.t)}>
-                  {fmt(k.t)} · {Math.round(k.x_pct)}%
+                  {fmtMs(k.t)} · {Math.round(k.x_pct)}%
                   <button onClick={(e) => { e.stopPropagation(); setKeyframes((kf) => kf.filter((x) => x.t !== k.t)); }} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", padding: 0 }}>×</button>
                 </span>
               ))}
