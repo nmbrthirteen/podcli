@@ -104,6 +104,7 @@ def handle_create_clip(task_id: str, params: dict):
         end_second=params["end_second"],
         caption_style=params.get("caption_style", "hormozi"),
         crop_strategy=params.get("crop_strategy", "face"),
+        crop_keyframes=params.get("crop_keyframes"),
         transcript_words=params.get("transcript_words", []),
         title=params.get("title", "clip"),
         output_dir=params.get("output_dir"),

@@ -52,6 +52,36 @@ from services.local_reframe import (
 import sys
 
 
+def _manual_crop_x_expr(keyframes: list, crop_w: int, width: int, pan_duration: float = 0.4) -> str:
+    """Build an FFmpeg x-expression panning the crop window between manual keyframes.
+
+    keyframes: [(t_seconds, center_x_pct 0-100), ...] in clip-relative time.
+    Returns crop x (top-left) as a function of t, clamped to the frame.
+    """
+    def cx(pct: float) -> int:
+        center = (max(0.0, min(100.0, pct)) / 100.0) * width
+        return int(max(0, min(width - crop_w, round(center - crop_w / 2))))
+
+    kf = sorted(((float(k["t"]), cx(float(k["x_pct"]))) for k in keyframes), key=lambda p: p[0])
+    if not kf:
+        return str(max(0, (width - crop_w) // 2))
+    if len(kf) == 1:
+        return str(kf[0][1])
+    # Nested conditionals: before first → x0; within each pair → linear pan; after last → xn.
+    expr = str(kf[-1][1])
+    for i in range(len(kf) - 2, -1, -1):
+        t0, x0 = kf[i]
+        t1, x1 = kf[i + 1]
+        if t1 - t0 <= 0.001:
+            seg = str(x1)
+        else:
+            seg = f"({x0}+({x1}-{x0})*(t-{t0:.3f})/{t1 - t0:.3f})"
+        expr = f"if(lt(t\\,{t1:.3f})\\,{seg}\\,{expr})"
+    t0, x0 = kf[0]
+    expr = f"if(lt(t\\,{t0:.3f})\\,{x0}\\,{expr})"
+    return expr
+
+
 def crop_to_vertical(
     input_path: str,
     output_path: str,
@@ -59,6 +89,7 @@ def crop_to_vertical(
     transcript_words: list = None,
     clip_start: float = 0,
     face_map: dict = None,
+    crop_keyframes: list = None,
 ) -> str:
     """
     Crop/scale video to 1080x1920 (9:16 vertical).
@@ -80,6 +111,19 @@ def crop_to_vertical(
     target_ratio = target_w / target_h  # 0.5625
 
     source_ratio = width / height
+
+    if strategy == "manual" and crop_keyframes:
+        crop_h = height
+        crop_w = min(int(crop_h * target_ratio), width)
+        crop_y = max(0, (height - crop_h) // 2)
+        x_expr = _manual_crop_x_expr(crop_keyframes, crop_w, width)
+        vf = f"crop={crop_w}:{crop_h}:x='{x_expr}':y={crop_y},scale={target_w}:{target_h}"
+        return _run_ffmpeg_with_fallback(
+            cmd_parts_before_enc=["ffmpeg", "-y", "-i", input_path, "-vf", vf],
+            cmd_parts_after_enc=["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-movflags", "+faststart"],
+            output_path=output_path,
+            label="crop_manual",
+        )
 
     if strategy == "speaker-hardcut" and face_map:
         crop_h = height
