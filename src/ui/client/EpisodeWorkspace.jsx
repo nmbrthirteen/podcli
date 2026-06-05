@@ -585,18 +585,38 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
       const loadPreset = async (name) => {
         if (!name) { setActivePreset(''); return; }
         try {
-          const d = await api('/presets', { method: 'POST', body: JSON.stringify({ action: 'get', name }) });
-          // Backend returns the preset config directly (not nested under .config)
+          const response = await api('/presets', { method: 'POST', body: JSON.stringify({ action: 'get', name }) });
+          const d = response.config || response;
           if (d.caption_style) setCaptionStyle(d.caption_style);
           if (d.crop_strategy) setCropStrategy(d.crop_strategy);
           if (d.logo_path !== undefined) setLogoPath(d.logo_path || '');
           if (d.outro_path !== undefined) setOutroPath(d.outro_path || '');
+          if (d.video_path !== undefined) {
+            const nextVideoPath = d.video_path || '';
+            const changedVideo = nextVideoPath.trim() !== videoPath.trim();
+            setVideoPath(nextVideoPath);
+            setFile(null);
+            if (changedVideo) {
+              setTranscript(null);
+              setCachedTranscript(false);
+              setTranscriptText('');
+              setTranscriptFileName('');
+              setSuggestions([]);
+              setDeselected(new Set());
+              setResults([]);
+              setEnergyData({});
+              autoTranscribeRef.current = '';
+              setPhase('idle');
+            }
+          }
           if (d.clean_fillers !== undefined) setCleanFillers(d.clean_fillers);
           if (d.quality) setQuality(d.quality);
           if (d.top_clips) setTopClips(d.top_clips);
           if (d.min_clip_duration) setMinDuration(d.min_clip_duration);
           if (d.max_clip_duration) setMaxDuration(d.max_clip_duration);
           if (d.energy_boost !== undefined) setEnergyBoost(d.energy_boost);
+          if (d.whisper_model) setWhisperModel(d.whisper_model);
+          if (d.time_adjust !== undefined) setTimeAdjust(d.time_adjust);
           setActivePreset(name);
         } catch {}
       };
@@ -607,7 +627,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
         try {
           await api('/presets', { method: 'POST', body: JSON.stringify({
             action: 'save', name: presetName.trim(),
-            config: { caption_style: captionStyle, crop_strategy: cropStrategy, logo_path: logoPath, outro_path: outroPath, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
+            config: { caption_style: captionStyle, crop_strategy: cropStrategy, logo_path: logoPath, outro_path: outroPath, video_path: videoPath.trim(), whisper_model: whisperModel, time_adjust: timeAdjust, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
           })});
           setActivePreset(presetName.trim());
           setPresetName(''); setShowPresetSave(false);
