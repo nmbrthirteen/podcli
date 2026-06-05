@@ -6,6 +6,7 @@ import StudioHome from "./StudioHome";
 import ClipDetail from "./ClipDetail";
 import EpisodeWorkspace from "./EpisodeWorkspace";
 import ThumbnailTemplate from "./ThumbnailTemplate";
+import AnalyticsPage from "./AnalyticsPage";
 import KnowledgePage from "./KnowledgePage";
 import ConfigPage from "./ConfigPage";
 import IntegrationsPage from "./IntegrationsPage";
@@ -24,6 +25,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/config" element={<ConfigPage />} />
           <Route path="/integrations" element={<IntegrationsPage />} />
           <Route path="/mcp" element={<McpSetupPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

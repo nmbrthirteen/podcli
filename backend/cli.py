@@ -2666,6 +2666,84 @@ def cmd_clips(args):
         return
 
 
+def cmd_youtube(args):
+    """Link clips to YouTube videos and sync performance metrics."""
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    green = "\033[38;2;74;222;128m"
+    red = "\033[38;2;248;113;113m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    action = getattr(args, "youtube_action", None) or "status"
+
+    def fail(e):
+        print(f"\n  {red}✗{reset} {e}\n", file=sys.stderr)
+        sys.exit(1)
+
+    if action == "auth":
+        from services.integrations.youtube import client
+        try:
+            client.authorize()
+            print(f"\n  {green}✓{reset} Authorized — token cached.\n")
+        except Exception as e:
+            fail(e)
+        return
+
+    if action == "status":
+        from services.integrations.youtube import client
+        from services.clips_history import load_clips_history
+        clips = load_clips_history()
+        linked = [c for c in clips if c.get("youtube_video_id")]
+        synced = [c for c in clips if c.get("metrics")]
+        print(f"\n  {bold}YouTube{reset}")
+        print(f"    {gray}Authorized:{reset} {'yes' if client.is_authorized() else 'no'}")
+        print(f"    {gray}Clips linked:{reset} {len(linked)}")
+        print(f"    {gray}Clips with metrics:{reset} {len(synced)}\n")
+        return
+
+    if action == "link":
+        from services.integrations.youtube import sync
+        clip_id = getattr(args, "clip_id", None)
+        video_id = getattr(args, "video_id", None)
+        if clip_id and video_id:
+            if sync.set_link(clip_id, video_id):
+                print(f"\n  {green}✓{reset} Linked {accent}{clip_id[:8]}{reset} → {video_id}\n")
+            else:
+                fail(f"clip not found: {clip_id}")
+            return
+        try:
+            proposals = sync.propose_links()
+        except Exception as e:
+            fail(e)
+        if not proposals:
+            print(f"\n  {gray}No link proposals (all clips linked, or no uploads matched).{reset}\n")
+            return
+        print(f"\n  {bold}Proposed links ({len(proposals)}){reset}  {gray}— confirm with: youtube link <clip_id> <video_id>{reset}\n")
+        for p in proposals:
+            print(f"    {accent}{p['clip_id'][:8]}{reset} {p['clip_title']}")
+            print(f"      {gray}→ {p['video_id']}  {p['video_title']}  (score {p['score']}){reset}")
+        print()
+        return
+
+    if action == "sync":
+        from services.integrations.youtube import sync
+        csv_path = getattr(args, "csv", None)
+        try:
+            if csv_path:
+                res = sync.sync_from_csv(csv_path)
+                print(f"\n  {green}✓{reset} Matched {res['matched']} clip(s) from {res['rows']} CSV row(s).")
+                if res["unmatched"]:
+                    print(f"  {gray}Unmatched: {len(res['unmatched'])}{reset}")
+                print()
+            else:
+                n = sync.sync_metrics()
+                print(f"\n  {green}✓{reset} Synced metrics onto {n} linked clip(s).\n")
+        except Exception as e:
+            fail(e)
+        return
+
+
 def cmd_config(args):
     """Export, import, and activate config profiles."""
     from config_bundle import run_config_action
@@ -3142,6 +3220,17 @@ def main():
     )
     clips_reopen.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
 
+    # ── youtube ──
+    yt = sub.add_parser("youtube", help="Link clips to YouTube videos and sync performance")
+    yt_sub = yt.add_subparsers(dest="youtube_action")
+    yt_sub.add_parser("auth", help="Authorize via Google OAuth (loopback)")
+    yt_sub.add_parser("status", help="Show auth state + linked/synced counts")
+    yt_link = yt_sub.add_parser("link", help="Propose clip↔video links, or set one explicitly")
+    yt_link.add_argument("clip_id", nargs="?", help="Clip id (omit to list proposals)")
+    yt_link.add_argument("video_id", nargs="?", help="YouTube video id to link")
+    yt_sync = yt_sub.add_parser("sync", help="Sync performance onto linked clips")
+    yt_sync.add_argument("--csv", help="Import from a YouTube Studio analytics CSV (no auth)")
+
     # ── config ──
     cfg = sub.add_parser("config", help="Export, import, and activate config profiles")
     cfg_sub = cfg.add_subparsers(dest="config_action")
@@ -3203,6 +3292,8 @@ def main():
         cmd_knowledge(args)
     elif args.command == "clips":
         cmd_clips(args)
+    elif args.command == "youtube":
+        cmd_youtube(args)
     elif args.command == "config":
         cmd_config(args)
     elif args.command == "cache":

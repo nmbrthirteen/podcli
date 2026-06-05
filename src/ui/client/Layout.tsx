@@ -39,7 +39,7 @@ export default function Layout() {
         <NavLink to="/mcp" className="sidebar-link"><Icon name="config" /> MCP Setup</NavLink>
 
         <div className="sidebar-section">Insights</div>
-        <span className="sidebar-link disabled"><Icon name="analytics" /> Analytics <span className="soon">SOON</span></span>
+        <NavLink to="/analytics" className="sidebar-link"><Icon name="analytics" /> Analytics</NavLink>
       </aside>
 
       <main className="shell-main">

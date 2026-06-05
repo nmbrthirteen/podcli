@@ -1257,6 +1257,89 @@ app.post("/api/clips/:id/thumbnail", async (req, res) => {
   res.json({ ok: true, preview_path: variations[0], variations });
 });
 
+app.get("/api/youtube/config", (_req, res) => {
+  try {
+    const all = JSON.parse(readFileSync(paths.integrations, "utf-8"));
+    const yt = all.youtube || {};
+    res.json({ client_id: yt.client_id || "", has_secret: !!yt.client_secret });
+  } catch {
+    res.json({ client_id: "", has_secret: false });
+  }
+});
+
+app.put("/api/youtube/config", (req, res) => {
+  try {
+    let all: Record<string, any> = {};
+    try { all = JSON.parse(readFileSync(paths.integrations, "utf-8")); } catch { /* new */ }
+    const yt = { ...(all.youtube || {}) };
+    const { client_id, client_secret } = req.body || {};
+    if (client_id !== undefined) yt.client_id = client_id;
+    if (client_secret) yt.client_secret = client_secret;
+    all.youtube = yt;
+    writeFileSync(paths.integrations, JSON.stringify(all, null, 2) + "\n", "utf-8");
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/youtube/status", async (_req, res) => {
+  try {
+    const clips = await clipsHistory.load();
+    res.json({
+      authorized: existsSync(join(paths.home, "youtube-token.json")),
+      linked: clips.filter((c) => c.youtube_video_id).length,
+      with_metrics: clips.filter((c) => c.metrics && (c.metrics.views != null || c.metrics.retention != null)).length,
+      total: clips.length,
+    });
+  } catch {
+    res.json({ authorized: false, linked: 0, with_metrics: 0, total: 0 });
+  }
+});
+
+app.post("/api/youtube/sync", async (req, res) => {
+  const csvPath = req.body?.csv_path;
+  const r = await runCli(["youtube", "sync", ...(csvPath ? ["--csv", String(csvPath)] : [])]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "sync failed" });
+    return;
+  }
+  res.json({ ok: true, message: stripAnsi(r.stdout) });
+});
+
+app.get("/api/analytics", async (_req, res) => {
+  const clips = await clipsHistory.load();
+  const withM = clips.filter((c) => c.metrics && (c.metrics.views != null || c.metrics.retention != null));
+  const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+  const agg = (keyFn: (c: any) => string) => {
+    const groups = new Map<string, any[]>();
+    for (const c of withM) {
+      const k = keyFn(c) || "—";
+      (groups.get(k) ?? groups.set(k, []).get(k)!).push(c);
+    }
+    return Array.from(groups.entries()).map(([key, cs]) => ({
+      key,
+      count: cs.length,
+      avgViews: Math.round(avg(cs.map((c) => c.metrics?.views || 0))),
+      avgRetention: +avg(cs.map((c) => c.metrics?.retention || 0)).toFixed(1),
+      avgCtr: +avg(cs.map((c) => c.metrics?.ctr || 0)).toFixed(1),
+    })).sort((a, b) => b.avgViews - a.avgViews);
+  };
+  const lengthBucket = (d: number) => (d < 25 ? "<25s" : d < 35 ? "25–35s" : d < 45 ? "35–45s" : "45s+");
+  res.json({
+    published: withM.length,
+    total: clips.length,
+    byContentType: agg((c) => c.content_type),
+    byCaptionStyle: agg((c) => c.caption_style),
+    byLength: agg((c) => lengthBucket(c.duration || 0)),
+    top: withM
+      .slice()
+      .sort((a, b) => (b.metrics?.views || 0) - (a.metrics?.views || 0))
+      .slice(0, 12)
+      .map((c) => ({ id: c.id, title: c.title, content_type: c.content_type, caption_style: c.caption_style, duration: c.duration, metrics: c.metrics })),
+  });
+});
+
 app.post("/api/clips/:id/davinci", async (req, res) => {
   const entries = await clipsHistory.load();
   const clip = entries.find(

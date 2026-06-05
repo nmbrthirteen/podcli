@@ -2,5 +2,6 @@
 from .base import IntegrationBase, IntegrationRegistry, ToolSpec
 from .manager import IntegrationsManager
 from . import davinci_resolve as _davinci_resolve  # noqa: F401
+from . import youtube as _youtube  # noqa: F401
 
 __all__ = ["IntegrationBase", "IntegrationRegistry", "ToolSpec", "IntegrationsManager"]
