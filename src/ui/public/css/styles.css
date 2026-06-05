@@ -25,6 +25,7 @@
   --radius: 12px;
   --radius-sm: 8px;
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -381,7 +382,8 @@ select {
 .btn {
   padding: 10px 18px; border-radius: var(--radius); font-family: inherit;
   font-size: 13px; font-weight: 600; cursor: pointer; border: none;
-  transition: all 0.15s var(--ease); display: inline-flex;
+  transition: transform 0.12s var(--ease), background 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease), opacity 0.15s var(--ease);
+  display: inline-flex;
   align-items: center; justify-content: center; gap: 6px; text-decoration: none;
 }
 .btn:active:not(:disabled) { transform: scale(0.97); }
@@ -1046,9 +1048,13 @@ input[type="range"]::-webkit-slider-thumb {
   @keyframes cardIn { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: none; } }
   @keyframes riseIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
-  .shell-main > * { animation: pageIn 0.3s var(--ease) both; }
+  .shell-main > * { animation: pageIn 0.24s var(--ease-out) both; }
 
-  .clip-grid .clip-card { animation: cardIn 0.34s var(--ease) both; }
+  .reframe-overlay { animation: pageIn 0.16s var(--ease-out) both; }
+  .reframe-modal { animation: modalIn 0.2s var(--ease-out) both; }
+  @keyframes modalIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+
+  .clip-grid .clip-card { animation: cardIn 0.28s var(--ease-out) both; }
   .clip-grid .clip-card:nth-child(1) { animation-delay: 0.02s; }
   .clip-grid .clip-card:nth-child(2) { animation-delay: 0.05s; }
   .clip-grid .clip-card:nth-child(3) { animation-delay: 0.08s; }
@@ -1057,7 +1063,7 @@ input[type="range"]::-webkit-slider-thumb {
   .clip-grid .clip-card:nth-child(6) { animation-delay: 0.17s; }
   .clip-grid .clip-card:nth-child(n+7) { animation-delay: 0.2s; }
 
-  .clip-controls .section, .tmpl-fields .section { animation: riseIn 0.32s var(--ease) both; }
+  .clip-controls .section, .tmpl-fields .section { animation: riseIn 0.26s var(--ease-out) both; }
   .clip-controls .section:nth-child(2) { animation-delay: 0.05s; }
   .clip-controls .section:nth-child(3) { animation-delay: 0.1s; }
   .clip-controls .section:nth-child(4) { animation-delay: 0.15s; }
