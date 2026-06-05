@@ -39,12 +39,25 @@ function groupEpisodes(clips: Clip[]): Episode[] {
 export default function StudioHome() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(0);
 
   useEffect(() => {
-    api("/history?limit=500")
-      .then((d) => setClips(Array.isArray(d) ? d : []))
-      .catch(() => setClips([]))
-      .finally(() => setLoading(false));
+    const loadHistory = () => {
+      api("/history?limit=500")
+        .then((d) => setClips(Array.isArray(d) ? d : []))
+        .catch(() => setClips([]))
+        .finally(() => setLoading(false));
+    };
+
+    loadHistory();
+    const events = new EventSource("/api/events");
+    events.addEventListener("history-updated", loadHistory);
+    const onStart = (e: MessageEvent) => { try { setExporting(JSON.parse(e.data).clipCount || 0); } catch { setExporting(1); } };
+    const onEnd = () => setExporting(0);
+    events.addEventListener("export-started", onStart as EventListener);
+    events.addEventListener("job-complete", onEnd as EventListener);
+    events.addEventListener("job-error", onEnd as EventListener);
+    return () => events.close();
   }, []);
 
   const episodes = groupEpisodes(clips);
@@ -57,6 +70,12 @@ export default function StudioHome() {
           <Link to="/episode" className="btn btn-primary btn-sm" style={{ textDecoration: "none" }}>+ New episode</Link>
         </div>
       </div>
+
+      {exporting > 0 && (
+        <div className="set-note ok" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <div className="spinner sm" /> Exporting {exporting} clip{exporting > 1 ? "s" : ""} — they appear here as each finishes.
+        </div>
+      )}
 
       {loading ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text2)" }}>
