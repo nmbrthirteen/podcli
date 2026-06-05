@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api } from "./lib";
 
 interface Keyframe { tAbs: number; x_pct: number }
@@ -36,6 +36,14 @@ export default function ReframeEditor({
   const pos = (t: number) => ((t - bufStart) / win) * 100;
   const half = boxPct / 2;
   const clampCenter = (p: number) => Math.max(half, Math.min(100 - half, p));
+
+  useEffect(() => {
+    api(`/clips/${clipId}/reframe`).then((r) => {
+      if (Array.isArray(r?.keyframes)) setKeyframes(r.keyframes);
+      if (typeof r?.inSec === "number") setInSec(r.inSec);
+      if (typeof r?.outSec === "number") setOutSec(r.outSec);
+    }).catch(() => {});
+  }, [clipId]);
 
   const onMeta = () => {
     const v = videoRef.current;
@@ -107,15 +115,12 @@ export default function ReframeEditor({
   };
 
   const apply = async () => {
-    const kf = keyframes
-      .filter((k) => k.tAbs >= inSec - 0.001 && k.tAbs <= outSec + 0.001)
-      .map((k) => ({ t: +Math.max(0, k.tAbs - inSec).toFixed(3), x_pct: k.x_pct }));
-    const crop_keyframes = kf.length ? kf : [{ t: 0, x_pct: +centerPct.toFixed(1) }];
+    const kf = keyframes.length ? keyframes : [{ tAbs: inSec, x_pct: +centerPct.toFixed(1) }];
     setBusy(true); setErr(null);
     try {
       const r = await api(`/clips/${clipId}/rerender`, {
         method: "POST",
-        body: JSON.stringify({ crop_keyframes, caption_style, start_second: +inSec.toFixed(3), end_second: +outSec.toFixed(3) }),
+        body: JSON.stringify({ caption_style, reframe: { keyframes: kf, inSec: +inSec.toFixed(3), outSec: +outSec.toFixed(3) } }),
       });
       if (r.error) throw new Error(r.error);
       onDone();

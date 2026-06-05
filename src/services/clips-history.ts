@@ -126,4 +126,22 @@ export class ClipsHistory {
       return null;
     }
   }
+
+  // Reframe editor state (keyframes + trim) so reopening shows prior edits.
+  private reframePath(id: string): string {
+    return join(paths.history, "reframe", `${id}.json`);
+  }
+
+  async saveReframe(id: string, state: Record<string, unknown>): Promise<void> {
+    await mkdir(join(paths.history, "reframe"), { recursive: true });
+    await writeFile(this.reframePath(id), JSON.stringify(state), "utf-8");
+  }
+
+  async loadReframe(id: string): Promise<Record<string, unknown> | null> {
+    try {
+      return JSON.parse(await readFile(this.reframePath(id), "utf-8"));
+    } catch {
+      return null;
+    }
+  }
 }

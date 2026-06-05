@@ -1405,6 +1405,13 @@ app.get("/api/clips/:id/source", async (req, res) => {
   }
 });
 
+app.get("/api/clips/:id/reframe", async (req, res) => {
+  const entries = await clipsHistory.load();
+  const clip = entries.find((e) => e.id === req.params.id || String(e.id).startsWith(req.params.id));
+  if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
+  res.json((await clipsHistory.loadReframe(clip.id)) || {});
+});
+
 app.post("/api/clips/:id/rerender", async (req, res) => {
   const entries = await clipsHistory.load();
   const clip = entries.find((e) => e.id === req.params.id || String(e.id).startsWith(req.params.id));
@@ -1412,11 +1419,23 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
     res.status(404).json({ error: "clip not found" });
     return;
   }
-  const keyframes = req.body?.crop_keyframes;
+  // Editor sends source-absolute keyframes + trim; derive the render's clip-relative
+  // crop keyframes from it, and persist the editor state so reopening shows it.
+  const reframe = req.body?.reframe as { keyframes?: { tAbs: number; x_pct: number }[]; inSec?: number; outSec?: number } | undefined;
+  const startSecond = reframe && typeof reframe.inSec === "number" ? reframe.inSec
+    : typeof req.body?.start_second === "number" ? req.body.start_second : clip.start_second;
+  const endSecond = reframe && typeof reframe.outSec === "number" ? reframe.outSec
+    : typeof req.body?.end_second === "number" ? req.body.end_second : clip.end_second;
+  const keyframes = reframe?.keyframes
+    ? reframe.keyframes
+        .filter((k) => k.tAbs >= startSecond - 0.001 && k.tAbs <= endSecond + 0.001)
+        .map((k) => ({ t: +Math.max(0, k.tAbs - startSecond).toFixed(3), x_pct: k.x_pct }))
+    : req.body?.crop_keyframes;
   if (!Array.isArray(keyframes) || keyframes.length === 0) {
-    res.status(400).json({ error: "crop_keyframes required" });
+    res.status(400).json({ error: "keyframes required" });
     return;
   }
+  if (reframe) await clipsHistory.saveReframe(clip.id, reframe);
   // Replay the original render recipe (logo/outro/captions/fillers) with the new
   // manual crop, so brand elements survive the reframe.
   const recipe = (await clipsHistory.loadRecipe(clip.id)) || {};
@@ -1428,8 +1447,6 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       if (t?.words?.length) allWords = t.words as any[];
     } catch { /* no cached transcript */ }
   }
-  const startSecond = typeof req.body?.start_second === "number" ? req.body.start_second : clip.start_second;
-  const endSecond = typeof req.body?.end_second === "number" ? req.body.end_second : clip.end_second;
   // If trimmed wider/narrower, keep only words inside the new bounds.
   const words = allWords.filter((w: any) => typeof w?.start !== "number" || (w.start >= startSecond && w.start < endSecond));
   try {
