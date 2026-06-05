@@ -18,6 +18,7 @@ The TS type is `ClipHistoryEntry` in `src/models/index.ts`. Keep both languages 
 | `caption_style` | string | TS render / edit | `hormozi` \| `karaoke` \| `subtle` \| `branded` |
 | `crop_strategy` | string | TS render / edit | `center` \| `face` \| `speaker` |
 | `logo_path` | string? | TS render | |
+| `outro_path` | string? | TS render | Outro video appended after the clip. |
 | `title` | string | TS render / edit | |
 | `output_path` | string | TS render | Rendered mp4. |
 | `file_size_mb` | number | TS render | |
@@ -25,6 +26,7 @@ The TS type is `ClipHistoryEntry` in `src/models/index.ts`. Keep both languages 
 | `created_at` | string (ISO) | TS render | |
 | `content_type` | string? | TS render | Carried from the suggestion (`guest_story`, `hot_take`, …). Undefined when no suggestion was used. |
 | `transcript_slice` | string? | TS render | Plain text the clip says. The session transcript is overwritten, so this is the **only durable** copy — never reconstruct it later. |
+| `thumbnail_config` | object? | TS render / edit | Per-clip thumbnail settings (`line1`, `line2`, `image_path`, `timestamp`, `preview_path`, `variations`). |
 | `youtube_video_id` | string? | Phase 2 | Set when a published video is linked. |
 | `metrics` | object? | Phase 2 | `{ views?, retention?, ctr?, impressions?, fetched_at? }`. retention/ctr are 0–100. |
 

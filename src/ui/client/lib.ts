@@ -45,7 +45,10 @@ async function request<T>(path: string, opts: RequestInit, jsonHeaders: boolean)
   }
 
   if (!res.ok || (body && typeof body === "object" && body.error)) {
-    const msg = (body && (body.error || body.message)) || `HTTP ${res.status}`;
+    const msg =
+      (typeof body === "string" && body) ||
+      (body && (body.error || body.message)) ||
+      `HTTP ${res.status}`;
     throw new ApiError(String(msg), res.status);
   }
   return body as T;

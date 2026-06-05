@@ -14,7 +14,7 @@ export default function KnowledgePage() {
       const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
 
       const loadFiles = useCallback(async () => {
-        try { setFiles(await api('/knowledge')); }
+        try { const r = await api('/knowledge'); setFiles(Array.isArray(r) ? r : []); }
         catch (e) { showToast(`Load failed: ${e.message}`); }
       }, []);
 

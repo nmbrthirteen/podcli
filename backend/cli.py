@@ -2128,6 +2128,7 @@ def cmd_thumbnails(args):
     accent = "\033[38;2;212;135;74m"
     green = "\033[38;2;74;222;128m"
     gray = "\033[38;5;245m"
+    red = "\033[38;2;248;113;113m"
     bold = "\033[1m"
     reset = "\033[0m"
 
@@ -2143,6 +2144,9 @@ def cmd_thumbnails(args):
     # An exact timestamp wins: extract that frame from the video and use it as the photo.
     timestamp = getattr(args, "timestamp", None)
     if photo is None and video and timestamp is not None:
+        if not os.path.exists(video):
+            print(f"  {red}✗{reset} Video not found: {video}", file=sys.stderr)
+            sys.exit(1)
         import cv2
         os.makedirs(args.output, exist_ok=True)
         cap = cv2.VideoCapture(video)

@@ -1491,7 +1491,8 @@ app.get("/api/clips/:id/source", async (req, res) => {
     res.status(404).json({ error: "source not found" });
     return;
   }
-  streamVideo(req, res, clip.source_video);
+  const srcMime: Record<string, string> = { ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".m4v": "video/mp4" };
+  streamVideo(req, res, clip.source_video, srcMime[extname(clip.source_video).toLowerCase()] || "video/mp4");
 });
 
 app.get("/api/clips/:id/reframe", async (req, res) => {

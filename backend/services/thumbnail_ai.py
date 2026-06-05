@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 from utils.proc import run as proc_run
+from utils.log import log_event
 import sys
 import tempfile
 import base64
@@ -451,7 +452,8 @@ def _ask_ai_for_json(prompt: str, timeout: int = 30):
                     cli_path=cli_path, engine=engine, prompt=prompt,
                     prompt_file=prompt_file, project_dir=project_dir, timeout=timeout,
                 )
-            except Exception:
+            except Exception as e:
+                log_event("thumbnail-ai", "ai cli failed", level="warn", engine=engine, err=e)
                 continue
             if result.returncode != 0 or not result.stdout.strip():
                 continue
