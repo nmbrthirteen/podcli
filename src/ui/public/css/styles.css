@@ -1093,3 +1093,7 @@ input[type="range"]::-webkit-slider-thumb {
 .rf-track { position: relative; height: 30px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; margin-top: 12px; overflow: hidden; }
 .rf-kf { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--green); transform: translateX(-1px); pointer-events: none; }
 .rf-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; box-shadow: 0 0 6px var(--accent); }
+
+/* ── Reframe trim region/handles ── */
+.rf-region { position: absolute; top: 0; bottom: 0; background: var(--accent-subtle); pointer-events: none; }
+.rf-handle { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--accent); transform: translateX(-1px); pointer-events: none; }

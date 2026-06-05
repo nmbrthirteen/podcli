@@ -73,6 +73,15 @@ export class ClipsHistory {
     return entries.slice(-limit).reverse();
   }
 
+  async update(id: string, patch: Partial<ClipHistoryEntry>): Promise<ClipHistoryEntry | null> {
+    const entries = await this.load();
+    const e = entries.find((x) => x.id === id || x.id.startsWith(id));
+    if (!e) return null;
+    Object.assign(e, patch);
+    await this.save(entries);
+    return e;
+  }
+
   async getBySource(videoPath: string): Promise<ClipHistoryEntry[]> {
     const entries = await this.load();
     const srcName = basename(videoPath);

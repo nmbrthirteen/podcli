@@ -1397,12 +1397,16 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
   // Replay the original render recipe (logo/outro/captions/fillers) with the new
   // manual crop, so brand elements survive the reframe.
   const recipe = (await clipsHistory.loadRecipe(clip.id)) || {};
-  const words = (recipe.transcript_words as unknown[]) || (await clipsHistory.loadWords(clip.id));
+  const allWords = (recipe.transcript_words as any[]) || (await clipsHistory.loadWords(clip.id)) || [];
+  const startSecond = typeof req.body?.start_second === "number" ? req.body.start_second : clip.start_second;
+  const endSecond = typeof req.body?.end_second === "number" ? req.body.end_second : clip.end_second;
+  // If trimmed wider/narrower, keep only words inside the new bounds.
+  const words = allWords.filter((w: any) => typeof w?.start !== "number" || (w.start >= startSecond && w.start < endSecond));
   try {
     const result = await executor.execute<ClipResult>("create_clip", {
       video_path: clip.source_video,
-      start_second: clip.start_second,
-      end_second: clip.end_second,
+      start_second: startSecond,
+      end_second: endSecond,
       caption_style: req.body?.caption_style || (recipe.caption_style as string) || clip.caption_style,
       crop_strategy: "manual",
       crop_keyframes: keyframes,
@@ -1415,12 +1419,15 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       output_dir: dirname(clip.output_path),
     });
     if (!result.data) throw new Error("no render output");
-    res.json({
-      ok: true,
-      output_path: result.data.output_path,
-      file_size_mb: result.data.file_size_mb,
-      degraded: !recipe.caption_style && (!words || words.length === 0),
+    await clipsHistory.update(clip.id, {
+      start_second: startSecond,
+      end_second: endSecond,
+      crop_strategy: "manual",
+      duration: result.data.duration ?? clip.duration,
+      file_size_mb: result.data.file_size_mb ?? clip.file_size_mb,
+      output_path: result.data.output_path || clip.output_path,
     });
+    res.json({ ok: true, output_path: result.data.output_path, file_size_mb: result.data.file_size_mb });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
