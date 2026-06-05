@@ -1039,3 +1039,34 @@ input[type="range"]::-webkit-slider-thumb {
 .tmpl-preview { width: 300px; flex-shrink: 0; position: sticky; top: 24px; }
 .tmpl-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 @media (max-width: 900px) { .tmpl-layout { flex-direction: column; } .tmpl-preview { position: static; } }
+
+/* ── Motion layer (respects reduced-motion) ── */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes pageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes cardIn { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: none; } }
+  @keyframes riseIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  .shell-main > * { animation: pageIn 0.3s var(--ease) both; }
+
+  .clip-grid .clip-card { animation: cardIn 0.34s var(--ease) both; }
+  .clip-grid .clip-card:nth-child(1) { animation-delay: 0.02s; }
+  .clip-grid .clip-card:nth-child(2) { animation-delay: 0.05s; }
+  .clip-grid .clip-card:nth-child(3) { animation-delay: 0.08s; }
+  .clip-grid .clip-card:nth-child(4) { animation-delay: 0.11s; }
+  .clip-grid .clip-card:nth-child(5) { animation-delay: 0.14s; }
+  .clip-grid .clip-card:nth-child(6) { animation-delay: 0.17s; }
+  .clip-grid .clip-card:nth-child(n+7) { animation-delay: 0.2s; }
+
+  .clip-controls .section, .tmpl-fields .section { animation: riseIn 0.32s var(--ease) both; }
+  .clip-controls .section:nth-child(2) { animation-delay: 0.05s; }
+  .clip-controls .section:nth-child(3) { animation-delay: 0.1s; }
+  .clip-controls .section:nth-child(4) { animation-delay: 0.15s; }
+
+  .thumb-variation { transition: border-color 0.15s var(--ease), transform 0.12s var(--ease); }
+  .thumb-variation:hover { transform: translateY(-2px); }
+  .thumb-stage img, .clip-card-media { transition: opacity 0.3s var(--ease); }
+  .btn:active { transform: translateY(1px); }
+  .sidebar-link { transition: background 0.14s var(--ease), color 0.14s var(--ease), padding-left 0.14s var(--ease); }
+  .sidebar-link:hover { padding-left: 15px; }
+  .set-note { animation: riseIn 0.25s var(--ease) both; }
+}
