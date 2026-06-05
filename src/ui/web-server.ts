@@ -1223,6 +1223,16 @@ function runPy(scriptAndArgs: string[]): Promise<{ code: number; stdout: string;
 const runCli = (args: string[]) =>
   runPy([join(paths.projectRoot, "backend", "cli.py"), "--no-banner", ...args]);
 
+// Composite a thumbnail PNG onto the start of a clip. stripStart > 0 removes a
+// prior card first (avoids stacking on re-bake). Returns the bake's success.
+async function bakeThumbnailCard(clipPath: string, image: string, stripStart = 0): Promise<{ ok: boolean; error?: string }> {
+  const r = await runCli([
+    "bake-thumbnail", clipPath, image, "--position", "start",
+    ...(stripStart ? ["--strip-start", String(stripStart)] : []),
+  ]);
+  return r.code === 0 ? { ok: true } : { ok: false, error: stripAnsi(r.stderr || r.stdout) };
+}
+
 app.patch("/api/clips/:id", async (req, res) => {
   const { title, caption_style, thumbnail_config } = req.body || {};
   const args = ["clips", "edit", req.params.id];
@@ -1296,8 +1306,11 @@ app.post("/api/clips/:id/thumbnail", async (req, res) => {
   }
   // Bake the chosen thumbnail into the clip as the opening card (stripping any prior card).
   if (existsSync(clip.output_path)) {
-    const prior = clip.thumbnail_config?.card_seconds || 0;
-    await runCli(["bake-thumbnail", clip.output_path, variations[0], "--position", "start", ...(prior ? ["--strip-start", String(prior)] : [])]);
+    const bake = await bakeThumbnailCard(clip.output_path, variations[0], clip.thumbnail_config?.card_seconds || 0);
+    if (!bake.ok) {
+      res.status(500).json({ error: `thumbnail generated but bake into clip failed: ${bake.error}` });
+      return;
+    }
   }
   const merged = { ...tc, preview_path: variations[0], variations, card_seconds: 1.5 };
   await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
@@ -1314,8 +1327,11 @@ app.post("/api/clips/:id/thumbnail/select", async (req, res) => {
     return;
   }
   if (existsSync(clip.output_path)) {
-    const prior = tc.card_seconds || 0;
-    await runCli(["bake-thumbnail", clip.output_path, pick, "--position", "start", ...(prior ? ["--strip-start", String(prior)] : [])]);
+    const bake = await bakeThumbnailCard(clip.output_path, pick, tc.card_seconds || 0);
+    if (!bake.ok) {
+      res.status(500).json({ error: `bake into clip failed: ${bake.error}` });
+      return;
+    }
   }
   await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify({ ...tc, preview_path: pick, card_seconds: 1.5 })]);
   res.json({ ok: true, preview_path: pick });
@@ -1503,10 +1519,17 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
     });
     if (!result.data) throw new Error("no render output");
     const outPath = result.data.output_path || clip.output_path;
-    // Re-bake the chosen thumbnail card onto the fresh clip (no strip needed).
+    // Re-bake the chosen thumbnail card onto the fresh clip (no strip needed —
+    // create_clip always renders a cardless clip).
     const tnail = clip.thumbnail_config?.preview_path;
+    let thumbnailBaked = false;
     if (tnail && existsSync(tnail) && existsSync(outPath)) {
-      await runCli(["bake-thumbnail", outPath, tnail, "--position", "start"]);
+      const bake = await bakeThumbnailCard(outPath, tnail);
+      thumbnailBaked = bake.ok;
+      if (!bake.ok) {
+        res.status(500).json({ error: `reframe rendered but thumbnail bake failed: ${bake.error}` });
+        return;
+      }
     }
     await clipsHistory.update(clip.id, {
       start_second: startSecond,
@@ -1516,7 +1539,7 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       file_size_mb: result.data.file_size_mb ?? clip.file_size_mb,
       output_path: outPath,
     });
-    res.json({ ok: true, output_path: outPath, file_size_mb: result.data.file_size_mb });
+    res.json({ ok: true, output_path: outPath, file_size_mb: result.data.file_size_mb, thumbnail_baked: thumbnailBaked });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

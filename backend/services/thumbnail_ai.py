@@ -415,6 +415,58 @@ def extract_candidate_frames(
     return results
 
 
+def _extract_json(text: str):
+    """Pull the first JSON value (object or array) out of a model's raw output."""
+    text = (text or "").strip()
+    spans = sorted(
+        (text.find(o), o, c) for o, c in (("[", "]"), ("{", "}")) if text.find(o) >= 0
+    )
+    for start, _open, close in spans:
+        end = text.rfind(close) + 1
+        if end > start:
+            try:
+                return json.loads(text[start:end])
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
+def _ask_ai_for_json(prompt: str, timeout: int = 30):
+    """Run the first available AI CLI on `prompt`, returning the first JSON value
+    it emits, or None if no CLI is available or none returns parseable JSON."""
+    from services.claude_suggest import _find_ai_cli_candidates, _run_ai_command
+
+    candidates = _find_ai_cli_candidates()
+    if not candidates:
+        return None
+
+    prompt_file = None
+    try:
+        from utils.prompt_files import write_prompt_file
+        prompt_file = write_prompt_file(prompt)
+        project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+        for cli_path, engine in candidates:
+            try:
+                result = _run_ai_command(
+                    cli_path=cli_path, engine=engine, prompt=prompt,
+                    prompt_file=prompt_file, project_dir=project_dir, timeout=timeout,
+                )
+            except Exception:
+                continue
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
+            parsed = _extract_json(result.stdout)
+            if parsed is not None:
+                return parsed
+    finally:
+        if prompt_file:
+            try:
+                os.unlink(prompt_file)
+            except Exception:
+                pass
+    return None
+
+
 def ask_claude_for_layout(
     title: str,
     frame_path: str,
@@ -429,12 +481,6 @@ def ask_claude_for_layout(
 
     Returns dict with line1, line2, box_y, photo_object_position, etc.
     """
-    from services.claude_suggest import _find_ai_cli_candidates, _run_ai_command
-
-    candidates = _find_ai_cli_candidates()
-    if not candidates:
-        return None
-
     cfg = config or _load_brand_config()
 
     face_ctx = "No face detected."
@@ -474,46 +520,39 @@ RULES:
 - No slashes in the text lines.
 - This is thumbnail variation #{variation + 1}. Give a DISTINCT headline angle and wording from the most obvious phrasing — vary the hook, the emphasis, or which idea you lead with so each variation reads differently."""
 
-    project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    layout = _ask_ai_for_json(prompt, timeout=30)
+    return layout if isinstance(layout, dict) else None
 
-    prompt_file = None
-    try:
-        from utils.prompt_files import write_prompt_file
-        prompt_file = write_prompt_file(prompt)
 
-        for cli_path, engine in candidates:
-            try:
-                result = _run_ai_command(
-                    cli_path=cli_path,
-                    engine=engine,
-                    prompt=prompt,
-                    prompt_file=prompt_file,
-                    project_dir=project_dir,
-                    timeout=30,
-                )
-            except Exception:
-                continue
+def generate_headline_variations(title: str, n: int, config: Optional[dict] = None) -> list[tuple[str, str]]:
+    """Write n DISTINCT 2-line thumbnail headlines in a single AI call.
 
-            if result.returncode != 0 or not result.stdout.strip():
-                continue
+    One call (rather than n independent layout calls) is both cheaper and the
+    only way to guarantee the variations actually differ — the model has to see
+    all n at once to make them distinct. Returns [] if no AI CLI answers, letting
+    the caller fall back to per-variation layout.
+    """
+    prompt = f"""You are a thumbnail copywriter. Write {n} DISTINCT headline options for a YouTube Shorts thumbnail.
 
-            text = result.stdout.strip()
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                try:
-                    return json.loads(text[start:end])
-                except json.JSONDecodeError:
-                    continue
-    except Exception:
-        pass
-    finally:
-        if prompt_file:
-            try:
-                os.unlink(prompt_file)
-            except Exception:
-                pass
-    return None
+TITLE: "{title}"
+
+Return ONLY a JSON array of exactly {n} objects, each with "line1" and "line2":
+[{{"line1": "FIRST LINE", "line2": "SECOND LINE"}}, ...]
+
+RULES:
+- Rewrite the title into punchy thumbnail copy, not a literal transcript sentence.
+- Line 1 = setup, Line 2 = payoff. 4-8 words total. Hard max 24 characters per line.
+- Drop filler words; keep numbers, nouns, and the strongest claim. No slashes.
+- Every option must read DIFFERENTLY — vary the hook, the emphasis, or which idea leads. Do not repeat the same phrasing across options."""
+
+    items = _ask_ai_for_json(prompt, timeout=45)
+    if not isinstance(items, list):
+        return []
+    return [
+        (str(it.get("line1", "")).strip(), str(it.get("line2", "")).strip())
+        for it in items
+        if isinstance(it, dict) and it.get("line1")
+    ]
 
 
 def generate_thumbnail_with_template(
@@ -636,11 +675,21 @@ def generate_variations(
     if not frames:
         frames = [{"path": None}]
 
+    # When the caller didn't pin exact copy, get n distinct headlines up front so
+    # the variations differ in wording — not just in frame/styling.
+    headlines: list[tuple[str, str]] = []
+    if line1 is None:
+        headlines = generate_headline_variations(title, n, config=cfg)
+
     paths = []
     for i in range(n):
         frame = frames[i] if i < len(frames) else frames[i % len(frames)]
         frame_path = frame.get("path") or ""
         out_path = os.path.join(output_dir, f"thumb_v{i+1}.png")
+
+        v_line1, v_line2 = (line1, line2)
+        if headlines:
+            v_line1, v_line2 = headlines[i % len(headlines)]
 
         result = generate_thumbnail_with_template(
             title=title,
@@ -650,8 +699,8 @@ def generate_variations(
             frame_info=frame if frame_path else None,
             config=cfg,
             variation=i,
-            line1_override=line1,
-            line2_override=line2,
+            line1_override=v_line1,
+            line2_override=v_line2,
         )
 
         if result:
