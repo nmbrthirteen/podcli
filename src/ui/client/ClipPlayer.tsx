@@ -21,11 +21,11 @@ export default function ClipPlayer({ src, onTime }: { src: string; onTime?: (t: 
     else v.pause();
   };
 
-  const seek = (e: React.MouseEvent<HTMLDivElement>) => {
+  const seekAt = (clientX: number, el: HTMLDivElement) => {
     const v = ref.current;
     if (!v || !dur) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    v.currentTime = ((e.clientX - rect.left) / rect.width) * dur;
+    const rect = el.getBoundingClientRect();
+    v.currentTime = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * dur;
   };
 
   const pct = dur ? (t / dur) * 100 : 0;
@@ -46,7 +46,11 @@ export default function ClipPlayer({ src, onTime }: { src: string; onTime?: (t: 
         <button className="clip-player-btn" onClick={toggle} aria-label={playing ? "Pause" : "Play"}>
           {playing ? "❚❚" : "▶"}
         </button>
-        <div className="clip-player-track" onClick={seek}>
+        <div
+          className="clip-player-track"
+          onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); seekAt(e.clientX, e.currentTarget); }}
+          onPointerMove={(e) => { if (e.buttons) seekAt(e.clientX, e.currentTarget); }}
+        >
           <div className="clip-player-fill" style={{ width: `${pct}%` }} />
         </div>
         <span className="clip-player-time">{fmt(t)} / {fmt(dur)}</span>

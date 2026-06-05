@@ -16,6 +16,8 @@ export default function ReframeEditor({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const dragMode = useRef<"in" | "out" | "scrub" | null>(null);
 
   const [boxPct, setBoxPct] = useState(31.6);
   const [centerPct, setCenterPct] = useState(50);
@@ -80,6 +82,24 @@ export default function ReframeEditor({
     setKeyframes((kf) => [...kf.filter((k) => Math.abs(k.tAbs - tAbs) > 0.02), { tAbs: +tAbs.toFixed(3), x_pct: +centerPct.toFixed(1) }].sort((a, b) => a.tAbs - b.tAbs));
   };
 
+  const xToTime = (clientX: number) => {
+    const r = trackRef.current!.getBoundingClientRect();
+    return bufStart + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * win;
+  };
+  const applyDrag = (clientX: number) => {
+    const tt = xToTime(clientX);
+    if (dragMode.current === "in") { setInSec(Math.min(tt, outSec - 0.2)); seek(tt); }
+    else if (dragMode.current === "out") { setOutSec(Math.max(tt, inSec + 0.2)); seek(tt); }
+    else seek(tt);
+  };
+  const onTrackDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const tt = xToTime(e.clientX);
+    const thr = win * 0.05;
+    dragMode.current = Math.abs(tt - inSec) < thr ? "in" : Math.abs(tt - outSec) < thr ? "out" : "scrub";
+    applyDrag(e.clientX);
+  };
+
   const jumpKeyframe = (dir: 1 | -1) => {
     const kf = keyframes.slice().sort((a, b) => a.tAbs - b.tAbs);
     const next = dir > 0 ? kf.find((k) => k.tAbs > tAbs + 0.001) : [...kf].reverse().find((k) => k.tAbs < tAbs - 0.001);
@@ -102,8 +122,6 @@ export default function ReframeEditor({
     } catch (e: any) { setErr(e.message); setBusy(false); }
   };
 
-  const label: React.CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: "0.5px", textTransform: "uppercase", color: "var(--text2)", marginBottom: 8, display: "block" };
-
   return (
     <div className="reframe-overlay" onClick={onClose}>
       <div className="reframe-modal" onClick={(e) => e.stopPropagation()}>
@@ -118,18 +136,15 @@ export default function ReframeEditor({
           <div className="reframe-box" style={{ left: `${centerPct - half}%`, width: `${boxPct}%` }} />
         </div>
 
-        <div className="rf-track" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seek(bufStart + ((e.clientX - r.left) / r.width) * win); }}>
+        <div ref={trackRef} className="rf-track" onPointerDown={onTrackDown} onPointerMove={(e) => { if (e.buttons) applyDrag(e.clientX); }} onPointerUp={() => (dragMode.current = null)}>
           <div className="rf-region" style={{ left: `${pos(inSec)}%`, width: `${pos(outSec) - pos(inSec)}%` }} />
-          <div className="rf-handle" style={{ left: `${pos(inSec)}%` }} title="Clip start" />
-          <div className="rf-handle" style={{ left: `${pos(outSec)}%` }} title="Clip end" />
+          <div className="rf-handle rf-handle-in" style={{ left: `${pos(inSec)}%` }} />
+          <div className="rf-handle rf-handle-out" style={{ left: `${pos(outSec)}%` }} />
           {keyframes.map((k) => <div key={k.tAbs} className="rf-kf" style={{ left: `${pos(k.tAbs)}%` }} title={`${fmtMs(k.tAbs)} · ${Math.round(k.x_pct)}%`} />)}
           <div className="rf-playhead" style={{ left: `${pos(tAbs)}%` }} />
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text3)", marginTop: 4 }}>
-          <span>{fmtMs(bufStart)}</span><span>buffer ±{BUFFER}s around clip</span><span>{fmtMs(bufEnd)}</span>
-        </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
           <button className="btn btn-ghost btn-sm" title="Play/pause" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
           <button className="btn btn-ghost btn-sm" title="-1 frame" onClick={() => seek(tAbs - FRAME)}>◀</button>
           <button className="btn btn-ghost btn-sm" title="+1 frame" onClick={() => seek(tAbs + FRAME)}>▶</button>
@@ -137,30 +152,19 @@ export default function ReframeEditor({
           <button className="btn btn-ghost btn-sm" title="Next keyframe" onClick={() => jumpKeyframe(1)}>⏭</button>
           <span style={{ fontSize: 12, color: "var(--text)", fontVariantNumeric: "tabular-nums", marginLeft: 4 }}>{fmtMs(tAbs)}</span>
           <span style={{ flex: 1 }} />
-          <button className="btn btn-ghost btn-sm" onClick={() => setInSec(Math.min(tAbs, outSec - 0.2))}>Set start</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => setOutSec(Math.max(tAbs, inSec + 0.2))}>Set end</button>
           <button className="btn btn-primary btn-sm" onClick={addKeyframe}>+ Keyframe</button>
         </div>
 
-        <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 8 }}>
-          Clip: {fmtMs(inSec)} → {fmtMs(outSec)} ({(outSec - inSec).toFixed(1)}s)
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          <label style={label}>Keyframes</label>
-          {keyframes.length === 0 ? (
-            <div style={{ fontSize: 12, color: "var(--text3)" }}>Drag the window to frame the shot. Add keyframes to snap framing at cuts; Set start/end to trim (±{BUFFER}s buffer).</div>
-          ) : (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {keyframes.map((k) => (
-                <span key={k.tAbs} className="pill" style={{ fontSize: 11, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }} onClick={() => seek(k.tAbs)}>
-                  {fmtMs(k.tAbs)} · {Math.round(k.x_pct)}%
-                  <button onClick={(e) => { e.stopPropagation(); setKeyframes((kf) => kf.filter((x) => x.tAbs !== k.tAbs)); }} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", padding: 0 }}>×</button>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        {keyframes.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+            {keyframes.map((k) => (
+              <span key={k.tAbs} className="pill" style={{ fontSize: 11, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }} onClick={() => seek(k.tAbs)}>
+                {fmtMs(k.tAbs)} · {Math.round(k.x_pct)}%
+                <button onClick={(e) => { e.stopPropagation(); setKeyframes((kf) => kf.filter((x) => x.tAbs !== k.tAbs)); }} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", padding: 0 }}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
 
         {err && <div className="set-note err" style={{ marginTop: 12 }}>{err}</div>}
 

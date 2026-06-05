@@ -213,6 +213,7 @@ export interface ClipThumbnailConfig {
   timestamp?: number; // absolute second in the source video for the frame
   preview_path?: string; // chosen thumbnail PNG
   variations?: string[]; // all generated thumbnail PNGs to pick from
+  card_seconds?: number; // duration of the thumbnail card baked into the clip start
 }
 
 export interface ClipHistoryEntry {

@@ -1259,9 +1259,32 @@ app.post("/api/clips/:id/thumbnail", async (req, res) => {
     res.status(500).json({ error: "no thumbnails generated" });
     return;
   }
-  const merged = { ...tc, preview_path: variations[0], variations };
+  // Bake the chosen thumbnail into the clip as the opening card (stripping any prior card).
+  if (existsSync(clip.output_path)) {
+    const prior = clip.thumbnail_config?.card_seconds || 0;
+    await runCli(["bake-thumbnail", clip.output_path, variations[0], "--position", "start", ...(prior ? ["--strip-start", String(prior)] : [])]);
+  }
+  const merged = { ...tc, preview_path: variations[0], variations, card_seconds: 1.5 };
   await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
   res.json({ ok: true, preview_path: variations[0], variations });
+});
+
+app.post("/api/clips/:id/thumbnail/select", async (req, res) => {
+  const entries = await clipsHistory.load();
+  const clip = entries.find((e) => e.id === req.params.id || String(e.id).startsWith(req.params.id));
+  if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
+  const tc = clip.thumbnail_config || {};
+  const pick = String(req.body?.path || "");
+  if (!pick || !(tc.variations || []).includes(pick) || !existsSync(pick)) {
+    res.status(400).json({ error: "unknown variation" });
+    return;
+  }
+  if (existsSync(clip.output_path)) {
+    const prior = tc.card_seconds || 0;
+    await runCli(["bake-thumbnail", clip.output_path, pick, "--position", "start", ...(prior ? ["--strip-start", String(prior)] : [])]);
+  }
+  await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify({ ...tc, preview_path: pick, card_seconds: 1.5 })]);
+  res.json({ ok: true, preview_path: pick });
 });
 
 app.get("/api/youtube/config", (_req, res) => {
@@ -1397,7 +1420,14 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
   // Replay the original render recipe (logo/outro/captions/fillers) with the new
   // manual crop, so brand elements survive the reframe.
   const recipe = (await clipsHistory.loadRecipe(clip.id)) || {};
-  const allWords = (recipe.transcript_words as any[]) || (await clipsHistory.loadWords(clip.id)) || [];
+  let allWords = (recipe.transcript_words as any[]) || (await clipsHistory.loadWords(clip.id)) || [];
+  if (!allWords.length) {
+    // Fallback for clips rendered before recipes existed: recover words from the cached source transcript.
+    try {
+      const t = await cache.get(clip.source_video);
+      if (t?.words?.length) allWords = t.words as any[];
+    } catch { /* no cached transcript */ }
+  }
   const startSecond = typeof req.body?.start_second === "number" ? req.body.start_second : clip.start_second;
   const endSecond = typeof req.body?.end_second === "number" ? req.body.end_second : clip.end_second;
   // If trimmed wider/narrower, keep only words inside the new bounds.
@@ -1419,15 +1449,21 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       output_dir: dirname(clip.output_path),
     });
     if (!result.data) throw new Error("no render output");
+    const outPath = result.data.output_path || clip.output_path;
+    // Re-bake the chosen thumbnail card onto the fresh clip (no strip needed).
+    const tnail = clip.thumbnail_config?.preview_path;
+    if (tnail && existsSync(tnail) && existsSync(outPath)) {
+      await runCli(["bake-thumbnail", outPath, tnail, "--position", "start"]);
+    }
     await clipsHistory.update(clip.id, {
       start_second: startSecond,
       end_second: endSecond,
       crop_strategy: "manual",
       duration: result.data.duration ?? clip.duration,
       file_size_mb: result.data.file_size_mb ?? clip.file_size_mb,
-      output_path: result.data.output_path || clip.output_path,
+      output_path: outPath,
     });
-    res.json({ ok: true, output_path: result.data.output_path, file_size_mb: result.data.file_size_mb });
+    res.json({ ok: true, output_path: outPath, file_size_mb: result.data.file_size_mb });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

@@ -1097,3 +1097,10 @@ input[type="range"]::-webkit-slider-thumb {
 /* ── Reframe trim region/handles ── */
 .rf-region { position: absolute; top: 0; bottom: 0; background: var(--accent-subtle); pointer-events: none; }
 .rf-handle { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--accent); transform: translateX(-1px); pointer-events: none; }
+
+/* ── Reframe timeline polish (grabbable handles) ── */
+.rf-track { height: 44px; }
+.rf-handle { width: 10px; border-radius: 4px; top: -3px; bottom: -3px; transform: translateX(-5px); cursor: ew-resize; box-shadow: 0 0 0 1px rgba(0,0,0,0.45); z-index: 2; }
+.rf-handle::after { content: ""; position: absolute; top: 50%; left: 50%; width: 2px; height: 16px; background: rgba(0,0,0,0.4); transform: translate(-50%,-50%); border-radius: 1px; }
+.rf-track:hover .rf-handle { box-shadow: 0 0 0 1px var(--accent-glow); }
+.rf-playhead { z-index: 3; }

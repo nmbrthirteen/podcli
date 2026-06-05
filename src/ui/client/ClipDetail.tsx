@@ -128,7 +128,7 @@ export default function ClipDetail() {
   const pickVariation = async (p: string) => {
     setBusy("pick");
     try {
-      const r = await patch({ thumbnail_config: { ...tc, preview_path: p } });
+      const r = await api(`/clips/${clip.id}/thumbnail/select`, { method: "POST", body: JSON.stringify({ path: p }) });
       if (r.error) throw new Error(r.error);
       setBust(Date.now()); load();
     } catch (e: any) { setMsg(`Pick failed: ${e.message}`); } finally { setBusy(null); }

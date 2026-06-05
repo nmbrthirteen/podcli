@@ -2195,6 +2195,47 @@ def cmd_thumbnails(args):
     print(f"\n  {gray}Open the folder to preview and pick the best one.{reset}\n")
 
 
+def cmd_bake_thumbnail(args):
+    """Composite a thumbnail PNG into a clip as an opening (or closing) card, in place."""
+    import tempfile, shutil
+    from services.thumbnail_ai import thumbnail_to_video_frame
+    from services.video_processor import concat_outro, _get_media_duration_seconds
+
+    green = "\033[38;2;74;222;128m"; red = "\033[38;2;248;113;113m"; gray = "\033[38;5;245m"; reset = "\033[0m"
+    if not os.path.exists(args.clip):
+        print(f"  {red}✗{reset} Clip not found: {args.clip}", file=sys.stderr); sys.exit(1)
+    if not os.path.exists(args.image):
+        print(f"  {red}✗{reset} Image not found: {args.image}", file=sys.stderr); sys.exit(1)
+
+    work = tempfile.mkdtemp(prefix="bake_thumb_")
+    try:
+        clip = args.clip
+        # Strip a prior card off the start, if asked (avoids stacking on re-bake).
+        if args.strip_start and args.strip_start > 0.05:
+            total = _get_media_duration_seconds(clip, default=0.0)
+            if total > args.strip_start + 0.2:
+                from utils.proc import run as proc_run
+                trimmed = os.path.join(work, "trimmed.mp4")
+                proc_run(["ffmpeg", "-y", "-ss", str(args.strip_start), "-i", clip, "-c", "copy",
+                          "-movflags", "+faststart", trimmed], timeout=120, check=False)
+                if os.path.exists(trimmed):
+                    clip = trimmed
+
+        card = os.path.join(work, "card.mp4")
+        thumbnail_to_video_frame(args.image, card, duration=args.duration)
+        out = os.path.join(work, "baked.mp4")
+        if args.position == "start":
+            concat_outro(card, clip, out, crossfade_duration=0.0, transition="fade")
+        else:
+            concat_outro(clip, card, out, crossfade_duration=0.0, transition="fade")
+        if not os.path.exists(out):
+            print(f"  {red}✗{reset} Bake failed", file=sys.stderr); sys.exit(1)
+        shutil.move(out, args.clip)
+        print(f"  {green}✓{reset} Baked thumbnail card ({args.position}) into {os.path.basename(args.clip)}")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def cmd_swap_thumbnail(args):
     """Regenerate and swap the thumbnail on an existing rendered clip."""
     from services.thumbnail_ai import generate_variations, thumbnail_to_video_frame
@@ -3229,6 +3270,14 @@ def main():
     )
     clips_reopen.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
 
+    # ── bake-thumbnail ──
+    bt = sub.add_parser("bake-thumbnail", help="Composite a thumbnail PNG into a clip as an opening card")
+    bt.add_argument("clip", help="Rendered clip (.mp4) to modify in place")
+    bt.add_argument("image", help="Thumbnail PNG to bake in")
+    bt.add_argument("--duration", type=float, default=1.5, help="Card duration seconds (default 1.5)")
+    bt.add_argument("--position", choices=["start", "end"], default="start", help="Card position")
+    bt.add_argument("--strip-start", type=float, default=0.0, help="Trim this many seconds off the start first (removes a prior card)")
+
     # ── youtube ──
     yt = sub.add_parser("youtube", help="Link clips to YouTube videos and sync performance")
     yt_sub = yt.add_subparsers(dest="youtube_action")
@@ -3292,6 +3341,8 @@ def main():
         cmd_thumbnails(args)
     elif args.command == "swap-thumbnail":
         cmd_swap_thumbnail(args)
+    elif args.command == "bake-thumbnail":
+        cmd_bake_thumbnail(args)
     elif args.command == "presets":
         cmd_presets(args)
     elif args.command == "assets":
