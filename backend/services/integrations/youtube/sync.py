@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
 
-from services.clips_history import load_clips_history, update_clip
+import sys
+
+from services.clips_history import load_clips_history, save_clips_history, update_clip
 from . import client
 
 
@@ -50,16 +52,31 @@ def set_link(clip_id: str, video_id: str) -> bool:
 
 
 def sync_metrics() -> int:
-    """Pull live metrics onto every linked clip. Returns the number updated."""
-    count = 0
-    for clip in load_clips_history():
+    """Pull live metrics onto every linked clip. Returns the number updated.
+
+    Mutates the loaded list and saves once (not once-per-clip) to shrink the
+    window where a concurrent writer could clobber the file. A single clip's
+    fetch failure is isolated so it can't abort the whole sync.
+    """
+    entries = load_clips_history()
+    count, failed = 0, 0
+    for clip in entries:
         vid = clip.get("youtube_video_id")
         if not vid:
             continue
-        metrics = client.fetch_metrics(vid)
+        try:
+            metrics = client.fetch_metrics(vid)
+        except Exception as e:
+            failed += 1
+            print(f"  ! metrics fetch failed for {vid}: {e}", file=sys.stderr)
+            continue
         metrics["fetched_at"] = _now()
-        if update_clip(clip["id"], metrics=metrics):
-            count += 1
+        clip["metrics"] = metrics
+        count += 1
+    if count:
+        save_clips_history(entries)
+    if failed:
+        print(f"  ! {failed} clip(s) skipped due to fetch errors", file=sys.stderr)
     from . import learnings
     learnings.write_learnings()
     return count
@@ -68,8 +85,9 @@ def sync_metrics() -> int:
 def sync_from_csv(path: str, threshold: float = 0.6) -> dict[str, Any]:
     """Match a YouTube Studio CSV to clips by title and write metrics. No auth."""
     rows = client.parse_analytics_csv(path)
+    entries = load_clips_history()
     matched, unmatched = 0, []
-    for clip in load_clips_history():
+    for clip in entries:
         best, best_score = None, 0.0
         for row in rows:
             r = _ratio(clip.get("title", ""), row["title"])
@@ -78,10 +96,12 @@ def sync_from_csv(path: str, threshold: float = 0.6) -> dict[str, Any]:
         if best and best_score >= threshold:
             metrics = {k: best[k] for k in ("views", "retention", "ctr", "impressions") if k in best}
             metrics["fetched_at"] = _now()
-            update_clip(clip["id"], metrics=metrics)
+            clip["metrics"] = metrics
             matched += 1
         else:
             unmatched.append(clip.get("title"))
+    if matched:
+        save_clips_history(entries)
     from . import learnings
     learnings_path = learnings.write_learnings()
     return {"matched": matched, "unmatched": unmatched, "rows": len(rows), "learnings": learnings_path}

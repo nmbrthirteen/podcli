@@ -83,7 +83,9 @@ def _credentials():
             SCOPES,
         )
         creds = flow.run_local_server(port=0)
-    with open(_TOKEN_PATH, "w") as f:
+    # 0o600: the file holds a long-lived refresh token — keep it owner-only.
+    fd = os.open(_TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         f.write(creds.to_json())
     return creds
 

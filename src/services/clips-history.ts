@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, rm } from "fs/promises";
+import { readFile, writeFile, mkdir, rm, rename } from "fs/promises";
 import { existsSync } from "fs";
 import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -18,6 +18,10 @@ interface BatchRecordContext {
 
 export class ClipsHistory {
   private historyPath = paths.clipsHistory;
+  // Serializes this process's own read-modify-write cycles so concurrent HTTP
+  // requests can't lose each other's edits. Cross-process safety (vs the Python
+  // CLI) rests on the atomic temp-file rename in save().
+  private writeChain: Promise<unknown> = Promise.resolve();
 
   private async ensureDir() {
     if (!existsSync(paths.history)) {
@@ -37,18 +41,35 @@ export class ClipsHistory {
 
   private async save(entries: ClipHistoryEntry[]): Promise<void> {
     await this.ensureDir();
-    await writeFile(this.historyPath, JSON.stringify(entries, null, 2), "utf-8");
+    // Write to a temp file and atomically rename so a crash or a concurrent
+    // reader never sees a half-written clips.json.
+    const tmp = `${this.historyPath}.${process.pid}.${uuidv4().slice(0, 8)}.tmp`;
+    await writeFile(tmp, JSON.stringify(entries, null, 2), "utf-8");
+    await rename(tmp, this.historyPath);
+  }
+
+  // Run load → mutate → save as one critical section, queued behind any
+  // in-flight mutation. The callback returns the value the caller wants back.
+  private mutate<T>(fn: (entries: ClipHistoryEntry[]) => T | Promise<T>): Promise<T> {
+    const run = this.writeChain.then(async () => {
+      const entries = await this.load();
+      const result = await fn(entries);
+      await this.save(entries);
+      return result;
+    });
+    this.writeChain = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   async record(entry: Omit<ClipHistoryEntry, "id" | "created_at">): Promise<ClipHistoryEntry> {
-    const entries = await this.load();
     const full: ClipHistoryEntry = {
       ...entry,
       id: uuidv4(),
       created_at: new Date().toISOString(),
     };
-    entries.push(full);
-    await this.save(entries);
+    await this.mutate((entries) => {
+      entries.push(full);
+    });
     return full;
   }
 
@@ -116,27 +137,47 @@ export class ClipsHistory {
     return entries.slice(-limit).reverse();
   }
 
-  async findById(idOrPrefix: string): Promise<ClipHistoryEntry | undefined> {
+  // Exact match only — REST routes feed req.params.id straight in, so a loose
+  // prefix could target the wrong clip (and an empty prefix the first one).
+  async findById(id: string): Promise<ClipHistoryEntry | undefined> {
+    if (!id) return undefined;
     const entries = await this.load();
-    return entries.find((e) => e.id === idOrPrefix || e.id.startsWith(idOrPrefix));
+    return entries.find((e) => e.id === id);
+  }
+
+  // Resolve a full id or an unambiguous ≥4-char prefix to a full id. For the
+  // human-facing MCP tool, where typing a short prefix is convenient.
+  async resolveId(idOrPrefix: string): Promise<string | null> {
+    if (!idOrPrefix) return null;
+    const entries = await this.load();
+    if (entries.some((e) => e.id === idOrPrefix)) return idOrPrefix;
+    if (idOrPrefix.length < 4) return null;
+    const matches = entries.filter((e) => e.id.startsWith(idOrPrefix));
+    return matches.length === 1 ? matches[0].id : null;
   }
 
   async update(id: string, patch: Partial<ClipHistoryEntry>): Promise<ClipHistoryEntry | null> {
-    const entries = await this.load();
-    const e = entries.find((x) => x.id === id || x.id.startsWith(id));
-    if (!e) return null;
-    Object.assign(e, patch);
-    await this.save(entries);
-    return e;
+    if (!id) return null;
+    return this.mutate((entries) => {
+      const e = entries.find((x) => x.id === id);
+      if (!e) return null;
+      Object.assign(e, patch);
+      return e;
+    });
   }
 
   // Remove a clip and the artifacts podcli rendered for it (output video,
   // word/recipe/reframe sidecars, thumbnail dir). The source video is never touched.
+  // Accepts a full id or an unambiguous prefix (MCP convenience).
   async remove(idOrPrefix: string): Promise<ClipHistoryEntry | null> {
-    const entries = await this.load();
-    const entry = entries.find((e) => e.id === idOrPrefix || e.id.startsWith(idOrPrefix));
+    const id = await this.resolveId(idOrPrefix);
+    if (!id) return null;
+    const entry = await this.mutate((entries) => {
+      const idx = entries.findIndex((e) => e.id === id);
+      if (idx < 0) return null;
+      return entries.splice(idx, 1)[0];
+    });
     if (!entry) return null;
-    await this.save(entries.filter((e) => e.id !== entry.id));
 
     const artifacts = [
       this.wordsPath(entry.id),

@@ -39,10 +39,16 @@ def load_clips_history() -> list[dict]:
 
 
 def save_clips_history(entries: list[dict]) -> str:
-    """Persist the full entry list. Returns the file path."""
+    """Persist the full entry list atomically. Returns the file path.
+
+    Writes a temp file then os.replace()s it into place so a crash or a
+    concurrent reader (the TS web server) never sees a half-written file.
+    """
     os.makedirs(os.path.dirname(_CLIPS_HISTORY_PATH), exist_ok=True)
-    with open(_CLIPS_HISTORY_PATH, "w") as f:
+    tmp = f"{_CLIPS_HISTORY_PATH}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
         json.dump(entries, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, _CLIPS_HISTORY_PATH)
     return _CLIPS_HISTORY_PATH
 
 
@@ -61,6 +67,8 @@ def get_clips_by_source(video_path: str) -> list[dict]:
 
 def find_clip(clip_id: str) -> Optional[dict]:
     """Find by exact id, falling back to an unambiguous 8-char prefix match."""
+    if not clip_id:
+        return None
     entries = load_clips_history()
     for e in entries:
         if e.get("id") == clip_id:

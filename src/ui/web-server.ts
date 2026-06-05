@@ -17,6 +17,7 @@ import {
   statSync,
   readFileSync,
   writeFileSync,
+  realpathSync,
 } from "fs";
 import { mkdir, readdir, unlink } from "fs/promises";
 import path from "path";
@@ -61,8 +62,10 @@ const knowledgeBase = new KnowledgeBase();
 
 // --- Path Traversal Protection ---
 function safePath(base: string, filename: string): string | null {
+  const root = path.resolve(base);
   const resolved = path.resolve(base, filename);
-  if (!resolved.startsWith(path.resolve(base))) return null;
+  // Compare on a path boundary so "/data/output-evil" isn't accepted as inside "/data/output".
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) return null;
   return resolved;
 }
 
@@ -185,20 +188,32 @@ const sseClients: Response[] = [];
 function streamVideo(req: Request, res: Response, filePath: string, contentType = "video/mp4") {
   const fileSize = statSync(filePath).size;
   const range = req.headers.range;
+  const onErr = (stream: ReturnType<typeof createReadStream>) =>
+    stream.on("error", () => res.destroy());
   if (range) {
     const [s, e] = range.replace(/bytes=/, "").split("-");
     const start = parseInt(s, 10);
     const end = e ? parseInt(e, 10) : fileSize - 1;
+    // Reject malformed/out-of-range requests instead of emitting NaN headers
+    // and a broken read stream.
+    if (Number.isNaN(start) || Number.isNaN(end) || start > end || start < 0 || end >= fileSize) {
+      res.writeHead(416, { "Content-Range": `bytes */${fileSize}` }).end();
+      return;
+    }
     res.writeHead(206, {
       "Content-Range": `bytes ${start}-${end}/${fileSize}`,
       "Accept-Ranges": "bytes",
       "Content-Length": end - start + 1,
       "Content-Type": contentType,
     });
-    createReadStream(filePath, { start, end }).pipe(res);
+    const stream = createReadStream(filePath, { start, end });
+    onErr(stream);
+    stream.pipe(res);
   } else {
     res.writeHead(200, { "Content-Length": fileSize, "Content-Type": contentType });
-    createReadStream(filePath).pipe(res);
+    const stream = createReadStream(filePath);
+    onErr(stream);
+    stream.pipe(res);
   }
 }
 
@@ -1020,20 +1035,31 @@ app.put("/api/thumbnail-config", (req, res) => {
 });
 
 app.get("/api/image", (req, res) => {
-  const filePath = req.query.path as string;
-  if (!filePath || !existsSync(filePath)) {
+  const raw = req.query.path as string;
+  const mimes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
+  const mime = raw ? mimes[extname(raw).toLowerCase()] : undefined;
+  if (!mime) {
+    res.status(403).json({ error: "unsupported type" });
+    return;
+  }
+  // realpath defeats symlinks pointing outside the allowed roots; home is
+  // excluded so the integrations/token files under it are never servable.
+  let resolved: string;
+  try {
+    resolved = realpathSync(path.resolve(raw));
+  } catch {
     res.status(404).json({ error: "not found" });
     return;
   }
-  const resolved = path.resolve(filePath);
-  const allowedRoots = [paths.output, paths.working, paths.assets, paths.home].map((p) => path.resolve(p));
-  if (!allowedRoots.some((root) => resolved === root || resolved.startsWith(root + "/"))) {
+  const allowedRoots = [paths.output, paths.working, paths.assets].map((p) => path.resolve(p));
+  if (!allowedRoots.some((root) => resolved === root || resolved.startsWith(root + path.sep))) {
     res.status(403).json({ error: "access denied" });
     return;
   }
-  const mimes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
-  res.writeHead(200, { "Content-Type": mimes[extname(filePath).toLowerCase()] || "application/octet-stream", "Cache-Control": "no-cache" });
-  createReadStream(filePath).pipe(res);
+  res.writeHead(200, { "Content-Type": mime, "Cache-Control": "no-cache" });
+  const stream = createReadStream(resolved);
+  stream.on("error", () => res.destroy());
+  stream.pipe(res);
 });
 
 registerConfigIntegrationRoutes(app, { executor, uploadDir });

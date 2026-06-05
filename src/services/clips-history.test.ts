@@ -123,6 +123,62 @@ describe("ClipsHistory", () => {
     expect(recorded).toEqual([]);
   });
 
+  it("serializes concurrent records without losing entries", async () => {
+    await Promise.all(
+      Array.from({ length: 25 }, (_, i) =>
+        history.record({
+          source_video: "/videos/show.mp4",
+          output_path: makeFakeOutput(`c-${i}.mp4`),
+          start_second: i,
+          end_second: i + 5,
+          caption_style: "karaoke",
+          crop_strategy: "smart",
+          title: `clip ${i}`,
+        } as any),
+      ),
+    );
+    const list = await history.list(100);
+    expect(list).toHaveLength(25);
+    expect(new Set(list.map((c) => c.id)).size).toBe(25);
+  });
+
+  it("findById and update require an exact id (no prefix match)", async () => {
+    const rec = await history.record({
+      source_video: "/videos/show.mp4",
+      output_path: makeFakeOutput("exact.mp4"),
+      start_second: 0,
+      end_second: 10,
+      caption_style: "karaoke",
+      crop_strategy: "smart",
+      title: "exact",
+    } as any);
+
+    expect(await history.findById(rec.id)).toBeDefined();
+    expect(await history.findById(rec.id.slice(0, 8))).toBeUndefined();
+    expect(await history.findById("")).toBeUndefined();
+    expect(await history.update("", { title: "x" })).toBeNull();
+    expect(await history.update(rec.id.slice(0, 8), { title: "x" })).toBeNull();
+    const ok = await history.update(rec.id, { title: "renamed" });
+    expect(ok?.title).toBe("renamed");
+  });
+
+  it("resolveId accepts a full id or unambiguous ≥4-char prefix, rejects short/empty", async () => {
+    const rec = await history.record({
+      source_video: "/videos/show.mp4",
+      output_path: makeFakeOutput("resolve.mp4"),
+      start_second: 0,
+      end_second: 10,
+      caption_style: "karaoke",
+      crop_strategy: "smart",
+      title: "resolve",
+    } as any);
+
+    expect(await history.resolveId(rec.id)).toBe(rec.id);
+    expect(await history.resolveId(rec.id.slice(0, 8))).toBe(rec.id);
+    expect(await history.resolveId("")).toBeNull();
+    expect(await history.resolveId(rec.id.slice(0, 2))).toBeNull();
+  });
+
   it("findDuplicate matches by basename, not full path", async () => {
     const output = makeFakeOutput("d.mp4");
     await history.record({
