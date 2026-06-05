@@ -19,8 +19,8 @@ from services.integrations.youtube import client as yt_client
 class CsvSyncTests(unittest.TestCase):
     def setUp(self):
         self.entries = [
-            {"id": "a", "title": "Why intelligence is commoditized", "duration": 30},
-            {"id": "b", "title": "GPU cooling deep dive", "duration": 42},
+            {"id": "a", "title": "Sample clip alpha", "duration": 30},
+            {"id": "b", "title": "Sample clip beta", "duration": 42},
         ]
         self.saved = None
 
@@ -45,8 +45,8 @@ class CsvSyncTests(unittest.TestCase):
 
     def test_csv_sync_reports_each_match_with_score(self):
         rows = [
-            {"title": "Why intelligence is commoditized", "views": 1000, "retention": 55.0},
-            {"title": "GPU cooling deep dive", "views": 500, "retention": 40.0},
+            {"title": "Sample clip alpha", "views": 1000, "retention": 55.0},
+            {"title": "Sample clip beta", "views": 500, "retention": 40.0},
         ]
         with self._csv_rows(rows):
             res = yt_sync.sync_from_csv("x.csv")
@@ -66,7 +66,7 @@ class CsvSyncTests(unittest.TestCase):
         self.assertIsNone(self.saved)  # nothing saved when nothing matched
 
     def test_csv_sync_writes_metrics_onto_matched_clip(self):
-        rows = [{"title": "GPU cooling deep dive", "views": 500, "retention": 40.0, "ctr": 5.0}]
+        rows = [{"title": "Sample clip beta", "views": 500, "retention": 40.0, "ctr": 5.0}]
         with self._csv_rows(rows):
             yt_sync.sync_from_csv("x.csv")
         matched = next(c for c in self.saved if c["id"] == "b")
