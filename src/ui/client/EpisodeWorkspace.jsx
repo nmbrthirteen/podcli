@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-    const api = async (path, opts = {}) => (await fetch(`/api${path}`, { headers: { 'Content-Type': 'application/json', ...opts.headers }, ...opts })).json();
+    const api = async (path, opts = {}) => {
+      const res = await fetch(`/api${path}`, { headers: { 'Content-Type': 'application/json', ...opts.headers }, ...opts });
+      let body = null;
+      try { body = await res.json(); } catch { /* empty / non-JSON body */ }
+      if (!res.ok) return { error: (body && body.error) || `HTTP ${res.status}` };
+      return body ?? {};
+    };
 
     function uploadFile(file, onProgress) {
       return new Promise((resolve, reject) => {
@@ -835,7 +841,9 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
             setBatchJobId(null);
           }
         }
-      }, [sseEvent]);
+        // phase/transcript are read above; the ts-guard makes re-runs on their
+        // change a no-op, so depending on them just keeps the reads fresh.
+      }, [sseEvent, phase, transcript]);
 
       // Preview panel state
       const videoRef = useRef();

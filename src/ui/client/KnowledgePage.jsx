@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { api, upload } from './lib';
 
 export default function KnowledgePage() {
       const [files, setFiles] = useState([]);
@@ -13,13 +14,13 @@ export default function KnowledgePage() {
       const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
 
       const loadFiles = useCallback(async () => {
-        const data = await (await fetch('/api/knowledge')).json();
-        setFiles(data);
+        try { setFiles(await api('/knowledge')); }
+        catch (e) { showToast(`Load failed: ${e.message}`); }
       }, []);
 
       useEffect(() => {
         loadFiles();
-        fetch('/api/knowledge/dir').then(r => r.json()).then(d => setKbDir(d.path)).catch(() => { });
+        api('/knowledge/dir').then(d => setKbDir(d.path)).catch(() => { });
       }, []);
 
       const openFile = (f) => {
@@ -31,66 +32,62 @@ export default function KnowledgePage() {
 
       const saveFile = async () => {
         if (!activeFile) return;
-        await fetch(`/api/knowledge/${encodeURIComponent(activeFile)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: editorContent }),
-        });
-        setDirty(false);
-        showToast('Saved');
-        loadFiles();
+        try {
+          await api(`/knowledge/${encodeURIComponent(activeFile)}`, { method: 'POST', body: JSON.stringify({ content: editorContent }) });
+          setDirty(false);
+          showToast('Saved');
+          loadFiles();
+        } catch (e) { showToast(`Save failed: ${e.message}`); }
       };
 
       const deleteFile = async (filename, e) => {
         e.stopPropagation();
         if (!confirm(`Delete ${filename}?`)) return;
-        await fetch(`/api/knowledge/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-        if (activeFile === filename) { setActiveFile(null); setEditorContent(''); }
-        showToast('Deleted');
-        loadFiles();
+        try {
+          await api(`/knowledge/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+          if (activeFile === filename) { setActiveFile(null); setEditorContent(''); }
+          showToast('Deleted');
+          loadFiles();
+        } catch (e) { showToast(`Delete failed: ${e.message}`); }
       };
 
       const createFile = async () => {
         let name = newName.trim();
         if (!name) return;
         if (!name.endsWith('.md')) name += '.md';
-        await fetch(`/api/knowledge/${encodeURIComponent(name)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: `# ${name.replace('.md', '')}\n\n` }),
-        });
-        setNewName('');
-        await loadFiles();
-        // Open the new file
-        const data = await (await fetch('/api/knowledge')).json();
-        const created = data.find(f => f.filename === name);
-        if (created) openFile(created);
-        showToast('Created');
+        try {
+          await api(`/knowledge/${encodeURIComponent(name)}`, { method: 'POST', body: JSON.stringify({ content: `# ${name.replace('.md', '')}\n\n` }) });
+          setNewName('');
+          await loadFiles();
+          const created = (await api('/knowledge')).find(f => f.filename === name);
+          if (created) openFile(created);
+          showToast('Created');
+        } catch (e) { showToast(`Create failed: ${e.message}`); }
+      };
+
+      const uploadFiles = async (fileList, label) => {
+        const fd = new FormData();
+        for (const f of fileList) {
+          if (f.name.endsWith('.md') || f.name.endsWith('.txt')) fd.append('files', f);
+        }
+        if (!fd.has('files')) return;
+        try {
+          await upload('/knowledge/upload', fd);
+          showToast(`${label} added`);
+          loadFiles();
+        } catch (e) { showToast(`Upload failed: ${e.message}`); }
       };
 
       const handleDrop = async (e) => {
         e.preventDefault();
         setDragOver(false);
-        const dt = e.dataTransfer;
-        if (!dt.files.length) return;
-        const fd = new FormData();
-        for (const f of dt.files) {
-          if (f.name.endsWith('.md') || f.name.endsWith('.txt')) fd.append('files', f);
-        }
-        if (!fd.has('files')) return;
-        await fetch('/api/knowledge/upload', { method: 'POST', body: fd });
-        showToast(`${dt.files.length} file(s) added`);
-        loadFiles();
+        if (!e.dataTransfer.files.length) return;
+        await uploadFiles(e.dataTransfer.files, `${e.dataTransfer.files.length} file(s)`);
       };
 
       const handleFileInput = async (e) => {
-        const inputFiles = e.target.files;
-        if (!inputFiles.length) return;
-        const fd = new FormData();
-        for (const f of inputFiles) fd.append('files', f);
-        await fetch('/api/knowledge/upload', { method: 'POST', body: fd });
-        showToast(`${inputFiles.length} file(s) added`);
-        loadFiles();
+        if (!e.target.files.length) return;
+        await uploadFiles(e.target.files, `${e.target.files.length} file(s)`);
         e.target.value = '';
       };
 
@@ -103,7 +100,6 @@ export default function KnowledgePage() {
             {kbDir && <div className="dir-path">{kbDir}</div>}
           </div>
 
-          {/* Drop zone */}
           <div
             className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -117,7 +113,6 @@ export default function KnowledgePage() {
             <input type="file" accept=".md,.txt" multiple onChange={handleFileInput} />
           </div>
 
-          {/* File grid */}
           {realFiles.length > 0 ? (
             <div className="file-grid">
               {realFiles.map(f => (
@@ -139,7 +134,6 @@ export default function KnowledgePage() {
             </div>
           )}
 
-          {/* New file */}
           <div className="new-file-row">
             <input
               className="new-file-input"
@@ -151,7 +145,6 @@ export default function KnowledgePage() {
             <button className="btn btn-primary" onClick={createFile}>Create</button>
           </div>
 
-          {/* Editor */}
           {activeFile && (
             <div className="editor-panel" style={{ animation: 'fadeIn 0.2s var(--ease)' }}>
               <div className="editor-header">
