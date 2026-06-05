@@ -16,6 +16,16 @@ from config.paths import paths
 from services.clips_history import load_clips_history
 
 LEARNINGS_FILE = "13-performance-learnings.md"
+AI_START = "<!-- AI-ANALYSIS-START -->"
+AI_END = "<!-- AI-ANALYSIS-END -->"
+
+
+def _existing_ai_block(path: str) -> str:
+    if not os.path.exists(path):
+        return ""
+    txt = open(path).read()
+    i, j = txt.find(AI_START), txt.find(AI_END)
+    return txt[i:j + len(AI_END)] if (i != -1 and j != -1) else ""
 
 
 def _has_perf(c: dict) -> bool:
@@ -45,8 +55,11 @@ def _length_bucket(c: dict) -> str:
     return "<25s" if d < 25 else "25-35s" if d < 35 else "35-45s" if d < 45 else "45s+"
 
 
-def write_learnings(min_clips: int = 3) -> Optional[str]:
-    """Regenerate the performance-learnings knowledge file. None if too little data."""
+def write_learnings(min_clips: int = 3, ai_block: Optional[str] = None) -> Optional[str]:
+    """Regenerate the performance-learnings knowledge file. None if too little data.
+
+    The structured 'what's working' section is rebuilt every call; any AI-analysis
+    block is preserved (or replaced when ai_block is passed)."""
     clips = [c for c in load_clips_history() if _has_perf(c)]
     if len(clips) < min_clips:
         return None
@@ -88,6 +101,67 @@ def write_learnings(min_clips: int = 3) -> Optional[str]:
 
     os.makedirs(paths["knowledge"], exist_ok=True)
     path = os.path.join(paths["knowledge"], LEARNINGS_FILE)
+    block = ai_block if ai_block is not None else _existing_ai_block(path)
+    content = "\n".join(L)
+    if block:
+        content += "\n\n" + block + "\n"
     with open(path, "w") as f:
-        f.write("\n".join(L))
+        f.write(content)
     return path
+
+
+def _clip_line(c: dict) -> str:
+    m = c.get("metrics") or {}
+    return (f"- [{c.get('content_type', '?')} · {c.get('caption_style', '?')} · {round(c.get('duration', 0))}s · "
+            f"{m.get('retention')}% retention · {m.get('ctr')}% CTR] \"{c.get('title')}\"\n"
+            f"  transcript: {c.get('transcript_slice', '')[:400]}")
+
+
+def write_semantic_learnings(top_n: int = 4, min_total: int = 6) -> Optional[str]:
+    """Token-frugal LLM pass: contrast top vs bottom clips by retention and write
+    a qualitative 'why winners win' block. Returns the file path, or None if there
+    isn't enough data or no AI CLI is available."""
+    clips = [c for c in load_clips_history()
+             if _has_perf(c) and c.get("transcript_slice") and (c.get("metrics") or {}).get("retention") is not None]
+    if len(clips) < min_total:
+        return None
+    ranked = sorted(clips, key=lambda c: c["metrics"]["retention"], reverse=True)
+    top_performers, underperformers = ranked[:top_n], ranked[-top_n:]
+
+    try:
+        from services.claude_suggest import _find_ai_cli_candidates, _run_ai_command
+    except Exception:
+        return None
+    candidates = _find_ai_cli_candidates()
+    if not candidates:
+        return None
+    cli_path, engine = candidates[0]
+
+    prompt = (
+        "You analyze short-form video performance to guide future clip selection.\n"
+        "Below are the highest- and lowest-retention clips from one podcast channel.\n\n"
+        "TOP PERFORMERS:\n" + "\n".join(_clip_line(c) for c in top_performers) +
+        "\n\nUNDERPERFORMERS:\n" + "\n".join(_clip_line(c) for c in underperformers) +
+        "\n\nIn 4-6 concise markdown bullets, state the concrete content patterns that distinguish "
+        "the top performers from the underperformers (hooks, topic, emotional beat, structure) and give "
+        "actionable guidance for picking future shorts. No preamble, just the bullets."
+    )
+    os.makedirs(paths["working"], exist_ok=True)
+    prompt_file = os.path.join(paths["working"], "_perf_analysis_prompt.txt")
+    with open(prompt_file, "w") as f:
+        f.write(prompt)
+    try:
+        res = _run_ai_command(cli_path, engine, prompt, prompt_file, paths["project_root"], timeout=180)
+    except Exception:
+        return None
+    finally:
+        try:
+            os.unlink(prompt_file)
+        except Exception:
+            pass
+    text = (res.stdout or "").strip()
+    if not text:
+        return None
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    block = f"{AI_START}\n## What separates top performers (AI analysis · {now})\n\n{text}\n{AI_END}"
+    return write_learnings(ai_block=block)

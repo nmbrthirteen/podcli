@@ -1307,6 +1307,15 @@ app.post("/api/youtube/sync", async (req, res) => {
   res.json({ ok: true, message: stripAnsi(r.stdout) });
 });
 
+app.post("/api/youtube/learn", async (_req, res) => {
+  const r = await runCli(["youtube", "learn"]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "analysis failed" });
+    return;
+  }
+  res.json({ ok: true, message: stripAnsi(r.stdout) });
+});
+
 app.get("/api/analytics", async (_req, res) => {
   const clips = await clipsHistory.load();
   const withM = clips.filter((c) => c.metrics && (c.metrics.views != null || c.metrics.retention != null));

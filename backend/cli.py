@@ -2743,6 +2743,15 @@ def cmd_youtube(args):
             fail(e)
         return
 
+    if action == "learn":
+        from services.integrations.youtube import learnings
+        path = learnings.write_semantic_learnings()
+        if path:
+            print(f"\n  {green}✓{reset} Wrote performance analysis to {accent}{path}{reset}\n")
+        else:
+            print(f"\n  {gray}Not enough mature clips with metrics, or no AI CLI available.{reset}\n")
+        return
+
 
 def cmd_config(args):
     """Export, import, and activate config profiles."""
@@ -3230,6 +3239,7 @@ def main():
     yt_link.add_argument("video_id", nargs="?", help="YouTube video id to link")
     yt_sync = yt_sub.add_parser("sync", help="Sync performance onto linked clips")
     yt_sync.add_argument("--csv", help="Import from a YouTube Studio analytics CSV (no auth)")
+    yt_sub.add_parser("learn", help="AI pass: analyze winners vs losers into the knowledge base")
 
     # ── config ──
     cfg = sub.add_parser("config", help="Export, import, and activate config profiles")

@@ -72,6 +72,15 @@ export default function AnalyticsPage() {
     } catch (e: any) { setMsg(`Sync failed: ${e.message}`); } finally { setBusy(false); }
   };
 
+  const analyze = async () => {
+    setBusy(true); setMsg("Analyzing top performers vs underperformers…");
+    try {
+      const r = await api("/youtube/learn", { method: "POST", body: "{}" });
+      if (r.error) throw new Error(r.error);
+      setMsg("Analysis written to the knowledge base — Claude will use it when picking shorts");
+    } catch (e: any) { setMsg(`Analysis failed: ${e.message}`); } finally { setBusy(false); }
+  };
+
   const importCsv = async (f: File) => {
     setBusy(true); setMsg(null);
     try {
@@ -91,6 +100,7 @@ export default function AnalyticsPage() {
             <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && importCsv(e.target.files[0])} />
             <button className="btn btn-ghost btn-sm" onClick={() => setShowConnect((v) => !v)} disabled={busy}>Connect</button>
             <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} disabled={busy}>Import CSV</button>
+            <button className="btn btn-ghost btn-sm" onClick={analyze} disabled={busy}>Analyze patterns</button>
             <button className="btn btn-primary btn-sm" onClick={() => sync()} disabled={busy}>{busy ? <div className="spinner sm" /> : "Sync YouTube"}</button>
           </div>
         </div>
@@ -105,6 +115,11 @@ export default function AnalyticsPage() {
       {showConnect && (
         <div className="section">
           <div className="section-label">Connect YouTube (read-only)</div>
+          <ol style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7, margin: "0 0 14px", paddingLeft: 18 }}>
+            <li>In Google Cloud Console, enable the <strong>YouTube Data API v3</strong> + <strong>YouTube Analytics API</strong>.</li>
+            <li>Create an <strong>OAuth client ID</strong> (type: Desktop app) and paste its ID + secret below.</li>
+            <li>Save, then run <code>podcli youtube auth</code> in your terminal to authorize.</li>
+          </ol>
           <div className="thumb-fields">
             <div>
               <label style={labelStyle}>OAuth client ID</label>
