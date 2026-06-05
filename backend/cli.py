@@ -2185,7 +2185,10 @@ def cmd_bake_thumbnail(args):
     from services.thumbnail_ai import thumbnail_to_video_frame
     from services.video_processor import concat_outro, _get_media_duration_seconds
 
-    green = "\033[38;2;74;222;128m"; red = "\033[38;2;248;113;113m"; gray = "\033[38;5;245m"; reset = "\033[0m"
+    green = "\033[38;2;74;222;128m"
+    red = "\033[38;2;248;113;113m"
+    gray = "\033[38;5;245m"
+    reset = "\033[0m"
     if not os.path.exists(args.clip):
         print(f"  {red}✗{reset} Clip not found: {args.clip}", file=sys.stderr); sys.exit(1)
     if not os.path.exists(args.image):

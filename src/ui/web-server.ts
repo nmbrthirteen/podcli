@@ -195,8 +195,6 @@ function streamVideo(req: Request, res: Response, filePath: string, contentType 
     const [s, e] = range.replace(/bytes=/, "").split("-");
     const start = parseInt(s, 10);
     const end = e ? parseInt(e, 10) : fileSize - 1;
-    // Reject malformed/out-of-range requests instead of emitting NaN headers
-    // and a broken read stream.
     if (Number.isNaN(start) || Number.isNaN(end) || start > end || start < 0 || end >= fileSize) {
       res.writeHead(416, { "Content-Range": `bytes */${fileSize}` }).end();
       return;
@@ -1507,7 +1505,7 @@ app.get("/api/clips/:id/cuts", async (req, res) => {
   if (!clip || !existsSync(clip.source_video)) { res.status(404).json({ error: "source not found" }); return; }
   const start = clip.start_second;
   const dur = Math.max(0.1, clip.end_second - clip.start_second);
-  // ffmpeg scene-change detection over the clip range; pts_time is relative to -ss.
+  // pts_time from ffmpeg scene detection is relative to -ss, not the source.
   const proc = spawn(paths.ffmpegPath, [
     "-ss", String(start), "-i", clip.source_video, "-t", String(dur),
     "-vf", "select='gt(scene,0.3)',showinfo", "-an", "-f", "null", "-",
