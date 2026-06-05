@@ -1088,3 +1088,8 @@ input[type="range"]::-webkit-slider-thumb {
 .reframe-stage { position: relative; width: 100%; background: #000; border-radius: var(--radius-sm); overflow: hidden; user-select: none; touch-action: none; cursor: ew-resize; }
 .reframe-stage video { width: 100%; display: block; }
 .reframe-box { position: absolute; top: 0; bottom: 0; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0,0,0,0.5); pointer-events: none; }
+
+/* ── Reframe timeline ── */
+.rf-track { position: relative; height: 30px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; margin-top: 12px; overflow: hidden; }
+.rf-kf { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--green); transform: translateX(-1px); pointer-events: none; }
+.rf-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; box-shadow: 0 0 6px var(--accent); }

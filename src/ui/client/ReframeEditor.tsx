@@ -21,6 +21,7 @@ export default function ReframeEditor({
   const [keyframes, setKeyframes] = useState<Keyframe[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [playing, setPlaying] = useState(false);
   const dur = Math.max(0.1, end - start);
 
   const onMeta = () => {
@@ -62,7 +63,31 @@ export default function ReframeEditor({
     } catch (e: any) { setErr(e.message); setBusy(false); }
   };
 
-  useEffect(() => { /* seek on keyframe add handled inline */ }, []);
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      if (v.currentTime < start || v.currentTime >= start + dur) v.currentTime = start;
+      v.play(); setPlaying(true);
+    } else { v.pause(); setPlaying(false); }
+  };
+
+  const onTimeUpdate = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.currentTime >= start + dur) { v.pause(); setPlaying(false); v.currentTime = start + dur; }
+    const clipT = Math.max(0, Math.min(dur, v.currentTime - start));
+    setT(clipT);
+    const kf = keyframes.slice().sort((a, b) => a.t - b.t);
+    const at = kf.filter((k) => k.t <= clipT).pop();
+    if (at) setCenterPct(at.x_pct);
+  };
+
+  const jumpKeyframe = (dir: 1 | -1) => {
+    const kf = keyframes.slice().sort((a, b) => a.t - b.t);
+    const next = dir > 0 ? kf.find((k) => k.t > t + 0.001) : [...kf].reverse().find((k) => k.t < t - 0.001);
+    if (next) seek(next.t);
+  };
 
   const label: React.CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: "0.5px", textTransform: "uppercase", color: "var(--text2)", marginBottom: 8, display: "block" };
 
@@ -75,19 +100,25 @@ export default function ReframeEditor({
         </div>
 
         <div ref={stageRef} className="reframe-stage" onPointerDown={pointer} onPointerMove={pointer}>
-          <video ref={videoRef} src={`/api/clips/${clipId}/source`} muted playsInline preload="auto" onLoadedMetadata={onMeta} />
+          <video ref={videoRef} src={`/api/clips/${clipId}/source`} muted playsInline preload="auto" onLoadedMetadata={onMeta} onTimeUpdate={onTimeUpdate} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} />
           <div className="reframe-box" style={{ left: `${centerPct - half}%`, width: `${boxPct}%` }} />
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
-          <span style={{ fontSize: 12, color: "var(--text)", fontVariantNumeric: "tabular-nums", minWidth: 78 }}>{fmtMs(t)}</span>
-          <input type="range" min={0} max={dur} step={0.001} value={t} onChange={(e) => seek(parseFloat(e.target.value))} style={{ flex: 1 }} />
+        <div
+          className="rf-track"
+          onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seek(((e.clientX - r.left) / r.width) * dur); }}
+        >
+          {keyframes.map((k) => <div key={k.t} className="rf-kf" style={{ left: `${(k.t / dur) * 100}%` }} title={`${fmtMs(k.t)} · ${Math.round(k.x_pct)}%`} />)}
+          <div className="rf-playhead" style={{ left: `${(t / dur) * 100}%` }} />
         </div>
+
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
-          <button className="btn btn-ghost btn-sm" title="-1s" onClick={() => seek(t - 1)}>⏮</button>
+          <button className="btn btn-ghost btn-sm" title="Play/pause" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
           <button className="btn btn-ghost btn-sm" title="-1 frame" onClick={() => seek(t - FRAME)}>◀</button>
           <button className="btn btn-ghost btn-sm" title="+1 frame" onClick={() => seek(t + FRAME)}>▶</button>
-          <button className="btn btn-ghost btn-sm" title="+1s" onClick={() => seek(t + 1)}>⏭</button>
+          <button className="btn btn-ghost btn-sm" title="Previous keyframe" onClick={() => jumpKeyframe(-1)}>⏮</button>
+          <button className="btn btn-ghost btn-sm" title="Next keyframe" onClick={() => jumpKeyframe(1)}>⏭</button>
+          <span style={{ fontSize: 12, color: "var(--text)", fontVariantNumeric: "tabular-nums", marginLeft: 6 }}>{fmtMs(t)} / {fmtMs(dur)}</span>
           <span style={{ flex: 1 }} />
           <button className="btn btn-primary btn-sm" onClick={addKeyframe}>+ Keyframe here</button>
         </div>
