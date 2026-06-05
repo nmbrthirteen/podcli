@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile, writeFile, mkdir, rm } from "fs/promises";
 import { existsSync } from "fs";
 import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -128,6 +128,27 @@ export class ClipsHistory {
     Object.assign(e, patch);
     await this.save(entries);
     return e;
+  }
+
+  // Remove a clip and the artifacts podcli rendered for it (output video,
+  // word/recipe/reframe sidecars, thumbnail dir). The source video is never touched.
+  async remove(idOrPrefix: string): Promise<ClipHistoryEntry | null> {
+    const entries = await this.load();
+    const entry = entries.find((e) => e.id === idOrPrefix || e.id.startsWith(idOrPrefix));
+    if (!entry) return null;
+    await this.save(entries.filter((e) => e.id !== entry.id));
+
+    const artifacts = [
+      this.wordsPath(entry.id),
+      this.recipePath(entry.id),
+      this.reframePath(entry.id),
+      entry.output_path,
+    ];
+    await Promise.all(
+      artifacts.map((p) => (p ? rm(p, { force: true }) : Promise.resolve())),
+    );
+    await rm(join(paths.output, "thumbnails", entry.id), { recursive: true, force: true });
+    return entry;
   }
 
   async getBySource(videoPath: string): Promise<ClipHistoryEntry[]> {

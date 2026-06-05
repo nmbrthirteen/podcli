@@ -392,6 +392,8 @@ select {
 .btn-primary:disabled { opacity: 0.25; cursor: not-allowed; }
 .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
 .btn-ghost:hover { border-color: var(--border-hover); color: var(--text); }
+.btn-danger { background: transparent; color: var(--text3); border: 1px solid var(--border); }
+.btn-danger:hover:not(:disabled) { border-color: var(--red-border); color: var(--red); background: var(--red-subtle); }
 .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: var(--radius-sm); }
 .btn-go {
   width: 100%; padding: 14px; font-size: 15px; justify-content: center;
@@ -992,8 +994,12 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* ── Library card grid ── */
 .clip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-.clip-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; text-decoration: none; color: inherit; transition: border-color 0.12s, transform 0.12s; }
+.clip-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; text-decoration: none; color: inherit; transition: border-color 0.12s, transform 0.12s; }
 .clip-card:hover { border-color: var(--border-hover); transform: translateY(-2px); }
+.clip-card-del { position: absolute; top: 7px; right: 7px; width: 26px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center; border: none; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.55); color: #fff; cursor: pointer; opacity: 0; transition: opacity 0.12s var(--ease), background 0.12s var(--ease); }
+.clip-card:hover .clip-card-del { opacity: 1; }
+.clip-card-del:hover:not(:disabled) { background: var(--red); }
+.clip-card-del:disabled { opacity: 0.4; cursor: default; }
 .clip-card-media { aspect-ratio: 9 / 16; width: 100%; display: block; object-fit: cover; background: #000; }
 .clip-card-media.empty { display: flex; align-items: center; justify-content: center; color: var(--text3); font-size: 22px; }
 .clip-card-body { padding: 10px 11px; }

@@ -1103,8 +1103,12 @@ export function createServer(): McpServer {
     "View previously created clips to avoid duplicates. Check before creating new clips.",
     {
       action: z
-        .enum(["list", "check"])
-        .describe("list = recent clips, check = find duplicate"),
+        .enum(["list", "check", "delete"])
+        .describe("list = recent clips, check = find duplicate, delete = remove a clip"),
+      clip_id: z
+        .string()
+        .optional()
+        .describe("Clip id, full or 8-char prefix (for delete)"),
       source_video: z
         .string()
         .optional()
@@ -1123,6 +1127,7 @@ export function createServer(): McpServer {
     },
     async ({
       action,
+      clip_id,
       source_video,
       start_second,
       end_second,
@@ -1131,6 +1136,23 @@ export function createServer(): McpServer {
       limit,
     }) => {
       try {
+        if (action === "delete") {
+          if (!clip_id)
+            return {
+              content: [{ type: "text" as const, text: "Provide clip_id to delete." }],
+            };
+          const removed = await history.remove(clip_id);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: removed
+                  ? `Deleted "${removed.title}" (${removed.id}).`
+                  : `No clip matched "${clip_id}".`,
+              },
+            ],
+          };
+        }
         if (action === "list") {
           const entries = source_video
             ? await history.getBySource(source_video)

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmt, timeAgo, basename } from "./lib";
+import { TrashIcon } from "./icons";
 
 interface Clip {
   id: string;
@@ -40,6 +41,7 @@ export default function StudioHome() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(0);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
     const loadHistory = () => {
@@ -59,6 +61,21 @@ export default function StudioHome() {
     events.addEventListener("job-error", onEnd as EventListener);
     return () => events.close();
   }, []);
+
+  const remove = async (e: React.MouseEvent, c: Clip) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (deleting || !window.confirm(`Delete "${c.title}"? This removes the rendered file too.`)) return;
+    setDeleting(c.id);
+    try {
+      await api(`/clips/${c.id}`, { method: "DELETE" });
+      setClips((prev) => prev.filter((x) => x.id !== c.id));
+    } catch {
+      // Keep the card; the SSE refresh will reconcile if it was actually removed.
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   const episodes = groupEpisodes(clips);
 
@@ -102,6 +119,14 @@ export default function StudioHome() {
                   const thumb = c.thumbnail_config?.preview_path;
                   return (
                     <Link key={c.id} to={`/clip/${c.id}`} className="clip-card">
+                      <button
+                        className="clip-card-del"
+                        title="Delete clip"
+                        onClick={(e) => remove(e, c)}
+                        disabled={deleting === c.id}
+                      >
+                        {deleting === c.id ? <div className="spinner sm" /> : <TrashIcon />}
+                      </button>
                       {thumb ? (
                         <img className="clip-card-media" src={`/api/image?path=${encodeURIComponent(thumb)}`} alt="" />
                       ) : file ? (

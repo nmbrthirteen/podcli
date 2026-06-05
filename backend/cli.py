@@ -2573,6 +2573,7 @@ def cmd_clips(args):
         get_clips_by_source,
         find_clip,
         update_clip,
+        delete_clip,
     )
 
     accent = "\033[38;2;212;135;74m"
@@ -2629,6 +2630,24 @@ def cmd_clips(args):
         updated = update_clip(args.clip_id, title=title, caption_style=caption_style, thumbnail_config=thumbnail_config)
         print(f"\n  {green}✓{reset} Updated {accent}{str(updated['id'])[:8]}{reset}  {bold}{updated.get('title')}{reset}")
         print(f"      {gray}caption: {updated.get('caption_style')}{reset}\n")
+        return
+
+    if action == "delete":
+        clip = find_clip(args.clip_id)
+        if not clip:
+            print(f"\n  {red}✗{reset} Clip not found: {args.clip_id}\n", file=sys.stderr)
+            sys.exit(1)
+        if not getattr(args, "yes", False):
+            title = clip.get("title", "untitled")
+            try:
+                confirm = input(f"\n  Delete {bold}{title}{reset} and its rendered file? [y/N] ")
+            except EOFError:
+                confirm = ""
+            if confirm.strip().lower() not in ("y", "yes"):
+                print(f"  {gray}Cancelled.{reset}\n")
+                return
+        removed = delete_clip(args.clip_id)
+        print(f"\n  {green}✓{reset} Deleted {accent}{str(removed['id'])[:8]}{reset}  {bold}{removed.get('title')}{reset}\n")
         return
 
     if action == "reopen":
@@ -3243,6 +3262,9 @@ def main():
         "reopen", help="Load a clip back into the studio editor for re-iteration"
     )
     clips_reopen.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
+    clips_delete = clips_sub.add_parser("delete", help="Delete a clip and its rendered output")
+    clips_delete.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
+    clips_delete.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     # ── bake-thumbnail ──
     bt = sub.add_parser("bake-thumbnail", help="Composite a thumbnail PNG into a clip as an opening card")

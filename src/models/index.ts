@@ -18,6 +18,7 @@ export interface ProgressEvent {
   stage: string;
   percent: number;
   message: string;
+  clip_result?: BatchClipsResult["results"][number];
 }
 
 // === Transcript Models ===
@@ -106,6 +107,7 @@ export interface SuggestedClip {
 export interface UIState {
   videoPath?: string;
   filePath?: string;
+  activeExportJobId?: string | null;
   transcript?: TranscriptResult | null;
   rawTranscriptText?: string;
   suggestions?: SuggestedClip[];
@@ -169,6 +171,7 @@ export interface BatchClipsResult {
   total_clips: number;
   successful_clips: number;
   results: Array<{
+    clip_index?: number;
     status: "success" | "error";
     output_path?: string;
     start_second?: number;

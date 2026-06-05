@@ -151,6 +151,15 @@ export default function ClipDetail() {
     } catch (e: any) { setMsg(`DaVinci export failed: ${e.message}`); } finally { setBusy(null); }
   };
 
+  const del = async () => {
+    if (!window.confirm(`Delete "${clip.title}"? This removes the rendered file too.`)) return;
+    setBusy("delete"); setMsg(null);
+    try {
+      await api(`/clips/${clip.id}`, { method: "DELETE" });
+      navigate("/");
+    } catch (e: any) { setMsg(`Delete failed: ${e.message}`); setBusy(null); }
+  };
+
   return (
     <div className="app">
       <div className="header">
@@ -161,6 +170,7 @@ export default function ClipDetail() {
             <a className="btn btn-ghost btn-sm" href={`/api/download/${file}`} download style={{ textDecoration: "none" }}>Download</a>
             <button className="btn btn-ghost btn-sm" onClick={reopen} disabled={busy !== null}>{busy === "reopen" ? <div className="spinner sm" /> : "Reopen in editor"}</button>
             {davinciOn && <button className="btn btn-ghost btn-sm" onClick={exportDavinci} disabled={busy !== null}>{busy === "davinci" ? <div className="spinner sm" /> : "Export for DaVinci"}</button>}
+            <button className="btn btn-danger btn-sm" onClick={del} disabled={busy !== null}>{busy === "delete" ? <div className="spinner sm" /> : "Delete"}</button>
           </div>
         </div>
       </div>

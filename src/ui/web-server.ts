@@ -39,8 +39,10 @@ import { errMsg } from "../utils/errors.js";
 import type {
   BatchClipsResult,
   ClipResult,
+  ProgressEvent,
   SuggestedClip,
   TranscriptResult,
+  WordTimestamp,
 } from "../models/index.js";
 
 const log = childLogger("web-server");
@@ -89,6 +91,7 @@ const sessionTranscripts = new Map<string, ServerTranscript>();
 interface UIState {
   videoPath: string;
   filePath: string;
+  activeExportJobId: string | null;
   transcript: ServerTranscript | null;
   rawTranscriptText: string;
   suggestions: SuggestedClip[];
@@ -118,6 +121,7 @@ function loadPersistedState(): UIState {
       return {
         videoPath: saved.videoPath || "",
         filePath: saved.filePath || "",
+        activeExportJobId: null,
         transcript: saved.transcript || null,
         rawTranscriptText: saved.rawTranscriptText || "",
         suggestions: saved.suggestions || [],
@@ -143,6 +147,7 @@ function loadPersistedState(): UIState {
   return {
     videoPath: "",
     filePath: "",
+    activeExportJobId: null,
     transcript: null,
     rawTranscriptText: "",
     suggestions: [],
@@ -206,6 +211,74 @@ function broadcastSSE(event: string, data: unknown) {
       sseClients.splice(i, 1);
     }
   }
+}
+
+function broadcastHistoryUpdated(jobId: string | null, clips: unknown[]) {
+  if (clips.length === 0) return;
+  broadcastSSE("history-updated", { jobId, count: clips.length });
+}
+
+function setExportState(phase: string, activeExportJobId: string | null) {
+  uiState.phase = phase;
+  uiState.activeExportJobId = activeExportJobId;
+  uiState.lastUpdated = Date.now();
+  persistState();
+}
+
+function createBatchHistoryRecorder({
+  jobId,
+  sourceVideo,
+  transcriptWords,
+  defaultCaptionStyle,
+  defaultCropStrategy,
+  label,
+}: {
+  jobId: string;
+  sourceVideo: string;
+  transcriptWords: WordTimestamp[];
+  defaultCaptionStyle?: string;
+  defaultCropStrategy?: string;
+  label: string;
+}) {
+  const recordedClipIndexes = new Set<number>();
+  const pendingWrites: Promise<void>[] = [];
+
+  const recordRows = async (rows: BatchClipsResult["results"]) => {
+    const recorded = await clipsHistory.recordBatchResults(rows, {
+      sourceVideo,
+      transcriptWords,
+      defaultCaptionStyle,
+      defaultCropStrategy,
+      contentTypeFor: (s, e) => findContentType(uiState.suggestions, s, e),
+    });
+    for (const row of rows) {
+      if (row.status === "success" && row.output_path && typeof row.clip_index === "number") {
+        recordedClipIndexes.add(row.clip_index);
+      }
+    }
+    broadcastHistoryUpdated(jobId, recorded);
+  };
+
+  return {
+    recordProgress(event: ProgressEvent) {
+      if (event.stage !== "clip_complete" || !event.clip_result) return;
+      const write = recordRows([event.clip_result]).catch((err) => {
+        log.warn(`Failed to record completed ${label} clip to history`, {
+          err: errMsg(err),
+        });
+      });
+      pendingWrites.push(write);
+    },
+    async recordRemaining(results: BatchClipsResult["results"] | undefined) {
+      await Promise.allSettled(pendingWrites);
+      const remaining = results?.filter(
+        (row) =>
+          typeof row.clip_index !== "number" ||
+          !recordedClipIndexes.has(row.clip_index),
+      );
+      if (remaining?.length) await recordRows(remaining);
+    },
+  };
 }
 
 // --- Middleware ---
@@ -612,7 +685,6 @@ app.post("/api/create-clip", async (req, res) => {
       job.progress = 100;
       job.message = "Clip created!";
       job.result = result.data;
-      broadcastSSE("job-complete", { jobId, result: result.data });
       // Record to history
       try {
         const d = result.data;
@@ -637,12 +709,14 @@ app.post("/api/create-clip", async (req, res) => {
           caption_style, crop_strategy, logo_path: logo_path || null, outro_path: outro_path || null,
           clean_fillers, transcript_words: clipWords,
         });
+        broadcastHistoryUpdated(jobId, [rec]);
       } catch (err) {
         log.warn("Failed to record clip to history", {
           title,
           err: errMsg(err),
         });
       }
+      broadcastSSE("job-complete", { jobId, result: result.data });
     })
     .catch((err) => {
       job.status = "error";
@@ -711,10 +785,15 @@ app.post("/api/batch-clips", async (req, res) => {
   };
   jobs.set(jobId, job);
 
+  const historyRecorder = createBatchHistoryRecorder({
+    jobId,
+    sourceVideo: video_path,
+    transcriptWords: transcript_words,
+    label: "batch",
+  });
+
   broadcastSSE("export-started", { jobId, clipCount: clips.length });
-  uiState.phase = "exporting";
-  uiState.lastUpdated = Date.now();
-  persistState();
+  setExportState("exporting", jobId);
 
   res.json({ job_id: jobId, status: "running" });
 
@@ -735,6 +814,7 @@ app.post("/api/batch-clips", async (req, res) => {
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
+        historyRecorder.recordProgress(event);
         broadcastSSE("job-update", {
           jobId,
           progress: event.percent,
@@ -747,24 +827,22 @@ app.post("/api/batch-clips", async (req, res) => {
       job.progress = 100;
       job.message = "Batch complete!";
       job.result = result.data;
-      broadcastSSE("job-complete", { jobId, result: result.data });
       // Record successful clips to history
       try {
-        await clipsHistory.recordBatchResults(result.data?.results, {
-          sourceVideo: video_path,
-          transcriptWords: transcript_words,
-          contentTypeFor: (s, e) => findContentType(uiState.suggestions, s, e),
-        });
+        await historyRecorder.recordRemaining(result.data?.results);
       } catch (err) {
         log.warn("Failed to record batch clips to history", {
           err: errMsg(err),
         });
       }
+      setExportState("done", null);
+      broadcastSSE("job-complete", { jobId, result: result.data });
     })
     .catch((err) => {
       job.status = "error";
       job.error = err.message;
       job.message = `Error: ${err.message}`;
+      setExportState("review", null);
       broadcastSSE("job-error", { jobId, error: err.message });
     });
 });
@@ -1160,6 +1238,16 @@ app.patch("/api/clips/:id", async (req, res) => {
     res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "edit failed" });
     return;
   }
+  res.json({ ok: true });
+});
+
+app.delete("/api/clips/:id", async (req, res) => {
+  const r = await runCli(["clips", "delete", req.params.id, "--yes"]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "delete failed" });
+    return;
+  }
+  broadcastSSE("history-updated", { jobId: null, count: 1 });
   res.json({ ok: true });
 });
 
@@ -1965,6 +2053,7 @@ app.get("/api/ui-state", (_req, res) => {
   res.json({
     videoPath: uiState.videoPath,
     filePath: uiState.filePath,
+    activeExportJobId: uiState.activeExportJobId,
     phase: uiState.phase,
     settings: uiState.settings,
     selectedClips: selected,
@@ -2089,11 +2178,18 @@ app.post("/api/mcp/export", async (req, res) => {
   };
   jobs.set(jobId, job);
 
+  const historyRecorder = createBatchHistoryRecorder({
+    jobId,
+    sourceVideo: videoPath,
+    transcriptWords,
+    defaultCaptionStyle: captionStyle,
+    defaultCropStrategy: cropStrategy,
+    label: "MCP export",
+  });
+
   // Broadcast to UI so it can track progress
   broadcastSSE("export-started", { jobId, clipCount: styledClips.length });
-  uiState.phase = "exporting";
-  uiState.lastUpdated = Date.now();
-  persistState();
+  setExportState("exporting", jobId);
 
   res.json({ job_id: jobId, status: "running", clipCount: styledClips.length });
 
@@ -2112,6 +2208,7 @@ app.post("/api/mcp/export", async (req, res) => {
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
+        historyRecorder.recordProgress(event);
         broadcastSSE("job-update", {
           jobId,
           progress: event.percent,
@@ -2126,24 +2223,20 @@ app.post("/api/mcp/export", async (req, res) => {
       job.result = result.data;
       // Record clips to history
       try {
-        await clipsHistory.recordBatchResults(result.data?.results, {
-          sourceVideo: videoPath,
-          transcriptWords,
-          defaultCaptionStyle: captionStyle,
-          defaultCropStrategy: cropStrategy,
-          contentTypeFor: (s, e) => findContentType(uiState.suggestions, s, e),
-        });
+        await historyRecorder.recordRemaining(result.data?.results);
       } catch (err) {
         log.warn("Failed to record batch export clips to history", {
           err: errMsg(err),
         });
       }
+      setExportState("done", null);
       broadcastSSE("job-complete", { jobId, result: result.data });
     })
     .catch((err) => {
       job.status = "error";
       job.error = err.message;
       job.message = `Error: ${err.message}`;
+      setExportState("review", null);
       broadcastSSE("job-error", { jobId, error: err.message });
     });
 });

@@ -18,6 +18,7 @@ written by the other language (e.g. Phase 2 metrics) are never clobbered.
 
 import json
 import os
+import shutil
 from typing import Optional
 
 from config.paths import paths
@@ -66,6 +67,49 @@ def find_clip(clip_id: str) -> Optional[dict]:
             return e
     prefix_matches = [e for e in entries if str(e.get("id", "")).startswith(clip_id)]
     return prefix_matches[0] if len(prefix_matches) == 1 else None
+
+
+def _clip_sidecar_paths(clip_id: str) -> list[str]:
+    """Per-clip sidecar files (words/recipe/reframe) and the thumbnail dir."""
+    history_dir = os.path.dirname(_CLIPS_HISTORY_PATH)
+    return [
+        os.path.join(history_dir, "words", f"{clip_id}.json"),
+        os.path.join(history_dir, "recipes", f"{clip_id}.json"),
+        os.path.join(history_dir, "reframe", f"{clip_id}.json"),
+    ]
+
+
+def delete_clip(clip_id: str) -> Optional[dict]:
+    """Remove a clip from history along with its rendered output and sidecars.
+
+    Returns the removed entry, or None if no clip matched. The source video is
+    never touched — only artifacts podcli rendered for this clip.
+    """
+    target = find_clip(clip_id)
+    if target is None:
+        return None
+    full_id = str(target.get("id"))
+    entries = load_clips_history()
+    save_clips_history([e for e in entries if str(e.get("id")) != full_id])
+
+    artifacts = list(_clip_sidecar_paths(full_id))
+    output_path = target.get("output_path")
+    if output_path:
+        artifacts.append(output_path)
+    for path in artifacts:
+        try:
+            if path and os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            pass
+
+    thumb_dir = os.path.join(paths["output"], "thumbnails", full_id)
+    try:
+        if os.path.isdir(thumb_dir):
+            shutil.rmtree(thumb_dir)
+    except OSError:
+        pass
+    return target
 
 
 def update_clip(clip_id: str, **fields) -> Optional[dict]:

@@ -805,6 +805,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
           if (d.deselectedIndices !== undefined) setDeselected(new Set(d.deselectedIndices));
           else if (d.suggestions && !d.deselectedIndices) setDeselected(new Set());
           if (d.phase) setPhase(d.phase);
+          if (d.activeExportJobId) setBatchJobId(d.activeExportJobId);
           if (d.videoPath !== undefined) setVideoPath(d.videoPath);
           if (d.transcript) { setTranscript(d.transcript); if (d.videoPath) autoTranscribeRef.current = d.videoPath; }
           if (d.rawTranscriptText && !transcript) setTranscriptText(d.rawTranscriptText);
@@ -825,11 +826,13 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
           if (phase === 'exporting' || sseEvent.data.result?.results) {
             setPhase('done');
             setResults(sseEvent.data.result?.results || []);
+            setBatchJobId(null);
           }
         } else if (sseEvent.type === 'job-error') {
           if (phase === 'exporting') {
             setError('Export failed: ' + (sseEvent.data.error || 'Unknown error'));
             setPhase('review');
+            setBatchJobId(null);
           }
         }
       }, [sseEvent]);
@@ -906,8 +909,8 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
       };
 
       useEffect(() => {
-        if (batchStream?.status === 'done') { setPhase('done'); setResults(batchStream.result?.results || []); }
-        if (batchStream?.status === 'error') { setError('Export failed: ' + batchStream.error); setPhase('review'); }
+        if (batchStream?.status === 'done') { setPhase('done'); setResults(batchStream.result?.results || []); setBatchJobId(null); }
+        if (batchStream?.status === 'error') { setError('Export failed: ' + batchStream.error); setPhase('review'); setBatchJobId(null); }
       }, [batchStream?.status]);
 
       const retryClip = async (idx) => {

@@ -142,7 +142,7 @@ export default function ReframeEditor({
         </div>
 
         <div ref={stageRef} className="reframe-stage" onPointerDown={pointer} onPointerMove={pointer}>
-          <video ref={videoRef} src={`/api/clips/${clipId}/source`} muted playsInline preload="auto"
+          <video ref={videoRef} src={`/api/clips/${clipId}/source`} playsInline preload="auto"
             onLoadedMetadata={onMeta} onTimeUpdate={onTimeUpdate} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} />
           <div className="reframe-box" style={{ left: `${centerPct - half}%`, width: `${boxPct}%` }} />
         </div>
