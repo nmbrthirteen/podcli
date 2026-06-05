@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import sys
+import textwrap
 import time
 
 _env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
@@ -356,15 +357,10 @@ def cmd_process(args):
             print(f"  Warning: Outro '{args.outro}' not found (checked assets and filesystem)", file=sys.stderr)
             config["outro_path"] = args.outro
     elif not config.get("outro_path"):
-        # Auto-detect outro from registered assets
-        try:
-            from services.asset_store import list_assets as _list_assets_auto
-            for a in _list_assets_auto():
-                if a["type"] == "video" and os.path.exists(a["path"]):
-                    config["outro_path"] = a["path"]
-                    break
-        except Exception:
-            pass
+        from services.asset_store import default_outro
+        auto_outro = default_outro()
+        if auto_outro:
+            config["outro_path"] = auto_outro
     if args.time_adjust is not None:
         config["time_adjust"] = args.time_adjust
     if args.no_energy:
@@ -994,8 +990,16 @@ class _Spinner:
         print(f"\r{self._indent}{'':60}\r", end="")
 
 
+def _wrap_text(text: str, indent: str) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 100)
+    return textwrap.fill(text, width=width, initial_indent=indent, subsequent_indent=indent)
+
+
 def _print_clips(clips: list):
     """Print clip list in the standard format."""
+    width = min(shutil.get_terminal_size((100, 24)).columns, 100)
+    title_indent = " " * 14
+    why_indent = " " * 14
     for i, c in enumerate(clips):
         m_s = int(c["start_second"]) // 60
         s_s = int(c["start_second"]) % 60
@@ -1007,9 +1011,10 @@ def _print_clips(clips: list):
         cuts_tag = f" ({n_segs} cuts)" if n_segs > 1 else ""
         selected = c.get("_selected", True)
         marker = "  ✓" if selected else "  ✗"
-        print(f"        {marker} {i+1}. [{m_s}:{s_s:02d} → +{c['duration']}s] {score_str}{type_tag}{cuts_tag} {c['title'][:50]}")
+        header = f"        {marker} {i+1}. [{m_s}:{s_s:02d} → +{c['duration']}s] {score_str}{type_tag}{cuts_tag} "
+        print(textwrap.fill(c.get("title", ""), width=width, initial_indent=header, subsequent_indent=title_indent))
         if c.get("why"):
-            print(f"              {c['why'][:70]}")
+            print(textwrap.fill(c["why"], width=width, initial_indent=why_indent, subsequent_indent=why_indent))
 
 
 def _find_moment_with_claude(description: str, segments: list, existing_clips: list) -> list:
@@ -1259,9 +1264,9 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
                         s_s = int(f_clip["start_second"]) % 60
                         print(f"         [{m_s}:{s_s:02d} → +{f_clip['duration']}s]")
                         if f_clip.get("quote"):
-                            print(f"         {dim}\"{f_clip['quote'][:80]}\"{reset}")
+                            print(f"{dim}{_wrap_text(chr(34) + f_clip['quote'] + chr(34), '         ')}{reset}")
                         if f_clip.get("why"):
-                            print(f"         {dim}{f_clip['why'][:80]}{reset}")
+                            print(f"{dim}{_wrap_text(f_clip['why'], '         ')}{reset}")
 
                     add = questionary.confirm(
                         f"Add {len(found)} found clip{'s' if len(found) > 1 else ''} to the list?",
@@ -1390,7 +1395,7 @@ def _post_render_loop(
 
     for idx, r in enumerate(rendered):
         clip = r["clip"]
-        print(f"\n  {accent}Clip {idx+1}/{len(rendered)}:{reset} {clip['title'][:50]}")
+        print(f"\n  {accent}Clip {idx+1}/{len(rendered)}:{reset} {clip['title']}")
         _open_clip(r)
 
         while True:
@@ -1534,7 +1539,7 @@ def _post_render_loop(
                         s_s = int(f_clip["start_second"]) % 60
                         print(f"         [{m_s}:{s_s:02d} → +{f_clip['duration']}s]")
                         if f_clip.get("quote"):
-                            print(f"         {dim}\"{f_clip['quote'][:80]}\"{reset}")
+                            print(f"{dim}{_wrap_text(chr(34) + f_clip['quote'] + chr(34), '         ')}{reset}")
 
                     render_it = questionary.confirm(
                         f"Render {len(found)} clip{'s' if len(found) > 1 else ''}?",
@@ -2118,57 +2123,115 @@ def cmd_init_thumbnail(args):
 def cmd_thumbnails(args):
     """Generate thumbnail variations for a title."""
     from services.thumbnail_ai import generate_variations
-    from services.asset_store import resolve as resolve_asset
+    from services.asset_store import resolve as resolve_asset, resolve_logo
 
     accent = "\033[38;2;212;135;74m"
     green = "\033[38;2;74;222;128m"
     gray = "\033[38;5;245m"
+    red = "\033[38;2;248;113;113m"
     bold = "\033[1m"
     reset = "\033[0m"
 
-    logo = None
-    if args.logo:
-        logo = resolve_asset(args.logo)
-    else:
-        # Auto-use first logo asset
-        try:
-            from services.asset_store import list_assets
-            logos = [a for a in list_assets() if a["type"] == "logo" and os.path.exists(a["path"])]
-            if logos:
-                logo = logos[0]["path"]
-        except Exception:
-            pass
+    logo = resolve_logo(args.logo)
 
     photo = None
     if args.photo:
         photo = resolve_asset(args.photo)
 
-    print(f"\n  {bold}Generating {args.variations} thumbnail variations...{reset}")
-    print(f"  Title: {accent}{args.title}{reset}")
-
     video = getattr(args, "video", None)
+    as_json = getattr(args, "json", False)
+
+    # An exact timestamp wins: extract that frame from the video and use it as the photo.
+    timestamp = getattr(args, "timestamp", None)
+    if photo is None and video and timestamp is not None:
+        if not os.path.exists(video):
+            print(f"  {red}✗{reset} Video not found: {video}", file=sys.stderr)
+            sys.exit(1)
+        import cv2
+        os.makedirs(args.output, exist_ok=True)
+        cap = cv2.VideoCapture(video)
+        cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
+        ok, frame = cap.read()
+        cap.release()
+        if ok:
+            photo = os.path.join(args.output, "_picked_frame.png")
+            cv2.imwrite(photo, frame)
+
+    if not as_json:
+        print(f"\n  {bold}Generating {args.variations} thumbnail variations...{reset}")
+        print(f"  Title: {accent}{args.title}{reset}")
 
     paths = generate_variations(
         title=args.title,
         output_dir=args.output,
         photo_path=photo,
         video_path=video,
+        start_second=getattr(args, "start", None),
+        end_second=getattr(args, "end", None),
         logo_path=logo,
         config={"variations": args.variations},
+        line1=getattr(args, "line1", None),
+        line2=getattr(args, "line2", None),
     )
+
+    if as_json:
+        print(json.dumps({"paths": paths}))
+        return
 
     for p in paths:
         print(f"  {green}✓{reset} {p}")
+    print(f"\n  {gray}Open the folder to preview and pick the best one.{reset}\n")
 
-    print(f"\n  {gray}Open the folder to preview and pick the best one.{reset}")
-    print(f"  {gray}Edit .podcli/thumbnail-config.json to customize colors, fonts, layout.{reset}\n")
+
+def cmd_bake_thumbnail(args):
+    """Composite a thumbnail PNG into a clip as an opening (or closing) card, in place."""
+    import tempfile, shutil
+    from services.thumbnail_ai import thumbnail_to_video_frame
+    from services.video_processor import concat_outro, _get_media_duration_seconds
+
+    green = "\033[38;2;74;222;128m"
+    red = "\033[38;2;248;113;113m"
+    gray = "\033[38;5;245m"
+    reset = "\033[0m"
+    if not os.path.exists(args.clip):
+        print(f"  {red}✗{reset} Clip not found: {args.clip}", file=sys.stderr); sys.exit(1)
+    if not os.path.exists(args.image):
+        print(f"  {red}✗{reset} Image not found: {args.image}", file=sys.stderr); sys.exit(1)
+
+    work = tempfile.mkdtemp(prefix="bake_thumb_")
+    try:
+        clip = args.clip
+        # Strip a prior card off the start, if asked (avoids stacking on re-bake).
+        if args.strip_start and args.strip_start > 0.05:
+            total = _get_media_duration_seconds(clip, default=0.0)
+            if total > args.strip_start + 0.2:
+                from utils.proc import run as proc_run
+                trimmed = os.path.join(work, "trimmed.mp4")
+                proc_run(["ffmpeg", "-y", "-ss", str(args.strip_start), "-i", clip, "-c", "copy",
+                          "-movflags", "+faststart", trimmed], timeout=120, check=False)
+                if os.path.exists(trimmed):
+                    clip = trimmed
+
+        card = os.path.join(work, "card.mp4")
+        thumbnail_to_video_frame(args.image, card, duration=args.duration)
+        out = os.path.join(work, "baked.mp4")
+        if args.position == "start":
+            concat_outro(card, clip, out, crossfade_duration=0.0, transition="fade")
+        else:
+            concat_outro(clip, card, out, crossfade_duration=0.0, transition="fade")
+        if not os.path.exists(out):
+            print(f"  {red}✗{reset} Bake failed", file=sys.stderr); sys.exit(1)
+        shutil.move(out, args.clip)
+        print(f"  {green}✓{reset} Baked thumbnail card ({args.position}) into {os.path.basename(args.clip)}")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def cmd_swap_thumbnail(args):
     """Regenerate and swap the thumbnail on an existing rendered clip."""
     from services.thumbnail_ai import generate_variations, thumbnail_to_video_frame
     from services.video_processor import concat_outro, _get_media_duration_seconds
-    from services.asset_store import resolve as resolve_asset
+    from services.asset_store import resolve_logo
 
     accent = "\033[38;2;212;135;74m"
     green = "\033[38;2;74;222;128m"
@@ -2195,17 +2258,7 @@ def cmd_swap_thumbnail(args):
         print(f"  ✗ Source video not found: {source_video}", file=sys.stderr)
         sys.exit(1)
 
-    logo = None
-    if getattr(args, "logo", None):
-        logo = resolve_asset(args.logo)
-    else:
-        try:
-            from services.asset_store import list_assets
-            logos = [a for a in list_assets() if a["type"] == "logo" and os.path.exists(a["path"])]
-            if logos:
-                logo = logos[0]["path"]
-        except Exception:
-            pass
+    logo = resolve_logo(getattr(args, "logo", None))
 
     # Step 1: Trim the old thumbnail from the clip
     clip_duration = _get_media_duration_seconds(clip_path, default=0.0)
@@ -2242,9 +2295,16 @@ def cmd_swap_thumbnail(args):
     start_sec = getattr(args, "start", None)
     end_sec = getattr(args, "end", None)
 
-    # If exact timestamp given, extract that specific frame
+    # A user-supplied image wins over any frame extraction.
     frame_path = None
-    if timestamp is not None:
+    custom_image = getattr(args, "image", None)
+    if custom_image:
+        if not os.path.exists(custom_image):
+            print(f"  ✗ Image not found: {custom_image}", file=sys.stderr)
+            sys.exit(1)
+        frame_path = custom_image
+        print(f"  {green}✓{reset} Using uploaded image")
+    if frame_path is None and timestamp is not None:
         import cv2
         cap = cv2.VideoCapture(source_video)
         cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
@@ -2511,6 +2571,240 @@ def _print_config_result(action: str, data: dict) -> None:
     if action == "use":
         print(f"\n  {green}✓{reset} Activated config root")
         print(f"    {gray}{data.get('home')}{reset}\n")
+
+
+def cmd_clips(args):
+    """Browse and edit saved clips (.podcli/history/clips.json)."""
+    from services.clips_history import (
+        list_clips,
+        get_clips_by_source,
+        find_clip,
+        update_clip,
+        delete_clip,
+    )
+
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    green = "\033[38;2;74;222;128m"
+    red = "\033[38;2;248;113;113m"
+    bold = "\033[1m"
+    dim = "\033[2m"
+    reset = "\033[0m"
+
+    action = getattr(args, "clips_action", None) or "list"
+
+    if action == "list":
+        source = getattr(args, "source", None)
+        limit = getattr(args, "limit", 50)
+        clips = get_clips_by_source(source)[:limit] if source else list_clips(limit)
+        if not clips:
+            print(f"\n  {gray}No clips yet — render one with{reset} {accent}podcli process{reset}\n")
+            return
+        print(f"\n  {bold}Recent clips ({len(clips)}){reset}\n")
+        for c in clips:
+            cid = str(c.get("id", "?"))[:8]
+            ctype = c.get("content_type")
+            tag = f"  {dim}{ctype}{reset}" if ctype else ""
+            dur = c.get("duration", 0)
+            print(f"    {accent}{cid}{reset}  {bold}{c.get('title', 'untitled')}{reset}{tag}")
+            print(
+                f"      {gray}{os.path.basename(c.get('source_video', '?'))}"
+                f"  ·  {dur:.0f}s  ·  {c.get('caption_style', '?')}"
+                f"  ·  {c.get('created_at', '?')[:10]}{reset}"
+            )
+        print(f"\n  {gray}Edit:{reset} {accent}podcli clips edit <id> --title \"…\"{reset}"
+              f"   {gray}Reopen:{reset} {accent}podcli clips reopen <id>{reset}\n")
+        return
+
+    if action == "edit":
+        clip = find_clip(args.clip_id)
+        if not clip:
+            print(f"\n  {red}✗{reset} Clip not found: {args.clip_id}\n", file=sys.stderr)
+            sys.exit(1)
+        title = getattr(args, "title", None)
+        caption_style = getattr(args, "caption_style", None)
+        thumb_cfg_raw = getattr(args, "thumbnail_config", None)
+        thumbnail_config = None
+        if thumb_cfg_raw:
+            try:
+                thumbnail_config = json.loads(thumb_cfg_raw)
+            except json.JSONDecodeError as e:
+                print(f"\n  {red}✗{reset} Invalid --thumbnail-config JSON: {e}\n", file=sys.stderr)
+                sys.exit(1)
+        if title is None and caption_style is None and thumbnail_config is None:
+            print(f"\n  {red}✗{reset} Nothing to change\n", file=sys.stderr)
+            sys.exit(1)
+        updated = update_clip(args.clip_id, title=title, caption_style=caption_style, thumbnail_config=thumbnail_config)
+        print(f"\n  {green}✓{reset} Updated {accent}{str(updated['id'])[:8]}{reset}  {bold}{updated.get('title')}{reset}")
+        print(f"      {gray}caption: {updated.get('caption_style')}{reset}\n")
+        return
+
+    if action == "delete":
+        clip = find_clip(args.clip_id)
+        if not clip:
+            print(f"\n  {red}✗{reset} Clip not found: {args.clip_id}\n", file=sys.stderr)
+            sys.exit(1)
+        if not getattr(args, "yes", False):
+            title = clip.get("title", "untitled")
+            try:
+                confirm = input(f"\n  Delete {bold}{title}{reset} and its rendered file? [y/N] ")
+            except EOFError:
+                confirm = ""
+            if confirm.strip().lower() not in ("y", "yes"):
+                print(f"  {gray}Cancelled.{reset}\n")
+                return
+        removed = delete_clip(args.clip_id)
+        print(f"\n  {green}✓{reset} Deleted {accent}{str(removed['id'])[:8]}{reset}  {bold}{removed.get('title')}{reset}\n")
+        return
+
+    if action == "reopen":
+        clip = find_clip(args.clip_id)
+        if not clip:
+            print(f"\n  {red}✗{reset} Clip not found: {args.clip_id}\n", file=sys.stderr)
+            sys.exit(1)
+        source_video = clip.get("source_video", "")
+        ui_state_path = paths["uiState"]
+        existing = {}
+        try:
+            if os.path.exists(ui_state_path):
+                with open(ui_state_path) as f:
+                    existing = json.load(f) or {}
+        except Exception:
+            existing = {}
+
+        # Preserve the loaded transcript only if it belongs to the same source video.
+        same_source = os.path.basename(existing.get("videoPath", "")) == os.path.basename(source_video)
+        transcript = existing.get("transcript") if same_source else None
+
+        suggestion = {
+            "clip_id": clip.get("id"),
+            "title": clip.get("title", "clip"),
+            "start_second": clip.get("start_second", 0),
+            "end_second": clip.get("end_second", 0),
+            "duration": clip.get("duration", 0),
+            "reasoning": "",
+            "preview_text": clip.get("transcript_slice", ""),
+            "suggested_caption_style": clip.get("caption_style"),
+            "content_type": clip.get("content_type"),
+        }
+        state = {
+            "videoPath": source_video,
+            "filePath": source_video,
+            "transcript": transcript,
+            "suggestions": [suggestion],
+            "deselectedIndices": [],
+            "settings": {"captionStyle": clip.get("caption_style"), "cropStrategy": clip.get("crop_strategy")},
+            "phase": "reviewing",
+        }
+        os.makedirs(os.path.dirname(ui_state_path), exist_ok=True)
+        with open(ui_state_path, "w") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+
+        print(f"\n  {green}✓{reset} Reopened {accent}{str(clip.get('id'))[:8]}{reset}  {bold}{clip.get('title')}{reset}")
+        if not transcript:
+            print(f"      {gray}Transcript not loaded — re-transcribe in the studio to edit captions.{reset}")
+        print(f"      {gray}Open the studio:{reset} {accent}http://localhost:3847/clip/{clip.get('id')}{reset}\n")
+        return
+
+
+def cmd_youtube(args):
+    """Link clips to YouTube videos and sync performance metrics."""
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    green = "\033[38;2;74;222;128m"
+    red = "\033[38;2;248;113;113m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    action = getattr(args, "youtube_action", None) or "status"
+
+    def fail(e):
+        print(f"\n  {red}✗{reset} {e}\n", file=sys.stderr)
+        sys.exit(1)
+
+    if action == "auth":
+        from services.integrations.youtube import client
+        try:
+            client.authorize()
+            print(f"\n  {green}✓{reset} Authorized — token cached.\n")
+        except Exception as e:
+            fail(e)
+        return
+
+    if action == "status":
+        from services.integrations.youtube import client
+        from services.clips_history import load_clips_history
+        clips = load_clips_history()
+        linked = [c for c in clips if c.get("youtube_video_id")]
+        synced = [c for c in clips if c.get("metrics")]
+        print(f"\n  {bold}YouTube{reset}")
+        print(f"    {gray}Authorized:{reset} {'yes' if client.is_authorized() else 'no'}")
+        print(f"    {gray}Clips linked:{reset} {len(linked)}")
+        print(f"    {gray}Clips with metrics:{reset} {len(synced)}\n")
+        return
+
+    if action == "link":
+        from services.integrations.youtube import sync
+        as_json = getattr(args, "json", False)
+        clip_id = getattr(args, "clip_id", None)
+        video_id = getattr(args, "video_id", None)
+        if clip_id and video_id:
+            ok = sync.set_link(clip_id, video_id)
+            if as_json:
+                print(json.dumps({"ok": ok, "clip_id": clip_id, "video_id": video_id}))
+            elif ok:
+                print(f"\n  {green}✓{reset} Linked {accent}{clip_id[:8]}{reset} → {video_id}\n")
+            else:
+                fail(f"clip not found: {clip_id}")
+            return
+        try:
+            proposals = sync.propose_links()
+        except Exception as e:
+            if as_json:
+                print(json.dumps({"error": str(e)}))
+                sys.exit(1)
+            fail(e)
+        if as_json:
+            print(json.dumps({"proposals": proposals}))
+            return
+        if not proposals:
+            print(f"\n  {gray}No link proposals (all clips linked, or no uploads matched).{reset}\n")
+            return
+        print(f"\n  {bold}Proposed links ({len(proposals)}){reset}  {gray}— confirm with: youtube link <clip_id> <video_id>{reset}\n")
+        for p in proposals:
+            print(f"    {accent}{p['clip_id'][:8]}{reset} {p['clip_title']}")
+            print(f"      {gray}→ {p['video_id']}  {p['video_title']}  (score {p['score']}){reset}")
+        print()
+        return
+
+    if action == "sync":
+        from services.integrations.youtube import sync
+        csv_path = getattr(args, "csv", None)
+        try:
+            if csv_path:
+                res = sync.sync_from_csv(csv_path)
+                print(f"\n  {green}✓{reset} Matched {res['matched']} clip(s) from {res['rows']} CSV row(s).")
+                for link in res.get("links", []):
+                    tone = gray if link["score"] >= 0.8 else red
+                    print(f"    {tone}{link['score']}{reset}  \"{link['clip_title']}\"  ←  \"{link['row_title']}\"")
+                if res["unmatched"]:
+                    print(f"  {gray}Unmatched: {len(res['unmatched'])}{reset}")
+                print(f"  {gray}Low scores are fuzzy title matches — verify them.{reset}\n")
+            else:
+                n = sync.sync_metrics()
+                print(f"\n  {green}✓{reset} Synced metrics onto {n} linked clip(s).\n")
+        except Exception as e:
+            fail(e)
+        return
+
+    if action == "learn":
+        from services.integrations.youtube import learnings
+        path = learnings.write_semantic_learnings()
+        if path:
+            print(f"\n  {green}✓{reset} Wrote performance analysis to {accent}{path}{reset}\n")
+        else:
+            print(f"\n  {gray}Not enough mature clips with metrics, or no AI CLI available.{reset}\n")
+        return
 
 
 def cmd_config(args):
@@ -2928,11 +3222,18 @@ def main():
     thumb.add_argument("--video", help="Video to extract face frame from")
     thumb.add_argument("--logo", help="Logo (asset name or path)")
     thumb.add_argument("-n", "--variations", type=int, default=3, help="Number of variations")
+    thumb.add_argument("--timestamp", type=float, help="Exact second in --video to use as the frame")
+    thumb.add_argument("--start", type=float, help="Frame search window start (seconds)")
+    thumb.add_argument("--end", type=float, help="Frame search window end (seconds)")
+    thumb.add_argument("--line1", help="Explicit first thumbnail line (skips AI rewrite)")
+    thumb.add_argument("--line2", help="Explicit second thumbnail line")
+    thumb.add_argument("--json", action="store_true", help="Emit JSON {paths:[...]} to stdout")
 
     # ── swap-thumbnail ──
     st = sub.add_parser("swap-thumbnail", help="Regenerate thumbnail on an existing clip")
     st.add_argument("clip", help="Path to rendered clip (.mp4)")
     st.add_argument("--title", help="Title text (defaults to filename)")
+    st.add_argument("--image", help="Use this image as the thumbnail background instead of a video frame")
     st.add_argument("--source-video", required=True, help="Original source video (required — rendered clips have captions burned in)")
     st.add_argument("--start", type=float, help="Clip start time in source video (seconds)")
     st.add_argument("--end", type=float, help="Clip end time in source video (seconds)")
@@ -2963,6 +3264,48 @@ def main():
     kb_edit.add_argument("--content", help="Content to write (opens $EDITOR if omitted)")
     kb_del = kb_sub.add_parser("delete", help="Delete a knowledge file")
     kb_del.add_argument("filename", help="File name to delete")
+
+    # ── clips ──
+    clips_p = sub.add_parser("clips", help="Browse and edit saved clips")
+    clips_sub = clips_p.add_subparsers(dest="clips_action")
+    clips_list = clips_sub.add_parser("list", help="List recent clips")
+    clips_list.add_argument("-n", "--limit", type=int, default=50, help="Max clips to show")
+    clips_list.add_argument("--source", help="Only clips from this source video (basename match)")
+    clips_edit = clips_sub.add_parser("edit", help="Edit a clip's metadata (title, caption style)")
+    clips_edit.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
+    clips_edit.add_argument("--title", help="New title")
+    clips_edit.add_argument(
+        "--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"], help="New caption style"
+    )
+    clips_edit.add_argument("--thumbnail-config", help="Per-clip thumbnail config as a JSON string")
+    clips_reopen = clips_sub.add_parser(
+        "reopen", help="Load a clip back into the studio editor for re-iteration"
+    )
+    clips_reopen.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
+    clips_delete = clips_sub.add_parser("delete", help="Delete a clip and its rendered output")
+    clips_delete.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
+    clips_delete.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
+
+    # ── bake-thumbnail ──
+    bt = sub.add_parser("bake-thumbnail", help="Composite a thumbnail PNG into a clip as an opening card")
+    bt.add_argument("clip", help="Rendered clip (.mp4) to modify in place")
+    bt.add_argument("image", help="Thumbnail PNG to bake in")
+    bt.add_argument("--duration", type=float, default=1.5, help="Card duration seconds (default 1.5)")
+    bt.add_argument("--position", choices=["start", "end"], default="start", help="Card position")
+    bt.add_argument("--strip-start", type=float, default=0.0, help="Trim this many seconds off the start first (removes a prior card)")
+
+    # ── youtube ──
+    yt = sub.add_parser("youtube", help="Link clips to YouTube videos and sync performance")
+    yt_sub = yt.add_subparsers(dest="youtube_action")
+    yt_sub.add_parser("auth", help="Authorize via Google OAuth (loopback)")
+    yt_sub.add_parser("status", help="Show auth state + linked/synced counts")
+    yt_link = yt_sub.add_parser("link", help="Propose clip↔video links, or set one explicitly")
+    yt_link.add_argument("clip_id", nargs="?", help="Clip id (omit to list proposals)")
+    yt_link.add_argument("video_id", nargs="?", help="YouTube video id to link")
+    yt_link.add_argument("--json", action="store_true", help="Emit proposals/result as JSON (for the web UI)")
+    yt_sync = yt_sub.add_parser("sync", help="Sync performance onto linked clips")
+    yt_sync.add_argument("--csv", help="Import from a YouTube Studio analytics CSV (no auth)")
+    yt_sub.add_parser("learn", help="AI pass: analyze winners vs losers into the knowledge base")
 
     # ── config ──
     cfg = sub.add_parser("config", help="Export, import, and activate config profiles")
@@ -3015,6 +3358,8 @@ def main():
         cmd_thumbnails(args)
     elif args.command == "swap-thumbnail":
         cmd_swap_thumbnail(args)
+    elif args.command == "bake-thumbnail":
+        cmd_bake_thumbnail(args)
     elif args.command == "presets":
         cmd_presets(args)
     elif args.command == "assets":
@@ -3023,6 +3368,10 @@ def main():
         cmd_corrections(args)
     elif args.command == "knowledge":
         cmd_knowledge(args)
+    elif args.command == "clips":
+        cmd_clips(args)
+    elif args.command == "youtube":
+        cmd_youtube(args)
     elif args.command == "config":
         cmd_config(args)
     elif args.command == "cache":
@@ -3100,9 +3449,19 @@ def interactive_menu():
             _interactive_process()
             return
         elif choice == "webui":
-            print(f"\n  {gray}Starting Web UI...{reset}\n")
             import subprocess as sp
-            sp.run(["npm", "run", "ui"], cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+            repo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+            spa = os.path.join(repo, "dist", "ui", "public", "index.html")
+            port = os.environ.get("PORT", "3847")
+            ok = True
+            if not os.path.exists(spa):
+                print(f"\n  {gray}Building the studio (first run)…{reset}\n")
+                ok = sp.run(["npm", "run", "build"], cwd=repo).returncode == 0
+                if not ok:
+                    print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
+            if ok:
+                print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
+                sp.run(["npm", "run", "ui:prod"], cwd=repo)
         elif choice == "assets":
             _interactive_assets()
         elif choice == "presets":
@@ -3612,9 +3971,9 @@ def _interactive_config():
             import webbrowser
 
             port = os.environ.get("PORT", "3847")
-            url = f"http://localhost:{port}/config.html"
+            url = f"http://localhost:{port}/config"
             print(f"\n  {gray}Config UI:{reset} {url}")
-            print(f"  {dim}Start the UI first if needed: npm run ui{reset}\n")
+            print(f"  {dim}Serve the UI first if needed: npm run build && npm run ui:prod{reset}\n")
             webbrowser.open(url)
             questionary.press_any_key_to_continue(style=qstyle).ask()
             continue

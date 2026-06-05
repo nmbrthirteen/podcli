@@ -569,6 +569,7 @@ def generate_clip(
     end_second: float,
     caption_style: str = "hormozi",
     crop_strategy: str = "face",
+    crop_keyframes: list[dict] = None,
     transcript_words: list[dict] = None,
     title: str = "clip",
     output_dir: Optional[str] = None,
@@ -772,6 +773,7 @@ def generate_clip(
             transcript_words=crop_words,
             clip_start=crop_clip_start,
             face_map=face_map,
+            crop_keyframes=crop_keyframes,
         )
 
         # Step 3: Render captions (Remotion-first; ASS fallback optional)

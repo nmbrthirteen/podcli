@@ -106,6 +106,36 @@ def list_assets(asset_type: Optional[str] = None) -> list[dict]:
     return assets
 
 
+def default_logo() -> Optional[str]:
+    """First registered logo whose file still exists, else None."""
+    for a in list_assets("logo"):
+        if os.path.exists(a["path"]):
+            return a["path"]
+    return None
+
+
+def default_outro() -> Optional[str]:
+    """First registered video asset whose file still exists, else None."""
+    for a in list_assets("video"):
+        if os.path.exists(a["path"]):
+            return a["path"]
+    return None
+
+
+def resolve_logo(explicit: Optional[str]) -> Optional[str]:
+    """Resolve an explicit logo name/path, falling back to the default logo."""
+    if explicit:
+        return resolve(explicit)
+    return default_logo()
+
+
+def resolve_outro(explicit: Optional[str]) -> Optional[str]:
+    """Resolve an explicit outro name/path, falling back to the default outro."""
+    if explicit:
+        return resolve(explicit)
+    return default_outro()
+
+
 def resolve(name_or_path: str) -> Optional[str]:
     """
     Resolve a name or path to an absolute file path.

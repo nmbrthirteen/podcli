@@ -17,11 +17,13 @@ import {
   statSync,
   readFileSync,
   writeFileSync,
+  chmodSync,
+  realpathSync,
 } from "fs";
 import { mkdir, readdir, unlink } from "fs/promises";
 import path from "path";
 import { join, dirname, basename, extname, resolve } from "path";
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
@@ -34,18 +36,18 @@ import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths } from "../config/paths.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
+import { sliceTranscript, sliceWords, findContentType } from "../utils/transcript.js";
+import { errMsg } from "../utils/errors.js";
 import type {
   BatchClipsResult,
   ClipResult,
+  ProgressEvent,
   SuggestedClip,
   TranscriptResult,
+  WordTimestamp,
 } from "../models/index.js";
 
 const log = childLogger("web-server");
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -61,8 +63,10 @@ const knowledgeBase = new KnowledgeBase();
 
 // --- Path Traversal Protection ---
 function safePath(base: string, filename: string): string | null {
+  const root = path.resolve(base);
   const resolved = path.resolve(base, filename);
-  if (!resolved.startsWith(path.resolve(base))) return null;
+  // Compare on a path boundary so "/data/output-evil" isn't accepted as inside "/data/output".
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) return null;
   return resolved;
 }
 
@@ -91,6 +95,7 @@ const sessionTranscripts = new Map<string, ServerTranscript>();
 interface UIState {
   videoPath: string;
   filePath: string;
+  activeExportJobId: string | null;
   transcript: ServerTranscript | null;
   rawTranscriptText: string;
   suggestions: SuggestedClip[];
@@ -120,6 +125,7 @@ function loadPersistedState(): UIState {
       return {
         videoPath: saved.videoPath || "",
         filePath: saved.filePath || "",
+        activeExportJobId: null,
         transcript: saved.transcript || null,
         rawTranscriptText: saved.rawTranscriptText || "",
         suggestions: saved.suggestions || [],
@@ -145,6 +151,7 @@ function loadPersistedState(): UIState {
   return {
     videoPath: "",
     filePath: "",
+    activeExportJobId: null,
     transcript: null,
     rawTranscriptText: "",
     suggestions: [],
@@ -176,8 +183,38 @@ function persistState() {
 }
 
 // SSE clients for the global event bus
-import type { Response } from "express";
+import type { Request, Response } from "express";
 const sseClients: Response[] = [];
+
+function streamVideo(req: Request, res: Response, filePath: string, contentType = "video/mp4") {
+  const fileSize = statSync(filePath).size;
+  const range = req.headers.range;
+  const onErr = (stream: ReturnType<typeof createReadStream>) =>
+    stream.on("error", () => res.destroy());
+  if (range) {
+    const [s, e] = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(s, 10);
+    const end = e ? parseInt(e, 10) : fileSize - 1;
+    if (Number.isNaN(start) || Number.isNaN(end) || start > end || start < 0 || end >= fileSize) {
+      res.writeHead(416, { "Content-Range": `bytes */${fileSize}` }).end();
+      return;
+    }
+    res.writeHead(206, {
+      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+      "Accept-Ranges": "bytes",
+      "Content-Length": end - start + 1,
+      "Content-Type": contentType,
+    });
+    const stream = createReadStream(filePath, { start, end });
+    onErr(stream);
+    stream.pipe(res);
+  } else {
+    res.writeHead(200, { "Content-Length": fileSize, "Content-Type": contentType });
+    const stream = createReadStream(filePath);
+    onErr(stream);
+    stream.pipe(res);
+  }
+}
 
 function broadcastSSE(event: string, data: unknown) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -188,6 +225,74 @@ function broadcastSSE(event: string, data: unknown) {
       sseClients.splice(i, 1);
     }
   }
+}
+
+function broadcastHistoryUpdated(jobId: string | null, clips: unknown[]) {
+  if (clips.length === 0) return;
+  broadcastSSE("history-updated", { jobId, count: clips.length });
+}
+
+function setExportState(phase: string, activeExportJobId: string | null) {
+  uiState.phase = phase;
+  uiState.activeExportJobId = activeExportJobId;
+  uiState.lastUpdated = Date.now();
+  persistState();
+}
+
+function createBatchHistoryRecorder({
+  jobId,
+  sourceVideo,
+  transcriptWords,
+  defaultCaptionStyle,
+  defaultCropStrategy,
+  label,
+}: {
+  jobId: string;
+  sourceVideo: string;
+  transcriptWords: WordTimestamp[];
+  defaultCaptionStyle?: string;
+  defaultCropStrategy?: string;
+  label: string;
+}) {
+  const recordedClipIndexes = new Set<number>();
+  const pendingWrites: Promise<void>[] = [];
+
+  const recordRows = async (rows: BatchClipsResult["results"]) => {
+    const recorded = await clipsHistory.recordBatchResults(rows, {
+      sourceVideo,
+      transcriptWords,
+      defaultCaptionStyle,
+      defaultCropStrategy,
+      contentTypeFor: (s, e) => findContentType(uiState.suggestions, s, e),
+    });
+    for (const row of rows) {
+      if (row.status === "success" && row.output_path && typeof row.clip_index === "number") {
+        recordedClipIndexes.add(row.clip_index);
+      }
+    }
+    broadcastHistoryUpdated(jobId, recorded);
+  };
+
+  return {
+    recordProgress(event: ProgressEvent) {
+      if (event.stage !== "clip_complete" || !event.clip_result) return;
+      const write = recordRows([event.clip_result]).catch((err) => {
+        log.warn(`Failed to record completed ${label} clip to history`, {
+          err: errMsg(err),
+        });
+      });
+      pendingWrites.push(write);
+    },
+    async recordRemaining(results: BatchClipsResult["results"] | undefined) {
+      await Promise.allSettled(pendingWrites);
+      const remaining = results?.filter(
+        (row) =>
+          typeof row.clip_index !== "number" ||
+          !recordedClipIndexes.has(row.clip_index),
+      );
+      if (remaining?.length) await recordRows(remaining);
+    },
+  };
 }
 
 // --- Middleware ---
@@ -501,6 +606,7 @@ app.post("/api/create-clip", async (req, res) => {
     outro_path = null,
     clean_fillers = false,
     allow_ass_fallback = false,
+    content_type = null,
   } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
@@ -593,28 +699,38 @@ app.post("/api/create-clip", async (req, res) => {
       job.progress = 100;
       job.message = "Clip created!";
       job.result = result.data;
-      broadcastSSE("job-complete", { jobId, result: result.data });
       // Record to history
       try {
         const d = result.data;
-        await clipsHistory.record({
+        const rec = await clipsHistory.record({
           source_video: video_path,
           start_second,
           end_second,
           caption_style,
           crop_strategy,
           logo_path: logo_path || undefined,
+          outro_path: outro_path || undefined,
           title,
           output_path: d?.output_path || "",
           file_size_mb: d?.file_size_mb || 0,
           duration: d?.duration || 0,
+          content_type: content_type || undefined,
+          transcript_slice: sliceTranscript(transcript_words, start_second, end_second),
         });
+        const clipWords = sliceWords(transcript_words, start_second, end_second);
+        await clipsHistory.saveWords(rec.id, clipWords);
+        await clipsHistory.saveRecipe(rec.id, {
+          caption_style, crop_strategy, logo_path: logo_path || null, outro_path: outro_path || null,
+          clean_fillers, transcript_words: clipWords,
+        });
+        broadcastHistoryUpdated(jobId, [rec]);
       } catch (err) {
         log.warn("Failed to record clip to history", {
           title,
           err: errMsg(err),
         });
       }
+      broadcastSSE("job-complete", { jobId, result: result.data });
     })
     .catch((err) => {
       job.status = "error";
@@ -683,10 +799,15 @@ app.post("/api/batch-clips", async (req, res) => {
   };
   jobs.set(jobId, job);
 
+  const historyRecorder = createBatchHistoryRecorder({
+    jobId,
+    sourceVideo: video_path,
+    transcriptWords: transcript_words,
+    label: "batch",
+  });
+
   broadcastSSE("export-started", { jobId, clipCount: clips.length });
-  uiState.phase = "exporting";
-  uiState.lastUpdated = Date.now();
-  persistState();
+  setExportState("exporting", jobId);
 
   res.json({ job_id: jobId, status: "running" });
 
@@ -707,6 +828,7 @@ app.post("/api/batch-clips", async (req, res) => {
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
+        historyRecorder.recordProgress(event);
         broadcastSSE("job-update", {
           jobId,
           progress: event.percent,
@@ -719,37 +841,22 @@ app.post("/api/batch-clips", async (req, res) => {
       job.progress = 100;
       job.message = "Batch complete!";
       job.result = result.data;
-      broadcastSSE("job-complete", { jobId, result: result.data });
       // Record successful clips to history
       try {
-        const d = result.data;
-        if (d?.results) {
-          for (const r of d.results) {
-            if (r.status === "success" && r.output_path) {
-              await clipsHistory.record({
-                source_video: video_path,
-                start_second: r.start_second || 0,
-                end_second: r.end_second || 0,
-                caption_style: r.caption_style || "hormozi",
-                crop_strategy: r.crop_strategy || "speaker",
-                title: r.title || "clip",
-                output_path: r.output_path,
-                file_size_mb: r.file_size_mb || 0,
-                duration: r.duration || 0,
-              });
-            }
-          }
-        }
+        await historyRecorder.recordRemaining(result.data?.results);
       } catch (err) {
         log.warn("Failed to record batch clips to history", {
           err: errMsg(err),
         });
       }
+      setExportState("done", null);
+      broadcastSSE("job-complete", { jobId, result: result.data });
     })
     .catch((err) => {
       job.status = "error";
       job.error = err.message;
       job.message = `Error: ${err.message}`;
+      setExportState("review", null);
       broadcastSSE("job-error", { jobId, error: err.message });
     });
 });
@@ -867,32 +974,7 @@ app.get("/api/preview/:filename", (req, res) => {
     res.status(404).json({ error: "File not found" });
     return;
   }
-
-  const stat = statSync(filePath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
-
-  if (range) {
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-    const chunkSize = end - start + 1;
-
-    const stream = createReadStream(filePath, { start, end });
-    res.writeHead(206, {
-      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-      "Accept-Ranges": "bytes",
-      "Content-Length": chunkSize,
-      "Content-Type": "video/mp4",
-    });
-    stream.pipe(res);
-  } else {
-    res.writeHead(200, {
-      "Content-Length": fileSize,
-      "Content-Type": "video/mp4",
-    });
-    createReadStream(filePath).pipe(res);
-  }
+  streamVideo(req, res, filePath);
 });
 
 /**
@@ -922,40 +1004,61 @@ app.get("/api/stream-source", (req, res) => {
     return;
   }
 
-  const stat = statSync(filePath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
-  const ext = extname(filePath).toLowerCase();
   const mimeTypes: Record<string, string> = {
-    ".mp4": "video/mp4",
     ".webm": "video/webm",
     ".mov": "video/quicktime",
     ".avi": "video/x-msvideo",
     ".mkv": "video/x-matroska",
-    ".m4v": "video/mp4",
   };
-  const contentType = mimeTypes[ext] || "video/mp4";
+  streamVideo(req, res, filePath, mimeTypes[extname(filePath).toLowerCase()] || "video/mp4");
+});
 
-  if (range) {
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-    const chunkSize = end - start + 1;
-    const stream = createReadStream(filePath, { start, end });
-    res.writeHead(206, {
-      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-      "Accept-Ranges": "bytes",
-      "Content-Length": chunkSize,
-      "Content-Type": contentType,
-    });
-    stream.pipe(res);
-  } else {
-    res.writeHead(200, {
-      "Content-Length": fileSize,
-      "Content-Type": contentType,
-    });
-    createReadStream(filePath).pipe(res);
+app.get("/api/thumbnail-config", (_req, res) => {
+  try {
+    res.json(JSON.parse(readFileSync(paths.thumbnailConfig, "utf-8")));
+  } catch {
+    res.json({});
   }
+});
+
+app.put("/api/thumbnail-config", (req, res) => {
+  try {
+    let current: Record<string, unknown> = {};
+    try { current = JSON.parse(readFileSync(paths.thumbnailConfig, "utf-8")); } catch { /* new file */ }
+    const merged = { ...current, ...(req.body || {}) };
+    writeFileSync(paths.thumbnailConfig, JSON.stringify(merged, null, 2), "utf-8");
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/image", (req, res) => {
+  const raw = req.query.path as string;
+  const mimes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
+  const mime = raw ? mimes[extname(raw).toLowerCase()] : undefined;
+  if (!mime) {
+    res.status(403).json({ error: "unsupported type" });
+    return;
+  }
+  // realpath defeats symlinks pointing outside the allowed roots; home is
+  // excluded so the integrations/token files under it are never servable.
+  let resolved: string;
+  try {
+    resolved = realpathSync(path.resolve(raw));
+  } catch {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  const allowedRoots = [paths.output, paths.working, paths.assets].map((p) => path.resolve(p));
+  if (!allowedRoots.some((root) => resolved === root || resolved.startsWith(root + path.sep))) {
+    res.status(403).json({ error: "access denied" });
+    return;
+  }
+  res.writeHead(200, { "Content-Type": mime, "Cache-Control": "no-cache" });
+  const stream = createReadStream(resolved);
+  stream.on("error", () => res.destroy());
+  stream.pipe(res);
 });
 
 registerConfigIntegrationRoutes(app, { executor, uploadDir });
@@ -1123,6 +1226,400 @@ app.get("/api/history", async (req, res) => {
   } catch (err: any) {
     res.json([]);
   }
+});
+
+// Clip edits route through the Python CLI so the web UI and `podcli clips`
+// share one history writer (preserves unknown fields like Phase 2 metrics).
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").trim();
+
+function runPy(scriptAndArgs: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(paths.pythonPath, scriptAndArgs, {
+      env: { ...process.env, PYTHONUNBUFFERED: "1", PODCLI_HOME: paths.home, PODCLI_DATA: paths.dataDir },
+    });
+    let stdout = "", stderr = "";
+    proc.stdout.on("data", (d) => (stdout += d));
+    proc.stderr.on("data", (d) => (stderr += d));
+    proc.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    proc.on("error", (e) => resolve({ code: 1, stdout, stderr: String(e) }));
+  });
+}
+
+const runCli = (args: string[]) =>
+  runPy([join(paths.projectRoot, "backend", "cli.py"), "--no-banner", ...args]);
+
+// Composite a thumbnail PNG onto the start of a clip. stripStart > 0 removes a
+// prior card first (avoids stacking on re-bake). Returns the bake's success.
+async function bakeThumbnailCard(clipPath: string, image: string, stripStart = 0): Promise<{ ok: boolean; error?: string }> {
+  const r = await runCli([
+    "bake-thumbnail", clipPath, image, "--position", "start",
+    ...(stripStart ? ["--strip-start", String(stripStart)] : []),
+  ]);
+  return r.code === 0 ? { ok: true } : { ok: false, error: stripAnsi(r.stderr || r.stdout) };
+}
+
+app.patch("/api/clips/:id", async (req, res) => {
+  const { title, caption_style, thumbnail_config } = req.body || {};
+  const args = ["clips", "edit", req.params.id];
+  if (title != null) args.push("--title", String(title));
+  if (caption_style != null) args.push("--caption-style", String(caption_style));
+  if (thumbnail_config != null) args.push("--thumbnail-config", JSON.stringify(thumbnail_config));
+  if (args.length === 3) {
+    res.status(400).json({ error: "nothing to update" });
+    return;
+  }
+  const r = await runCli(args);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "edit failed" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.delete("/api/clips/:id", async (req, res) => {
+  const r = await runCli(["clips", "delete", req.params.id, "--yes"]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "delete failed" });
+    return;
+  }
+  broadcastSSE("history-updated", { jobId: null, count: 1 });
+  res.json({ ok: true });
+});
+
+app.post("/api/clips/:id/reopen", async (req, res) => {
+  const r = await runCli(["clips", "reopen", req.params.id]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "reopen failed" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/clips/:id/thumbnail", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip) {
+    res.status(404).json({ error: "clip not found" });
+    return;
+  }
+  const tc = clip.thumbnail_config || {};
+  // Standalone thumbnail generation — produces variation PNGs, never touches the clip video.
+  const outDir = join(paths.output, "thumbnails", String(clip.id));
+  const args = [
+    "thumbnails", tc.text || clip.title,
+    "--output", outDir,
+    "--variations", "3",
+    "--json",
+    "--video", clip.source_video,
+    "--start", String(clip.start_second),
+    "--end", String(clip.end_second),
+  ];
+  if (tc.image_path) args.push("--photo", String(tc.image_path));
+  else if (typeof tc.timestamp === "number") args.push("--timestamp", String(tc.timestamp));
+  if (tc.line1) args.push("--line1", String(tc.line1));
+  if (tc.line2) args.push("--line2", String(tc.line2));
+  const r = await runCli(args);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "thumbnail failed" });
+    return;
+  }
+  const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
+  let variations: string[] = [];
+  try { variations = JSON.parse(jsonLine || "{}").paths || []; } catch { /* no paths */ }
+  if (variations.length === 0) {
+    res.status(500).json({ error: "no thumbnails generated" });
+    return;
+  }
+  // Bake the chosen thumbnail into the clip as the opening card (stripping any prior card).
+  if (existsSync(clip.output_path)) {
+    const bake = await bakeThumbnailCard(clip.output_path, variations[0], clip.thumbnail_config?.card_seconds || 0);
+    if (!bake.ok) {
+      res.status(500).json({ error: `thumbnail generated but bake into clip failed: ${bake.error}` });
+      return;
+    }
+  }
+  const merged = { ...tc, preview_path: variations[0], variations, card_seconds: 1.5 };
+  await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
+  res.json({ ok: true, preview_path: variations[0], variations });
+});
+
+app.post("/api/clips/:id/thumbnail/select", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
+  const tc = clip.thumbnail_config || {};
+  const pick = String(req.body?.path || "");
+  if (!pick || !(tc.variations || []).includes(pick) || !existsSync(pick)) {
+    res.status(400).json({ error: "unknown variation" });
+    return;
+  }
+  if (existsSync(clip.output_path)) {
+    const bake = await bakeThumbnailCard(clip.output_path, pick, tc.card_seconds || 0);
+    if (!bake.ok) {
+      res.status(500).json({ error: `bake into clip failed: ${bake.error}` });
+      return;
+    }
+  }
+  await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify({ ...tc, preview_path: pick, card_seconds: 1.5 })]);
+  res.json({ ok: true, preview_path: pick });
+});
+
+app.get("/api/youtube/config", (_req, res) => {
+  try {
+    const all = JSON.parse(readFileSync(paths.integrations, "utf-8"));
+    const yt = all.youtube || {};
+    res.json({ client_id: yt.client_id || "", has_secret: !!yt.client_secret });
+  } catch {
+    res.json({ client_id: "", has_secret: false });
+  }
+});
+
+app.put("/api/youtube/config", (req, res) => {
+  try {
+    let all: Record<string, any> = {};
+    try { all = JSON.parse(readFileSync(paths.integrations, "utf-8")); } catch { /* new */ }
+    const yt = { ...(all.youtube || {}) };
+    const { client_id, client_secret } = req.body || {};
+    if (client_id !== undefined) yt.client_id = client_id;
+    if (client_secret) yt.client_secret = client_secret;
+    all.youtube = yt;
+    writeFileSync(paths.integrations, JSON.stringify(all, null, 2) + "\n", "utf-8");
+    // Holds the OAuth client secret — keep it owner-only (chmod covers the
+    // case where the file already existed with looser perms).
+    try { chmodSync(paths.integrations, 0o600); } catch { /* best effort */ }
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/youtube/status", async (_req, res) => {
+  try {
+    const clips = await clipsHistory.load();
+    res.json({
+      authorized: existsSync(join(paths.home, "youtube-token.json")),
+      linked: clips.filter((c) => c.youtube_video_id).length,
+      with_metrics: clips.filter((c) => c.metrics && (c.metrics.views != null || c.metrics.retention != null)).length,
+      total: clips.length,
+    });
+  } catch {
+    res.json({ authorized: false, linked: 0, with_metrics: 0, total: 0 });
+  }
+});
+
+app.post("/api/youtube/sync", async (req, res) => {
+  const csvPath = req.body?.csv_path;
+  const r = await runCli(["youtube", "sync", ...(csvPath ? ["--csv", String(csvPath)] : [])]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "sync failed" });
+    return;
+  }
+  res.json({ ok: true, message: stripAnsi(r.stdout) });
+});
+
+app.post("/api/youtube/learn", async (_req, res) => {
+  const r = await runCli(["youtube", "learn"]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "analysis failed" });
+    return;
+  }
+  res.json({ ok: true, message: stripAnsi(r.stdout) });
+});
+
+// Proposed clip↔video links for the authorized channel (live OAuth path).
+app.get("/api/youtube/links", async (_req, res) => {
+  const r = await runCli(["youtube", "link", "--json"]);
+  let payload: any = {};
+  try { payload = JSON.parse(r.stdout.trim().split("\n").pop() || "{}"); } catch { /* non-JSON */ }
+  if (r.code !== 0 || payload.error) {
+    res.status(400).json({ error: payload.error || stripAnsi(r.stderr || r.stdout) || "could not load proposals" });
+    return;
+  }
+  res.json({ proposals: payload.proposals || [] });
+});
+
+app.post("/api/youtube/link", async (req, res) => {
+  const { clip_id, video_id } = req.body || {};
+  if (!clip_id || !video_id) {
+    res.status(400).json({ error: "clip_id and video_id are required" });
+    return;
+  }
+  const r = await runCli(["youtube", "link", String(clip_id), String(video_id), "--json"]);
+  let payload: any = {};
+  try { payload = JSON.parse(r.stdout.trim().split("\n").pop() || "{}"); } catch { /* non-JSON */ }
+  if (r.code !== 0 || !payload.ok) {
+    res.status(400).json({ error: payload.error || "link failed (clip not found?)" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.get("/api/analytics", async (_req, res) => {
+  const clips = await clipsHistory.load();
+  const withM = clips.filter((c) => c.metrics && (c.metrics.views != null || c.metrics.retention != null));
+  const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+  const agg = (keyFn: (c: any) => string) => {
+    const groups = new Map<string, any[]>();
+    for (const c of withM) {
+      const k = keyFn(c) || "—";
+      (groups.get(k) ?? groups.set(k, []).get(k)!).push(c);
+    }
+    return Array.from(groups.entries()).map(([key, cs]) => ({
+      key,
+      count: cs.length,
+      avgViews: Math.round(avg(cs.map((c) => c.metrics?.views || 0))),
+      avgRetention: +avg(cs.map((c) => c.metrics?.retention || 0)).toFixed(1),
+      avgCtr: +avg(cs.map((c) => c.metrics?.ctr || 0)).toFixed(1),
+    })).sort((a, b) => b.avgViews - a.avgViews);
+  };
+  const lengthBucket = (d: number) => (d < 25 ? "<25s" : d < 35 ? "25–35s" : d < 45 ? "35–45s" : "45s+");
+  res.json({
+    published: withM.length,
+    total: clips.length,
+    byContentType: agg((c) => c.content_type),
+    byCaptionStyle: agg((c) => c.caption_style),
+    byLength: agg((c) => lengthBucket(c.duration || 0)),
+    top: withM
+      .slice()
+      .sort((a, b) => (b.metrics?.views || 0) - (a.metrics?.views || 0))
+      .slice(0, 12)
+      .map((c) => ({ id: c.id, title: c.title, content_type: c.content_type, caption_style: c.caption_style, duration: c.duration, metrics: c.metrics })),
+  });
+});
+
+app.get("/api/clips/:id/source", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip || !existsSync(clip.source_video)) {
+    res.status(404).json({ error: "source not found" });
+    return;
+  }
+  const srcMime: Record<string, string> = { ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".m4v": "video/mp4" };
+  streamVideo(req, res, clip.source_video, srcMime[extname(clip.source_video).toLowerCase()] || "video/mp4");
+});
+
+app.get("/api/clips/:id/reframe", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
+  res.json((await clipsHistory.loadReframe(clip.id)) || {});
+});
+
+app.get("/api/clips/:id/cuts", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip || !existsSync(clip.source_video)) { res.status(404).json({ error: "source not found" }); return; }
+  const start = clip.start_second;
+  const dur = Math.max(0.1, clip.end_second - clip.start_second);
+  // pts_time from ffmpeg scene detection is relative to -ss, not the source.
+  const proc = spawn(paths.ffmpegPath, [
+    "-ss", String(start), "-i", clip.source_video, "-t", String(dur),
+    "-vf", "select='gt(scene,0.3)',showinfo", "-an", "-f", "null", "-",
+  ]);
+  let stderr = "";
+  proc.stderr.on("data", (d) => (stderr += d));
+  proc.on("close", () => {
+    const cuts = [...stderr.matchAll(/pts_time:([\d.]+)/g)]
+      .map((m) => +(start + parseFloat(m[1])).toFixed(3))
+      .filter((t) => t > start + 0.2 && t < start + dur - 0.2);
+    res.json({ cuts: Array.from(new Set(cuts)) });
+  });
+  proc.on("error", () => res.json({ cuts: [] }));
+});
+
+app.post("/api/clips/:id/rerender", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip) {
+    res.status(404).json({ error: "clip not found" });
+    return;
+  }
+  // Editor sends source-absolute keyframes + trim; derive the render's clip-relative
+  // crop keyframes from it, and persist the editor state so reopening shows it.
+  const reframe = req.body?.reframe as { keyframes?: { tAbs: number; x_pct: number }[]; inSec?: number; outSec?: number } | undefined;
+  const startSecond = reframe && typeof reframe.inSec === "number" ? reframe.inSec
+    : typeof req.body?.start_second === "number" ? req.body.start_second : clip.start_second;
+  const endSecond = reframe && typeof reframe.outSec === "number" ? reframe.outSec
+    : typeof req.body?.end_second === "number" ? req.body.end_second : clip.end_second;
+  const keyframes = reframe?.keyframes
+    ? reframe.keyframes
+        .filter((k) => k.tAbs >= startSecond - 0.001 && k.tAbs <= endSecond + 0.001)
+        .map((k) => ({ t: +Math.max(0, k.tAbs - startSecond).toFixed(3), x_pct: k.x_pct }))
+    : req.body?.crop_keyframes;
+  if (!Array.isArray(keyframes) || keyframes.length === 0) {
+    res.status(400).json({ error: "keyframes required" });
+    return;
+  }
+  if (reframe) await clipsHistory.saveReframe(clip.id, reframe);
+  // Replay the original render recipe (logo/outro/captions/fillers) with the new
+  // manual crop, so brand elements survive the reframe.
+  const recipe = (await clipsHistory.loadRecipe(clip.id)) || {};
+  let allWords = (recipe.transcript_words as any[]) || (await clipsHistory.loadWords(clip.id)) || [];
+  if (!allWords.length) {
+    // Fallback for clips rendered before recipes existed: recover words from the cached source transcript.
+    try {
+      const t = await cache.get(clip.source_video);
+      if (t?.words?.length) allWords = t.words as any[];
+    } catch { /* no cached transcript */ }
+  }
+  // If trimmed wider/narrower, keep only words inside the new bounds.
+  const words = allWords.filter((w: any) => typeof w?.start !== "number" || (w.start >= startSecond && w.start < endSecond));
+  try {
+    const result = await executor.execute<ClipResult>("create_clip", {
+      video_path: clip.source_video,
+      start_second: startSecond,
+      end_second: endSecond,
+      caption_style: req.body?.caption_style || (recipe.caption_style as string) || clip.caption_style,
+      crop_strategy: "manual",
+      crop_keyframes: keyframes,
+      transcript_words: words,
+      logo_path: (recipe.logo_path as string) ?? clip.logo_path ?? null,
+      outro_path: (recipe.outro_path as string) ?? clip.outro_path ?? null,
+      clean_fillers: recipe.clean_fillers !== undefined ? recipe.clean_fillers : true,
+      ...(recipe.keep_segments ? { keep_segments: recipe.keep_segments } : {}),
+      title: clip.title,
+      output_dir: dirname(clip.output_path),
+    });
+    if (!result.data) throw new Error("no render output");
+    const outPath = result.data.output_path || clip.output_path;
+    // Re-bake the chosen thumbnail card onto the fresh clip (no strip needed —
+    // create_clip always renders a cardless clip).
+    const tnail = clip.thumbnail_config?.preview_path;
+    let thumbnailBaked = false;
+    if (tnail && existsSync(tnail) && existsSync(outPath)) {
+      const bake = await bakeThumbnailCard(outPath, tnail);
+      thumbnailBaked = bake.ok;
+      if (!bake.ok) {
+        res.status(500).json({ error: `reframe rendered but thumbnail bake failed: ${bake.error}` });
+        return;
+      }
+    }
+    await clipsHistory.update(clip.id, {
+      start_second: startSecond,
+      end_second: endSecond,
+      crop_strategy: "manual",
+      duration: result.data.duration ?? clip.duration,
+      file_size_mb: result.data.file_size_mb ?? clip.file_size_mb,
+      output_path: outPath,
+    });
+    res.json({ ok: true, output_path: outPath, file_size_mb: result.data.file_size_mb, thumbnail_baked: thumbnailBaked });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/clips/:id/davinci", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip) {
+    res.status(404).json({ error: "clip not found" });
+    return;
+  }
+  if (!existsSync(clip.output_path)) {
+    res.status(400).json({ error: "rendered file missing" });
+    return;
+  }
+  const cli = join(paths.projectRoot, "backend", "services", "integrations", "davinci_resolve", "cli.py");
+  const r = await runPy([cli, "--source", clip.output_path, "--title", clip.title]);
+  if (r.code !== 0) {
+    res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "export failed" });
+    return;
+  }
+  const wrote = (r.stdout.match(/wrote:\s*(.+)/) || [])[1]?.trim();
+  res.json({ ok: true, path: wrote });
 });
 
 app.get("/api/history/check", async (req, res) => {
@@ -1636,6 +2133,7 @@ app.get("/api/ui-state", (_req, res) => {
   res.json({
     videoPath: uiState.videoPath,
     filePath: uiState.filePath,
+    activeExportJobId: uiState.activeExportJobId,
     phase: uiState.phase,
     settings: uiState.settings,
     selectedClips: selected,
@@ -1760,11 +2258,18 @@ app.post("/api/mcp/export", async (req, res) => {
   };
   jobs.set(jobId, job);
 
+  const historyRecorder = createBatchHistoryRecorder({
+    jobId,
+    sourceVideo: videoPath,
+    transcriptWords,
+    defaultCaptionStyle: captionStyle,
+    defaultCropStrategy: cropStrategy,
+    label: "MCP export",
+  });
+
   // Broadcast to UI so it can track progress
   broadcastSSE("export-started", { jobId, clipCount: styledClips.length });
-  uiState.phase = "exporting";
-  uiState.lastUpdated = Date.now();
-  persistState();
+  setExportState("exporting", jobId);
 
   res.json({ job_id: jobId, status: "running", clipCount: styledClips.length });
 
@@ -1783,6 +2288,7 @@ app.post("/api/mcp/export", async (req, res) => {
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
+        historyRecorder.recordProgress(event);
         broadcastSSE("job-update", {
           jobId,
           progress: event.percent,
@@ -1797,35 +2303,20 @@ app.post("/api/mcp/export", async (req, res) => {
       job.result = result.data;
       // Record clips to history
       try {
-        const d = result.data;
-        if (d?.results) {
-          for (const r of d.results) {
-            if (r.status === "success" && r.output_path) {
-              await clipsHistory.record({
-                source_video: videoPath,
-                start_second: r.start_second || 0,
-                end_second: r.end_second || 0,
-                caption_style: r.caption_style || captionStyle,
-                crop_strategy: r.crop_strategy || cropStrategy,
-                title: r.title || "clip",
-                output_path: r.output_path,
-                file_size_mb: r.file_size_mb || 0,
-                duration: r.duration || 0,
-              });
-            }
-          }
-        }
+        await historyRecorder.recordRemaining(result.data?.results);
       } catch (err) {
         log.warn("Failed to record batch export clips to history", {
           err: errMsg(err),
         });
       }
+      setExportState("done", null);
       broadcastSSE("job-complete", { jobId, result: result.data });
     })
     .catch((err) => {
       job.status = "error";
       job.error = err.message;
       job.message = `Error: ${err.message}`;
+      setExportState("review", null);
       broadcastSSE("job-error", { jobId, error: err.message });
     });
 });
@@ -1858,6 +2349,12 @@ async function main() {
   } catch (err) {
     log.warn("Legacy cache migration skipped", { err: errMsg(err) });
   }
+
+  // SPA fallback: client-side routes (/, /episode, /clip/:id) resolve to the
+  // built index.html. Registered last so it never shadows /api or static assets.
+  app.get(/^(?!\/api\/).*/, (_req, res) => {
+    res.sendFile(join(__dirname, "public", "index.html"));
+  });
 
   app.listen(PORT, () => {
     log.info(`podcli running at http://localhost:${PORT}`);

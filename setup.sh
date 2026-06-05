@@ -141,13 +141,6 @@ install() {
 
 # ---- Launch UI ----
 launch_ui() {
-  echo "  Starting web UI..."
-  echo ""
-
-  # Ensure public files are in dist
-  mkdir -p dist/ui/public
-  cp -r src/ui/public/* dist/ui/public/ 2>/dev/null || true
-
   # Always use venv python (absolute path, no spaces issue)
   if [ -f "venv/bin/python3" ]; then
     export PYTHON_PATH="$(cd "$(pwd)" && pwd)/venv/bin/python3"
@@ -165,7 +158,15 @@ launch_ui() {
     done < .env
   fi
 
-  exec npx tsx src/ui/web-server.ts
+  # The studio is a Vite + React Router SPA; build it before serving.
+  if [ ! -f dist/ui/public/index.html ]; then
+    echo "  Building the studio UI..."
+    npm run build || { echo "  Build failed — run ./setup.sh --install first."; exit 1; }
+  fi
+
+  echo "  Studio: http://localhost:${PORT:-3847}"
+  echo ""
+  exec node dist/ui/web-server.js
 }
 
 # ---- Show MCP config ----

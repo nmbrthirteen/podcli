@@ -108,6 +108,37 @@ class AssetStoreTests(unittest.TestCase):
         # registered name points to deleted file → returns None (not the dead path)
         self.assertIsNone(asset_store.resolve("missing"))
 
+    def test_default_logo_returns_first_existing_logo(self):
+        self.assertIsNone(asset_store.default_logo())
+        asset_store.register("l1", self._make_file("l1.png"), "logo")
+        asset_store.register("l2", self._make_file("l2.png"), "logo")
+        self.assertTrue(asset_store.default_logo().endswith("l1.png"))
+
+    def test_default_logo_skips_deleted_files(self):
+        first = self._make_file("first.png")
+        asset_store.register("first", first, "logo")
+        second = self._make_file("second.png")
+        asset_store.register("second", second, "logo")
+        os.remove(first)
+        self.assertTrue(asset_store.default_logo().endswith("second.png"))
+
+    def test_resolve_logo_prefers_explicit_over_default(self):
+        asset_store.register("fallback", self._make_file("fb.png"), "logo")
+        chosen = self._make_file("chosen.png")
+        asset_store.register("chosen", chosen, "logo")
+        self.assertEqual(asset_store.resolve_logo("chosen"), chosen)
+
+    def test_resolve_logo_falls_back_when_no_explicit(self):
+        only = self._make_file("only.png")
+        asset_store.register("only", only, "logo")
+        self.assertEqual(asset_store.resolve_logo(None), only)
+
+    def test_resolve_outro_uses_default_video(self):
+        asset_store.register("logo", self._make_file("l.png"), "logo")
+        vid = self._make_file("outro.mp4")
+        asset_store.register("outro", vid, "video")
+        self.assertEqual(asset_store.resolve_outro(None), vid)
+
     def test_load_tolerates_corrupt_registry(self):
         with open(self.registry_file, "w") as f:
             f.write("{not valid json")

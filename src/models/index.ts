@@ -18,6 +18,7 @@ export interface ProgressEvent {
   stage: string;
   percent: number;
   message: string;
+  clip_result?: BatchClipsResult["results"][number];
 }
 
 // === Transcript Models ===
@@ -106,6 +107,7 @@ export interface SuggestedClip {
 export interface UIState {
   videoPath?: string;
   filePath?: string;
+  activeExportJobId?: string | null;
   transcript?: TranscriptResult | null;
   rawTranscriptText?: string;
   suggestions?: SuggestedClip[];
@@ -169,6 +171,7 @@ export interface BatchClipsResult {
   total_clips: number;
   successful_clips: number;
   results: Array<{
+    clip_index?: number;
     status: "success" | "error";
     output_path?: string;
     start_second?: number;
@@ -197,6 +200,25 @@ export interface AssetRegistry {
 
 // === Clip History Models ===
 
+export interface ClipPerformanceMetrics {
+  views?: number;
+  retention?: number; // averageViewPercentage, 0-100
+  ctr?: number; // impressionsClickThroughRate, 0-100
+  impressions?: number;
+  fetched_at?: string;
+}
+
+export interface ClipThumbnailConfig {
+  text?: string;
+  line1?: string; // explicit first line (overrides the AI split)
+  line2?: string; // explicit second line
+  image_path?: string; // user-supplied background image
+  timestamp?: number; // absolute second in the source video for the frame
+  preview_path?: string; // chosen thumbnail PNG
+  variations?: string[]; // all generated thumbnail PNGs to pick from
+  card_seconds?: number; // duration of the thumbnail card baked into the clip start
+}
+
 export interface ClipHistoryEntry {
   id: string;
   source_video: string;
@@ -205,11 +227,17 @@ export interface ClipHistoryEntry {
   caption_style: string;
   crop_strategy: string;
   logo_path?: string;
+  outro_path?: string;
   title: string;
   output_path: string;
   file_size_mb: number;
   duration: number;
   created_at: string;
+  content_type?: string;
+  transcript_slice?: string;
+  thumbnail_config?: ClipThumbnailConfig;
+  youtube_video_id?: string;
+  metrics?: ClipPerformanceMetrics;
 }
 
 // === Knowledge Base Models ===

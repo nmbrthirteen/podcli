@@ -79,6 +79,106 @@ describe("ClipsHistory", () => {
     expect(dup).toBeNull();
   });
 
+  it("recordBatchResults skips failed/output-less rows and applies defaults", async () => {
+    const ok = makeFakeOutput("batch-ok.mp4");
+    const recorded = await history.recordBatchResults(
+      [
+        { status: "success", output_path: ok, start_second: 5, end_second: 20, title: "kept" },
+        { status: "error", error: "boom" },
+        { status: "success", title: "no output" },
+      ] as any,
+      { sourceVideo: "/videos/show.mp4", defaultCaptionStyle: "hormozi", defaultCropStrategy: "speaker" },
+    );
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0].title).toBe("kept");
+    expect(recorded[0].caption_style).toBe("hormozi");
+    expect(recorded[0].crop_strategy).toBe("speaker");
+
+    const list = await history.list();
+    expect(list).toHaveLength(1);
+  });
+
+  it("recordBatchResults resolves content_type and transcript_slice per row", async () => {
+    const ok = makeFakeOutput("batch-ct.mp4");
+    const recorded = await history.recordBatchResults(
+      [{ status: "success", output_path: ok, start_second: 0, end_second: 10, title: "ct" }] as any,
+      {
+        sourceVideo: "/videos/show.mp4",
+        transcriptWords: [
+          { word: "hello", start: 1, end: 2 },
+          { word: "world", start: 3, end: 4 },
+          { word: "later", start: 99, end: 100 },
+        ] as any,
+        contentTypeFor: (s, e) => (s === 0 && e === 10 ? "hook" : undefined),
+      },
+    );
+
+    expect(recorded[0].content_type).toBe("hook");
+    expect(recorded[0].transcript_slice).toBe("hello world");
+  });
+
+  it("recordBatchResults tolerates undefined results", async () => {
+    const recorded = await history.recordBatchResults(undefined, { sourceVideo: "/videos/show.mp4" });
+    expect(recorded).toEqual([]);
+  });
+
+  it("serializes concurrent records without losing entries", async () => {
+    await Promise.all(
+      Array.from({ length: 25 }, (_, i) =>
+        history.record({
+          source_video: "/videos/show.mp4",
+          output_path: makeFakeOutput(`c-${i}.mp4`),
+          start_second: i,
+          end_second: i + 5,
+          caption_style: "karaoke",
+          crop_strategy: "smart",
+          title: `clip ${i}`,
+        } as any),
+      ),
+    );
+    const list = await history.list(100);
+    expect(list).toHaveLength(25);
+    expect(new Set(list.map((c) => c.id)).size).toBe(25);
+  });
+
+  it("findById and update require an exact id (no prefix match)", async () => {
+    const rec = await history.record({
+      source_video: "/videos/show.mp4",
+      output_path: makeFakeOutput("exact.mp4"),
+      start_second: 0,
+      end_second: 10,
+      caption_style: "karaoke",
+      crop_strategy: "smart",
+      title: "exact",
+    } as any);
+
+    expect(await history.findById(rec.id)).toBeDefined();
+    expect(await history.findById(rec.id.slice(0, 8))).toBeUndefined();
+    expect(await history.findById("")).toBeUndefined();
+    expect(await history.update("", { title: "x" })).toBeNull();
+    expect(await history.update(rec.id.slice(0, 8), { title: "x" })).toBeNull();
+    const ok = await history.update(rec.id, { title: "renamed" });
+    expect(ok?.title).toBe("renamed");
+  });
+
+  it("resolveId accepts a full id or unambiguous ≥4-char prefix, rejects short/empty", async () => {
+    const rec = await history.record({
+      source_video: "/videos/show.mp4",
+      output_path: makeFakeOutput("resolve.mp4"),
+      start_second: 0,
+      end_second: 10,
+      caption_style: "karaoke",
+      crop_strategy: "smart",
+      title: "resolve",
+    } as any);
+
+    expect(await history.resolveId(rec.id)).toBe(rec.id);
+    expect(await history.resolveId(rec.id.slice(0, 8))).toBe(rec.id);
+    expect(await history.resolveId("")).toBeNull();
+    expect(await history.resolveId(rec.id.slice(0, 2))).toBeNull();
+  });
+
   it("findDuplicate matches by basename, not full path", async () => {
     const output = makeFakeOutput("d.mp4");
     await history.record({

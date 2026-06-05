@@ -1,12 +1,27 @@
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile, writeFile, mkdir, rm, rename } from "fs/promises";
 import { existsSync } from "fs";
-import { basename } from "path";
+import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
 import { paths } from "../config/paths.js";
-import type { ClipHistoryEntry } from "../models/index.js";
+import { sliceTranscript } from "../utils/transcript.js";
+import type { BatchClipsResult, ClipHistoryEntry, WordTimestamp } from "../models/index.js";
+
+type BatchResultRow = BatchClipsResult["results"][number];
+
+interface BatchRecordContext {
+  sourceVideo: string;
+  transcriptWords?: WordTimestamp[] | null;
+  defaultCaptionStyle?: string;
+  defaultCropStrategy?: string;
+  contentTypeFor?: (start: number, end: number) => string | undefined;
+}
 
 export class ClipsHistory {
   private historyPath = paths.clipsHistory;
+  // Serializes this process's own read-modify-write cycles so concurrent HTTP
+  // requests can't lose each other's edits. Cross-process safety (vs the Python
+  // CLI) rests on the atomic temp-file rename in save().
+  private writeChain: Promise<unknown> = Promise.resolve();
 
   private async ensureDir() {
     if (!existsSync(paths.history)) {
@@ -26,19 +41,68 @@ export class ClipsHistory {
 
   private async save(entries: ClipHistoryEntry[]): Promise<void> {
     await this.ensureDir();
-    await writeFile(this.historyPath, JSON.stringify(entries, null, 2), "utf-8");
+    // Write to a temp file and atomically rename so a crash or a concurrent
+    // reader never sees a half-written clips.json.
+    const tmp = `${this.historyPath}.${process.pid}.${uuidv4().slice(0, 8)}.tmp`;
+    await writeFile(tmp, JSON.stringify(entries, null, 2), "utf-8");
+    await rename(tmp, this.historyPath);
+  }
+
+  // Run load → mutate → save as one critical section, queued behind any
+  // in-flight mutation. The callback returns the value the caller wants back.
+  private mutate<T>(fn: (entries: ClipHistoryEntry[]) => T | Promise<T>): Promise<T> {
+    const run = this.writeChain.then(async () => {
+      const entries = await this.load();
+      const result = await fn(entries);
+      await this.save(entries);
+      return result;
+    });
+    this.writeChain = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   async record(entry: Omit<ClipHistoryEntry, "id" | "created_at">): Promise<ClipHistoryEntry> {
-    const entries = await this.load();
     const full: ClipHistoryEntry = {
       ...entry,
       id: uuidv4(),
       created_at: new Date().toISOString(),
     };
-    entries.push(full);
-    await this.save(entries);
+    await this.mutate((entries) => {
+      entries.push(full);
+    });
     return full;
+  }
+
+  // Persist every successful row of a batch render. Single source of truth for
+  // turning backend batch results into history entries — callers used to inline
+  // this loop, drifting on defaults and on which fields got recorded.
+  async recordBatchResults(
+    results: BatchResultRow[] | undefined,
+    ctx: BatchRecordContext,
+  ): Promise<ClipHistoryEntry[]> {
+    if (!results) return [];
+    const recorded: ClipHistoryEntry[] = [];
+    for (const r of results) {
+      if (r.status !== "success" || !r.output_path) continue;
+      const start = r.start_second || 0;
+      const end = r.end_second || 0;
+      recorded.push(
+        await this.record({
+          source_video: ctx.sourceVideo,
+          start_second: start,
+          end_second: end,
+          caption_style: r.caption_style || ctx.defaultCaptionStyle || "hormozi",
+          crop_strategy: r.crop_strategy || ctx.defaultCropStrategy || "speaker",
+          title: r.title || "clip",
+          output_path: r.output_path,
+          file_size_mb: r.file_size_mb || 0,
+          duration: r.duration || 0,
+          content_type: ctx.contentTypeFor?.(start, end),
+          transcript_slice: sliceTranscript(ctx.transcriptWords, start, end),
+        }),
+      );
+    }
+    return recorded;
   }
 
   /**
@@ -73,9 +137,121 @@ export class ClipsHistory {
     return entries.slice(-limit).reverse();
   }
 
+  // Exact match only — REST routes feed req.params.id straight in, so a loose
+  // prefix could target the wrong clip (and an empty prefix the first one).
+  async findById(id: string): Promise<ClipHistoryEntry | undefined> {
+    if (!id) return undefined;
+    const entries = await this.load();
+    return entries.find((e) => e.id === id);
+  }
+
+  // Resolve a full id or an unambiguous ≥4-char prefix to a full id. For the
+  // human-facing MCP tool, where typing a short prefix is convenient.
+  async resolveId(idOrPrefix: string): Promise<string | null> {
+    if (!idOrPrefix) return null;
+    const entries = await this.load();
+    if (entries.some((e) => e.id === idOrPrefix)) return idOrPrefix;
+    if (idOrPrefix.length < 4) return null;
+    const matches = entries.filter((e) => e.id.startsWith(idOrPrefix));
+    return matches.length === 1 ? matches[0].id : null;
+  }
+
+  async update(id: string, patch: Partial<ClipHistoryEntry>): Promise<ClipHistoryEntry | null> {
+    if (!id) return null;
+    return this.mutate((entries) => {
+      const e = entries.find((x) => x.id === id);
+      if (!e) return null;
+      Object.assign(e, patch);
+      return e;
+    });
+  }
+
+  // Remove a clip and the artifacts podcli rendered for it (output video,
+  // word/recipe/reframe sidecars, thumbnail dir). The source video is never touched.
+  // Accepts a full id or an unambiguous prefix (MCP convenience).
+  async remove(idOrPrefix: string): Promise<ClipHistoryEntry | null> {
+    const id = await this.resolveId(idOrPrefix);
+    if (!id) return null;
+    const entry = await this.mutate((entries) => {
+      const idx = entries.findIndex((e) => e.id === id);
+      if (idx < 0) return null;
+      return entries.splice(idx, 1)[0];
+    });
+    if (!entry) return null;
+
+    const artifacts = [
+      this.wordsPath(entry.id),
+      this.recipePath(entry.id),
+      this.reframePath(entry.id),
+      entry.output_path,
+    ];
+    await Promise.all(
+      artifacts.map((p) => (p ? rm(p, { force: true }) : Promise.resolve())),
+    );
+    await rm(join(paths.output, "thumbnails", entry.id), { recursive: true, force: true });
+    return entry;
+  }
+
   async getBySource(videoPath: string): Promise<ClipHistoryEntry[]> {
     const entries = await this.load();
     const srcName = basename(videoPath);
     return entries.filter((e) => basename(e.source_video) === srcName).reverse();
+  }
+
+  // Word timings are kept in a sidecar (not in clips.json) so re-rendering a
+  // clip can re-burn captions without bloating the history file.
+  private wordsPath(id: string): string {
+    return join(paths.history, "words", `${id}.json`);
+  }
+
+  async saveWords(id: string, words: unknown[]): Promise<void> {
+    if (!words || words.length === 0) return;
+    await mkdir(join(paths.history, "words"), { recursive: true });
+    await writeFile(this.wordsPath(id), JSON.stringify(words), "utf-8");
+  }
+
+  async loadWords(id: string): Promise<unknown[]> {
+    try {
+      return JSON.parse(await readFile(this.wordsPath(id), "utf-8"));
+    } catch {
+      return [];
+    }
+  }
+
+  // Full render recipe (logo/outro/captions/fillers/segments/words) so a clip
+  // can be re-rendered faithfully — e.g. after a manual reframe.
+  private recipePath(id: string): string {
+    return join(paths.history, "recipes", `${id}.json`);
+  }
+
+  async saveRecipe(id: string, recipe: Record<string, unknown>): Promise<void> {
+    await mkdir(join(paths.history, "recipes"), { recursive: true });
+    await writeFile(this.recipePath(id), JSON.stringify(recipe), "utf-8");
+  }
+
+  async loadRecipe(id: string): Promise<Record<string, unknown> | null> {
+    try {
+      return JSON.parse(await readFile(this.recipePath(id), "utf-8"));
+    } catch {
+      return null;
+    }
+  }
+
+  // Reframe editor state (keyframes + trim) so reopening shows prior edits.
+  private reframePath(id: string): string {
+    return join(paths.history, "reframe", `${id}.json`);
+  }
+
+  async saveReframe(id: string, state: Record<string, unknown>): Promise<void> {
+    await mkdir(join(paths.history, "reframe"), { recursive: true });
+    await writeFile(this.reframePath(id), JSON.stringify(state), "utf-8");
+  }
+
+  async loadReframe(id: string): Promise<Record<string, unknown> | null> {
+    try {
+      return JSON.parse(await readFile(this.reframePath(id), "utf-8"));
+    } catch {
+      return null;
+    }
   }
 }

@@ -18,7 +18,7 @@ except ImportError:
     pass
 import traceback
 
-def emit_progress(task_id: str, stage: str, percent: int, message: str):
+def emit_progress(task_id: str, stage: str, percent: int, message: str, **extra):
     """Write a progress event to stderr (picked up by TypeScript executor)."""
     event = {
         "task_id": task_id,
@@ -26,6 +26,7 @@ def emit_progress(task_id: str, stage: str, percent: int, message: str):
         "percent": percent,
         "message": message,
     }
+    event.update(extra)
     print(json.dumps(event), file=sys.stderr, flush=True)
 
 
@@ -104,6 +105,7 @@ def handle_create_clip(task_id: str, params: dict):
         end_second=params["end_second"],
         caption_style=params.get("caption_style", "hormozi"),
         crop_strategy=params.get("crop_strategy", "face"),
+        crop_keyframes=params.get("crop_keyframes"),
         transcript_words=params.get("transcript_words", []),
         title=params.get("title", "clip"),
         output_dir=params.get("output_dir"),
@@ -159,13 +161,21 @@ def handle_batch_clips(task_id: str, params: dict):
                     task_id, "batch", int((_i / total) * 100 + pct / total), msg
                 ),
             )
-            results.append({
+            row = {
                 "clip_index": i,
                 "status": "success",
                 "start_second": clip["start_second"],
                 "end_second": clip["end_second"],
                 **result,
-            })
+            }
+            results.append(row)
+            emit_progress(
+                task_id,
+                "clip_complete",
+                int(((i + 1) / total) * 100),
+                f"Clip {i + 1}/{total} complete",
+                clip_result=row,
+            )
         except Exception as e:
             results.append({"clip_index": i, "status": "error", "error": str(e)})
 
