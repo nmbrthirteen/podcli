@@ -98,4 +98,23 @@ export class ClipsHistory {
       return [];
     }
   }
+
+  // Full render recipe (logo/outro/captions/fillers/segments/words) so a clip
+  // can be re-rendered faithfully — e.g. after a manual reframe.
+  private recipePath(id: string): string {
+    return join(paths.history, "recipes", `${id}.json`);
+  }
+
+  async saveRecipe(id: string, recipe: Record<string, unknown>): Promise<void> {
+    await mkdir(join(paths.history, "recipes"), { recursive: true });
+    await writeFile(this.recipePath(id), JSON.stringify(recipe), "utf-8");
+  }
+
+  async loadRecipe(id: string): Promise<Record<string, unknown> | null> {
+    try {
+      return JSON.parse(await readFile(this.recipePath(id), "utf-8"));
+    } catch {
+      return null;
+    }
+  }
 }

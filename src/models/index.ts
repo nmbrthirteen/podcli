@@ -223,6 +223,7 @@ export interface ClipHistoryEntry {
   caption_style: string;
   crop_strategy: string;
   logo_path?: string;
+  outro_path?: string;
   title: string;
   output_path: string;
   file_size_mb: number;

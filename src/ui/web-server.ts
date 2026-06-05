@@ -606,6 +606,7 @@ app.post("/api/create-clip", async (req, res) => {
           caption_style,
           crop_strategy,
           logo_path: logo_path || undefined,
+          outro_path: outro_path || undefined,
           title,
           output_path: d?.output_path || "",
           file_size_mb: d?.file_size_mb || 0,
@@ -613,7 +614,12 @@ app.post("/api/create-clip", async (req, res) => {
           content_type: content_type || undefined,
           transcript_slice: sliceTranscript(transcript_words, start_second, end_second),
         });
-        await clipsHistory.saveWords(rec.id, sliceWords(transcript_words, start_second, end_second));
+        const clipWords = sliceWords(transcript_words, start_second, end_second);
+        await clipsHistory.saveWords(rec.id, clipWords);
+        await clipsHistory.saveRecipe(rec.id, {
+          caption_style, crop_strategy, logo_path: logo_path || null, outro_path: outro_path || null,
+          clean_fillers, transcript_words: clipWords,
+        });
       } catch (err) {
         log.warn("Failed to record clip to history", {
           title,
@@ -1388,22 +1394,33 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
     res.status(400).json({ error: "crop_keyframes required" });
     return;
   }
-  const words = await clipsHistory.loadWords(clip.id);
+  // Replay the original render recipe (logo/outro/captions/fillers) with the new
+  // manual crop, so brand elements survive the reframe.
+  const recipe = (await clipsHistory.loadRecipe(clip.id)) || {};
+  const words = (recipe.transcript_words as unknown[]) || (await clipsHistory.loadWords(clip.id));
   try {
     const result = await executor.execute<ClipResult>("create_clip", {
       video_path: clip.source_video,
       start_second: clip.start_second,
       end_second: clip.end_second,
-      caption_style: req.body?.caption_style || clip.caption_style,
+      caption_style: req.body?.caption_style || (recipe.caption_style as string) || clip.caption_style,
       crop_strategy: "manual",
       crop_keyframes: keyframes,
       transcript_words: words,
+      logo_path: (recipe.logo_path as string) ?? clip.logo_path ?? null,
+      outro_path: (recipe.outro_path as string) ?? clip.outro_path ?? null,
+      clean_fillers: recipe.clean_fillers !== undefined ? recipe.clean_fillers : true,
+      ...(recipe.keep_segments ? { keep_segments: recipe.keep_segments } : {}),
       title: clip.title,
       output_dir: dirname(clip.output_path),
-      clean_fillers: true,
     });
     if (!result.data) throw new Error("no render output");
-    res.json({ ok: true, output_path: result.data.output_path, file_size_mb: result.data.file_size_mb });
+    res.json({
+      ok: true,
+      output_path: result.data.output_path,
+      file_size_mb: result.data.file_size_mb,
+      degraded: !recipe.caption_style && (!words || words.length === 0),
+    });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
