@@ -421,6 +421,7 @@ def ask_claude_for_layout(
     frame_info: Optional[dict] = None,
     logo_path: Optional[str] = None,
     config: Optional[dict] = None,
+    variation: int = 0,
 ) -> Optional[dict]:
     """
     Ask an available AI CLI to generate layout values for the thumbnail.
@@ -470,7 +471,8 @@ RULES:
 - box_y: position the text box so it does NOT overlap the face. If face is high (y<40%), use 80-85%. If face is centered (y~50%), use 75-78%. If face is low, use 68-72%.
 - photo_object_position: CSS value to show the face well. The photo is already 1080x1920 with face centered, so "center top" usually works. Adjust if face_y is unusual.
 - Font sizes: for short text (1-2 words per line) use 96-110px. For medium (3-4 words) use 80-96px. For long (5+ words) use 64-80px. Line 2 should be 85-95% of Line 1.
-- No slashes in the text lines."""
+- No slashes in the text lines.
+- This is thumbnail variation #{variation + 1}. Give a DISTINCT headline angle and wording from the most obvious phrasing — vary the hook, the emphasis, or which idea you lead with so each variation reads differently."""
 
     project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 
@@ -538,7 +540,7 @@ def generate_thumbnail_with_template(
     if config:
         cfg.update(config)
 
-    layout = None if line1_override is not None else ask_claude_for_layout(title, frame_path, frame_info, logo_path, cfg)
+    layout = None if line1_override is not None else ask_claude_for_layout(title, frame_path, frame_info, logo_path, cfg, variation=variation)
 
     if line1_override is not None:
         line1, line2 = _prepare_thumbnail_lines(
