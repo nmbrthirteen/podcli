@@ -73,6 +73,11 @@ export class ClipsHistory {
     return entries.slice(-limit).reverse();
   }
 
+  async findById(idOrPrefix: string): Promise<ClipHistoryEntry | undefined> {
+    const entries = await this.load();
+    return entries.find((e) => e.id === idOrPrefix || e.id.startsWith(idOrPrefix));
+  }
+
   async update(id: string, patch: Partial<ClipHistoryEntry>): Promise<ClipHistoryEntry | null> {
     const entries = await this.load();
     const e = entries.find((x) => x.id === id || x.id.startsWith(id));

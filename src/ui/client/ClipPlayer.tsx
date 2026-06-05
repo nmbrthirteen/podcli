@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
+import { fmt as fmtTime } from "./lib";
 
-const fmt = (s: number) =>
-  Number.isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` : "0:00";
+const fmt = (s: number) => (Number.isFinite(s) ? fmtTime(s) : "0:00");
 
 export default function ClipPlayer({ src, onTime }: { src: string; onTime?: (t: number) => void }) {
   const ref = useRef<HTMLVideoElement>(null);

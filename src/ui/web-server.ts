@@ -177,8 +177,28 @@ function persistState() {
 }
 
 // SSE clients for the global event bus
-import type { Response } from "express";
+import type { Request, Response } from "express";
 const sseClients: Response[] = [];
+
+function streamVideo(req: Request, res: Response, filePath: string, contentType = "video/mp4") {
+  const fileSize = statSync(filePath).size;
+  const range = req.headers.range;
+  if (range) {
+    const [s, e] = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(s, 10);
+    const end = e ? parseInt(e, 10) : fileSize - 1;
+    res.writeHead(206, {
+      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+      "Accept-Ranges": "bytes",
+      "Content-Length": end - start + 1,
+      "Content-Type": contentType,
+    });
+    createReadStream(filePath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, { "Content-Length": fileSize, "Content-Type": contentType });
+    createReadStream(filePath).pipe(res);
+  }
+}
 
 function broadcastSSE(event: string, data: unknown) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -880,32 +900,7 @@ app.get("/api/preview/:filename", (req, res) => {
     res.status(404).json({ error: "File not found" });
     return;
   }
-
-  const stat = statSync(filePath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
-
-  if (range) {
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-    const chunkSize = end - start + 1;
-
-    const stream = createReadStream(filePath, { start, end });
-    res.writeHead(206, {
-      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-      "Accept-Ranges": "bytes",
-      "Content-Length": chunkSize,
-      "Content-Type": "video/mp4",
-    });
-    stream.pipe(res);
-  } else {
-    res.writeHead(200, {
-      "Content-Length": fileSize,
-      "Content-Type": "video/mp4",
-    });
-    createReadStream(filePath).pipe(res);
-  }
+  streamVideo(req, res, filePath);
 });
 
 /**
@@ -935,40 +930,13 @@ app.get("/api/stream-source", (req, res) => {
     return;
   }
 
-  const stat = statSync(filePath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
-  const ext = extname(filePath).toLowerCase();
   const mimeTypes: Record<string, string> = {
-    ".mp4": "video/mp4",
     ".webm": "video/webm",
     ".mov": "video/quicktime",
     ".avi": "video/x-msvideo",
     ".mkv": "video/x-matroska",
-    ".m4v": "video/mp4",
   };
-  const contentType = mimeTypes[ext] || "video/mp4";
-
-  if (range) {
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-    const chunkSize = end - start + 1;
-    const stream = createReadStream(filePath, { start, end });
-    res.writeHead(206, {
-      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-      "Accept-Ranges": "bytes",
-      "Content-Length": chunkSize,
-      "Content-Type": contentType,
-    });
-    stream.pipe(res);
-  } else {
-    res.writeHead(200, {
-      "Content-Length": fileSize,
-      "Content-Type": contentType,
-    });
-    createReadStream(filePath).pipe(res);
-  }
+  streamVideo(req, res, filePath, mimeTypes[extname(filePath).toLowerCase()] || "video/mp4");
 });
 
 app.get("/api/thumbnail-config", (_req, res) => {
@@ -1223,10 +1191,7 @@ app.post("/api/clips/:id/reopen", async (req, res) => {
 });
 
 app.post("/api/clips/:id/thumbnail", async (req, res) => {
-  const entries = await clipsHistory.load();
-  const clip = entries.find(
-    (e) => e.id === req.params.id || String(e.id).startsWith(req.params.id),
-  );
+  const clip = await clipsHistory.findById(req.params.id);
   if (!clip) {
     res.status(404).json({ error: "clip not found" });
     return;
@@ -1270,8 +1235,7 @@ app.post("/api/clips/:id/thumbnail", async (req, res) => {
 });
 
 app.post("/api/clips/:id/thumbnail/select", async (req, res) => {
-  const entries = await clipsHistory.load();
-  const clip = entries.find((e) => e.id === req.params.id || String(e.id).startsWith(req.params.id));
+  const clip = await clipsHistory.findById(req.params.id);
   if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
   const tc = clip.thumbnail_config || {};
   const pick = String(req.body?.path || "");
@@ -1380,41 +1344,22 @@ app.get("/api/analytics", async (_req, res) => {
 });
 
 app.get("/api/clips/:id/source", async (req, res) => {
-  const entries = await clipsHistory.load();
-  const clip = entries.find((e) => e.id === req.params.id || String(e.id).startsWith(req.params.id));
+  const clip = await clipsHistory.findById(req.params.id);
   if (!clip || !existsSync(clip.source_video)) {
     res.status(404).json({ error: "source not found" });
     return;
   }
-  const stat = statSync(clip.source_video);
-  const range = req.headers.range;
-  if (range) {
-    const [s, e] = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(s, 10);
-    const end = e ? parseInt(e, 10) : stat.size - 1;
-    res.writeHead(206, {
-      "Content-Range": `bytes ${start}-${end}/${stat.size}`,
-      "Accept-Ranges": "bytes",
-      "Content-Length": end - start + 1,
-      "Content-Type": "video/mp4",
-    });
-    createReadStream(clip.source_video, { start, end }).pipe(res);
-  } else {
-    res.writeHead(200, { "Content-Length": stat.size, "Content-Type": "video/mp4" });
-    createReadStream(clip.source_video).pipe(res);
-  }
+  streamVideo(req, res, clip.source_video);
 });
 
 app.get("/api/clips/:id/reframe", async (req, res) => {
-  const entries = await clipsHistory.load();
-  const clip = entries.find((e) => e.id === req.params.id || String(e.id).startsWith(req.params.id));
+  const clip = await clipsHistory.findById(req.params.id);
   if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
   res.json((await clipsHistory.loadReframe(clip.id)) || {});
 });
 
 app.post("/api/clips/:id/rerender", async (req, res) => {
-  const entries = await clipsHistory.load();
-  const clip = entries.find((e) => e.id === req.params.id || String(e.id).startsWith(req.params.id));
+  const clip = await clipsHistory.findById(req.params.id);
   if (!clip) {
     res.status(404).json({ error: "clip not found" });
     return;
@@ -1487,10 +1432,7 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
 });
 
 app.post("/api/clips/:id/davinci", async (req, res) => {
-  const entries = await clipsHistory.load();
-  const clip = entries.find(
-    (e) => e.id === req.params.id || String(e.id).startsWith(req.params.id),
-  );
+  const clip = await clipsHistory.findById(req.params.id);
   if (!clip) {
     res.status(404).json({ error: "clip not found" });
     return;

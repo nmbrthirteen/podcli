@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { api, fmt, basename } from "./lib";
+import { api, fmt, basename, labelStyle } from "./lib";
 import ClipPlayer from "./ClipPlayer";
 import ReframeEditor from "./ReframeEditor";
 
@@ -32,7 +32,6 @@ interface Clip {
 }
 
 const CAPTION_STYLES = ["branded", "hormozi", "karaoke", "subtle"];
-const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: "0.5px", textTransform: "uppercase", color: "var(--text2)", marginBottom: 8, display: "block" };
 const img = (p: string, bust: number) => `/api/image?path=${encodeURIComponent(p)}&t=${bust}`;
 
 export default function ClipDetail() {

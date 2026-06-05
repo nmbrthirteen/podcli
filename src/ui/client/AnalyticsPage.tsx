@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, fmt } from "./lib";
+import { api, fmt, labelStyle } from "./lib";
 
 interface Row { key: string; count: number; avgViews: number; avgRetention: number; avgCtr: number }
 interface Data {
@@ -9,7 +9,6 @@ interface Data {
   top: Array<{ id: string; title: string; content_type?: string; caption_style: string; duration: number; metrics: any }>;
 }
 
-const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: "0.5px", textTransform: "uppercase", color: "var(--text2)", marginBottom: 6, display: "block" };
 const fmtViews = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
 function Group({ title, rows, metric }: { title: string; rows: Row[]; metric: "avgRetention" | "avgCtr" | "avgViews" }) {

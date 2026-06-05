@@ -1,12 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { api } from "./lib";
+import { api, fmtMs } from "./lib";
 
 interface Keyframe { tAbs: number; x_pct: number }
 
 const FRAME = 1 / 30;
 const BUFFER = 7; // seconds of padding shown around the clip for trimming
-const fmtMs = (s: number) =>
-  `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}.${String(Math.floor((s % 1) * 1000)).padStart(3, "0")}`;
 
 export default function ReframeEditor({
   clipId, start, end, caption_style, onClose, onDone,

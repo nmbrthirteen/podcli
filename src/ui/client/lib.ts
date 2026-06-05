@@ -1,5 +1,20 @@
+import type { CSSProperties } from "react";
+
 export const fmt = (s: number) =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+export const fmtMs = (s: number) =>
+  `${fmt(s)}.${String(Math.floor((s % 1) * 1000)).padStart(3, "0")}`;
+
+export const labelStyle: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: "0.5px",
+  textTransform: "uppercase",
+  color: "var(--text2)",
+  marginBottom: 8,
+  display: "block",
+};
 
 export async function api(path: string, opts: RequestInit = {}) {
   const res = await fetch(`/api${path}`, {

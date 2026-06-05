@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api } from "./lib";
+import { api, labelStyle } from "./lib";
 
 type Cfg = Record<string, any>;
 type FieldType = "color" | "num" | "text" | "bool" | "select";
@@ -45,7 +45,6 @@ const GROUPS: { group: string; items: Field[] }[] = [
 ];
 
 const KNOWN = new Set(GROUPS.flatMap((g) => g.items.map((i) => i.k)));
-const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 600, letterSpacing: "0.3px", color: "var(--text2)", marginBottom: 5, display: "block" };
 const titleCase = (k: string) => k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const isHex = (v: any) => typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);
 const px = (v: any, s: number, f = 0) => { const n = parseFloat(String(v ?? "").replace(/[^0-9.]/g, "")); return (Number.isFinite(n) ? n : f) * s; };
