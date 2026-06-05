@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, fmtMs } from "./lib";
+import { PlayIcon, PauseIcon, FrameBackIcon, FrameForwardIcon, CutBackIcon, CutForwardIcon, CloseIcon } from "./icons";
 
 interface Keyframe { tAbs: number; x_pct: number }
 
@@ -27,6 +28,8 @@ export default function ReframeEditor({
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [cuts, setCuts] = useState<number[]>([]);
+  const [detectingCuts, setDetectingCuts] = useState(true);
 
   const bufStart = Math.max(0, start - BUFFER);
   const bufEnd = Math.min(srcDur, end + BUFFER);
@@ -41,6 +44,10 @@ export default function ReframeEditor({
       if (typeof r?.inSec === "number") setInSec(r.inSec);
       if (typeof r?.outSec === "number") setOutSec(r.outSec);
     }).catch(() => {});
+    api(`/clips/${clipId}/cuts`)
+      .then((r) => setCuts(Array.isArray(r?.cuts) ? r.cuts : []))
+      .catch(() => {})
+      .finally(() => setDetectingCuts(false));
   }, [clipId]);
 
   const onMeta = () => {
@@ -85,7 +92,14 @@ export default function ReframeEditor({
   };
 
   const addKeyframe = () => {
-    setKeyframes((kf) => [...kf.filter((k) => Math.abs(k.tAbs - tAbs) > 0.02), { tAbs: +tAbs.toFixed(3), x_pct: +centerPct.toFixed(1) }].sort((a, b) => a.tAbs - b.tAbs));
+    const near = cuts.find((c) => Math.abs(c - tAbs) < 0.25);
+    const t = near ?? tAbs;
+    setKeyframes((kf) => [...kf.filter((k) => Math.abs(k.tAbs - t) > 0.02), { tAbs: +t.toFixed(3), x_pct: +centerPct.toFixed(1) }].sort((a, b) => a.tAbs - b.tAbs));
+  };
+
+  const jumpCut = (dir: 1 | -1) => {
+    const next = dir > 0 ? cuts.find((c) => c > tAbs + 0.05) : [...cuts].reverse().find((c) => c < tAbs - 0.05);
+    if (next != null) seek(next);
   };
 
   const xToTime = (clientX: number) => {
@@ -106,12 +120,6 @@ export default function ReframeEditor({
     applyDrag(e.clientX);
   };
 
-  const jumpKeyframe = (dir: 1 | -1) => {
-    const kf = keyframes.slice().sort((a, b) => a.tAbs - b.tAbs);
-    const next = dir > 0 ? kf.find((k) => k.tAbs > tAbs + 0.001) : [...kf].reverse().find((k) => k.tAbs < tAbs - 0.001);
-    if (next) seek(next.tAbs);
-  };
-
   const apply = async () => {
     const kf = keyframes.length ? keyframes : [{ tAbs: inSec, x_pct: +centerPct.toFixed(1) }];
     setBusy(true); setErr(null);
@@ -130,7 +138,7 @@ export default function ReframeEditor({
       <div className="reframe-modal" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h3 style={{ margin: 0, fontSize: 16 }}>Reframe & trim</h3>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close"><CloseIcon /></button>
         </div>
 
         <div ref={stageRef} className="reframe-stage" onPointerDown={pointer} onPointerMove={pointer}>
@@ -143,16 +151,21 @@ export default function ReframeEditor({
           <div className="rf-region" style={{ left: `${pos(inSec)}%`, width: `${pos(outSec) - pos(inSec)}%` }} />
           <div className="rf-handle rf-handle-in" style={{ left: `${pos(inSec)}%` }} />
           <div className="rf-handle rf-handle-out" style={{ left: `${pos(outSec)}%` }} />
+          {cuts.map((c) => <div key={`cut-${c}`} className="rf-cut" style={{ left: `${pos(c)}%` }} title={`camera switch @ ${fmtMs(c)}`} />)}
           {keyframes.map((k) => <div key={k.tAbs} className="rf-kf" style={{ left: `${pos(k.tAbs)}%` }} title={`${fmtMs(k.tAbs)} · ${Math.round(k.x_pct)}%`} />)}
           <div className="rf-playhead" style={{ left: `${pos(tAbs)}%` }} />
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
-          <button className="btn btn-ghost btn-sm" title="Play/pause" onClick={togglePlay}>{playing ? "❚❚" : "▶"}</button>
-          <button className="btn btn-ghost btn-sm" title="-1 frame" onClick={() => seek(tAbs - FRAME)}>◀</button>
-          <button className="btn btn-ghost btn-sm" title="+1 frame" onClick={() => seek(tAbs + FRAME)}>▶</button>
-          <button className="btn btn-ghost btn-sm" title="Previous keyframe" onClick={() => jumpKeyframe(-1)}>⏮</button>
-          <button className="btn btn-ghost btn-sm" title="Next keyframe" onClick={() => jumpKeyframe(1)}>⏭</button>
+        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>
+          {detectingCuts ? "Detecting camera switches…" : cuts.length ? `${cuts.length} camera switch${cuts.length > 1 ? "es" : ""} detected — a keyframe near one snaps to it` : "No camera switches detected"}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
+          <button className="btn btn-ghost btn-sm" title="Play / pause" onClick={togglePlay}>{playing ? <PauseIcon /> : <PlayIcon />}</button>
+          <button className="btn btn-ghost btn-sm" title="Previous frame" onClick={() => seek(tAbs - FRAME)}><FrameBackIcon /></button>
+          <button className="btn btn-ghost btn-sm" title="Next frame" onClick={() => seek(tAbs + FRAME)}><FrameForwardIcon /></button>
+          <button className="btn btn-ghost btn-sm" title="Previous camera switch" onClick={() => jumpCut(-1)} disabled={!cuts.length}><CutBackIcon /></button>
+          <button className="btn btn-ghost btn-sm" title="Next camera switch" onClick={() => jumpCut(1)} disabled={!cuts.length}><CutForwardIcon /></button>
           <span style={{ fontSize: 12, color: "var(--text)", fontVariantNumeric: "tabular-nums", marginLeft: 4 }}>{fmtMs(tAbs)}</span>
           <span style={{ flex: 1 }} />
           <button className="btn btn-primary btn-sm" onClick={addKeyframe}>+ Keyframe</button>

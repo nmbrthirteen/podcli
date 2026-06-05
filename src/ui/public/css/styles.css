@@ -1114,3 +1114,6 @@ h1, h2, h3 { text-wrap: balance; }
 .rf-handle::after { content: ""; position: absolute; top: 50%; left: 50%; width: 2px; height: 16px; background: rgba(0,0,0,0.4); transform: translate(-50%,-50%); border-radius: 1px; }
 .rf-track:hover .rf-handle { box-shadow: 0 0 0 1px var(--accent-glow); }
 .rf-playhead { z-index: 3; }
+
+/* ── Reframe: camera-switch (cut) markers ── */
+.rf-cut { position: absolute; top: 0; bottom: 0; width: 2px; background: #facc15; opacity: 0.75; transform: translateX(-1px); pointer-events: none; }

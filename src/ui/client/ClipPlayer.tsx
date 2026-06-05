@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { fmt as fmtTime } from "./lib";
+import { PlayIcon, PauseIcon } from "./icons";
 
 const fmt = (s: number) => (Number.isFinite(s) ? fmtTime(s) : "0:00");
 
@@ -44,7 +45,7 @@ export default function ClipPlayer({ src, onTime }: { src: string; onTime?: (t: 
       />
       <div className="clip-player-bar">
         <button className="clip-player-btn" onClick={toggle} aria-label={playing ? "Pause" : "Play"}>
-          {playing ? "❚❚" : "▶"}
+          {playing ? <PauseIcon /> : <PlayIcon />}
         </button>
         <div
           className="clip-player-track"

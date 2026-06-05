@@ -753,26 +753,11 @@ app.post("/api/batch-clips", async (req, res) => {
       broadcastSSE("job-complete", { jobId, result: result.data });
       // Record successful clips to history
       try {
-        const d = result.data;
-        if (d?.results) {
-          for (const r of d.results) {
-            if (r.status === "success" && r.output_path) {
-              await clipsHistory.record({
-                source_video: video_path,
-                start_second: r.start_second || 0,
-                end_second: r.end_second || 0,
-                caption_style: r.caption_style || "hormozi",
-                crop_strategy: r.crop_strategy || "speaker",
-                title: r.title || "clip",
-                output_path: r.output_path,
-                file_size_mb: r.file_size_mb || 0,
-                duration: r.duration || 0,
-                content_type: findContentType(uiState.suggestions, r.start_second || 0, r.end_second || 0),
-                transcript_slice: sliceTranscript(transcript_words, r.start_second || 0, r.end_second || 0),
-              });
-            }
-          }
-        }
+        await clipsHistory.recordBatchResults(result.data?.results, {
+          sourceVideo: video_path,
+          transcriptWords: transcript_words,
+          contentTypeFor: (s, e) => findContentType(uiState.suggestions, s, e),
+        });
       } catch (err) {
         log.warn("Failed to record batch clips to history", {
           err: errMsg(err),
@@ -1356,6 +1341,27 @@ app.get("/api/clips/:id/reframe", async (req, res) => {
   const clip = await clipsHistory.findById(req.params.id);
   if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
   res.json((await clipsHistory.loadReframe(clip.id)) || {});
+});
+
+app.get("/api/clips/:id/cuts", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip || !existsSync(clip.source_video)) { res.status(404).json({ error: "source not found" }); return; }
+  const start = clip.start_second;
+  const dur = Math.max(0.1, clip.end_second - clip.start_second);
+  // ffmpeg scene-change detection over the clip range; pts_time is relative to -ss.
+  const proc = spawn(paths.ffmpegPath, [
+    "-ss", String(start), "-i", clip.source_video, "-t", String(dur),
+    "-vf", "select='gt(scene,0.3)',showinfo", "-an", "-f", "null", "-",
+  ]);
+  let stderr = "";
+  proc.stderr.on("data", (d) => (stderr += d));
+  proc.on("close", () => {
+    const cuts = [...stderr.matchAll(/pts_time:([\d.]+)/g)]
+      .map((m) => +(start + parseFloat(m[1])).toFixed(3))
+      .filter((t) => t > start + 0.2 && t < start + dur - 0.2);
+    res.json({ cuts: Array.from(new Set(cuts)) });
+  });
+  proc.on("error", () => res.json({ cuts: [] }));
 });
 
 app.post("/api/clips/:id/rerender", async (req, res) => {
@@ -2123,26 +2129,13 @@ app.post("/api/mcp/export", async (req, res) => {
       job.result = result.data;
       // Record clips to history
       try {
-        const d = result.data;
-        if (d?.results) {
-          for (const r of d.results) {
-            if (r.status === "success" && r.output_path) {
-              await clipsHistory.record({
-                source_video: videoPath,
-                start_second: r.start_second || 0,
-                end_second: r.end_second || 0,
-                caption_style: r.caption_style || captionStyle,
-                crop_strategy: r.crop_strategy || cropStrategy,
-                title: r.title || "clip",
-                output_path: r.output_path,
-                file_size_mb: r.file_size_mb || 0,
-                duration: r.duration || 0,
-                content_type: findContentType(uiState.suggestions, r.start_second || 0, r.end_second || 0),
-                transcript_slice: sliceTranscript(transcriptWords, r.start_second || 0, r.end_second || 0),
-              });
-            }
-          }
-        }
+        await clipsHistory.recordBatchResults(result.data?.results, {
+          sourceVideo: videoPath,
+          transcriptWords,
+          defaultCaptionStyle: captionStyle,
+          defaultCropStrategy: cropStrategy,
+          contentTypeFor: (s, e) => findContentType(uiState.suggestions, s, e),
+        });
       } catch (err) {
         log.warn("Failed to record batch export clips to history", {
           err: errMsg(err),
