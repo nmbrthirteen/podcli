@@ -154,98 +154,97 @@ export default function ClipDetail() {
     <div className="app">
       <div className="header">
         <Link to="/" style={{ fontSize: 12, color: "var(--text3)", textDecoration: "none" }}>← Library</Link>
-        <h1 style={{ marginTop: 8 }}>{clip.title}</h1>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
+          <h1 style={{ margin: 0 }}>{clip.title}</h1>
+          <div className="set-actions">
+            <a className="btn btn-ghost btn-sm" href={`/api/download/${file}`} download style={{ textDecoration: "none" }}>Download</a>
+            <button className="btn btn-ghost btn-sm" onClick={reopen} disabled={busy !== null}>{busy === "reopen" ? <div className="spinner sm" /> : "Reopen in editor"}</button>
+            {davinciOn && <button className="btn btn-ghost btn-sm" onClick={exportDavinci} disabled={busy !== null}>{busy === "davinci" ? <div className="spinner sm" /> : "Export for DaVinci"}</button>}
+          </div>
+        </div>
       </div>
 
-      <div className="clip-media">
-        <div className="clip-media-col">
-          <label style={labelStyle}>Preview</label>
+      <div className="clip-detail">
+        <div className="clip-detail-player">
           {file ? <ClipPlayer key={previewUrl} src={previewUrl} onTime={(t) => (playerTime.current = t)} /> : <div className="phone-empty">No rendered output</div>}
+          <div className="clip-meta">
+            <span>{fmt(clip.start_second)}–{fmt(clip.end_second)} · {clip.duration}s</span>
+            <span>{clip.crop_strategy}</span>
+            {clip.content_type && <span>{clip.content_type}</span>}
+            {clip.file_size_mb != null && <span>{clip.file_size_mb.toFixed(1)}MB</span>}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>{basename(clip.source_video)}</div>
         </div>
-        <div className="clip-media-col">
-          <label style={labelStyle}>Thumbnail</label>
-          <div className="thumb-stage">
-            {tc.preview_path ? (
-              <img key={`gen-${bust}`} src={img(tc.preview_path, bust)} alt="thumbnail" />
-            ) : thumbImage ? (
-              <img src={img(thumbImage, bust)} alt="thumbnail source" />
-            ) : (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: 12, textAlign: "center", padding: 16 }}>
-                Generate a thumbnail to preview it here.
+
+        <div className="clip-detail-editor">
+          {msg && <div className="set-note ok" style={{ wordBreak: "break-all" }}>{msg}</div>}
+
+          <div className="section">
+            <label style={labelStyle}>Title & captions</label>
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%", fontSize: 14, padding: "10px 13px" }} />
+            <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
+              <select value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value)} style={{ flex: 1 }}>
+                {CAPTION_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <button className="btn btn-primary btn-sm" onClick={save} disabled={!dirty || busy !== null}>
+                {busy === "save" ? <div className="spinner sm" /> : "Save"}
+              </button>
+            </div>
+          </div>
+
+          <div className="section">
+            <label style={labelStyle}>Thumbnail</label>
+            <div className="thumb-edit">
+              <div className="thumb-edit-preview">
+                <div className="thumb-stage">
+                  {tc.preview_path ? (
+                    <img key={`gen-${bust}`} src={img(tc.preview_path, bust)} alt="thumbnail" />
+                  ) : thumbImage ? (
+                    <img src={img(thumbImage, bust)} alt="thumbnail source" />
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: 11, textAlign: "center", padding: 12 }}>
+                      Generate to preview
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="thumb-edit-controls">
+                <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%", fontSize: 14, padding: "9px 12px" }} />
+                <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", fontSize: 14, padding: "9px 12px", marginTop: 8 }} />
+                <div className="set-actions" style={{ marginTop: 10 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={useCurrentFrame} disabled={busy !== null}>Use current frame</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} disabled={busy !== null}>
+                    {busy === "upload" ? <div className="spinner sm" /> : "Upload image"}
+                  </button>
+                  <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,.webp" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>Source · {source}</div>
+                <div style={{ marginTop: 12 }}>
+                  <button className="btn btn-primary btn-sm" onClick={generate} disabled={busy !== null}>
+                    {busy === "thumb" ? <div className="spinner sm" /> : (tc.variations?.length ? "Regenerate" : "Generate thumbnail")}
+                  </button>
+                </div>
+              </div>
+            </div>
+            {(tc.variations?.length ?? 0) > 0 && (
+              <div className="thumb-variations" style={{ marginTop: 14 }}>
+                {tc.variations!.map((v) => (
+                  <button key={v} className={`thumb-variation ${tc.preview_path === v ? "selected" : ""}`} onClick={() => pickVariation(v)} disabled={busy !== null}>
+                    <img src={img(v, bust)} alt="" />
+                  </button>
+                ))}
               </div>
             )}
           </div>
-          {(tc.variations?.length ?? 0) > 0 && (
-            <div className="thumb-variations">
-              {tc.variations!.map((v) => (
-                <button key={v} className={`thumb-variation ${tc.preview_path === v ? "selected" : ""}`} onClick={() => pickVariation(v)} disabled={busy !== null}>
-                  <img src={img(v, bust)} alt="" />
-                </button>
-              ))}
+
+          {clip.transcript_slice && (
+            <div className="section">
+              <label style={labelStyle}>Transcript</label>
+              <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.7 }}>{clip.transcript_slice}</div>
             </div>
           )}
         </div>
       </div>
-
-      <div className="clip-controls">
-        <div className="section">
-          <label style={labelStyle}>Title</label>
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%", fontSize: 14, padding: "10px 13px" }} />
-          <label style={{ ...labelStyle, marginTop: 16 }}>Caption style</label>
-          <select value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value)}>
-            {CAPTION_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <div style={{ marginTop: 16 }}>
-            <button className="btn btn-primary btn-sm" onClick={save} disabled={!dirty || busy !== null}>
-              {busy === "save" ? <div className="spinner sm" /> : "Save"}
-            </button>
-          </div>
-        </div>
-
-        <div className="section">
-          <label style={labelStyle}>Thumbnail</label>
-          <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%", fontSize: 14, padding: "10px 13px" }} />
-          <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", fontSize: 14, padding: "10px 13px", marginTop: 8 }} />
-          <div className="set-actions" style={{ marginTop: 10 }}>
-            <button className="btn btn-ghost btn-sm" onClick={useCurrentFrame} disabled={busy !== null}>Use current frame</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} disabled={busy !== null}>
-              {busy === "upload" ? <div className="spinner sm" /> : "Upload image"}
-            </button>
-            <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,.webp" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
-            <span style={{ fontSize: 12, color: "var(--text3)" }}>{source}</span>
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <button className="btn btn-primary btn-sm" onClick={generate} disabled={busy !== null}>
-              {busy === "thumb" ? <div className="spinner sm" /> : (tc.variations?.length ? "Regenerate" : "Generate thumbnail")}
-            </button>
-          </div>
-        </div>
-
-        {clip.transcript_slice && (
-          <div className="section">
-            <label style={labelStyle}>Transcript</label>
-            <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.7 }}>{clip.transcript_slice}</div>
-          </div>
-        )}
-
-        <div className="section">
-          <label style={labelStyle}>Details</label>
-          <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.8 }}>
-            <div>Source · {basename(clip.source_video)}</div>
-            <div>Range · {fmt(clip.start_second)} → {fmt(clip.end_second)} ({clip.duration}s)</div>
-            <div>Crop · {clip.crop_strategy}</div>
-            {clip.content_type && <div>Type · {clip.content_type}</div>}
-            {clip.file_size_mb != null && <div>Size · {clip.file_size_mb.toFixed(1)}MB</div>}
-          </div>
-        </div>
-      </div>
-
-      <div className="set-actions" style={{ marginTop: 18 }}>
-        <a className="btn btn-ghost btn-sm" href={`/api/download/${file}`} download style={{ textDecoration: "none" }}>Download</a>
-        <button className="btn btn-ghost btn-sm" onClick={reopen} disabled={busy !== null}>{busy === "reopen" ? <div className="spinner sm" /> : "Reopen in editor"}</button>
-        {davinciOn && <button className="btn btn-ghost btn-sm" onClick={exportDavinci} disabled={busy !== null}>{busy === "davinci" ? <div className="spinner sm" /> : "Export for DaVinci"}</button>}
-      </div>
-      {msg && <div className="set-note ok" style={{ wordBreak: "break-all", marginTop: 12 }}>{msg}</div>}
     </div>
   );
 }
