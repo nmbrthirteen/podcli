@@ -357,15 +357,10 @@ def cmd_process(args):
             print(f"  Warning: Outro '{args.outro}' not found (checked assets and filesystem)", file=sys.stderr)
             config["outro_path"] = args.outro
     elif not config.get("outro_path"):
-        # Auto-detect outro from registered assets
-        try:
-            from services.asset_store import list_assets as _list_assets_auto
-            for a in _list_assets_auto():
-                if a["type"] == "video" and os.path.exists(a["path"]):
-                    config["outro_path"] = a["path"]
-                    break
-        except Exception:
-            pass
+        from services.asset_store import default_outro
+        auto_outro = default_outro()
+        if auto_outro:
+            config["outro_path"] = auto_outro
     if args.time_adjust is not None:
         config["time_adjust"] = args.time_adjust
     if args.no_energy:
@@ -2128,7 +2123,7 @@ def cmd_init_thumbnail(args):
 def cmd_thumbnails(args):
     """Generate thumbnail variations for a title."""
     from services.thumbnail_ai import generate_variations
-    from services.asset_store import resolve as resolve_asset
+    from services.asset_store import resolve as resolve_asset, resolve_logo
 
     accent = "\033[38;2;212;135;74m"
     green = "\033[38;2;74;222;128m"
@@ -2136,18 +2131,7 @@ def cmd_thumbnails(args):
     bold = "\033[1m"
     reset = "\033[0m"
 
-    logo = None
-    if args.logo:
-        logo = resolve_asset(args.logo)
-    else:
-        # Auto-use first logo asset
-        try:
-            from services.asset_store import list_assets
-            logos = [a for a in list_assets() if a["type"] == "logo" and os.path.exists(a["path"])]
-            if logos:
-                logo = logos[0]["path"]
-        except Exception:
-            pass
+    logo = resolve_logo(args.logo)
 
     photo = None
     if args.photo:
@@ -2240,7 +2224,7 @@ def cmd_swap_thumbnail(args):
     """Regenerate and swap the thumbnail on an existing rendered clip."""
     from services.thumbnail_ai import generate_variations, thumbnail_to_video_frame
     from services.video_processor import concat_outro, _get_media_duration_seconds
-    from services.asset_store import resolve as resolve_asset
+    from services.asset_store import resolve_logo
 
     accent = "\033[38;2;212;135;74m"
     green = "\033[38;2;74;222;128m"
@@ -2267,17 +2251,7 @@ def cmd_swap_thumbnail(args):
         print(f"  ✗ Source video not found: {source_video}", file=sys.stderr)
         sys.exit(1)
 
-    logo = None
-    if getattr(args, "logo", None):
-        logo = resolve_asset(args.logo)
-    else:
-        try:
-            from services.asset_store import list_assets
-            logos = [a for a in list_assets() if a["type"] == "logo" and os.path.exists(a["path"])]
-            if logos:
-                logo = logos[0]["path"]
-        except Exception:
-            pass
+    logo = resolve_logo(getattr(args, "logo", None))
 
     # Step 1: Trim the old thumbnail from the clip
     clip_duration = _get_media_duration_seconds(clip_path, default=0.0)

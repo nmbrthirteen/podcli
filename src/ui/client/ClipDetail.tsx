@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { api, fmt, basename, labelStyle } from "./lib";
+import { api, upload, fmt, basename, labelStyle } from "./lib";
 import ClipPlayer from "./ClipPlayer";
 import ReframeEditor from "./ReframeEditor";
 
@@ -104,8 +104,8 @@ export default function ClipDetail() {
     setBusy("upload"); setMsg(null);
     try {
       const fd = new FormData(); fd.append("file", f);
-      const r = await (await fetch("/api/upload", { method: "POST", body: fd })).json();
-      if (!r.file_path) throw new Error(r.error || "upload failed");
+      const r = await upload<any>("/upload", fd);
+      if (!r.file_path) throw new Error("upload failed");
       setThumbImage(r.file_path); setThumbTimestamp(null);
     } catch (e: any) { setMsg(`Upload failed: ${e.message}`); } finally { setBusy(null); }
   };

@@ -35,6 +35,7 @@ import { paths } from "../config/paths.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
 import { sliceTranscript, sliceWords, findContentType } from "../utils/transcript.js";
+import { errMsg } from "../utils/errors.js";
 import type {
   BatchClipsResult,
   ClipResult,
@@ -43,10 +44,6 @@ import type {
 } from "../models/index.js";
 
 const log = childLogger("web-server");
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();

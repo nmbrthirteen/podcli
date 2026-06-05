@@ -16,12 +16,49 @@ export const labelStyle: CSSProperties = {
   display: "block",
 };
 
-export async function api(path: string, opts: RequestInit = {}) {
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+async function request<T>(path: string, opts: RequestInit, jsonHeaders: boolean): Promise<T> {
   const res = await fetch(`/api${path}`, {
-    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
     ...opts,
+    headers: jsonHeaders
+      ? { "Content-Type": "application/json", ...(opts.headers || {}) }
+      : opts.headers,
   });
-  return res.json();
+
+  const text = await res.text();
+  let body: any = undefined;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+
+  if (!res.ok || (body && typeof body === "object" && body.error)) {
+    const msg = (body && (body.error || body.message)) || `HTTP ${res.status}`;
+    throw new ApiError(String(msg), res.status);
+  }
+  return body as T;
+}
+
+/** JSON request against /api. Throws ApiError on non-2xx or `{ error }` bodies. */
+export function api<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
+  return request<T>(path, opts, true);
+}
+
+/** Multipart upload (FormData body); skips the JSON content-type header. */
+export function upload<T = any>(path: string, form: FormData): Promise<T> {
+  return request<T>(path, { method: "POST", body: form }, false);
 }
 
 export function timeAgo(iso: string): string {

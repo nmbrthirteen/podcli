@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { api, upload } from "./lib";
 
 export default function ConfigPage() {
   const [status, setStatus] = useState<any>(null);
@@ -10,9 +11,7 @@ export default function ConfigPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function loadStatus() {
-    const resp = await fetch("/api/config/status");
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    setStatus(await resp.json());
+    setStatus(await api("/config/status"));
     setStatusError(null);
   }
 
@@ -23,9 +22,7 @@ export default function ConfigPage() {
   async function onMigrate() {
     setMsg({ text: "Migrating…", ok: true });
     try {
-      const resp = await fetch("/api/config/migrate", { method: "POST" });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      const data = await api<any>("/config/migrate", { method: "POST" });
       setMsg({ text: `Moved ${data.moved_json || 0} cache file(s).`, ok: true });
       await loadStatus();
     } catch (e: any) {
@@ -46,9 +43,7 @@ export default function ConfigPage() {
     setMsg({ text: "Importing…", ok: true });
     setImporting(true);
     try {
-      const resp = await fetch("/api/config/import", { method: "POST", body: fd });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      const data = await upload<any>("/config/import", fd);
       setMsg({ text: data.backup ? `Imported into ${data.home} · backup ${data.backup}` : `Imported into ${data.home}`, ok: true });
       await loadStatus();
     } catch (e: any) {

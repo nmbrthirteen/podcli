@@ -29,7 +29,7 @@ import { ClipsHistory } from "./services/clips-history.js";
 import { TranscriptCache } from "./services/transcript-cache.js";
 import { paths } from "./config/paths.js";
 import { childLogger } from "./utils/logger.js";
-import { sliceTranscript } from "./utils/transcript.js";
+import { mcpError } from "./utils/errors.js";
 import type { BatchClipsResult, UIState, WordTimestamp } from "./models/index.js";
 
 const log = childLogger("server");
@@ -294,11 +294,7 @@ export function createServer(): McpServer {
         );
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
+        return mcpError(err);
       }
     },
   );
@@ -324,11 +320,7 @@ export function createServer(): McpServer {
         const text = await handleTranscribeStart(input);
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
+        return mcpError(err);
       }
     },
   );
@@ -348,11 +340,7 @@ export function createServer(): McpServer {
         const text = await handleJobStatus(input);
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
+        return mcpError(err);
       }
     },
   );
@@ -426,11 +414,7 @@ export function createServer(): McpServer {
         );
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
+        return mcpError(err);
       }
     },
   );
@@ -692,11 +676,7 @@ export function createServer(): McpServer {
         );
         return { content: [{ type: "text" as const, text: clipText }] };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
+        return mcpError(err);
       }
     },
   );
@@ -905,28 +885,10 @@ export function createServer(): McpServer {
           const parsed = JSON.parse(finalResult) as BatchClipsResult;
 
           // Record each successful clip
-          if (parsed.results) {
-            for (const r of parsed.results) {
-              if (r.status === "success" && r.output_path) {
-                await history.record({
-                  source_video: params.video_path || "",
-                  start_second: r.start_second || 0,
-                  end_second: r.end_second || 0,
-                  caption_style: r.caption_style || "hormozi",
-                  crop_strategy: r.crop_strategy || "speaker",
-                  title: r.title || "clip",
-                  output_path: r.output_path,
-                  file_size_mb: r.file_size_mb || 0,
-                  duration: r.duration || 0,
-                  transcript_slice: sliceTranscript(
-                    params.transcript_words as WordTimestamp[] | undefined,
-                    r.start_second || 0,
-                    r.end_second || 0,
-                  ),
-                });
-              }
-            }
-          }
+          await history.recordBatchResults(parsed.results, {
+            sourceVideo: params.video_path || "",
+            transcriptWords: params.transcript_words as WordTimestamp[] | undefined,
+          });
 
           await uiPing({ phase: "done" });
         }
@@ -1041,11 +1003,7 @@ export function createServer(): McpServer {
           ],
         };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
+        return mcpError(err);
       }
     },
   );
@@ -1132,11 +1090,7 @@ export function createServer(): McpServer {
           ],
         };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
+        return mcpError(err);
       }
     },
   );
@@ -1236,11 +1190,7 @@ export function createServer(): McpServer {
           ],
         };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Error: ${msg}` }],
-          isError: true,
-        };
+        return mcpError(err);
       }
     },
   );

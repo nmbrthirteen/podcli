@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { api } from "./lib";
 
 type StatusKind = "warn" | "ok" | "err";
 
@@ -17,8 +18,7 @@ export default function McpSetupPage() {
   const [copied, setCopied] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    fetch("/api/integration-info")
-      .then((r) => r.json())
+    api<any>("/integration-info")
       .then((data) => {
         setDistPath(data.dist_path);
         if (data.server_ok) {

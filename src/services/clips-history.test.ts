@@ -79,6 +79,50 @@ describe("ClipsHistory", () => {
     expect(dup).toBeNull();
   });
 
+  it("recordBatchResults skips failed/output-less rows and applies defaults", async () => {
+    const ok = makeFakeOutput("batch-ok.mp4");
+    const recorded = await history.recordBatchResults(
+      [
+        { status: "success", output_path: ok, start_second: 5, end_second: 20, title: "kept" },
+        { status: "error", error: "boom" },
+        { status: "success", title: "no output" },
+      ] as any,
+      { sourceVideo: "/videos/show.mp4", defaultCaptionStyle: "hormozi", defaultCropStrategy: "speaker" },
+    );
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0].title).toBe("kept");
+    expect(recorded[0].caption_style).toBe("hormozi");
+    expect(recorded[0].crop_strategy).toBe("speaker");
+
+    const list = await history.list();
+    expect(list).toHaveLength(1);
+  });
+
+  it("recordBatchResults resolves content_type and transcript_slice per row", async () => {
+    const ok = makeFakeOutput("batch-ct.mp4");
+    const recorded = await history.recordBatchResults(
+      [{ status: "success", output_path: ok, start_second: 0, end_second: 10, title: "ct" }] as any,
+      {
+        sourceVideo: "/videos/show.mp4",
+        transcriptWords: [
+          { word: "hello", start: 1, end: 2 },
+          { word: "world", start: 3, end: 4 },
+          { word: "later", start: 99, end: 100 },
+        ] as any,
+        contentTypeFor: (s, e) => (s === 0 && e === 10 ? "hook" : undefined),
+      },
+    );
+
+    expect(recorded[0].content_type).toBe("hook");
+    expect(recorded[0].transcript_slice).toBe("hello world");
+  });
+
+  it("recordBatchResults tolerates undefined results", async () => {
+    const recorded = await history.recordBatchResults(undefined, { sourceVideo: "/videos/show.mp4" });
+    expect(recorded).toEqual([]);
+  });
+
   it("findDuplicate matches by basename, not full path", async () => {
     const output = makeFakeOutput("d.mp4");
     await history.record({

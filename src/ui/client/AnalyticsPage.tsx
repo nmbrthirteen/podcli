@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, fmt, labelStyle } from "./lib";
+import { api, upload, fmt, labelStyle } from "./lib";
 
 interface Row { key: string; count: number; avgViews: number; avgRetention: number; avgCtr: number }
 interface Data {
@@ -84,8 +84,8 @@ export default function AnalyticsPage() {
     setBusy(true); setMsg(null);
     try {
       const fd = new FormData(); fd.append("file", f);
-      const up = await (await fetch("/api/upload", { method: "POST", body: fd })).json();
-      if (!up.file_path) throw new Error(up.error || "upload failed");
+      const up = await upload<any>("/upload", fd);
+      if (!up.file_path) throw new Error("upload failed");
       await sync(up.file_path);
     } catch (e: any) { setMsg(`Import failed: ${e.message}`); setBusy(false); }
   };

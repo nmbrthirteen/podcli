@@ -13,6 +13,7 @@ from typing import Optional
 
 from services.encoder import get_video_encode_flags
 from utils.proc import run as proc_run, ProcError
+from utils.log import log_event
 from services import media_probe
 from services.media_probe import (
     CPU_FLAGS,
@@ -105,6 +106,7 @@ def crop_to_vertical(
     source_ratio = width / height
 
     if strategy == "manual" and crop_keyframes:
+        log_event("crop", "chose=manual", keyframes=len(crop_keyframes), source=f"{width}x{height}")
         crop_h = height
         crop_w = min(int(crop_h * target_ratio), width)
         crop_y = max(0, (height - crop_h) // 2)
@@ -131,6 +133,7 @@ def crop_to_vertical(
             hard_cut=True,
         )
         if x_expr:
+            log_event("crop", "chose=speaker-hardcut", source=f"{width}x{height}")
             crop_w = int(crop_h * target_ratio)
             crop_w = min(crop_w, width)
             vf = f"crop={crop_w}:{crop_h}:{x_expr}:{crop_y},scale={target_w}:{target_h}"
@@ -149,6 +152,7 @@ def crop_to_vertical(
                 output_path=output_path,
                 label="crop_speaker_hardcut",
             )
+        log_event("crop", "fallback", reason="hardcut_face_map_empty", to="speaker")
         strategy = "speaker"
 
     if strategy in ("face", "speaker", "speaker-hardcut"):
@@ -171,10 +175,9 @@ def crop_to_vertical(
                     f":x='{plan['x_expression']}':y={crop_y},"
                     f"scale={target_w}:{target_h}"
                 )
-                print(
-                    f"  Reframe: local mouth-motion, {len(plan['timeline'])} segs, "
-                    f"{plan['scene_cuts']} cuts",
-                    flush=True,
+                log_event(
+                    "crop", "chose=local-mouth-motion",
+                    segs=len(plan["timeline"]), cuts=plan["scene_cuts"],
                 )
                 result = _run_ffmpeg_with_fallback(
                     cmd_parts_before_enc=[
@@ -193,6 +196,7 @@ def crop_to_vertical(
                 )
                 if result:
                     return result
+                log_event("crop", "fallback", reason="local_reframe_ffmpeg_failed")
 
         # Any clip with speaker labels should prefer clip-local tracking over the
         # episode-wide face_map. Global speaker→side mappings are too coarse for
@@ -206,7 +210,9 @@ def crop_to_vertical(
                 face_map=face_map,
             )
             if result:
+                log_event("crop", "chose=speaker-track", speakers=len(speakers_in_clip))
                 return result
+            log_event("crop", "fallback", reason="speaker_track_failed", speakers=len(speakers_in_clip))
 
         if face_map:
             crop_h = height
@@ -221,6 +227,7 @@ def crop_to_vertical(
                 crop_h=crop_h,
             )
             if x_expr:
+                log_event("crop", "chose=face-map", source=f"{width}x{height}")
                 crop_w = int(crop_h * target_ratio)
                 crop_w = min(crop_w, width)
                 vf = f"crop={crop_w}:{crop_h}:{x_expr}:{crop_y},scale={target_w}:{target_h}"
@@ -247,11 +254,14 @@ def crop_to_vertical(
             face_map=face_map,
         )
         if result:
+            log_event("crop", "chose=face-track")
             return result
+        log_event("crop", "fallback", reason="face_track_failed", to="center")
         strategy = "center"
 
     if strategy == "center":
         if source_ratio > target_ratio:
+            log_event("crop", "chose=center-blur-bg", source=f"{width}x{height}")
             # Wide source with no face detected: blurred background + sharp center.
             # Scales source to fill 9:16 height → blur → overlay sharp fit-to-width.
             vf_complex = (
@@ -278,6 +288,7 @@ def crop_to_vertical(
                 label="crop_blur_bg",
             )
         else:
+            log_event("crop", "chose=center", source=f"{width}x{height}")
             crop_w = width
             crop_h = int(crop_w / target_ratio)
             if crop_h > height:

@@ -3,7 +3,18 @@ import { existsSync } from "fs";
 import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
 import { paths } from "../config/paths.js";
-import type { ClipHistoryEntry } from "../models/index.js";
+import { sliceTranscript } from "../utils/transcript.js";
+import type { BatchClipsResult, ClipHistoryEntry, WordTimestamp } from "../models/index.js";
+
+type BatchResultRow = BatchClipsResult["results"][number];
+
+interface BatchRecordContext {
+  sourceVideo: string;
+  transcriptWords?: WordTimestamp[] | null;
+  defaultCaptionStyle?: string;
+  defaultCropStrategy?: string;
+  contentTypeFor?: (start: number, end: number) => string | undefined;
+}
 
 export class ClipsHistory {
   private historyPath = paths.clipsHistory;
@@ -39,6 +50,38 @@ export class ClipsHistory {
     entries.push(full);
     await this.save(entries);
     return full;
+  }
+
+  // Persist every successful row of a batch render. Single source of truth for
+  // turning backend batch results into history entries — callers used to inline
+  // this loop, drifting on defaults and on which fields got recorded.
+  async recordBatchResults(
+    results: BatchResultRow[] | undefined,
+    ctx: BatchRecordContext,
+  ): Promise<ClipHistoryEntry[]> {
+    if (!results) return [];
+    const recorded: ClipHistoryEntry[] = [];
+    for (const r of results) {
+      if (r.status !== "success" || !r.output_path) continue;
+      const start = r.start_second || 0;
+      const end = r.end_second || 0;
+      recorded.push(
+        await this.record({
+          source_video: ctx.sourceVideo,
+          start_second: start,
+          end_second: end,
+          caption_style: r.caption_style || ctx.defaultCaptionStyle || "hormozi",
+          crop_strategy: r.crop_strategy || ctx.defaultCropStrategy || "speaker",
+          title: r.title || "clip",
+          output_path: r.output_path,
+          file_size_mb: r.file_size_mb || 0,
+          duration: r.duration || 0,
+          content_type: ctx.contentTypeFor?.(start, end),
+          transcript_slice: sliceTranscript(ctx.transcriptWords, start, end),
+        }),
+      );
+    }
+    return recorded;
   }
 
   /**

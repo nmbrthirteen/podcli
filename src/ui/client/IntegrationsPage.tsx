@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { api } from "./lib";
 
 const CATEGORY: Record<string, string> = {
   editor_export: "Editor export",
@@ -14,9 +15,7 @@ export default function IntegrationsPage() {
 
   async function load() {
     try {
-      const resp = await fetch("/api/integrations");
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
+      const data = await api<any>("/integrations");
       setIntegrations(data.integrations || []);
       setError(null);
     } catch (err: any) {
@@ -33,15 +32,10 @@ export default function IntegrationsPage() {
     const next = !int.enabled;
     setBusy((b) => ({ ...b, [name]: true }));
     try {
-      const resp = await fetch(`/api/integrations/${encodeURIComponent(name)}`, {
+      await api(`/integrations/${encodeURIComponent(name)}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: next }),
       });
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${resp.status}`);
-      }
       setIntegrations((list) => (list || []).map((i) => (i.name === name ? { ...i, enabled: next } : i)));
     } catch (err: any) {
       alert(`Failed to ${next ? "enable" : "disable"} ${name}: ${err.message}`);
