@@ -1065,11 +1065,15 @@ input[type="range"]::-webkit-slider-thumb {
   .thumb-variation { transition: border-color 0.15s var(--ease), transform 0.12s var(--ease); }
   .thumb-variation:hover { transform: translateY(-2px); }
   .thumb-stage img, .clip-card-media { transition: opacity 0.3s var(--ease); }
-  .btn:active { transform: translateY(1px); }
   .sidebar-link { transition: background 0.14s var(--ease), color 0.14s var(--ease), padding-left 0.14s var(--ease); }
   .sidebar-link:hover { padding-left: 15px; }
   .set-note { animation: riseIn 0.25s var(--ease) both; }
 }
+
+/* ── Polish: balanced headings, image outlines, tabular figures ── */
+h1, h2, h3 { text-wrap: balance; }
+.clip-card-media, .thumb-stage img, .thumb-variation img { outline: 1px solid rgba(255, 255, 255, 0.1); outline-offset: -1px; }
+.clip-card-meta, .clip-meta span, .clip-card-title { font-variant-numeric: tabular-nums; }
 
 /* ── Clip detail (player hero + editor) ── */
 .clip-detail { display: flex; gap: 28px; align-items: flex-start; }
