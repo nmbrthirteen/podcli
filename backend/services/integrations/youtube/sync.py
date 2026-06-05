@@ -77,16 +77,25 @@ def sync_metrics() -> int:
         save_clips_history(entries)
     if failed:
         print(f"  ! {failed} clip(s) skipped due to fetch errors", file=sys.stderr)
-    from . import learnings
-    learnings.write_learnings()
+    _refresh_learnings()
     return count
+
+
+def _refresh_learnings() -> None:
+    """Regenerate the learnings digest; isolated so its failure can't discard saved metrics."""
+    try:
+        from . import learnings
+        learnings.write_learnings()
+    except Exception as e:
+        print(f"  ! learnings refresh skipped: {e}", file=sys.stderr)
 
 
 def sync_from_csv(path: str, threshold: float = 0.6) -> dict[str, Any]:
     """Match a YouTube Studio CSV to clips by title and write metrics. No auth."""
     rows = client.parse_analytics_csv(path)
     entries = load_clips_history()
-    matched, unmatched = 0, []
+    links: list[dict[str, Any]] = []
+    unmatched = []
     for clip in entries:
         best, best_score = None, 0.0
         for row in rows:
@@ -97,11 +106,15 @@ def sync_from_csv(path: str, threshold: float = 0.6) -> dict[str, Any]:
             metrics = {k: best[k] for k in ("views", "retention", "ctr", "impressions") if k in best}
             metrics["fetched_at"] = _now()
             clip["metrics"] = metrics
-            matched += 1
+            # Title-only attribution is fuzzy; surface every pairing + score so a
+            # wrong match is visible rather than silently poisoning the signal.
+            links.append({
+                "clip_title": clip.get("title"), "row_title": best["title"],
+                "score": round(best_score, 2),
+            })
         else:
             unmatched.append(clip.get("title"))
-    if matched:
+    if links:
         save_clips_history(entries)
-    from . import learnings
-    learnings_path = learnings.write_learnings()
-    return {"matched": matched, "unmatched": unmatched, "rows": len(rows), "learnings": learnings_path}
+    _refresh_learnings()
+    return {"matched": len(links), "links": links, "unmatched": unmatched, "rows": len(rows)}

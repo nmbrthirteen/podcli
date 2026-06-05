@@ -17,6 +17,7 @@ import {
   statSync,
   readFileSync,
   writeFileSync,
+  chmodSync,
   realpathSync,
 } from "fs";
 import { mkdir, readdir, unlink } from "fs/promises";
@@ -1383,6 +1384,9 @@ app.put("/api/youtube/config", (req, res) => {
     if (client_secret) yt.client_secret = client_secret;
     all.youtube = yt;
     writeFileSync(paths.integrations, JSON.stringify(all, null, 2) + "\n", "utf-8");
+    // Holds the OAuth client secret — keep it owner-only (chmod covers the
+    // case where the file already existed with looser perms).
+    try { chmodSync(paths.integrations, 0o600); } catch { /* best effort */ }
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -1420,6 +1424,34 @@ app.post("/api/youtube/learn", async (_req, res) => {
     return;
   }
   res.json({ ok: true, message: stripAnsi(r.stdout) });
+});
+
+// Proposed clip↔video links for the authorized channel (live OAuth path).
+app.get("/api/youtube/links", async (_req, res) => {
+  const r = await runCli(["youtube", "link", "--json"]);
+  let payload: any = {};
+  try { payload = JSON.parse(r.stdout.trim().split("\n").pop() || "{}"); } catch { /* non-JSON */ }
+  if (r.code !== 0 || payload.error) {
+    res.status(400).json({ error: payload.error || stripAnsi(r.stderr || r.stdout) || "could not load proposals" });
+    return;
+  }
+  res.json({ proposals: payload.proposals || [] });
+});
+
+app.post("/api/youtube/link", async (req, res) => {
+  const { clip_id, video_id } = req.body || {};
+  if (!clip_id || !video_id) {
+    res.status(400).json({ error: "clip_id and video_id are required" });
+    return;
+  }
+  const r = await runCli(["youtube", "link", String(clip_id), String(video_id), "--json"]);
+  let payload: any = {};
+  try { payload = JSON.parse(r.stdout.trim().split("\n").pop() || "{}"); } catch { /* non-JSON */ }
+  if (r.code !== 0 || !payload.ok) {
+    res.status(400).json({ error: payload.error || "link failed (clip not found?)" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 app.get("/api/analytics", async (_req, res) => {

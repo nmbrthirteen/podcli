@@ -43,6 +43,8 @@ export default function AnalyticsPage() {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [hasSecret, setHasSecret] = useState(false);
+  const [proposals, setProposals] = useState<any[] | null>(null);
+  const [linkBusy, setLinkBusy] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
@@ -69,6 +71,23 @@ export default function AnalyticsPage() {
       if (r.error) throw new Error(r.error);
       setMsg("Synced"); load();
     } catch (e: any) { setMsg(`Sync failed: ${e.message}`); } finally { setBusy(false); }
+  };
+
+  const loadProposals = async () => {
+    setBusy(true); setMsg(null); setProposals(null);
+    try {
+      const r = await api<any>("/youtube/links");
+      setProposals(r.proposals || []);
+    } catch (e: any) { setMsg(`Could not load links: ${e.message}`); } finally { setBusy(false); }
+  };
+
+  const linkClip = async (clipId: string, videoId: string) => {
+    setLinkBusy(clipId);
+    try {
+      await api("/youtube/link", { method: "POST", body: JSON.stringify({ clip_id: clipId, video_id: videoId }) });
+      setProposals((ps) => (ps || []).filter((p) => p.clip_id !== clipId));
+      load();
+    } catch (e: any) { setMsg(`Link failed: ${e.message}`); } finally { setLinkBusy(null); }
   };
 
   const analyze = async () => {
@@ -98,6 +117,7 @@ export default function AnalyticsPage() {
           <div className="set-actions">
             <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && importCsv(e.target.files[0])} />
             <button className="btn btn-ghost btn-sm" onClick={() => setShowConnect((v) => !v)} disabled={busy}>Connect</button>
+            {status?.authorized && <button className="btn btn-ghost btn-sm" onClick={loadProposals} disabled={busy}>Link clips</button>}
             <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} disabled={busy}>Import CSV</button>
             <button className="btn btn-ghost btn-sm" onClick={analyze} disabled={busy}>Analyze patterns</button>
             <button className="btn btn-primary btn-sm" onClick={() => sync()} disabled={busy}>{busy ? <div className="spinner sm" /> : "Sync YouTube"}</button>
@@ -133,6 +153,29 @@ export default function AnalyticsPage() {
             <button className="btn btn-primary btn-sm" onClick={saveConfig} disabled={busy || !clientId}>Save credentials</button>
             <span style={{ fontSize: 12, color: "var(--text3)" }}>then run <code>podcli youtube auth</code> to authorize · or use Import CSV (no auth)</span>
           </div>
+        </div>
+      )}
+
+      {proposals !== null && (
+        <div className="section">
+          <div className="section-label">Link clips to uploads</div>
+          {proposals.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--text2)" }}>No proposals — every clip is linked, or no upload matched.</div>
+          ) : (
+            proposals.map((p) => (
+              <div key={p.clip_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.clip_title}</div>
+                  <div style={{ fontSize: 12, color: "var(--text3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    → {p.video_title} <span style={{ color: p.score >= 0.8 ? "var(--green)" : "var(--text3)" }}>(score {p.score})</span>
+                  </div>
+                </div>
+                <button className="btn btn-ghost btn-sm" disabled={linkBusy !== null} onClick={() => linkClip(p.clip_id, p.video_id)}>
+                  {linkBusy === p.clip_id ? <div className="spinner sm" /> : "Link"}
+                </button>
+              </div>
+            ))
+          )}
         </div>
       )}
 

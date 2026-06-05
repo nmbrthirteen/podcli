@@ -2738,10 +2738,14 @@ def cmd_youtube(args):
 
     if action == "link":
         from services.integrations.youtube import sync
+        as_json = getattr(args, "json", False)
         clip_id = getattr(args, "clip_id", None)
         video_id = getattr(args, "video_id", None)
         if clip_id and video_id:
-            if sync.set_link(clip_id, video_id):
+            ok = sync.set_link(clip_id, video_id)
+            if as_json:
+                print(json.dumps({"ok": ok, "clip_id": clip_id, "video_id": video_id}))
+            elif ok:
                 print(f"\n  {green}✓{reset} Linked {accent}{clip_id[:8]}{reset} → {video_id}\n")
             else:
                 fail(f"clip not found: {clip_id}")
@@ -2749,7 +2753,13 @@ def cmd_youtube(args):
         try:
             proposals = sync.propose_links()
         except Exception as e:
+            if as_json:
+                print(json.dumps({"error": str(e)}))
+                sys.exit(1)
             fail(e)
+        if as_json:
+            print(json.dumps({"proposals": proposals}))
+            return
         if not proposals:
             print(f"\n  {gray}No link proposals (all clips linked, or no uploads matched).{reset}\n")
             return
@@ -2767,9 +2777,12 @@ def cmd_youtube(args):
             if csv_path:
                 res = sync.sync_from_csv(csv_path)
                 print(f"\n  {green}✓{reset} Matched {res['matched']} clip(s) from {res['rows']} CSV row(s).")
+                for link in res.get("links", []):
+                    tone = gray if link["score"] >= 0.8 else red
+                    print(f"    {tone}{link['score']}{reset}  \"{link['clip_title']}\"  ←  \"{link['row_title']}\"")
                 if res["unmatched"]:
                     print(f"  {gray}Unmatched: {len(res['unmatched'])}{reset}")
-                print()
+                print(f"  {gray}Low scores are fuzzy title matches — verify them.{reset}\n")
             else:
                 n = sync.sync_metrics()
                 print(f"\n  {green}✓{reset} Synced metrics onto {n} linked clip(s).\n")
@@ -3282,6 +3295,7 @@ def main():
     yt_link = yt_sub.add_parser("link", help="Propose clip↔video links, or set one explicitly")
     yt_link.add_argument("clip_id", nargs="?", help="Clip id (omit to list proposals)")
     yt_link.add_argument("video_id", nargs="?", help="YouTube video id to link")
+    yt_link.add_argument("--json", action="store_true", help="Emit proposals/result as JSON (for the web UI)")
     yt_sync = yt_sub.add_parser("sync", help="Sync performance onto linked clips")
     yt_sync.add_argument("--csv", help="Import from a YouTube Studio analytics CSV (no auth)")
     yt_sub.add_parser("learn", help="AI pass: analyze winners vs losers into the knowledge base")

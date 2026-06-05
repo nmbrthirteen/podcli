@@ -33,7 +33,19 @@ def _yt_config() -> dict[str, Any]:
 
 
 def is_authorized() -> bool:
-    return os.path.exists(_TOKEN_PATH)
+    """True only if a cached token actually carries a refresh token (not just present)."""
+    try:
+        with open(_TOKEN_PATH) as f:
+            return bool((json.load(f) or {}).get("refresh_token"))
+    except (OSError, ValueError):
+        return False
+
+
+def _write_token(creds) -> None:
+    # 0o600: the file holds a long-lived refresh token — keep it owner-only.
+    fd = os.open(_TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(creds.to_json())
 
 
 def _require_libs():
@@ -83,10 +95,7 @@ def _credentials():
             SCOPES,
         )
         creds = flow.run_local_server(port=0)
-    # 0o600: the file holds a long-lived refresh token — keep it owner-only.
-    fd = os.open(_TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(creds.to_json())
+    _write_token(creds)
     return creds
 
 
