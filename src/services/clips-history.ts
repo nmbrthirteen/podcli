@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
-import { basename } from "path";
+import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
 import { paths } from "../config/paths.js";
 import type { ClipHistoryEntry } from "../models/index.js";
@@ -77,5 +77,25 @@ export class ClipsHistory {
     const entries = await this.load();
     const srcName = basename(videoPath);
     return entries.filter((e) => basename(e.source_video) === srcName).reverse();
+  }
+
+  // Word timings are kept in a sidecar (not in clips.json) so re-rendering a
+  // clip can re-burn captions without bloating the history file.
+  private wordsPath(id: string): string {
+    return join(paths.history, "words", `${id}.json`);
+  }
+
+  async saveWords(id: string, words: unknown[]): Promise<void> {
+    if (!words || words.length === 0) return;
+    await mkdir(join(paths.history, "words"), { recursive: true });
+    await writeFile(this.wordsPath(id), JSON.stringify(words), "utf-8");
+  }
+
+  async loadWords(id: string): Promise<unknown[]> {
+    try {
+      return JSON.parse(await readFile(this.wordsPath(id), "utf-8"));
+    } catch {
+      return [];
+    }
   }
 }

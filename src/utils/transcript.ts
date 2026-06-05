@@ -20,6 +20,16 @@ export function sliceTranscript(
   return text || undefined;
 }
 
+/** Word objects spoken within [start, end] — used to re-burn captions on re-render. */
+export function sliceWords(
+  words: WordTimestamp[] | undefined | null,
+  start: number,
+  end: number,
+): WordTimestamp[] {
+  if (!words) return [];
+  return words.filter((w) => w.start >= start && w.start < end);
+}
+
 /** content_type of the suggestion whose range best matches [start, end]. */
 export function findContentType(
   suggestions: Array<{ start_second: number; end_second: number; content_type?: string }> | undefined | null,

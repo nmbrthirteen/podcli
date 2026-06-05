@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { api, fmt, basename } from "./lib";
 import ClipPlayer from "./ClipPlayer";
+import ReframeEditor from "./ReframeEditor";
 
 interface ThumbnailConfig {
   text?: string;
@@ -52,6 +53,7 @@ export default function ClipDetail() {
   const [msg, setMsg] = useState<string | null>(null);
   const [bust, setBust] = useState(1);
   const [davinciOn, setDavinciOn] = useState(false);
+  const [reframing, setReframing] = useState(false);
 
   const load = () => {
     api("/history?limit=500")
@@ -167,6 +169,7 @@ export default function ClipDetail() {
       <div className="clip-detail">
         <div className="clip-detail-player">
           {file ? <ClipPlayer key={previewUrl} src={previewUrl} onTime={(t) => (playerTime.current = t)} /> : <div className="phone-empty">No rendered output</div>}
+          <button className="btn btn-ghost btn-sm" style={{ width: "100%", marginTop: 10 }} onClick={() => setReframing(true)}>Reframe (fix camera)</button>
           <div className="clip-meta">
             <span>{fmt(clip.start_second)}–{fmt(clip.end_second)} · {clip.duration}s</span>
             <span>{clip.crop_strategy}</span>
@@ -245,6 +248,17 @@ export default function ClipDetail() {
           )}
         </div>
       </div>
+
+      {reframing && (
+        <ReframeEditor
+          clipId={clip.id}
+          start={clip.start_second}
+          end={clip.end_second}
+          caption_style={clip.caption_style}
+          onClose={() => setReframing(false)}
+          onDone={() => { setReframing(false); setBust(Date.now()); setMsg("Reframed & re-rendered"); load(); }}
+        />
+      )}
     </div>
   );
 }

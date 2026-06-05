@@ -34,7 +34,7 @@ import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths } from "../config/paths.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
-import { sliceTranscript, findContentType } from "../utils/transcript.js";
+import { sliceTranscript, sliceWords, findContentType } from "../utils/transcript.js";
 import type {
   BatchClipsResult,
   ClipResult,
@@ -599,7 +599,7 @@ app.post("/api/create-clip", async (req, res) => {
       // Record to history
       try {
         const d = result.data;
-        await clipsHistory.record({
+        const rec = await clipsHistory.record({
           source_video: video_path,
           start_second,
           end_second,
@@ -613,6 +613,7 @@ app.post("/api/create-clip", async (req, res) => {
           content_type: content_type || undefined,
           transcript_slice: sliceTranscript(transcript_words, start_second, end_second),
         });
+        await clipsHistory.saveWords(rec.id, sliceWords(transcript_words, start_second, end_second));
       } catch (err) {
         log.warn("Failed to record clip to history", {
           title,
@@ -1347,6 +1348,65 @@ app.get("/api/analytics", async (_req, res) => {
       .slice(0, 12)
       .map((c) => ({ id: c.id, title: c.title, content_type: c.content_type, caption_style: c.caption_style, duration: c.duration, metrics: c.metrics })),
   });
+});
+
+app.get("/api/clips/:id/source", async (req, res) => {
+  const entries = await clipsHistory.load();
+  const clip = entries.find((e) => e.id === req.params.id || String(e.id).startsWith(req.params.id));
+  if (!clip || !existsSync(clip.source_video)) {
+    res.status(404).json({ error: "source not found" });
+    return;
+  }
+  const stat = statSync(clip.source_video);
+  const range = req.headers.range;
+  if (range) {
+    const [s, e] = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(s, 10);
+    const end = e ? parseInt(e, 10) : stat.size - 1;
+    res.writeHead(206, {
+      "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+      "Accept-Ranges": "bytes",
+      "Content-Length": end - start + 1,
+      "Content-Type": "video/mp4",
+    });
+    createReadStream(clip.source_video, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, { "Content-Length": stat.size, "Content-Type": "video/mp4" });
+    createReadStream(clip.source_video).pipe(res);
+  }
+});
+
+app.post("/api/clips/:id/rerender", async (req, res) => {
+  const entries = await clipsHistory.load();
+  const clip = entries.find((e) => e.id === req.params.id || String(e.id).startsWith(req.params.id));
+  if (!clip) {
+    res.status(404).json({ error: "clip not found" });
+    return;
+  }
+  const keyframes = req.body?.crop_keyframes;
+  if (!Array.isArray(keyframes) || keyframes.length === 0) {
+    res.status(400).json({ error: "crop_keyframes required" });
+    return;
+  }
+  const words = await clipsHistory.loadWords(clip.id);
+  try {
+    const result = await executor.execute<ClipResult>("create_clip", {
+      video_path: clip.source_video,
+      start_second: clip.start_second,
+      end_second: clip.end_second,
+      caption_style: req.body?.caption_style || clip.caption_style,
+      crop_strategy: "manual",
+      crop_keyframes: keyframes,
+      transcript_words: words,
+      title: clip.title,
+      output_dir: dirname(clip.output_path),
+      clean_fillers: true,
+    });
+    if (!result.data) throw new Error("no render output");
+    res.json({ ok: true, output_path: result.data.output_path, file_size_mb: result.data.file_size_mb });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post("/api/clips/:id/davinci", async (req, res) => {
