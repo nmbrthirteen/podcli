@@ -29,9 +29,15 @@ const home = resolveHome();
 
 function detectPython(): string {
   if (process.env.PYTHON_PATH) return process.env.PYTHON_PATH;
-  const venvPython = join(projectRoot, "venv", "bin", "python3");
+  const isWindows = process.platform === "win32";
+  const venvPython = join(
+    projectRoot,
+    "venv",
+    isWindows ? "Scripts" : "bin",
+    isWindows ? "python.exe" : "python3"
+  );
   if (existsSync(venvPython)) return venvPython;
-  return "python3";
+  return isWindows ? "python" : "python3";
 }
 
 export const paths = {
