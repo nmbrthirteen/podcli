@@ -10,6 +10,14 @@ import json
 import os
 import sys
 
+# Windows stdout/stderr default to cp1252, which can't encode chars like '→'; IPC is UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
 # Load .env file (for HF_TOKEN, etc.)
 try:
     from dotenv import load_dotenv
