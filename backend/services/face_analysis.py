@@ -305,7 +305,7 @@ def analyze_faces(
                 speaker_mappings[top_2[1]] = 1 - speaker_mappings[top_2[0]]
 
         # Extra speakers → dominant speaker's cluster
-        dominant_idx = speaker_mappings.get(speakers_by_talk[0], 0)
+        dominant_idx = speaker_mappings.get(speakers_by_talk[0], 0) if speakers_by_talk else 0
         for sp in speakers_by_talk[2:]:
             speaker_mappings[sp] = dominant_idx
     elif len(clusters_list) >= 2 and len(speakers) >= 2:

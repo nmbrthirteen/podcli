@@ -9,6 +9,7 @@ Produces word-level timestamps with speaker labels by:
 
 import os
 import subprocess
+import sys
 import tempfile
 from typing import Optional, Callable
 
