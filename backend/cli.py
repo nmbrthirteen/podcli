@@ -53,8 +53,8 @@ def _reveal_in_os(path: str) -> None:
         else:
             import subprocess
             subprocess.Popen(["xdg-open", path])
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"  ⚠ Could not open {path}: {exc}", file=sys.stderr)
 
 
 from config.paths import paths
