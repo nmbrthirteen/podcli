@@ -4,6 +4,17 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    echo ""
+    echo "  This is the macOS/Linux installer. On Windows, use:"
+    echo "    install.cmd            (double-click, or run in a terminal)"
+    echo "    or: powershell -ExecutionPolicy Bypass -File setup.ps1"
+    echo ""
+    exit 1
+    ;;
+esac
+
 # ============================================================
 # podcli — Install & Launch
 # Usage:

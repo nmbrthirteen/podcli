@@ -172,13 +172,17 @@ chmod +x setup.sh podcli
 ./setup.sh
 ```
 
-**Windows (PowerShell)**
+**Windows**
 
 ```powershell
 git clone https://github.com/nmbrthirteen/podcli.git
 cd podcli
-# If scripts are blocked: Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\setup.ps1
+```
+
+Then double-click **`install.cmd`** (or run it in a terminal). It installs everything and keeps the window open so you can see the result. To launch the studio afterwards:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File setup.ps1 -Ui
 ```
 
 This will:

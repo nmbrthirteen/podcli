@@ -202,17 +202,28 @@ function Show-Mcp {
     Write-Host ""
 }
 
-Write-Banner
+try {
+    Write-Banner
 
-if ($Mcp) {
-    Show-Mcp
-} elseif ($Ui) {
-    Invoke-LaunchUi
-} elseif ($Install) {
-    Invoke-Install
-} else {
-    Invoke-Install
-    Write-Host "----------------------------------------"
+    if ($Mcp) {
+        Show-Mcp
+    } elseif ($Ui) {
+        Invoke-LaunchUi
+    } elseif ($Install) {
+        Invoke-Install
+    } else {
+        Invoke-Install
+        Write-Host "----------------------------------------"
+        Write-Host ""
+        Invoke-LaunchUi
+    }
+} catch {
     Write-Host ""
-    Invoke-LaunchUi
+    Write-Host "  Setup failed: $($_.Exception.Message)"
+    Write-Host "  Fix the issue above and re-run .\setup.ps1"
+    Write-Host ""
+    if ($Host.Name -eq "ConsoleHost") {
+        Read-Host "  Press Enter to close"
+    }
+    exit 1
 }
