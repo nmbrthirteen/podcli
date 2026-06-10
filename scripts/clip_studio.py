@@ -174,7 +174,7 @@ def _concat(parts: list[str], out_path: str, fps: int = 30):
     filtergraph = "".join(fc)
 
     cmd = [
-        "ffmpeg", "-y", *inputs,
+        FFMPEG, "-y", *inputs,
         "-filter_complex", filtergraph,
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-crf", os.environ.get("PODCLI_CONCAT_CRF", "18"),

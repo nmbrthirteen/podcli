@@ -224,13 +224,17 @@ def cmd_studio(args):
     cmd += [
         "--caption-style", args.caption_style,
         "--crop", args.crop,
-        "--outro-title", args.outro_title,
-        "--platforms", args.platforms,
         "--intro-seconds", str(args.intro_seconds),
         "--outro-seconds", str(args.outro_seconds),
-        "--accent", args.accent,
-        "--bg", args.bg,
     ]
+    if args.outro_title is not None:
+        cmd += ["--outro-title", args.outro_title]
+    if args.platforms is not None:
+        cmd += ["--platforms", args.platforms]
+    if args.accent is not None:
+        cmd += ["--accent", args.accent]
+    if args.bg is not None:
+        cmd += ["--bg", args.bg]
     if args.intro_title:
         cmd += ["--intro-title", args.intro_title]
     if args.handle:
@@ -2726,13 +2730,13 @@ def main():
     studio.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"], default="face")
     studio.add_argument("-o", "--output", help="Final output path")
     studio.add_argument("--intro-title", help="Intro headline (default: derived from first words)")
-    studio.add_argument("--outro-title", default="Follow for more")
+    studio.add_argument("--outro-title", default=None)
     studio.add_argument("--handle", help="Handle shown on cards, e.g. @yourbrand")
-    studio.add_argument("--platforms", default="tiktok,instagram,youtube,x")
+    studio.add_argument("--platforms", default=None)
     studio.add_argument("--intro-seconds", type=float, default=2.0)
     studio.add_argument("--outro-seconds", type=float, default=3.0)
-    studio.add_argument("--accent", default="#FFE000")
-    studio.add_argument("--bg", default="#0B0B0F")
+    studio.add_argument("--accent", default=None)
+    studio.add_argument("--bg", default=None)
     studio.add_argument("--no-intro", action="store_true")
     studio.add_argument("--no-outro", action="store_true")
     studio.add_argument("--save-brand", action="store_true",

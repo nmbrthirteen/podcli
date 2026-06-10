@@ -20,7 +20,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import crypto from "crypto";
-import { execSync } from "child_process";
+import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -91,11 +91,25 @@ async function main() {
 
   // Add a silent stereo audio track so concat/crossfade with the main clip
   // (which has audio) doesn't fail on a missing audio stream.
-  execSync(
-    `ffmpeg -y -i "${silentVideo}" -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 ` +
-    `-c:v copy -c:a aac -b:a 192k -ar 44100 -shortest "${path.resolve(opts.output)}"`,
+  const mux = spawnSync(
+    "ffmpeg",
+    [
+      "-y",
+      "-i", silentVideo,
+      "-f", "lavfi",
+      "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-b:a", "192k",
+      "-ar", "44100",
+      "-shortest",
+      path.resolve(opts.output),
+    ],
     { stdio: "ignore", timeout: 60000 }
   );
+  if (mux.status !== 0) {
+    throw new Error(`ffmpeg failed to add silent audio track (exit ${mux.status})`);
+  }
   try { fs.unlinkSync(silentVideo); } catch {}
 
   console.log(`OK ${opts.output}`);
