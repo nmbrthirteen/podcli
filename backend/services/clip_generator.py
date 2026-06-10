@@ -504,7 +504,7 @@ def _render_with_remotion(
             "words": adjusted_words,
             "faceY": face_y_norm,  # normalized face center Y (0-1), null if unknown
         }
-        with open(words_file, "w") as f:
+        with open(words_file, "w", encoding="utf-8") as f:
             json.dump(payload, f)
 
         cmd = [

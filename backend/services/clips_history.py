@@ -31,7 +31,7 @@ def load_clips_history() -> list[dict]:
     if not os.path.exists(_CLIPS_HISTORY_PATH):
         return []
     try:
-        with open(_CLIPS_HISTORY_PATH) as f:
+        with open(_CLIPS_HISTORY_PATH, encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, list) else []
     except Exception:
@@ -46,7 +46,7 @@ def save_clips_history(entries: list[dict]) -> str:
     """
     os.makedirs(os.path.dirname(_CLIPS_HISTORY_PATH), exist_ok=True)
     tmp = f"{_CLIPS_HISTORY_PATH}.{os.getpid()}.tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(entries, f, indent=2, ensure_ascii=False)
     os.replace(tmp, _CLIPS_HISTORY_PATH)
     return _CLIPS_HISTORY_PATH

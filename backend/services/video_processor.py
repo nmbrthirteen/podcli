@@ -1788,7 +1788,7 @@ def _crop_split_screen(
 
             # Concat all parts
             concat_file = os.path.join(work_dir, "_speaker_concat.txt")
-            with open(concat_file, "w") as f:
+            with open(concat_file, "w", encoding="utf-8") as f:
                 for p in part_paths:
                     f.write(f"file '{os.path.abspath(p)}'\n")
 
@@ -2633,7 +2633,7 @@ def concat_outro(
     )
 
     try:
-        with open(concat_list, "w") as f:
+        with open(concat_list, "w", encoding="utf-8") as f:
             f.write(f"file '{main_reenc}'\n")
             f.write(f"file '{outro_scaled}'\n")
 

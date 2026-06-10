@@ -23,7 +23,7 @@ AI_END = "<!-- AI-ANALYSIS-END -->"
 def _existing_ai_block(path: str) -> str:
     if not os.path.exists(path):
         return ""
-    txt = open(path).read()
+    txt = open(path, encoding="utf-8").read()
     i, j = txt.find(AI_START), txt.find(AI_END)
     return txt[i:j + len(AI_END)] if (i != -1 and j != -1) else ""
 
@@ -105,7 +105,7 @@ def write_learnings(min_clips: int = 3, ai_block: Optional[str] = None) -> Optio
     content = "\n".join(L)
     if block:
         content += "\n\n" + block + "\n"
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     return path
 
@@ -148,7 +148,7 @@ def write_semantic_learnings(top_n: int = 4, min_total: int = 6) -> Optional[str
     )
     os.makedirs(paths["working"], exist_ok=True)
     prompt_file = os.path.join(paths["working"], "_perf_analysis_prompt.txt")
-    with open(prompt_file, "w") as f:
+    with open(prompt_file, "w", encoding="utf-8") as f:
         f.write(prompt)
     try:
         res = _run_ai_command(cli_path, engine, prompt, prompt_file, paths["project_root"], timeout=180)

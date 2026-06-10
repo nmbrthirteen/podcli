@@ -163,11 +163,22 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 
 ## Quick Start
 
+**macOS / Linux**
+
 ```bash
 git clone https://github.com/nmbrthirteen/podcli.git
 cd podcli
 chmod +x setup.sh podcli
 ./setup.sh
+```
+
+**Windows (PowerShell)**
+
+```powershell
+git clone https://github.com/nmbrthirteen/podcli.git
+cd podcli
+# If scripts are blocked: Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\setup.ps1
 ```
 
 This will:
@@ -187,6 +198,8 @@ This will:
 ./setup.sh --ui         # launch UI only (skip install)
 ./setup.sh --mcp        # print MCP config for Claude
 ```
+
+On Windows, use `.\setup.ps1` with `-Install`, `-Ui`, or `-Mcp`, and run the CLI via `podcli.cmd` (e.g. `podcli process video.mp4 --top 5`).
 
 ---
 

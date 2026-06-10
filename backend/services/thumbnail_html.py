@@ -116,7 +116,7 @@ def _load_config() -> dict:
     config_path = paths["thumbnailConfig"]
     if os.path.exists(config_path):
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 user = json.load(f)
             defaults.update(user)
         except Exception:
@@ -127,7 +127,9 @@ def _load_config() -> dict:
 def _playwright_cli_candidates() -> list[list[str]]:
     """Return Playwright CLI commands in preference order."""
     repo_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
-    local_bin = os.path.join(repo_root, "node_modules", ".bin", "playwright")
+    # On Windows the runnable shim is playwright.cmd; the extensionless file is a POSIX script.
+    local_name = "playwright.cmd" if sys.platform == "win32" else "playwright"
+    local_bin = os.path.join(repo_root, "node_modules", ".bin", local_name)
 
     candidates = []
     if os.path.exists(local_bin):
@@ -663,6 +665,8 @@ def generate_thumbnail(
                     capture_output=True,
                     text=True,
                     timeout=timeout_s,
+                    # .cmd/npx shims need cmd.exe on Windows; shell=True with a list breaks on POSIX.
+                    shell=sys.platform == "win32",
                 )
             except subprocess.TimeoutExpired:
                 errors.append(f"{cmd_label} timed out after {timeout_s} seconds")

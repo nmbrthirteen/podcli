@@ -178,7 +178,7 @@ def get_encoder_info() -> dict:
     fp = _ffmpeg_fingerprint()
 
     try:
-        with open(cache_path) as f:
+        with open(cache_path, encoding="utf-8") as f:
             cached = json.load(f)
         if cached.get("fingerprint") == fp and cached.get("system") == platform.system():
             return cached["info"]
@@ -194,7 +194,7 @@ def get_encoder_info() -> dict:
 
     try:
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        with open(cache_path, "w") as f:
+        with open(cache_path, "w", encoding="utf-8") as f:
             json.dump({"fingerprint": fp, "system": platform.system(), "info": info}, f)
     except OSError:
         pass

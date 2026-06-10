@@ -26,7 +26,7 @@ _TOKEN_PATH = os.path.join(os.path.dirname(paths["integrations"]), "youtube-toke
 def _yt_config() -> dict[str, Any]:
     """The 'youtube' block of integrations.json (client_id/client_secret/...)."""
     try:
-        with open(paths["integrations"]) as f:
+        with open(paths["integrations"], encoding="utf-8") as f:
             return (json.load(f).get("youtube") or {})
     except Exception:
         return {}
@@ -35,7 +35,7 @@ def _yt_config() -> dict[str, Any]:
 def is_authorized() -> bool:
     """True only if a cached token actually carries a refresh token (not just present)."""
     try:
-        with open(_TOKEN_PATH) as f:
+        with open(_TOKEN_PATH, encoding="utf-8") as f:
             return bool((json.load(f) or {}).get("refresh_token"))
     except (OSError, ValueError):
         return False

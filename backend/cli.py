@@ -25,7 +25,7 @@ try:
 except ImportError:
     pass
 if os.path.exists(_env_file):
-    with open(_env_file) as _f:
+    with open(_env_file, encoding="utf-8") as _f:
         for _line in _f:
             _line = _line.strip()
             if _line and not _line.startswith("#") and "=" in _line:
@@ -40,6 +40,23 @@ if sys.platform == "darwin":
 os.environ.setdefault("PODCLI_TRANSITION_AUTOFIX_PASSES", "2")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+def _reveal_in_os(path: str) -> None:
+    """Open a file or folder in the OS file manager / default app. Best-effort."""
+    try:
+        if sys.platform == "darwin":
+            import subprocess
+            subprocess.Popen(["open", path])
+        elif sys.platform == "win32":
+            os.startfile(path)  # type: ignore[attr-defined]
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", path])
+    except Exception as exc:
+        print(f"  ⚠ Could not open {path}: {exc}", file=sys.stderr)
+
+
 from config.paths import paths
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 
@@ -441,7 +458,7 @@ def cmd_process(args):
 
     if args.transcript:
         print("  [1/4] Loading transcript...")
-        with open(args.transcript, "r") as f:
+        with open(args.transcript, "r", encoding="utf-8") as f:
             raw_text = f.read()
 
         # Detect format
@@ -633,7 +650,7 @@ def cmd_process(args):
 
     if _thumb_enabled and os.path.exists(_tc_path):
         try:
-            with open(_tc_path) as _tcf:
+            with open(_tc_path, encoding="utf-8") as _tcf:
                 _thumb_cfg = json.load(_tcf)
                 _thumb_enabled = _thumb_cfg.get("enabled", True)
                 _thumb_intro_duration = float(
@@ -746,7 +763,7 @@ def cmd_process(args):
                     if content_result and content_result.get("raw_text"):
                         # Save per-clip content to file
                         _content_path = result["output_path"].replace(".mp4", "_content.md")
-                        with open(_content_path, "w") as _cf:
+                        with open(_content_path, "w", encoding="utf-8") as _cf:
                             _cf.write(f"# {clip.get('title', 'Clip')}\n\n{content_result['raw_text']}")
 
                         # Pretty-print in terminal
@@ -778,8 +795,7 @@ def cmd_process(args):
 
             # ── Per-clip review: open video, ask for feedback ──
             if ok and not _skip_review and result.get("output_path") and os.path.exists(result["output_path"]):
-                import subprocess as _review_sp
-                _review_sp.Popen(["open", result["output_path"]] if sys.platform == "darwin" else ["xdg-open", result["output_path"]])
+                _reveal_in_os(result["output_path"])
 
                 while True:
                     import questionary as _rq
@@ -910,7 +926,7 @@ def cmd_process(args):
                             results[-1] = result
                             print(f"         ✓ Re-rendered: {result['file_size_mb']}MB")
                             # Open new version
-                            _review_sp.Popen(["open", result["output_path"]] if sys.platform == "darwin" else ["xdg-open", result["output_path"]])
+                            _reveal_in_os(result["output_path"])
                         except Exception as _re:
                             print(f"         ✗ {_re}")
                             break
@@ -1354,10 +1370,9 @@ def _post_render_loop(
 
     def _open_clip(r):
         """Open a rendered clip for preview."""
-        import subprocess as _sp
         out = r["result"].get("output_path", "")
         if out and os.path.exists(out):
-            _sp.Popen(["open", out] if sys.platform == "darwin" else ["xdg-open", out])
+            _reveal_in_os(out)
 
     def _rerender_clip(r):
         """Re-render a clip with current config."""
@@ -1471,8 +1486,7 @@ def _post_render_loop(
         ).ask()
 
         if action is None or action == "done":
-            import subprocess as _sp
-            _sp.run(["open", output_dir] if sys.platform == "darwin" else ["xdg-open", output_dir])
+            _reveal_in_os(output_dir)
             break
 
         if action == "rerender":
@@ -2438,7 +2452,7 @@ def cmd_knowledge(args):
             # Read first non-empty, non-header line as preview
             preview = ""
             try:
-                with open(fpath) as f:
+                with open(fpath, encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if line and not line.startswith("#") and not line.startswith("---"):
@@ -2463,7 +2477,7 @@ def cmd_knowledge(args):
         if not os.path.exists(fpath):
             print(f"  {red}✗{reset} Not found: {name}", file=sys.stderr)
             return
-        with open(fpath) as f:
+        with open(fpath, encoding="utf-8") as f:
             print(f.read())
 
     elif action == "edit":
@@ -2477,7 +2491,7 @@ def cmd_knowledge(args):
         os.makedirs(kb_dir, exist_ok=True)
         fpath = os.path.join(kb_dir, name)
         if content:
-            with open(fpath, "w") as f:
+            with open(fpath, "w", encoding="utf-8") as f:
                 f.write(content)
             print(f"  {green}✓{reset} Written: {name}")
         else:
@@ -2667,7 +2681,7 @@ def cmd_clips(args):
         existing = {}
         try:
             if os.path.exists(ui_state_path):
-                with open(ui_state_path) as f:
+                with open(ui_state_path, encoding="utf-8") as f:
                     existing = json.load(f) or {}
         except Exception:
             existing = {}
@@ -2697,7 +2711,7 @@ def cmd_clips(args):
             "phase": "reviewing",
         }
         os.makedirs(os.path.dirname(ui_state_path), exist_ok=True)
-        with open(ui_state_path, "w") as f:
+        with open(ui_state_path, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
 
         print(f"\n  {green}✓{reset} Reopened {accent}{str(clip.get('id'))[:8]}{reset}  {bold}{clip.get('title')}{reset}")
@@ -2890,7 +2904,7 @@ def cmd_cache(args):
 
         # Try to read the cached file to show what video it's for
         try:
-            with open(fpath) as f:
+            with open(fpath, encoding="utf-8") as f:
                 data = json.load(f)
             n_words = len(data.get("words", []))
             n_segs = len(data.get("segments", []))
@@ -2929,7 +2943,7 @@ def cmd_info(args):
         env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
         if os.path.exists(env_path):
             try:
-                with open(env_path) as f:
+                with open(env_path, encoding="utf-8") as f:
                     for line in f:
                         if line.strip().startswith("HF_TOKEN=") and line.strip().split("=", 1)[1].strip():
                             hf_token = line.strip().split("=", 1)[1].strip()
@@ -2995,7 +3009,7 @@ def print_banner():
     if not hf_token:
         env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
         if os.path.exists(env_path):
-            with open(env_path) as f:
+            with open(env_path, encoding="utf-8") as f:
                 for line in f:
                     if line.strip().startswith("HF_TOKEN=") and line.strip().split("=", 1)[1].strip():
                         hf_token = line.strip().split("=", 1)[1].strip()
@@ -3454,14 +3468,16 @@ def interactive_menu():
             spa = os.path.join(repo, "dist", "ui", "public", "index.html")
             port = os.environ.get("PORT", "3847")
             ok = True
+            # npm is npm.cmd on Windows; subprocess can't run a batch file without a shell.
+            _npm_shell = sys.platform == "win32"
             if not os.path.exists(spa):
                 print(f"\n  {gray}Building the studio (first run)…{reset}\n")
-                ok = sp.run(["npm", "run", "build"], cwd=repo).returncode == 0
+                ok = sp.run(["npm", "run", "build"], cwd=repo, shell=_npm_shell).returncode == 0
                 if not ok:
                     print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
             if ok:
                 print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
-                sp.run(["npm", "run", "ui:prod"], cwd=repo)
+                sp.run(["npm", "run", "ui:prod"], cwd=repo, shell=_npm_shell)
         elif choice == "assets":
             _interactive_assets()
         elif choice == "presets":

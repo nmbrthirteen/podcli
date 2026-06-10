@@ -63,7 +63,7 @@ def list_presets() -> list[dict]:
             name = f[:-5]
             path = os.path.join(PRESETS_DIR, f)
             try:
-                with open(path, "r") as fh:
+                with open(path, "r", encoding="utf-8") as fh:
                     data = json.load(fh)
                     presets.append({"name": name, **data})
             except (json.JSONDecodeError, IOError):
@@ -79,7 +79,7 @@ def get_preset(name: str) -> dict:
             return {**DEFAULT_PRESET}
         raise FileNotFoundError(f"Preset not found: {name}")
 
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         saved = json.load(f)
 
     # Merge with defaults so new keys are always present
@@ -99,7 +99,7 @@ def save_preset(name: str, config: dict) -> str:
             continue  # don't store the name inside the file
         to_save[key] = val
 
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(to_save, f, indent=2)
 
     return path

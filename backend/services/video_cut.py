@@ -72,7 +72,7 @@ def cut_multi_segment(
             cut_segment(input_path, part_path, seg["start"], seg["end"])
             part_paths.append(part_path)
 
-        with open(concat_file, "w") as f:
+        with open(concat_file, "w", encoding="utf-8") as f:
             for p in part_paths:
                 f.write(f"file '{os.path.abspath(p)}'\n")
 

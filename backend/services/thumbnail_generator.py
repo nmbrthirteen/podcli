@@ -98,7 +98,7 @@ def _load_config() -> dict:
     config_path = paths["thumbnailConfig"]
     if os.path.exists(config_path):
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 user = json.load(f)
             config.update(user)
         except (json.JSONDecodeError, IOError):
@@ -116,21 +116,25 @@ def _get_font(size: int, bold: bool = True, italic: bool = False) -> ImageFont.F
         ttc_options = [
             ("/System/Library/Fonts/HelveticaNeue.ttc", 3),    # Helvetica Neue Bold Italic
             ("/System/Library/Fonts/Helvetica.ttc", 3),
+            ("C:/Windows/Fonts/arialbi.ttf", 0),
         ]
     elif bold:
         ttc_options = [
             ("/System/Library/Fonts/HelveticaNeue.ttc", 1),    # Helvetica Neue Bold
             ("/System/Library/Fonts/Helvetica.ttc", 1),
+            ("C:/Windows/Fonts/arialbd.ttf", 0),
         ]
     elif italic:
         ttc_options = [
             ("/System/Library/Fonts/HelveticaNeue.ttc", 2),    # Helvetica Neue Italic
             ("/System/Library/Fonts/Helvetica.ttc", 2),
+            ("C:/Windows/Fonts/ariali.ttf", 0),
         ]
     else:
         ttc_options = [
             ("/System/Library/Fonts/HelveticaNeue.ttc", 0),    # Helvetica Neue Regular
             ("/System/Library/Fonts/Helvetica.ttc", 0),
+            ("C:/Windows/Fonts/arial.ttf", 0),
         ]
 
     for path, idx in ttc_options:
@@ -146,6 +150,7 @@ def _get_font(size: int, bold: bool = True, italic: bool = False) -> ImageFont.F
         fallbacks = [
             "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
             "/Library/Fonts/Arial Bold.ttf",
+            "C:/Windows/Fonts/arialbd.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         ]
@@ -153,6 +158,7 @@ def _get_font(size: int, bold: bool = True, italic: bool = False) -> ImageFont.F
         fallbacks = [
             "/System/Library/Fonts/Supplemental/Arial.ttf",
             "/Library/Fonts/Arial.ttf",
+            "C:/Windows/Fonts/arial.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         ]
 

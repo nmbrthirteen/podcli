@@ -28,7 +28,7 @@ def _load_kb_context() -> str:
         fpath = os.path.join(kb_dir, fname)
         if os.path.exists(fpath):
             try:
-                with open(fpath) as kf:
+                with open(fpath, encoding="utf-8") as kf:
                     content = kf.read().strip()
                 # Skip uncustomized templates
                 if content.count("[Your Show Name]") > 2 and len(content) < 500:
