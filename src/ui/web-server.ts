@@ -388,6 +388,19 @@ app.get("/api/browse-file", (_req, res) => {
         encoding: "utf-8",
         timeout: 120_000,
       }).trim();
+    } else if (process.platform === "win32") {
+      // EncodedCommand (UTF-16LE base64) sidesteps cmd→PowerShell quoting; -STA is required by WinForms dialogs.
+      const ps = [
+        "Add-Type -AssemblyName System.Windows.Forms;",
+        "$f = New-Object System.Windows.Forms.OpenFileDialog;",
+        "$f.Filter = 'Media files|*.mp4;*.mov;*.mkv;*.webm;*.mp3;*.wav;*.m4a';",
+        "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.FileName }",
+      ].join(" ");
+      const encoded = Buffer.from(ps, "utf16le").toString("base64");
+      filePath = execSync(`powershell -NoProfile -STA -EncodedCommand ${encoded}`, {
+        encoding: "utf-8",
+        timeout: 120_000,
+      }).trim();
     } else {
       // Linux fallback
       filePath = execSync(

@@ -3468,14 +3468,16 @@ def interactive_menu():
             spa = os.path.join(repo, "dist", "ui", "public", "index.html")
             port = os.environ.get("PORT", "3847")
             ok = True
+            # npm is npm.cmd on Windows; subprocess can't run a batch file without a shell.
+            _npm_shell = sys.platform == "win32"
             if not os.path.exists(spa):
                 print(f"\n  {gray}Building the studio (first run)…{reset}\n")
-                ok = sp.run(["npm", "run", "build"], cwd=repo).returncode == 0
+                ok = sp.run(["npm", "run", "build"], cwd=repo, shell=_npm_shell).returncode == 0
                 if not ok:
                     print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
             if ok:
                 print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
-                sp.run(["npm", "run", "ui:prod"], cwd=repo)
+                sp.run(["npm", "run", "ui:prod"], cwd=repo, shell=_npm_shell)
         elif choice == "assets":
             _interactive_assets()
         elif choice == "presets":
