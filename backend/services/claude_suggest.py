@@ -27,28 +27,39 @@ def _find_cli(name: str, extra_paths: list[str] = None) -> Optional[str]:
     a `which` subprocess — banner renders twice (claude + codex) on startup.
     """
     import shutil
+    # On Windows the binary is claude.exe / claude.cmd (npm shim), so an
+    # extensionless path never matches on disk — try the usual suffixes.
+    exts = ["", ".cmd", ".exe", ".bat"] if sys.platform == "win32" else [""]
     for path in (extra_paths or []):
-        if os.path.exists(path):
-            return path
+        for ext in exts:
+            if os.path.isfile(path + ext):
+                return path + ext
     return shutil.which(name)
+
+
+def _ai_cli_search_paths(name: str) -> list[str]:
+    """Common install locations for an AI CLI, in addition to PATH."""
+    paths_out = [
+        os.path.expanduser(f"~/.local/bin/{name}"),
+        f"/usr/local/bin/{name}",
+        f"/opt/homebrew/bin/{name}",
+    ]
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            paths_out.append(os.path.join(appdata, "npm", name))
+    return paths_out
 
 
 def _find_ai_cli_candidates() -> list[tuple[str, str]]:
     """Find all available AI CLIs in preference order."""
     candidates = []
 
-    claude = _find_cli("claude", [
-        os.path.expanduser("~/.local/bin/claude"),
-        "/usr/local/bin/claude",
-        "/opt/homebrew/bin/claude",
-    ])
+    claude = _find_cli("claude", _ai_cli_search_paths("claude"))
     if claude:
         candidates.append((claude, "claude"))
 
-    codex = _find_cli("codex", [
-        "/usr/local/bin/codex",
-        "/opt/homebrew/bin/codex",
-    ])
+    codex = _find_cli("codex", _ai_cli_search_paths("codex"))
     if codex:
         candidates.append((codex, "codex"))
 
