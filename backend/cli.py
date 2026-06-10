@@ -302,6 +302,67 @@ def _should_enter_post_render_loop(config: dict, interrupted: bool, results: lis
     return bool(config.get("post_render_review", False) or (interrupted and _has_successful_results(results)))
 
 
+def cmd_studio(args):
+    """Cut a fragment + wrap it with Remotion intro/outro bookends.
+
+    Thin wrapper around scripts/clip_studio.py (which orchestrates the
+    fragment render, bookend renders, and the concat). Runs it as a
+    subprocess with this same interpreter so the venv is reused.
+    """
+    if not getattr(args, "save_brand", False) and not args.paragraph and (args.start is None or args.end is None):
+        print("Error: provide either --start and --end, or --paragraph \"text\"", file=sys.stderr)
+        sys.exit(1)
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(project_root, "scripts", "clip_studio.py")
+    if not os.path.exists(script):
+        print(f"Error: clip_studio.py not found at {script}", file=sys.stderr)
+        sys.exit(1)
+
+    # When just saving the brand, no video is needed; pass a placeholder the
+    # script ignores because --save-brand returns before touching the video.
+    video_arg = os.path.abspath(args.video) if args.video else "_brand_only_"
+    cmd = [sys.executable, script, video_arg]
+    if getattr(args, "save_brand", False):
+        cmd += ["--save-brand"]
+    if args.start is not None:
+        cmd += ["--start", str(args.start)]
+    if args.end is not None:
+        cmd += ["--end", str(args.end)]
+    if args.paragraph:
+        cmd += ["--paragraph", args.paragraph]
+    if args.language:
+        cmd += ["--language", args.language]
+    cmd += [
+        "--caption-style", args.caption_style,
+        "--crop", args.crop,
+        "--intro-seconds", str(args.intro_seconds),
+        "--outro-seconds", str(args.outro_seconds),
+    ]
+    if args.outro_title is not None:
+        cmd += ["--outro-title", args.outro_title]
+    if args.platforms is not None:
+        cmd += ["--platforms", args.platforms]
+    if args.accent is not None:
+        cmd += ["--accent", args.accent]
+    if args.bg is not None:
+        cmd += ["--bg", args.bg]
+    if args.intro_title:
+        cmd += ["--intro-title", args.intro_title]
+    if args.handle:
+        cmd += ["--handle", args.handle]
+    if args.output:
+        cmd += ["--output", os.path.abspath(args.output)]
+    if args.no_intro:
+        cmd += ["--no-intro"]
+    if args.no_outro:
+        cmd += ["--no-outro"]
+
+    import subprocess
+    rc = subprocess.run(cmd).returncode
+    sys.exit(rc)
+
+
 def cmd_process(args):
     """Full auto pipeline: transcribe → suggest → export."""
     from services.clip_generator import generate_clip
@@ -3181,6 +3242,29 @@ def main():
     proc.add_argument("--review-each", action="store_true", help="Review each rendered clip interactively")
     proc.add_argument("--post-review", action="store_true", help="Open the post-render review loop after export")
 
+    # ── studio ──
+    studio = sub.add_parser("studio", help="Cut a fragment + add Remotion intro/outro (follow-us) bookends")
+    studio.add_argument("video", nargs="?", default=None, help="Path to the source video (omit only with --save-brand)")
+    studio.add_argument("--start", type=float, help="Fragment start (seconds)")
+    studio.add_argument("--end", type=float, help="Fragment end (seconds)")
+    studio.add_argument("--paragraph", help="Find the fragment by matching this text in the transcript")
+    studio.add_argument("--language", help="Transcription language (e.g. es). Auto-detect if omitted.")
+    studio.add_argument("--caption-style", choices=["hormozi", "karaoke", "subtle", "branded"], default="hormozi")
+    studio.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"], default="face")
+    studio.add_argument("-o", "--output", help="Final output path")
+    studio.add_argument("--intro-title", help="Intro headline (default: derived from first words)")
+    studio.add_argument("--outro-title", default=None)
+    studio.add_argument("--handle", help="Handle shown on cards, e.g. @yourbrand")
+    studio.add_argument("--platforms", default=None)
+    studio.add_argument("--intro-seconds", type=float, default=2.0)
+    studio.add_argument("--outro-seconds", type=float, default=3.0)
+    studio.add_argument("--accent", default=None)
+    studio.add_argument("--bg", default=None)
+    studio.add_argument("--no-intro", action="store_true")
+    studio.add_argument("--no-outro", action="store_true")
+    studio.add_argument("--save-brand", action="store_true",
+                        help="Save handle/platforms/outro-title/accent/bg as the default brand and exit")
+
     # ── presets ──
     pre = sub.add_parser("presets", help="Manage presets")
     pre_sub = pre.add_subparsers(dest="presets_action")
@@ -3368,6 +3452,8 @@ def main():
         if not getattr(args, "no_banner", False):
             print()
         cmd_process(args)
+    elif args.command == "studio":
+        cmd_studio(args)
     elif args.command == "thumbnails":
         cmd_thumbnails(args)
     elif args.command == "swap-thumbnail":
