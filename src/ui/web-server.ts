@@ -50,6 +50,11 @@ import type {
 const log = childLogger("web-server");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const publicDir = existsSync(join(__dirname, "public", "index.html"))
+  ? join(__dirname, "public")
+  : resolve(__dirname, "..", "..", "dist", "ui", "public");
+
 const app = express();
 const PORT = parseInt(process.env.PORT || "3847");
 
@@ -299,7 +304,7 @@ function createBatchHistoryRecorder({
 app.use(express.json({ limit: "50mb" }));
 
 // Serve static frontend
-app.use(express.static(join(__dirname, "public")));
+app.use(express.static(publicDir));
 
 // File upload config
 const uploadDir = join(paths.working, "uploads");
@@ -2366,7 +2371,7 @@ async function main() {
   // SPA fallback: client-side routes (/, /episode, /clip/:id) resolve to the
   // built index.html. Registered last so it never shadows /api or static assets.
   app.get(/^(?!\/api\/).*/, (_req, res) => {
-    res.sendFile(join(__dirname, "public", "index.html"));
+    res.sendFile(join(publicDir, "index.html"));
   });
 
   app.listen(PORT, () => {
