@@ -18,6 +18,14 @@ import sys
 import textwrap
 import time
 
+# Windows stdout/stderr default to cp1252, which can't encode chars like '→'; output is UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
 _env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
 try:
     from dotenv import load_dotenv

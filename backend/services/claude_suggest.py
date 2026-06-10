@@ -104,6 +104,8 @@ def _run_ai_command(
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=project_dir,
             timeout=timeout,
         )
@@ -125,6 +127,8 @@ def _run_ai_command(
         f'cat "{prompt_file}" | "{cli_path}" --print -p -',
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=project_dir,
         timeout=timeout,
         shell=True,
