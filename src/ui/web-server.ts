@@ -1820,7 +1820,7 @@ function buildPromptForAction(
   const parts: string[] = [];
 
   const settingsSummary = [
-    uiState.videoPath ? `Video: ${uiState.videoPath.split("/").pop()}` : null,
+    uiState.videoPath ? `Video: ${uiState.videoPath.split(/[/\\]/).pop()}` : null,
     `Style: ${uiState.settings.captionStyle}`,
     `Crop: ${uiState.settings.cropStrategy}`,
     uiState.settings.logoPath ? `Logo: set` : null,

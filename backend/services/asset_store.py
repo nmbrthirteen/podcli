@@ -30,7 +30,7 @@ def _load() -> list[dict]:
     if not os.path.exists(path):
         return []
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         return data.get("assets", []) if isinstance(data, dict) else data
     except (json.JSONDecodeError, IOError):
@@ -39,7 +39,7 @@ def _load() -> list[dict]:
 
 def _save(assets: list[dict]):
     path = _registry_path()
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump({"assets": assets}, f, indent=2)
 
 

@@ -364,7 +364,7 @@ def write_packed(
     md = pack_transcript(transcript, label, energy_data=energy_data)
     os.makedirs(_packed_dir(), exist_ok=True)
     out_path = packed_path_for(cache_hash)
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write(md)
     return out_path, md
 

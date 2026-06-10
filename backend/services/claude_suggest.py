@@ -108,7 +108,7 @@ def _run_ai_command(
             timeout=timeout,
         )
         if os.path.exists(output_file):
-            with open(output_file) as f:
+            with open(output_file, encoding="utf-8") as f:
                 result = subprocess.CompletedProcess(
                     args=result.args,
                     returncode=result.returncode,
@@ -136,7 +136,7 @@ def _load_existing_shorts(episodes_path: str) -> list[str]:
     if not os.path.exists(episodes_path):
         return []
     try:
-        with open(episodes_path) as f:
+        with open(episodes_path, encoding="utf-8") as f:
             content = f.read()
         # Parse lines that look like shorts entries: "1. [title] — [category]"
         shorts = []
@@ -187,7 +187,7 @@ def _build_prompt(
         fpath = os.path.join(kb_dir, fname)
         if os.path.exists(fpath):
             try:
-                with open(fpath) as f:
+                with open(fpath, encoding="utf-8") as f:
                     content = f.read().strip()
                 # Skip template-only files (uncustomized placeholders)
                 if content.count("[Your Show Name]") > 2 and len(content) < 500:

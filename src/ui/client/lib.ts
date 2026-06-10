@@ -72,4 +72,4 @@ export function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-export const basename = (p: string) => (p || "").split("/").pop() || "";
+export const basename = (p: string) => (p || "").split(/[/\\]/).pop() || "";

@@ -28,7 +28,7 @@ def _load_corrections() -> dict[str, str]:
     if not os.path.exists(_CORRECTIONS_PATH):
         return {}
     try:
-        with open(_CORRECTIONS_PATH) as f:
+        with open(_CORRECTIONS_PATH, encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             return data
@@ -45,7 +45,7 @@ def get_corrections() -> dict[str, str]:
 def save_corrections(corrections: dict[str, str]) -> str:
     """Save corrections dict to .podcli/corrections.json. Returns the file path."""
     os.makedirs(os.path.dirname(_CORRECTIONS_PATH), exist_ok=True)
-    with open(_CORRECTIONS_PATH, "w") as f:
+    with open(_CORRECTIONS_PATH, "w", encoding="utf-8") as f:
         json.dump(corrections, f, indent=2, ensure_ascii=False)
     return _CORRECTIONS_PATH
 
