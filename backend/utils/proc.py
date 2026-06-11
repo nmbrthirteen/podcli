@@ -8,11 +8,23 @@ the server or swallow failures silently.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import time
 from typing import Sequence
 
 log = logging.getLogger("podcli.proc")
+
+_TOOL_ENV = {"ffmpeg": "PODCLI_FFMPEG", "ffprobe": "PODCLI_FFPROBE"}
+
+
+def _resolve_tool(cmd: Sequence[str]) -> list[str]:
+    if not cmd:
+        return list(cmd)
+    override = os.environ.get(_TOOL_ENV.get(cmd[0], ""))
+    if override and os.path.exists(override):
+        return [override, *cmd[1:]]
+    return list(cmd)
 
 
 class ProcError(RuntimeError):
@@ -45,6 +57,7 @@ def run(
     """
     if not cmd:
         raise ValueError("proc.run: cmd must be non-empty")
+    cmd = _resolve_tool(cmd)
     tool = cmd[0]
     t0 = time.monotonic()
     log.debug("proc.start tool=%s argc=%d timeout=%.0fs", tool, len(cmd), timeout)

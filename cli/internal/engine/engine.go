@@ -65,18 +65,20 @@ func Python() string {
 	return "python3"
 }
 
-func FFmpeg() string {
-	cands := []string{
-		filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg"),
-		filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg.exe"),
-	}
-	for _, p := range cands {
+func runtimeBin(name string) string {
+	for _, p := range []string{
+		filepath.Join(paths.RuntimeDir(), "ffmpeg", name),
+		filepath.Join(paths.RuntimeDir(), "ffmpeg", name+".exe"),
+	} {
 		if exists(p) {
 			return p
 		}
 	}
 	return ""
 }
+
+func FFmpeg() string  { return runtimeBin("ffmpeg") }
+func FFprobe() string { return runtimeBin("ffprobe") }
 
 func Run(args []string) (int, error) {
 	root, ok := BackendRoot()
@@ -95,6 +97,9 @@ func Run(args []string) (int, error) {
 	)
 	if ff := FFmpeg(); ff != "" {
 		env = append(env, "PODCLI_FFMPEG="+ff)
+	}
+	if fp := FFprobe(); fp != "" {
+		env = append(env, "PODCLI_FFPROBE="+fp)
 	}
 	cmd.Env = env
 

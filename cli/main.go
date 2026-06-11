@@ -120,6 +120,9 @@ func doctor() {
 	} else {
 		fmt.Printf("  ffmpeg:   PATH fallback (not yet hermetic)\n")
 	}
+	if fp := engine.FFprobe(); fp != "" {
+		fmt.Printf("  ffprobe:  %s (hermetic)\n", fp)
+	}
 	fmt.Println("\nModels")
 	fmt.Printf("  base:     %s\n", presence(provision.ModelPath("base")))
 	fmt.Printf("  vad:      %s\n", presence(provision.VADModelPath()))
