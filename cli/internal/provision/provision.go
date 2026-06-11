@@ -2,13 +2,16 @@
 package provision
 
 import (
+	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"podcli/internal/paths"
@@ -78,14 +81,13 @@ func EnsureVADModel() (string, error) {
 
 const maxAttempts = 6
 
-// download resumes via HTTP Range across transient stalls rather than
-// restarting, then verifies the pinned checksum and renames atomically.
-func download(url, dest, wantSHA, label string) error {
+// fetch resumes via HTTP Range across transient stalls rather than restarting,
+// writing to dest atomically.
+func fetch(url, dest, label string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
 	tmp := dest + ".part"
-
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		done, err := downloadOnce(url, tmp, label)
@@ -101,20 +103,26 @@ func download(url, dest, wantSHA, label string) error {
 		os.Remove(tmp)
 		return lastErr
 	}
-
-	if wantSHA != "" {
-		got, err := sha256file(tmp)
-		if err != nil {
-			return err
-		}
-		if got != wantSHA {
-			os.Remove(tmp)
-			return fmt.Errorf("checksum mismatch for %s: got %s want %s", label, got, wantSHA)
-		}
-	} else {
-		fmt.Fprintf(os.Stderr, "  (no pinned checksum for %s — skipped verification)\n", label)
-	}
 	return os.Rename(tmp, dest)
+}
+
+func download(url, dest, wantSHA, label string) error {
+	if err := fetch(url, dest, label); err != nil {
+		return err
+	}
+	if wantSHA == "" {
+		fmt.Fprintf(os.Stderr, "  (no pinned checksum for %s — skipped verification)\n", label)
+		return nil
+	}
+	got, err := sha256file(dest)
+	if err != nil {
+		return err
+	}
+	if got != wantSHA {
+		os.Remove(dest)
+		return fmt.Errorf("checksum mismatch for %s: got %s want %s", label, got, wantSHA)
+	}
+	return nil
 }
 
 func downloadOnce(url, tmp, label string) (bool, error) {
@@ -176,6 +184,160 @@ func sha256file(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+type ffArchive struct {
+	URL  string
+	Bins []string
+}
+
+// Static ffmpeg sources are not yet pinned by checksum (upstream "latest" URLs);
+// they get our own pinned builds once podcli hosts releases.
+var ffmpegSpecs = map[string][]ffArchive{
+	"darwin/amd64": {
+		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip", Bins: []string{"ffmpeg"}},
+		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip", Bins: []string{"ffprobe"}},
+	},
+	"darwin/arm64": {
+		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip", Bins: []string{"ffmpeg"}},
+		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip", Bins: []string{"ffprobe"}},
+	},
+	"linux/amd64": {
+		{URL: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz", Bins: []string{"ffmpeg", "ffprobe"}},
+	},
+	"linux/arm64": {
+		{URL: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz", Bins: []string{"ffmpeg", "ffprobe"}},
+	},
+	"windows/amd64": {
+		{URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip", Bins: []string{"ffmpeg.exe", "ffprobe.exe"}},
+	},
+}
+
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
+func FFmpegBin() string {
+	return filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg"+exeSuffix())
+}
+
+func EnsureFFmpeg() (string, error) {
+	bin := FFmpegBin()
+	if have(bin) {
+		return bin, nil
+	}
+	specs, ok := ffmpegSpecs[runtime.GOOS+"/"+runtime.GOARCH]
+	if !ok {
+		return "", fmt.Errorf("no ffmpeg build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	dir := filepath.Join(paths.RuntimeDir(), "ffmpeg")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	for _, a := range specs {
+		sum := sha256.Sum256([]byte(a.URL))
+		archive := filepath.Join(os.TempDir(), "podcli-ff-"+hex.EncodeToString(sum[:8]))
+		if err := fetch(a.URL, archive, "ffmpeg-archive"); err != nil {
+			return "", err
+		}
+		err := extractBins(archive, a.Bins, dir)
+		os.Remove(archive)
+		if err != nil {
+			return "", err
+		}
+	}
+	if !have(bin) {
+		return "", fmt.Errorf("ffmpeg missing after extraction in %s", dir)
+	}
+	return bin, nil
+}
+
+func extractBins(archive string, bins []string, dest string) error {
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	magic := make([]byte, 6)
+	io.ReadFull(f, magic)
+	f.Close()
+	switch {
+	case magic[0] == 'P' && magic[1] == 'K':
+		return extractZip(archive, bins, dest)
+	case magic[0] == 0xFD && string(magic[1:6]) == "7zXZ\x00":
+		return extractTarXz(archive, bins, dest)
+	default:
+		return fmt.Errorf("unrecognized archive format")
+	}
+}
+
+func wantSet(bins []string) map[string]bool {
+	m := make(map[string]bool, len(bins))
+	for _, b := range bins {
+		m[b] = true
+	}
+	return m
+}
+
+func extractZip(archive string, bins []string, dest string) error {
+	zr, err := zip.OpenReader(archive)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	want := wantSet(bins)
+	for _, zf := range zr.File {
+		if zf.FileInfo().IsDir() || !want[filepath.Base(zf.Name)] {
+			continue
+		}
+		rc, err := zf.Open()
+		if err != nil {
+			return err
+		}
+		err = writeBin(rc, filepath.Join(dest, filepath.Base(zf.Name)))
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func extractTarXz(archive string, bins []string, dest string) error {
+	tmp, err := os.MkdirTemp("", "podcli-ffx-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	cmd := exec.Command("tar", "-xf", archive, "-C", tmp)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("tar extract (is tar installed?): %w", err)
+	}
+	want := wantSet(bins)
+	return filepath.WalkDir(tmp, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !want[filepath.Base(p)] {
+			return err
+		}
+		in, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		return writeBin(in, filepath.Join(dest, filepath.Base(p)))
+	})
+}
+
+func writeBin(r io.Reader, dest string) error {
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, r)
+	return err
 }
 
 type progress struct {

@@ -98,7 +98,12 @@ func setup(args []string) int {
 		}
 		fmt.Printf("  vad:    %s\n", vp)
 	}
-	fmt.Println("Done. (hermetic python/ffmpeg/whisper.cpp provisioning lands in a later phase)")
+	if fp, err := provision.EnsureFFmpeg(); err != nil {
+		fmt.Fprintf(os.Stderr, "  ffmpeg: skipped (%v) — backend will use PATH ffmpeg\n", err)
+	} else {
+		fmt.Printf("  ffmpeg: %s\n", fp)
+	}
+	fmt.Println("Done. (hermetic python/whisper.cpp provisioning lands in a later phase)")
 	return 0
 }
 
