@@ -1,0 +1,119 @@
+// Package engine routes podcli subcommands to the Python backend. In Phase 0 it
+// resolves an interpreter and backend/cli.py and execs them; later phases swap
+// the resolved interpreter/ffmpeg to hermetically provisioned ones without
+// changing this routing.
+package engine
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+
+	"podcli/internal/paths"
+)
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// BackendRoot locates the directory containing cli.py: explicit override, then
+// the dev repo (walk up for backend/cli.py), then the provisioned location.
+func BackendRoot() (string, bool) {
+	if b := os.Getenv("PODCLI_BACKEND"); b != "" && exists(filepath.Join(b, "cli.py")) {
+		return b, true
+	}
+	if dir, err := os.Getwd(); err == nil {
+		for {
+			cand := filepath.Join(dir, "backend")
+			if exists(filepath.Join(cand, "cli.py")) {
+				return cand, true
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	cand := filepath.Join(paths.RuntimeDir(), "backend")
+	if exists(filepath.Join(cand, "cli.py")) {
+		return cand, true
+	}
+	return "", false
+}
+
+// Python resolves the interpreter: explicit override, hermetic runtime, dev
+// venv next to the backend, then system python3.
+func Python() string {
+	if p := os.Getenv("PODCLI_PYTHON"); p != "" {
+		return p
+	}
+	hermetic := []string{
+		filepath.Join(paths.RuntimeDir(), "python", "bin", "python3"),
+		filepath.Join(paths.RuntimeDir(), "python", "python.exe"),
+	}
+	for _, p := range hermetic {
+		if exists(p) {
+			return p
+		}
+	}
+	if root, ok := BackendRoot(); ok {
+		venv := filepath.Join(filepath.Dir(root), "venv", "bin", "python3")
+		if runtime.GOOS == "windows" {
+			venv = filepath.Join(filepath.Dir(root), "venv", "Scripts", "python.exe")
+		}
+		if exists(venv) {
+			return venv
+		}
+	}
+	return "python3"
+}
+
+// FFmpeg resolves a hermetic ffmpeg if present, else lets the backend fall back
+// to PATH (current behavior).
+func FFmpeg() string {
+	cands := []string{
+		filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg"),
+		filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg.exe"),
+	}
+	for _, p := range cands {
+		if exists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// Run execs the Python backend with args, inheriting stdio. Returns the child's
+// exit code.
+func Run(args []string) (int, error) {
+	root, ok := BackendRoot()
+	if !ok {
+		return 1, fmt.Errorf("python backend not found — set PODCLI_BACKEND or run inside the repo")
+	}
+	cli := filepath.Join(root, "cli.py")
+	full := append([]string{"-W", "ignore::UserWarning", cli}, args...)
+
+	cmd := exec.Command(Python(), full...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	env := append(os.Environ(),
+		"OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES",
+		"PYTHONIOENCODING=utf-8",
+		"PYTHONUTF8=1",
+	)
+	if ff := FFmpeg(); ff != "" {
+		env = append(env, "PODCLI_FFMPEG="+ff)
+	}
+	cmd.Env = env
+
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.ExitCode(), nil
+		}
+		return 1, err
+	}
+	return 0, nil
+}
