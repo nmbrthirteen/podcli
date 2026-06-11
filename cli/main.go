@@ -1,17 +1,15 @@
-// podcli — native launcher.
-//
-// Phase 0: resolves the Python backend + interpreter and routes subcommands to
-// it (replacing the bash `podcli` and install.cmd). Reserved launcher verbs
-// (version, doctor, update, setup) are handled here; everything else is passed
-// through to the engine. update/setup are stubs until Phases 0+/2.
+// podcli — native launcher. Reserved verbs are handled here; everything else
+// routes to the Python engine.
 package main
 
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"podcli/internal/engine"
 	"podcli/internal/paths"
+	"podcli/internal/provision"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=...".
@@ -32,10 +30,16 @@ func main() {
 	case "update":
 		fmt.Println("self-update: not yet implemented (Phase 2 — GitHub Releases + atomic swap)")
 	case "setup":
-		fmt.Println("hermetic provisioning: not yet implemented (Phase 0+ — fetch pinned python/ffmpeg/whisper.cpp)")
+		os.Exit(setup(args[1:]))
 	case "help", "--help", "-h":
 		printHelp()
 	default:
+		if usesWhisperCpp(args) {
+			if _, err := provision.EnsureModel("base"); err != nil {
+				fmt.Fprintln(os.Stderr, "podcli: provisioning model:", err)
+				os.Exit(1)
+			}
+		}
 		code, err := engine.Run(args)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "podcli:", err)
@@ -43,6 +47,59 @@ func main() {
 		}
 		os.Exit(code)
 	}
+}
+
+func usesWhisperCpp(args []string) bool {
+	cmd := args[0]
+	if cmd != "process" && cmd != "studio" {
+		return false
+	}
+	engineSel := strings.ToLower(os.Getenv("PODCLI_ENGINE"))
+	for i, a := range args {
+		if a == "--engine" && i+1 < len(args) {
+			engineSel = strings.ToLower(args[i+1])
+		} else if strings.HasPrefix(a, "--engine=") {
+			engineSel = strings.ToLower(strings.TrimPrefix(a, "--engine="))
+		}
+	}
+	switch engineSel {
+	case "whispercpp", "whisper-cpp", "whisper.cpp", "cpp":
+		return true
+	}
+	return false
+}
+
+func setup(args []string) int {
+	size := "base"
+	vad := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--model":
+			if i+1 < len(args) {
+				size = args[i+1]
+				i++
+			}
+		case "--vad":
+			vad = true
+		}
+	}
+	fmt.Printf("Provisioning into %s\n", paths.Home())
+	p, err := provision.EnsureModel(size)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "podcli: setup:", err)
+		return 1
+	}
+	fmt.Printf("  model:  %s\n", p)
+	if vad {
+		vp, err := provision.EnsureVADModel()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "podcli: setup:", err)
+			return 1
+		}
+		fmt.Printf("  vad:    %s\n", vp)
+	}
+	fmt.Println("Done. (hermetic python/ffmpeg/whisper.cpp provisioning lands in a later phase)")
+	return 0
 }
 
 func doctor() {
@@ -63,6 +120,16 @@ func doctor() {
 	} else {
 		fmt.Printf("  ffmpeg:   PATH fallback (not yet hermetic)\n")
 	}
+	fmt.Println("\nModels")
+	fmt.Printf("  base:     %s\n", presence(provision.ModelPath("base")))
+	fmt.Printf("  vad:      %s\n", presence(provision.VADModelPath()))
+}
+
+func presence(p string) string {
+	if fi, err := os.Stat(p); err == nil && fi.Size() > 0 {
+		return fmt.Sprintf("%s (%d MB)", p, fi.Size()>>20)
+	}
+	return "not provisioned — run `podcli setup`"
 }
 
 func printHelp() {
@@ -82,7 +149,8 @@ Launcher commands:
   doctor               Show resolved paths, interpreter, backend, ffmpeg
   version              Print version
   update               Self-update (coming in Phase 2)
-  setup                Provision hermetic runtimes (coming soon)
+  setup [--model base] [--vad]
+                       Provision models into the managed dir (runtimes: later phase)
 
 Run a command with --help for its options.
 `, Version)

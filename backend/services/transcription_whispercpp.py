@@ -1,17 +1,8 @@
-"""whisper.cpp transcription adapter — emits the same contract dict as
-services.transcription.transcribe_file (segments + word-level timestamps), so it
-is a drop-in engine behind that seam.
+"""whisper.cpp adapter behind the transcribe_file contract.
 
-whisper.cpp emits subword *tokens* with a literal leading-space convention
-(" and", " just", continuation/punctuation tokens have no leading space). We
-merge tokens into words on that boundary and apply the exact same word-text
-normalization the rest of the pipeline expects (strip) — this is the single
-highest-risk integration detail: apply_corrections() and caption spacing match
-on stripped word text, so the new engine's words must normalize identically.
-
-Requires a whisper-cli binary and a ggml model. In production these come from
-the hermetic provisioner; here they are parameters/env so the parity harness can
-point at a local install.
+Tokens carry a leading-space convention (" and", continuations have none); we
+merge on that boundary and strip word text. The strip must match the rest of the
+pipeline exactly — apply_corrections() and caption spacing key on stripped text.
 """
 
 import json

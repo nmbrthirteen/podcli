@@ -1,7 +1,4 @@
-// Package engine routes podcli subcommands to the Python backend. In Phase 0 it
-// resolves an interpreter and backend/cli.py and execs them; later phases swap
-// the resolved interpreter/ffmpeg to hermetically provisioned ones without
-// changing this routing.
+// Package engine routes podcli subcommands to the Python backend.
 package engine
 
 import (
@@ -19,8 +16,6 @@ func exists(p string) bool {
 	return err == nil
 }
 
-// BackendRoot locates the directory containing cli.py: explicit override, then
-// the dev repo (walk up for backend/cli.py), then the provisioned location.
 func BackendRoot() (string, bool) {
 	if b := os.Getenv("PODCLI_BACKEND"); b != "" && exists(filepath.Join(b, "cli.py")) {
 		return b, true
@@ -45,8 +40,6 @@ func BackendRoot() (string, bool) {
 	return "", false
 }
 
-// Python resolves the interpreter: explicit override, hermetic runtime, dev
-// venv next to the backend, then system python3.
 func Python() string {
 	if p := os.Getenv("PODCLI_PYTHON"); p != "" {
 		return p
@@ -72,8 +65,6 @@ func Python() string {
 	return "python3"
 }
 
-// FFmpeg resolves a hermetic ffmpeg if present, else lets the backend fall back
-// to PATH (current behavior).
 func FFmpeg() string {
 	cands := []string{
 		filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg"),
@@ -87,8 +78,6 @@ func FFmpeg() string {
 	return ""
 }
 
-// Run execs the Python backend with args, inheriting stdio. Returns the child's
-// exit code.
 func Run(args []string) (int, error) {
 	root, ok := BackendRoot()
 	if !ok {

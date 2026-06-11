@@ -39,14 +39,7 @@ func Home() string {
 	}
 }
 
-// RuntimeDir holds hermetic CPython, ffmpeg, whisper.cpp, etc.
 func RuntimeDir() string { return filepath.Join(Home(), "runtime") }
-
-// ModelsDir holds fetched ggml models.
-func ModelsDir() string { return filepath.Join(Home(), "models") }
-
-// BinDir holds the self-updatable engine binary.
-func BinDir() string { return filepath.Join(Home(), "bin") }
-
-// ConfigPath is the launcher config (update opt-out, pins).
+func ModelsDir() string  { return filepath.Join(Home(), "models") }
+func BinDir() string     { return filepath.Join(Home(), "bin") }
 func ConfigPath() string { return filepath.Join(Home(), "config.json") }
