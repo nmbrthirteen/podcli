@@ -78,6 +78,8 @@ def transcribe_file(
     language: Optional[str] = "en",
     dtw_model: str = "base",
     threads: int = 4,
+    vad: bool = False,
+    vad_model: Optional[str] = None,
     **_ignored,
 ) -> dict:
     if not os.path.exists(file_path):
@@ -94,6 +96,11 @@ def transcribe_file(
            "-of", out_base, "-t", str(threads)]
     if dtw_model:
         cmd += ["-dtw", dtw_model]
+    if vad and vad_model and os.path.exists(vad_model):
+        # VAD removes the trailing-words-into-silence failure mode but currently
+        # adds a small systematic early bias (silence-removal remapping). Off by
+        # default; opt in via PODCLI_WHISPERCPP_VAD.
+        cmd += ["--vad", "--vad-model", vad_model]
     if language:
         cmd += ["-l", language]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

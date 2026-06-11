@@ -14,6 +14,48 @@ import tempfile
 from typing import Optional, Callable
 
 
+def _managed_home() -> str:
+    h = os.environ.get("PODCLI_HOME")
+    if h:
+        return h
+    home = os.path.expanduser("~")
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Application Support", "podcli")
+    if sys.platform == "win32":
+        return os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local", "podcli")
+    return os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share", "podcli")
+
+
+def _transcribe_with_whispercpp(file_path, model_size, language, progress_callback):
+    from services import transcription_whispercpp as wcpp
+
+    if progress_callback:
+        progress_callback(10, "Transcribing with whisper.cpp...")
+
+    cli = os.environ.get("PODCLI_WHISPER_CLI", "whisper-cli")
+    model = os.environ.get("PODCLI_WHISPERCPP_MODEL") or os.path.join(
+        _managed_home(), "models", f"ggml-{model_size}.bin"
+    )
+    if not os.path.exists(model):
+        raise FileNotFoundError(
+            f"whisper.cpp model not found: {model}. "
+            "Set PODCLI_WHISPERCPP_MODEL or run provisioning."
+        )
+    vad = os.environ.get("PODCLI_WHISPERCPP_VAD", "").strip().lower() in ("1", "true", "yes", "on")
+    result = wcpp.transcribe_file(
+        file_path,
+        model_path=model,
+        whisper_cli=cli,
+        ffmpeg=os.environ.get("PODCLI_FFMPEG", "ffmpeg"),
+        language=language,
+        vad=vad,
+        vad_model=os.environ.get("PODCLI_WHISPERCPP_VAD_MODEL") or None,
+    )
+    if progress_callback:
+        progress_callback(100, "Transcription complete")
+    return result
+
+
 def transcribe_file(
     file_path: str,
     model_size: str = "base",
@@ -38,6 +80,10 @@ def transcribe_file(
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
+
+    engine = os.environ.get("PODCLI_ENGINE", "whisper-py").strip().lower()
+    if engine in ("whispercpp", "whisper-cpp", "whisper.cpp", "cpp"):
+        return _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
 
     # ================================================================
     # Step 1: Whisper transcription

@@ -416,6 +416,8 @@ def cmd_process(args):
             save_corrections(merged)
 
     # CLI overrides
+    if getattr(args, "engine", None):
+        os.environ["PODCLI_ENGINE"] = args.engine
     if args.caption_style:
         config["caption_style"] = args.caption_style
     if args.crop:
@@ -3235,6 +3237,7 @@ def main():
     proc.add_argument("-n", "--top", type=int, help="Number of top clips to export (default: 5)")
     proc.add_argument("-o", "--output", help="Output directory (default: ./clips)")
     proc.add_argument("-p", "--preset", help="Load a saved preset")
+    proc.add_argument("--engine", choices=["whisper-py", "whispercpp"], help="Transcription engine (default: whisper-py; whispercpp is the native, PyTorch-free path)")
     proc.add_argument("--fast", action="store_true", help="Draft mode: tiny Whisper, heuristic selection, center crop, low quality")
     proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
     proc.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
