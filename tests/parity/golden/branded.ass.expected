@@ -1,0 +1,52 @@
+[Script Info]
+Title: Podcast Clip Captions (Branded)
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: BrandedNormal,Arial,80,&H00FFFFFF,&H00FFFFFF,&H90000000,&H00000000,-1,0,0,0,100,100,2,0,1,1,1,2,60,60,500,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:00.34,BrandedNormal,,0,0,0,,{\an7\pos(208,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 168 0 b 176 0 183 7 183 15 l 183 85 b 183 93 176 100 168 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:00.00,0:00:00.34,BrandedNormal,,0,0,0,,{\an5\pos(299,1380)}The
+Dialogue: 1,0:00:00.00,0:00:00.34,BrandedNormal,,0,0,0,,{\an5\pos(509,1380)}james
+Dialogue: 1,0:00:00.00,0:00:00.34,BrandedNormal,,0,0,0,,{\an5\pos(749,1380)}webb
+Dialogue: 0,0:00:00.34,0:00:00.72,BrandedNormal,,0,0,0,,{\an7\pos(373,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 257 0 b 265 0 272 7 272 15 l 272 85 b 272 93 265 100 257 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:00.34,0:00:00.72,BrandedNormal,,0,0,0,,{\an5\pos(299,1380)}The
+Dialogue: 1,0:00:00.34,0:00:00.72,BrandedNormal,,0,0,0,,{\an5\pos(509,1380)}james
+Dialogue: 1,0:00:00.34,0:00:00.72,BrandedNormal,,0,0,0,,{\an5\pos(749,1380)}webb
+Dialogue: 0,0:00:00.72,0:00:01.05,BrandedNormal,,0,0,0,,{\an7\pos(627,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 230 0 b 238 0 245 7 245 15 l 245 85 b 245 93 238 100 230 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:00.72,0:00:01.05,BrandedNormal,,0,0,0,,{\an5\pos(299,1380)}The
+Dialogue: 1,0:00:00.72,0:00:01.05,BrandedNormal,,0,0,0,,{\an5\pos(509,1380)}james
+Dialogue: 1,0:00:00.72,0:00:01.05,BrandedNormal,,0,0,0,,{\an5\pos(749,1380)}webb
+Dialogue: 0,0:00:01.05,0:00:01.62,BrandedNormal,,0,0,0,,{\an7\pos(150,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 419 0 b 427 0 434 7 434 15 l 434 85 b 434 93 427 100 419 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:01.05,0:00:01.62,BrandedNormal,,0,0,0,,{\an5\pos(367,1380)}Telescope
+Dialogue: 1,0:00:01.05,0:00:01.62,BrandedNormal,,0,0,0,,{\an5\pos(669,1380)}cost
+Dialogue: 1,0:00:01.05,0:00:01.62,BrandedNormal,,0,0,0,,{\an5\pos(841,1380)}$10
+Dialogue: 0,0:00:01.62,0:00:01.95,BrandedNormal,,0,0,0,,{\an7\pos(566,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 191 0 b 199 0 206 7 206 15 l 206 85 b 206 93 199 100 191 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:01.62,0:00:01.95,BrandedNormal,,0,0,0,,{\an5\pos(367,1380)}Telescope
+Dialogue: 1,0:00:01.62,0:00:01.95,BrandedNormal,,0,0,0,,{\an5\pos(669,1380)}cost
+Dialogue: 1,0:00:01.62,0:00:01.95,BrandedNormal,,0,0,0,,{\an5\pos(841,1380)}$10
+Dialogue: 0,0:00:01.95,0:00:02.40,BrandedNormal,,0,0,0,,{\an7\pos(754,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 160 0 b 168 0 175 7 175 15 l 175 85 b 175 93 168 100 160 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:01.95,0:00:02.40,BrandedNormal,,0,0,0,,{\an5\pos(367,1380)}Telescope
+Dialogue: 1,0:00:01.95,0:00:02.40,BrandedNormal,,0,0,0,,{\an5\pos(669,1380)}cost
+Dialogue: 1,0:00:01.95,0:00:02.40,BrandedNormal,,0,0,0,,{\an5\pos(841,1380)}$10
+Dialogue: 0,0:00:02.40,0:00:03.10,BrandedNormal,,0,0,0,,{\an7\pos(167,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 291 0 b 299 0 306 7 306 15 l 306 85 b 306 93 299 100 291 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:02.40,0:00:03.10,BrandedNormal,,0,0,0,,{\an5\pos(320,1380)}Billion.
+Dialogue: 1,0:00:02.40,0:00:03.10,BrandedNormal,,0,0,0,,{\an5\pos(598,1380)}wasn't
+Dialogue: 1,0:00:02.40,0:00:03.10,BrandedNormal,,0,0,0,,{\an5\pos(818,1380)}that
+Dialogue: 0,0:00:03.10,0:00:03.55,BrandedNormal,,0,0,0,,{\an7\pos(455,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 272 0 b 280 0 287 7 287 15 l 287 85 b 287 93 280 100 272 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:03.10,0:00:03.55,BrandedNormal,,0,0,0,,{\an5\pos(320,1380)}Billion.
+Dialogue: 1,0:00:03.10,0:00:03.55,BrandedNormal,,0,0,0,,{\an5\pos(598,1380)}wasn't
+Dialogue: 1,0:00:03.10,0:00:03.55,BrandedNormal,,0,0,0,,{\an5\pos(818,1380)}that
+Dialogue: 0,0:00:03.55,0:00:03.60,BrandedNormal,,0,0,0,,{\an7\pos(724,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 173 0 b 181 0 188 7 188 15 l 188 85 b 188 93 181 100 173 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:03.55,0:00:03.60,BrandedNormal,,0,0,0,,{\an5\pos(320,1380)}Billion.
+Dialogue: 1,0:00:03.55,0:00:03.60,BrandedNormal,,0,0,0,,{\an5\pos(598,1380)}wasn't
+Dialogue: 1,0:00:03.55,0:00:03.60,BrandedNormal,,0,0,0,,{\an5\pos(818,1380)}that
+Dialogue: 0,0:00:03.55,0:00:04.20,BrandedNormal,,0,0,0,,{\an7\pos(296,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 472 0 b 480 0 487 7 487 15 l 487 85 b 487 93 480 100 472 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:03.55,0:00:04.20,BrandedNormal,,0,0,0,,{\an5\pos(539,1380)}Expensive?

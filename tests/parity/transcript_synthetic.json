@@ -1,0 +1,22 @@
+{
+  "_comment": "Neutral synthetic transcript for Layer-1 caption parity. No personal/podcast content. Deliberately exercises the word-text edge cases most likely to diverge across transcription engines: a leading-space token marker, a number+symbol token, end-of-sentence punctuation, an apostrophe, a whitespace-only token (must be dropped), a zero-duration token (must get the 50ms floor), and a speaker change.",
+  "segments": [
+    {"id": 0, "start": 0.0, "end": 2.95, "text": "The James Webb telescope cost $10 billion.", "speaker": "SPEAKER_00"},
+    {"id": 1, "start": 3.1, "end": 4.2, "text": "Wasn't that expensive?", "speaker": "SPEAKER_01"}
+  ],
+  "words": [
+    {"word": " The", "start": 0.0, "end": 0.34, "speaker": "SPEAKER_00"},
+    {"word": "James", "start": 0.34, "end": 0.72, "speaker": "SPEAKER_00"},
+    {"word": "Webb", "start": 0.72, "end": 1.05, "speaker": "SPEAKER_00"},
+    {"word": "telescope", "start": 1.05, "end": 1.62, "speaker": "SPEAKER_00"},
+    {"word": "cost", "start": 1.62, "end": 1.95, "speaker": "SPEAKER_00"},
+    {"word": "$10", "start": 1.95, "end": 2.4, "speaker": "SPEAKER_00"},
+    {"word": "billion.", "start": 2.4, "end": 2.95, "speaker": "SPEAKER_00"},
+    {"word": "   ", "start": 2.95, "end": 2.95, "speaker": "SPEAKER_00"},
+    {"word": "Wasn't", "start": 3.1, "end": 3.55, "speaker": "SPEAKER_01"},
+    {"word": "that", "start": 3.55, "end": 3.55, "speaker": "SPEAKER_01"},
+    {"word": "expensive?", "start": 3.55, "end": 4.2, "speaker": "SPEAKER_01"}
+  ],
+  "duration": 4.2,
+  "language": "en"
+}

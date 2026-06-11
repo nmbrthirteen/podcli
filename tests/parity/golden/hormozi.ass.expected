@@ -1,0 +1,18 @@
+[Script Info]
+Title: Podcast Clip Captions
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,80,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,3,0,0,2,40,40,180,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.05,Default,,0,0,0,,{\c&H0000FFFF\2c&H00FFFFFF}{\kf34}THE {\kf37}JAMES {\kf33}WEBB
+Dialogue: 0,0:00:01.05,0:00:02.40,Default,,0,0,0,,{\c&H0000FFFF\2c&H00FFFFFF}{\kf57}TELESCOPE {\kf32}COST {\kf44}$10
+Dialogue: 0,0:00:02.40,0:00:03.60,Default,,0,0,0,,{\c&H0000FFFF\2c&H00FFFFFF}{\kf55}BILLION. {\kf44}WASN'T {\kf4}THAT
+Dialogue: 0,0:00:03.55,0:00:04.20,Default,,0,0,0,,{\c&H0000FFFF\2c&H00FFFFFF}{\kf65}EXPENSIVE?
