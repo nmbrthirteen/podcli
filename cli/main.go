@@ -152,7 +152,12 @@ func setup(args []string) int {
 			fmt.Printf("  python: %s\n", pb)
 		}
 	}
-	fmt.Println("Done. (whisper.cpp binary provisioning lands once podcli hosts builds)")
+	if wc, err := provision.EnsureWhisperCpp(); err != nil {
+		fmt.Fprintf(os.Stderr, "  whisper: skipped (%v) — backend will use PATH whisper-cli\n", err)
+	} else {
+		fmt.Printf("  whisper: %s\n", wc)
+	}
+	fmt.Println("Done.")
 	return 0
 }
 
@@ -176,6 +181,11 @@ func doctor() {
 	}
 	if fp := engine.FFprobe(); fp != "" {
 		fmt.Printf("  ffprobe:  %s (hermetic)\n", fp)
+	}
+	if wc := engine.WhisperCLI(); wc != "" {
+		fmt.Printf("  whisper:  %s (hermetic)\n", wc)
+	} else {
+		fmt.Printf("  whisper:  PATH fallback (install whisper-cli, or provisioned once hosted)\n")
 	}
 	fmt.Println("\nModels")
 	fmt.Printf("  base:     %s\n", presence(provision.ModelPath("base")))

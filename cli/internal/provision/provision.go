@@ -224,6 +224,62 @@ func exeSuffix() string {
 	return ""
 }
 
+const podcliRepo = "nmbrthirteen/podcli"
+
+func WhisperCLIBin() string {
+	return filepath.Join(paths.RuntimeDir(), "whisper", "whisper-cli"+exeSuffix())
+}
+
+func latestReleaseAssetURL(name string) (string, error) {
+	req, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+podcliRepo+"/releases/latest", nil)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("no published release (HTTP %d)", resp.StatusCode)
+	}
+	var rel struct {
+		Assets []struct {
+			Name string `json:"name"`
+			URL  string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return "", err
+	}
+	for _, a := range rel.Assets {
+		if a.Name == name {
+			return a.URL, nil
+		}
+	}
+	return "", fmt.Errorf("asset %s not in latest release", name)
+}
+
+func EnsureWhisperCpp() (string, error) {
+	bin := WhisperCLIBin()
+	if have(bin) {
+		return bin, nil
+	}
+	name := fmt.Sprintf("whisper-cli-%s-%s%s", runtime.GOOS, runtime.GOARCH, exeSuffix())
+	url, err := latestReleaseAssetURL(name)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		return "", err
+	}
+	if err := fetch(url, bin, "whisper-cli"); err != nil {
+		return "", err
+	}
+	if runtime.GOOS != "windows" {
+		os.Chmod(bin, 0o755)
+	}
+	return bin, nil
+}
+
 func FFmpegBin() string {
 	return filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg"+exeSuffix())
 }

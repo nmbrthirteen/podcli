@@ -72,10 +72,10 @@ func Python() string {
 	return "python3"
 }
 
-func runtimeBin(name string) string {
+func runtimeBin(sub, name string) string {
 	for _, p := range []string{
-		filepath.Join(paths.RuntimeDir(), "ffmpeg", name),
-		filepath.Join(paths.RuntimeDir(), "ffmpeg", name+".exe"),
+		filepath.Join(paths.RuntimeDir(), sub, name),
+		filepath.Join(paths.RuntimeDir(), sub, name+".exe"),
 	} {
 		if exists(p) {
 			return p
@@ -84,8 +84,9 @@ func runtimeBin(name string) string {
 	return ""
 }
 
-func FFmpeg() string  { return runtimeBin("ffmpeg") }
-func FFprobe() string { return runtimeBin("ffprobe") }
+func FFmpeg() string     { return runtimeBin("ffmpeg", "ffmpeg") }
+func FFprobe() string    { return runtimeBin("ffmpeg", "ffprobe") }
+func WhisperCLI() string { return runtimeBin("whisper", "whisper-cli") }
 
 func Run(args []string) (int, error) {
 	root, ok := BackendRoot()
@@ -107,6 +108,9 @@ func Run(args []string) (int, error) {
 	}
 	if fp := FFprobe(); fp != "" {
 		env = append(env, "PODCLI_FFPROBE="+fp)
+	}
+	if wc := WhisperCLI(); wc != "" {
+		env = append(env, "PODCLI_WHISPER_CLI="+wc)
 	}
 	cmd.Env = env
 

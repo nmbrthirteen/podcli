@@ -1,10 +1,9 @@
 # Cuts a release on a v* tag: cross-compiles the Go launcher for all 5 targets,
-# publishes them as release assets (the names the npm wrapper + self-update
-# expect), then publishes the npm package pinned to the tag.
+# builds whisper.cpp per platform, publishes both as release assets (the names
+# the npm wrapper, self-update, and provisioner expect), then publishes npm.
 #
-# TODO: a separate matrix job should build whisper.cpp per platform on native
-# runners and attach whisper-cli-<os>-<arch> assets, so the provisioner can fetch
-# a hermetic binary instead of relying on a PATH/brew install.
+# The whisper.cpp matrix below is unverified until the first tagged run — the
+# binary name / cmake flags may need adjustment for the pinned whisper.cpp ref.
 name: release
 
 on:
@@ -49,8 +48,47 @@ jobs:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
 
+  whisper:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, goos: darwin, goarch: arm64 }
+          - { runner: macos-13, goos: darwin, goarch: amd64 }
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+          - { runner: windows-latest, goos: windows, goarch: amd64 }
+    runs-on: ${{ matrix.runner }}
+    env:
+      WHISPER_REF: v1.7.4 # pin a known-good whisper.cpp tag
+    steps:
+      - name: Clone whisper.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ env.WHISPER_REF }}
+      - name: Build (static; Metal embedded on macOS)
+        shell: bash
+        run: |
+          EXTRA=""
+          if [ "${{ matrix.goos }}" = "darwin" ]; then EXTRA="-DGGML_METAL_EMBED_LIBRARY=ON"; fi
+          cmake -B build -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release $EXTRA
+          cmake --build build --config Release --target whisper-cli -j
+      - name: Stage asset
+        shell: bash
+        run: |
+          EXT=""; [ "${{ matrix.goos }}" = "windows" ] && EXT=".exe"
+          SRC=$(find build -name "whisper-cli${EXT}" -type f | head -1)
+          OUT="whisper-cli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
+          cp "$SRC" "$OUT"
+          echo "ASSET=$OUT" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}
+
   release:
-    needs: build
+    needs: [build, whisper]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
