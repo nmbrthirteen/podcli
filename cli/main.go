@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"podcli/internal/config"
 	"podcli/internal/engine"
 	"podcli/internal/paths"
 	"podcli/internal/provision"
+	"podcli/internal/update"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=...".
@@ -29,26 +31,58 @@ func main() {
 	case "doctor":
 		doctor()
 	case "update":
-		fmt.Println("self-update: not yet implemented (Phase 2 — GitHub Releases + atomic swap)")
+		os.Exit(update.Run(Version))
 	case "setup":
 		os.Exit(setup(args[1:]))
+	case "config":
+		if len(args) >= 2 && (args[1] == "get" || args[1] == "set") {
+			os.Exit(configCmd(args[1:]))
+		}
+		os.Exit(runEngine(args)) // status/export/import/use → Python
 	case "help", "--help", "-h":
 		printHelp()
 	default:
-		if transcribeEngine(args) == "whispercpp" {
-			if _, err := provision.EnsureModel("base"); err != nil {
-				fmt.Fprintln(os.Stderr, "podcli: provisioning model:", err)
-				os.Exit(1)
-			}
-			os.Setenv("PODCLI_ENGINE", "whispercpp")
+		os.Exit(runEngine(args))
+	}
+}
+
+func runEngine(args []string) int {
+	update.NotifyIfOutdated(Version)
+	if transcribeEngine(args) == "whispercpp" {
+		if _, err := provision.EnsureModel("base"); err != nil {
+			fmt.Fprintln(os.Stderr, "podcli: provisioning model:", err)
+			return 1
 		}
-		code, err := engine.Run(args)
+		os.Setenv("PODCLI_ENGINE", "whispercpp")
+	}
+	code, err := engine.Run(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "podcli:", err)
+		return 1
+	}
+	return code
+}
+
+func configCmd(args []string) int {
+	switch {
+	case args[0] == "get" && len(args) == 2:
+		v, err := config.Get(args[1])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "podcli:", err)
-			os.Exit(1)
+			return 1
 		}
-		os.Exit(code)
+		fmt.Println(v)
+	case args[0] == "set" && len(args) == 3:
+		if err := config.Set(args[1], args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, "podcli:", err)
+			return 1
+		}
+		fmt.Printf("%s = %s\n", args[1], args[2])
+	default:
+		fmt.Fprintln(os.Stderr, "usage: podcli config get <key> | config set <key> <value>")
+		return 2
 	}
+	return 0
 }
 
 // transcribeEngine resolves which engine a process/studio run will use, honoring
@@ -169,11 +203,13 @@ Engine commands (routed to the processing backend):
   knowledge | presets | assets | youtube | config | cache | info
 
 Launcher commands:
-  doctor               Show resolved paths, interpreter, backend, ffmpeg
+  doctor               Show resolved paths, interpreter, backend, ffmpeg, models
   version              Print version
-  update               Self-update (coming in Phase 2)
+  update               Check for and apply a newer release
   setup [--model base] [--vad]
-                       Provision models into the managed dir (runtimes: later phase)
+                       Provision runtimes + models into the managed dir
+  config set update.auto off    Disable auto-update (also: PODCLI_NO_UPDATE=1)
+  config get update.auto
 
 Run a command with --help for its options.
 `, Version)
