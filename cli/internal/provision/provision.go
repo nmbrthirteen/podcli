@@ -2,9 +2,12 @@
 package provision
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"podcli/internal/paths"
@@ -338,6 +342,163 @@ func writeBin(r io.Reader, dest string) error {
 	defer out.Close()
 	_, err = io.Copy(out, r)
 	return err
+}
+
+var pyTriples = map[string]string{
+	"darwin/amd64":  "x86_64-apple-darwin",
+	"darwin/arm64":  "aarch64-apple-darwin",
+	"linux/amd64":   "x86_64-unknown-linux-gnu",
+	"linux/arm64":   "aarch64-unknown-linux-gnu",
+	"windows/amd64": "x86_64-pc-windows-msvc",
+}
+
+func PythonBin() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(paths.RuntimeDir(), "python", "python.exe")
+	}
+	return filepath.Join(paths.RuntimeDir(), "python", "bin", "python3")
+}
+
+// pythonAssetURL resolves a python-build-standalone install_only tarball for
+// this platform via the GitHub latest-release API, so it tracks upstream
+// without a hardcoded version that rots.
+func pythonAssetURL() (string, error) {
+	triple, ok := pyTriples[runtime.GOOS+"/"+runtime.GOARCH]
+	if !ok {
+		return "", fmt.Errorf("no python build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	req, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest", nil)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("github api: HTTP %d", resp.StatusCode)
+	}
+	var rel struct {
+		Assets []struct {
+			Name string `json:"name"`
+			URL  string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return "", err
+	}
+	match := func(prefer string) string {
+		for _, a := range rel.Assets {
+			if strings.Contains(a.Name, triple) && strings.HasSuffix(a.Name, "install_only.tar.gz") && strings.Contains(a.Name, prefer) {
+				return a.URL
+			}
+		}
+		return ""
+	}
+	if u := match("cpython-3.12."); u != "" {
+		return u, nil
+	}
+	if u := match("cpython-3."); u != "" {
+		return u, nil
+	}
+	return "", fmt.Errorf("no install_only python asset for %s", triple)
+}
+
+func EnsurePython(requirements string) (string, error) {
+	bin := PythonBin()
+	if !have(bin) {
+		url, err := pythonAssetURL()
+		if err != nil {
+			return "", err
+		}
+		sum := sha256.Sum256([]byte(url))
+		archive := filepath.Join(os.TempDir(), "podcli-py-"+hex.EncodeToString(sum[:8])+".tar.gz")
+		if err := fetch(url, archive, "cpython"); err != nil {
+			return "", err
+		}
+		err = extractTarGz(archive, paths.RuntimeDir())
+		os.Remove(archive)
+		if err != nil {
+			return "", err
+		}
+		if !have(bin) {
+			return "", fmt.Errorf("python missing after extraction")
+		}
+	}
+	if requirements != "" {
+		if err := pipInstall(bin, requirements); err != nil {
+			return "", err
+		}
+	}
+	return bin, nil
+}
+
+func pipInstall(pybin, requirements string) error {
+	fmt.Fprintf(os.Stderr, "  installing python deps (%s)\n", filepath.Base(requirements))
+	cmd := exec.Command(pybin, "-m", "pip", "install", "--disable-pip-version-check", "-q", "-r", requirements)
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	return cmd.Run()
+}
+
+func extractTarGz(archive, dest string) error {
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	root := filepath.Clean(dest) + string(os.PathSeparator)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dest, h.Name)
+		if !strings.HasPrefix(target, root) {
+			return fmt.Errorf("unsafe path in archive: %s", h.Name)
+		}
+		switch h.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(h.Mode))
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(out, tr)
+			out.Close()
+			if err != nil {
+				return err
+			}
+		case tar.TypeSymlink:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			os.Remove(target)
+			if err := os.Symlink(h.Linkname, target); err != nil {
+				return err
+			}
+		case tar.TypeLink:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			os.Remove(target)
+			os.Link(filepath.Join(dest, h.Linkname), target)
+		}
+	}
+	return nil
 }
 
 type progress struct {

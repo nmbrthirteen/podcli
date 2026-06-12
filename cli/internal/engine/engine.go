@@ -7,9 +7,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"podcli/internal/paths"
 )
+
+// IsHermeticPython reports whether the resolved interpreter is the provisioned
+// one (which lacks openai-whisper, so transcription must default to whisper.cpp).
+func IsHermeticPython() bool {
+	return strings.HasPrefix(Python(), paths.RuntimeDir())
+}
 
 func exists(p string) bool {
 	_, err := os.Stat(p)

@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"podcli/internal/engine"
@@ -34,11 +35,12 @@ func main() {
 	case "help", "--help", "-h":
 		printHelp()
 	default:
-		if usesWhisperCpp(args) {
+		if transcribeEngine(args) == "whispercpp" {
 			if _, err := provision.EnsureModel("base"); err != nil {
 				fmt.Fprintln(os.Stderr, "podcli: provisioning model:", err)
 				os.Exit(1)
 			}
+			os.Setenv("PODCLI_ENGINE", "whispercpp")
 		}
 		code, err := engine.Run(args)
 		if err != nil {
@@ -49,24 +51,29 @@ func main() {
 	}
 }
 
-func usesWhisperCpp(args []string) bool {
-	cmd := args[0]
-	if cmd != "process" && cmd != "studio" {
-		return false
+// transcribeEngine resolves which engine a process/studio run will use, honoring
+// --engine, PODCLI_ENGINE, then defaulting to whisper.cpp on a hermetic Python
+// (which has no openai-whisper).
+func transcribeEngine(args []string) string {
+	if args[0] != "process" && args[0] != "studio" {
+		return ""
 	}
-	engineSel := strings.ToLower(os.Getenv("PODCLI_ENGINE"))
+	sel := strings.ToLower(os.Getenv("PODCLI_ENGINE"))
 	for i, a := range args {
 		if a == "--engine" && i+1 < len(args) {
-			engineSel = strings.ToLower(args[i+1])
+			sel = strings.ToLower(args[i+1])
 		} else if strings.HasPrefix(a, "--engine=") {
-			engineSel = strings.ToLower(strings.TrimPrefix(a, "--engine="))
+			sel = strings.ToLower(strings.TrimPrefix(a, "--engine="))
 		}
 	}
-	switch engineSel {
-	case "whispercpp", "whisper-cpp", "whisper.cpp", "cpp":
-		return true
+	if sel == "" && engine.IsHermeticPython() {
+		sel = "whispercpp"
 	}
-	return false
+	switch sel {
+	case "whispercpp", "whisper-cpp", "whisper.cpp", "cpp":
+		return "whispercpp"
+	}
+	return sel
 }
 
 func setup(args []string) int {
@@ -103,7 +110,15 @@ func setup(args []string) int {
 	} else {
 		fmt.Printf("  ffmpeg: %s\n", fp)
 	}
-	fmt.Println("Done. (hermetic python/whisper.cpp provisioning lands in a later phase)")
+	if root, ok := engine.BackendRoot(); ok {
+		reqs := filepath.Join(root, "requirements-runtime.txt")
+		if pb, err := provision.EnsurePython(reqs); err != nil {
+			fmt.Fprintf(os.Stderr, "  python: skipped (%v) — using dev venv / system python\n", err)
+		} else {
+			fmt.Printf("  python: %s\n", pb)
+		}
+	}
+	fmt.Println("Done. (whisper.cpp binary provisioning lands once podcli hosts builds)")
 	return 0
 }
 

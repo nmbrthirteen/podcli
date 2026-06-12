@@ -1,0 +1,11 @@
+# Hermetic native-CLI runtime deps. Transcription is whisper.cpp (a native
+# binary), so openai-whisper/torch are intentionally absent — that is the ~2GB
+# the native install saves. --engine whisper-py remains a dev/source-only option
+# via backend/requirements.txt.
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+questionary>=2.0.0
+python-dotenv>=1.0.0
+google-api-python-client>=2.0.0
+google-auth-oauthlib>=1.0.0
