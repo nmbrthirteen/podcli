@@ -8,6 +8,7 @@ pipeline exactly — apply_corrections() and caption spacing key on stripped tex
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -61,6 +62,76 @@ def _tokens_to_words(tokens: list[dict]) -> list[dict]:
     return words
 
 
+def _voiced_intervals(wav_path: str, bridge: float = 0.3, thresh_ratio: float = 0.07):
+    import wave
+
+    import numpy as np
+
+    try:
+        w = wave.open(wav_path, "rb")
+        sr, width, n = w.getframerate(), w.getsampwidth(), w.getnframes()
+        raw = w.readframes(n)
+        w.close()
+    except Exception:
+        return []
+    if width != 2 or sr <= 0 or not raw:
+        return []
+    samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+    hop = max(1, int(sr * 0.010))
+    frame = max(hop, int(sr * 0.025))
+    if len(samples) < frame:
+        return []
+    nf = 1 + (len(samples) - frame) // hop
+    idx = np.arange(nf)[:, None] * hop + np.arange(frame)[None, :]
+    rms = np.sqrt((samples[idx] ** 2).mean(axis=1))
+    peak = float(rms.max())
+    if peak <= 0:
+        return []
+    voiced = rms > thresh_ratio * peak
+    intervals, start = [], None
+    for i, v in enumerate(voiced):
+        if v and start is None:
+            start = i * hop / sr
+        elif not v and start is not None:
+            intervals.append([start, i * hop / sr])
+            start = None
+    if start is not None:
+        intervals.append([start, nf * hop / sr])
+    merged = []
+    for iv in intervals:
+        if merged and iv[0] - merged[-1][1] <= bridge:
+            merged[-1][1] = iv[1]
+        else:
+            merged.append(iv)
+    return merged
+
+
+def _snap_words_to_voiced(words: list[dict], wav_path: str) -> list[dict]:
+    """Pull word timings back into the voiced span. whisper.cpp sometimes
+    stretches trailing words across trailing silence; clamping to [first voiced,
+    last voiced] (with a small pad) and re-flowing keeps captions in sync without
+    disturbing words that already overlap speech."""
+    if not words:
+        return words
+    intervals = _voiced_intervals(wav_path)
+    if not intervals:
+        return words
+    pad = 0.15
+    lo = max(0.0, intervals[0][0] - pad)
+    hi = intervals[-1][1] + pad
+    out, prev_end = [], lo
+    for w in words:
+        s = min(max(float(w.get("start", 0.0)), lo), hi)
+        e = min(max(float(w.get("end", 0.0)), lo), hi)
+        if s < prev_end:
+            s = prev_end
+        if e <= s:
+            e = min(s + 0.05, hi)
+        prev_end = e
+        out.append({**w, "start": round(s, 3), "end": round(e, 3)})
+    return out
+
+
 def transcribe_file(
     file_path: str,
     model_path: str,
@@ -81,47 +152,50 @@ def transcribe_file(
     tmpdir = tempfile.mkdtemp(prefix="wcpp_")
     wav = os.path.join(tmpdir, "audio.wav")
     out_base = os.path.join(tmpdir, "out")
-    _extract_wav(file_path, wav, ffmpeg)
+    try:
+        _extract_wav(file_path, wav, ffmpeg)
 
-    cmd = [whisper_cli, "-m", model_path, "-f", wav, "-ojf",
-           "-of", out_base, "-t", str(threads)]
-    if dtw_model:
-        cmd += ["-dtw", dtw_model]
-    if vad and vad_model and os.path.exists(vad_model):
-        # VAD removes the trailing-words-into-silence failure mode but currently
-        # adds a small systematic early bias (silence-removal remapping). Off by
-        # default; opt in via PODCLI_WHISPERCPP_VAD.
-        cmd += ["--vad", "--vad-model", vad_model]
-    if language:
-        cmd += ["-l", language]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cmd = [whisper_cli, "-m", model_path, "-f", wav, "-ojf",
+               "-of", out_base, "-t", str(threads)]
+        if dtw_model:
+            cmd += ["-dtw", dtw_model]
+        if vad and vad_model and os.path.exists(vad_model):
+            # VAD removes the trailing-words-into-silence failure mode but adds a
+            # systematic early bias (silence-removal remapping). Off by default;
+            # the energy-snap below addresses the same defect without the bias.
+            cmd += ["--vad", "--vad-model", vad_model]
+        if language:
+            cmd += ["-l", language]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    with open(out_base + ".json", encoding="utf-8") as f:
-        data = json.load(f)
+        with open(out_base + ".json", encoding="utf-8") as f:
+            data = json.load(f)
 
-    transcription = data.get("transcription", [])
-    segments, words = [], []
-    for i, seg in enumerate(transcription):
-        off = seg.get("offsets") or {}
-        seg_start = round((off.get("from") or 0) / 1000.0, 3)
-        seg_end = round((off.get("to") or 0) / 1000.0, 3)
-        segments.append({
-            "id": i,
-            "start": seg_start,
-            "end": seg_end,
-            "text": (seg.get("text") or "").strip(),
-            "speaker": None,
-        })
-        words.extend(_tokens_to_words(seg.get("tokens", [])))
+        transcription = data.get("transcription", [])
+        segments, words = [], []
+        for i, seg in enumerate(transcription):
+            off = seg.get("offsets") or {}
+            segments.append({
+                "id": i,
+                "start": round((off.get("from") or 0) / 1000.0, 3),
+                "end": round((off.get("to") or 0) / 1000.0, 3),
+                "text": (seg.get("text") or "").strip(),
+                "speaker": None,
+            })
+            words.extend(_tokens_to_words(seg.get("tokens", [])))
 
-    duration = segments[-1]["end"] if segments else 0.0
-    return {
-        "transcript": " ".join(s["text"] for s in segments).strip(),
-        "segments": segments,
-        "words": words,
-        "duration": duration,
-        "language": (data.get("params") or {}).get("language") or language or "en",
-    }
+        if os.environ.get("PODCLI_WHISPERCPP_NO_SNAP", "").strip().lower() not in ("1", "true", "yes", "on"):
+            words = _snap_words_to_voiced(words, wav)
+
+        return {
+            "transcript": " ".join(s["text"] for s in segments).strip(),
+            "segments": segments,
+            "words": words,
+            "duration": segments[-1]["end"] if segments else 0.0,
+            "language": (data.get("params") or {}).get("language") or language or "en",
+        }
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 if __name__ == "__main__":
