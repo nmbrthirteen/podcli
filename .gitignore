@@ -45,3 +45,4 @@ episodes/
 uploads/
 output/
 cli/internal/backend/files/
+cli/internal/podstack/commands/

@@ -12,6 +12,7 @@ import (
 	"podcli/internal/config"
 	"podcli/internal/engine"
 	"podcli/internal/paths"
+	"podcli/internal/podstack"
 	"podcli/internal/provision"
 	"podcli/internal/update"
 )
@@ -22,8 +23,7 @@ var Version = "2.0.0-dev"
 func main() {
 	args := os.Args[1:]
 	if len(args) == 0 {
-		printHelp()
-		return
+		os.Exit(runEngine(args)) // backend's branded interactive menu
 	}
 
 	switch args[0] {
@@ -43,6 +43,9 @@ func main() {
 	case "help", "--help", "-h":
 		printHelp()
 	default:
+		if podstack.IsCommand(args[0]) {
+			os.Exit(podstack.Run(args[0], args[1:]))
+		}
 		os.Exit(runEngine(args))
 	}
 }
@@ -90,7 +93,7 @@ func configCmd(args []string) int {
 // --engine, PODCLI_ENGINE, then defaulting to whisper.cpp on a hermetic Python
 // (which has no openai-whisper).
 func transcribeEngine(args []string) string {
-	if args[0] != "process" && args[0] != "studio" {
+	if len(args) == 0 || (args[0] != "process" && args[0] != "studio") {
 		return ""
 	}
 	sel := strings.ToLower(os.Getenv("PODCLI_ENGINE"))
@@ -230,6 +233,12 @@ Engine commands (routed to the processing backend):
   clips                Browse and edit saved clips
   thumbnails           Generate thumbnails
   knowledge | presets | assets | youtube | config | cache | info
+
+PodStack commands (run inside Claude Code / Codex):
+  auto <video>         One-verb pipeline: drop footage, get rendered clips
+  generate-titles | generate-descriptions | plan-thumbnails | plan-episode
+  process-transcript | produce-shorts | review-content | publish-checklist
+  retro-episode        Add --codex / --claude to pick the agent
 
 Launcher commands:
   doctor               Show resolved paths, interpreter, backend, ffmpeg, models
