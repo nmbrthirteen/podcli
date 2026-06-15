@@ -26,12 +26,33 @@ BACKEND_ROOT = os.path.join(ROOT, "backend")
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
+import services.caption_renderer as caption_renderer  # noqa: E402
 from services.caption_renderer import render_captions, _sanitize_words  # noqa: E402
 
 HERE = os.path.dirname(__file__)
 GOLDEN_DIR = os.path.join(HERE, "golden")
 TRANSCRIPT = os.path.join(HERE, "transcript_synthetic.json")
 STYLES = ["hormozi", "karaoke", "subtle", "branded"]
+
+
+def _deterministic_text_widths(texts, font_name, font_size, bold, spacing=2):
+    """A host-font-independent stand-in for _measure_text_widths.
+
+    Real width measurement resolves the host's font via fc-match and freetype,
+    so positions differ between macOS (Arial) and CI (DejaVu/Liberation) and the
+    goldens can never match across machines. The parity harness exists to lock
+    the engine-independent ASS pipeline (timing, styles, karaoke, position and
+    pill geometry derived from widths) — not the host's typography — so we pin a
+    deterministic width model and the goldens become reproducible everywhere.
+    """
+    widths = []
+    for t in texts:
+        n = len(t)
+        if n == 0:
+            widths.append(0)
+            continue
+        widths.append(round(n * font_size * 0.5) + spacing * max(0, n - 1))
+    return widths
 
 
 def _load_words():
@@ -49,6 +70,28 @@ def _render(style: str) -> str:
     finally:
         if os.path.exists(out):
             os.remove(out)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_render(monkeypatch):
+    """Pin the two host-dependent inputs so goldens are reproducible everywhere.
+
+    1. Font name: caption_styles.DETECTED_FONT is resolved at import via fc-list,
+       so it's "Arial" on macOS and "Liberation Sans" on CI's Ubuntu — and that
+       name is written into the ASS Style line.
+    2. Text widths: see _deterministic_text_widths (affects the branded style's
+       per-word positioning and pill geometry).
+    """
+    monkeypatch.setattr(caption_renderer, "_measure_text_widths", _deterministic_text_widths)
+
+    real_get_style = caption_renderer.get_style
+
+    def _pinned_get_style(name):
+        style = dict(real_get_style(name))
+        style["font_name"] = "Arial"
+        return style
+
+    monkeypatch.setattr(caption_renderer, "get_style", _pinned_get_style)
 
 
 @pytest.mark.parametrize("style", STYLES)
