@@ -3026,8 +3026,20 @@ def cmd_info(args):
     print(f"    Platform:     {info['system']}")
     print(f"    Encoder:      {info['best']}")
     print(f"    Available:    {', '.join(info['available'])}")
+    import importlib.util
+    try:
+        diarization_available = importlib.util.find_spec("pyannote.audio") is not None
+    except (ImportError, ValueError):
+        diarization_available = False
+    if not diarization_available:
+        speakers_status = f"{yellow}✗ not available in this install (source install only)"
+    elif hf_token:
+        speakers_status = f"{green}✓ configured"
+    else:
+        speakers_status = f"{yellow}✗ set HF_TOKEN in .env"
+
     print(f"    AI CLI:       {green}{('Claude' if ai_engine == 'claude' else 'Codex') + ' (' + ai_path + ')' if ai_path else f'{yellow}not found — install Claude Code or Codex'}{reset}")
-    print(f"    Speakers:     {green + '✓ configured' if hf_token else yellow + '✗ set HF_TOKEN in .env'}{reset}")
+    print(f"    Speakers:     {speakers_status}{reset}")
     print()
 
 
@@ -3086,7 +3098,12 @@ def print_banner():
                         hf_token = line.strip().split("=", 1)[1].strip()
                         break
 
-    speakers_ok = bool(hf_token)
+    import importlib.util
+    try:
+        _diarization_ok = importlib.util.find_spec("pyannote.audio") is not None
+    except (ImportError, ValueError):
+        _diarization_ok = False
+    speakers_ok = bool(hf_token) and _diarization_ok
 
     # Check AI CLI (Claude Code or Codex)
     from services.claude_suggest import _find_ai_cli

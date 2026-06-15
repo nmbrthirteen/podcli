@@ -13,5 +13,7 @@ rsync -a \
   --exclude='venv' \
   --exclude='.venv' \
   --exclude='requirements.txt' \
+  --exclude='models/res10_300x300_ssd_iter_140000.caffemodel' \
+  --exclude='models/deploy.prototxt' \
   "$src"/ "$dest"/
 echo "synced backend -> $dest"

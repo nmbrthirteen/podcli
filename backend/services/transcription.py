@@ -91,7 +91,13 @@ def transcribe_file(
     if progress_callback:
         progress_callback(5, "Loading Whisper model...")
 
-    import whisper
+    try:
+        import whisper
+    except ImportError as e:
+        raise RuntimeError(
+            "The whisper-py engine needs the full source install (openai-whisper + torch). "
+            "This native install ships whisper.cpp — rerun with --engine whispercpp."
+        ) from e
 
     model = whisper.load_model(model_size)
 

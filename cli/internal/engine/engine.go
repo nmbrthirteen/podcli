@@ -2,6 +2,7 @@
 package engine
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,40 @@ import (
 
 	"podcli/internal/paths"
 )
+
+// stderrFilter drops the macOS/OpenCV/Whisper startup noise the old bash
+// launcher stripped with `grep -v`, so native runs aren't louder than before.
+// It buffers partial lines and forwards everything else to real stderr.
+type stderrFilter struct{ buf []byte }
+
+func isStderrNoise(line string) bool {
+	return strings.HasPrefix(line, "objc[") ||
+		strings.Contains(line, "FP16 is not supported") ||
+		strings.Contains(line, "warnings.warn")
+}
+
+func (w *stderrFilter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := w.buf[:i]
+		w.buf = w.buf[i+1:]
+		if !isStderrNoise(string(line)) {
+			os.Stderr.Write(append(line, '\n'))
+		}
+	}
+	return len(p), nil
+}
+
+func (w *stderrFilter) flush() {
+	if len(w.buf) > 0 && !isStderrNoise(string(w.buf)) {
+		os.Stderr.Write(w.buf)
+	}
+	w.buf = nil
+}
 
 // IsHermeticPython reports whether the resolved interpreter is the provisioned
 // one (which lacks openai-whisper, so transcription must default to whisper.cpp).
@@ -143,7 +178,8 @@ func Run(args []string) (int, error) {
 	full := append([]string{"-W", "ignore::UserWarning", cli}, args...)
 
 	cmd := exec.Command(Python(), full...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	sf := &stderrFilter{}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, sf
 	env := append(os.Environ(),
 		"OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES",
 		"PYTHONIOENCODING=utf-8",
@@ -179,7 +215,9 @@ func Run(args []string) (int, error) {
 	}
 	cmd.Env = env
 
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	sf.flush()
+	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode(), nil
 		}
