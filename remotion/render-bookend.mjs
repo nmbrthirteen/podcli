@@ -25,7 +25,13 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const CACHE_DIR = path.join(PROJECT_ROOT, ".podcli", "cache", "remotion-bundle");
+// Share the (project-independent) composition bundle with render.mjs via
+// PODCLI_CACHE_DIR so bookends reuse the prewarmed bundle instead of rebuilding
+// into the runtime dir.
+const CACHE_ROOT = process.env.PODCLI_CACHE_DIR
+  ? path.resolve(process.env.PODCLI_CACHE_DIR)
+  : path.join(PROJECT_ROOT, "data", "cache");
+const CACHE_DIR = path.join(CACHE_ROOT, "remotion-bundle");
 const ENTRY_POINT = path.join(__dirname, "src", "index.ts");
 
 function parseArgs() {

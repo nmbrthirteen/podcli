@@ -28,7 +28,8 @@ cat > "$out/package.json" <<'JSON'
     "@remotion/renderer": "^4.0.441",
     "remotion": "^4.0.441",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "@fontsource/dm-sans": "^5.2.8"
   }
 }
 JSON

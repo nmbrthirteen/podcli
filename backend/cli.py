@@ -313,7 +313,7 @@ def _should_enter_post_render_loop(config: dict, interrupted: bool, results: lis
 def cmd_studio(args):
     """Cut a fragment + wrap it with Remotion intro/outro bookends.
 
-    Thin wrapper around scripts/clip_studio.py (which orchestrates the
+    Thin wrapper around clip_studio.py (which orchestrates the
     fragment render, bookend renders, and the concat). Runs it as a
     subprocess with this same interpreter so the venv is reused.
     """
@@ -321,8 +321,7 @@ def cmd_studio(args):
         print("Error: provide either --start and --end, or --paragraph \"text\"", file=sys.stderr)
         sys.exit(1)
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    script = os.path.join(project_root, "scripts", "clip_studio.py")
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clip_studio.py")
     if not os.path.exists(script):
         print(f"Error: clip_studio.py not found at {script}", file=sys.stderr)
         sys.exit(1)

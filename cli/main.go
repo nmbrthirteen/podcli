@@ -264,6 +264,9 @@ func doctor() {
 	fmt.Printf("  home:     %s\n", paths.Home())
 	fmt.Printf("  runtime:  %s\n", paths.RuntimeDir())
 	fmt.Printf("  models:   %s\n", paths.ModelsDir())
+	if proj, ok := engine.ProjectDir(); ok {
+		fmt.Printf("  project:  %s  (episodes, presets, .env resolve here)\n", proj)
+	}
 	fmt.Println("\nEngine resolution")
 	if root, ok := engine.BackendRoot(); ok {
 		fmt.Printf("  backend:  %s\n", root)

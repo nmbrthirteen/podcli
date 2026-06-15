@@ -204,17 +204,17 @@ func RunMCP() (int, error) {
 // working directory itself. This keeps episode data, presets, and .env
 // project-local — the behavior of the old in-repo launcher — now that the
 // backend lives in the global runtime dir instead of beside the data.
-// ProjectDir returns the nearest ancestor of the working directory holding a
-// .podcli dir or .podcli-home marker, and whether one was found. Only an
-// established project pins data locally; in an unmarked dir the second return is
-// false so callers leave the backend's default home rather than scattering
-// .podcli/ into arbitrary directories.
+// ProjectDir resolves where a run's data lives: the nearest ancestor of the
+// working directory holding a .podcli/.podcli-home marker, else the working
+// directory itself. Data is always project-local — never the global runtime dir,
+// where setup/self-update would overwrite it. The bool is false only when the
+// working directory can't be determined.
 func ProjectDir() (string, bool) {
-	dir, err := os.Getwd()
+	cwd, err := os.Getwd()
 	if err != nil {
 		return "", false
 	}
-	for {
+	for dir := cwd; ; {
 		if exists(filepath.Join(dir, ".podcli")) || exists(filepath.Join(dir, ".podcli-home")) {
 			return dir, true
 		}
@@ -224,7 +224,7 @@ func ProjectDir() (string, bool) {
 		}
 		dir = parent
 	}
-	return "", false
+	return cwd, true
 }
 
 func Run(args []string) (int, error) {
