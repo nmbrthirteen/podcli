@@ -143,6 +143,62 @@ func StudioServer() string {
 	return ""
 }
 
+func MCPServer() string {
+	p := filepath.Join(paths.RuntimeDir(), "studio", "mcp-server.mjs")
+	if exists(p) {
+		return p
+	}
+	return ""
+}
+
+// nodeEnv builds the env a bundled Node server (studio/MCP) needs: the TS
+// paths.ts reads these names (note PYTHON_PATH/FFMPEG_PATH differ from the
+// PODCLI_* names the Python side uses). Project data stays cwd-local.
+func nodeEnv() []string {
+	env := os.Environ()
+	if root, ok := BackendRoot(); ok {
+		env = append(env, "PODCLI_BACKEND="+root)
+	}
+	env = append(env, "PYTHON_PATH="+Python())
+	if ff := FFmpeg(); ff != "" {
+		env = append(env, "FFMPEG_PATH="+ff)
+	}
+	if fp := FFprobe(); fp != "" {
+		env = append(env, "FFPROBE_PATH="+fp)
+	}
+	if proj := ProjectDir(); proj != "" {
+		if os.Getenv("PODCLI_HOME") == "" {
+			env = append(env, "PODCLI_HOME="+filepath.Join(proj, ".podcli"))
+		}
+		if os.Getenv("PODCLI_DATA") == "" {
+			env = append(env, "PODCLI_DATA="+filepath.Join(proj, "data"))
+		}
+		if os.Getenv("PODCLI_ENV_FILE") == "" {
+			env = append(env, "PODCLI_ENV_FILE="+filepath.Join(proj, ".env"))
+		}
+	}
+	return env
+}
+
+// RunMCP execs the bundled MCP stdio server under hermetic Node. stdout carries
+// JSON-RPC, so nothing here may write to it.
+func RunMCP() (int, error) {
+	node, server := Node(), MCPServer()
+	if node == "" || server == "" {
+		return 1, fmt.Errorf("MCP server not provisioned — run `podcli setup`")
+	}
+	cmd := exec.Command(node, server)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Env = nodeEnv()
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.ExitCode(), nil
+		}
+		return 1, err
+	}
+	return 0, nil
+}
+
 // ProjectDir resolves the user's project root: the nearest ancestor of the
 // working directory holding a .podcli dir or .podcli-home marker, else the
 // working directory itself. This keeps episode data, presets, and .env

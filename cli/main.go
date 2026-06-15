@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -35,6 +36,15 @@ func main() {
 		os.Exit(update.Run(Version))
 	case "setup":
 		os.Exit(setup(args[1:]))
+	case "mcp":
+		if len(args) >= 2 && args[1] == "install" {
+			os.Exit(mcpInstall())
+		}
+		code, err := engine.RunMCP()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "podcli:", err)
+		}
+		os.Exit(code)
 	case "config":
 		if len(args) >= 2 && (args[1] == "get" || args[1] == "set") {
 			os.Exit(configCmd(args[1:]))
@@ -178,7 +188,43 @@ func setup(args []string) int {
 	} else {
 		fmt.Printf("  studio:  %s\n", sd)
 	}
+	if engine.MCPServer() != "" {
+		if err := registerMCPServer(); err != nil {
+			fmt.Fprintf(os.Stderr, "  mcp:     not registered (%v) — run `podcli mcp install`\n", err)
+		} else {
+			fmt.Printf("  mcp:     registered with Claude Code\n")
+		}
+	}
 	fmt.Println("Done.")
+	return 0
+}
+
+// registerMCPServer points Claude Code at this binary's `mcp` command. Remove
+// first so re-runs refresh a stale path and stay idempotent.
+func registerMCPServer() error {
+	claude, err := exec.LookPath("claude")
+	if err != nil {
+		return fmt.Errorf("Claude Code CLI not found on PATH")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	exec.Command(claude, "mcp", "remove", "podcli").Run()
+	if out, err := exec.Command(claude, "mcp", "add", "podcli", "--", self, "mcp").CombinedOutput(); err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func mcpInstall() int {
+	if err := registerMCPServer(); err != nil {
+		self, _ := os.Executable()
+		fmt.Fprintf(os.Stderr, "podcli: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Register manually:  claude mcp add podcli -- %s mcp\n", self)
+		return 1
+	}
+	fmt.Println("Registered podcli MCP server with Claude Code.")
 	return 0
 }
 
@@ -217,6 +263,11 @@ func doctor() {
 		fmt.Printf("  studio:   %s\n", ss)
 	} else {
 		fmt.Printf("  studio:   not provisioned (Web UI needs a published release)\n")
+	}
+	if ms := engine.MCPServer(); ms != "" {
+		fmt.Printf("  mcp:      %s\n", ms)
+	} else {
+		fmt.Printf("  mcp:      not provisioned (needs a published release)\n")
 	}
 	fmt.Println("\nModels")
 	fmt.Printf("  base:     %s\n", presence(provision.ModelPath("base")))
@@ -266,6 +317,8 @@ Launcher commands:
   update               Check for and apply a newer release
   setup [--model base] [--vad]
                        Provision runtimes + models into the managed dir
+  mcp                  Run the MCP server (stdio) for Claude/Codex
+  mcp install          Register the MCP server with Claude Code
   config set update.auto off    Disable auto-update (also: PODCLI_NO_UPDATE=1)
   config get update.auto
 
