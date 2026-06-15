@@ -194,9 +194,20 @@ func doctor() {
 
 func presence(p string) string {
 	if fi, err := os.Stat(p); err == nil && fi.Size() > 0 {
-		return fmt.Sprintf("%s (%d MB)", p, fi.Size()>>20)
+		return fmt.Sprintf("%s (%s)", p, humanBytes(fi.Size()))
 	}
 	return "not provisioned — run `podcli setup`"
+}
+
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%d MB", n>>20)
+	case n >= 1<<10:
+		return fmt.Sprintf("%d KB", n>>10)
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }
 
 func printHelp() {
