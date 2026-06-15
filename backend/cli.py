@@ -26,7 +26,7 @@ for _stream in (sys.stdout, sys.stderr):
         except (ValueError, OSError):
             pass
 
-_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+_env_file = os.environ.get("PODCLI_ENV_FILE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
 try:
     from dotenv import load_dotenv
     load_dotenv(_env_file)

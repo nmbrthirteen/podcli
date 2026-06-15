@@ -108,6 +108,32 @@ func StudioServer() string {
 	return ""
 }
 
+// ProjectDir resolves the user's project root: the nearest ancestor of the
+// working directory holding a .podcli dir or .podcli-home marker, else the
+// working directory itself. This keeps episode data, presets, and .env
+// project-local — the behavior of the old in-repo launcher — now that the
+// backend lives in the global runtime dir instead of beside the data.
+func ProjectDir() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if exists(filepath.Join(dir, ".podcli")) || exists(filepath.Join(dir, ".podcli-home")) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return ""
+}
+
 func Run(args []string) (int, error) {
 	root, ok := BackendRoot()
 	if !ok {
@@ -137,6 +163,19 @@ func Run(args []string) (int, error) {
 	}
 	if ss := StudioServer(); ss != "" {
 		env = append(env, "PODCLI_STUDIO="+filepath.Dir(ss))
+	}
+	// Pin data + .env to the user's project dir so the global runtime backend
+	// doesn't strand project-local episodes/presets. Explicit env wins.
+	if proj := ProjectDir(); proj != "" {
+		if os.Getenv("PODCLI_HOME") == "" {
+			env = append(env, "PODCLI_HOME="+filepath.Join(proj, ".podcli"))
+		}
+		if os.Getenv("PODCLI_DATA") == "" {
+			env = append(env, "PODCLI_DATA="+filepath.Join(proj, "data"))
+		}
+		if os.Getenv("PODCLI_ENV_FILE") == "" {
+			env = append(env, "PODCLI_ENV_FILE="+filepath.Join(proj, ".env"))
+		}
 	}
 	cmd.Env = env
 

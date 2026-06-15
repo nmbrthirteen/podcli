@@ -21,7 +21,7 @@ for _stream in (sys.stdout, sys.stderr):
 # Load .env file (for HF_TOKEN, etc.)
 try:
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
+    load_dotenv(os.environ.get("PODCLI_ENV_FILE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 except ImportError:
     pass
 import traceback
