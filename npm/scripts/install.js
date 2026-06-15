@@ -9,9 +9,16 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 const { version } = require('../package.json');
 
 const REPO = 'nmbrthirteen/podcli';
+
+function allowedHost(h) {
+  h = String(h).toLowerCase();
+  if (['github.com', 'api.github.com', 'objects.githubusercontent.com', 'codeload.github.com'].includes(h)) return true;
+  return h.endsWith('.githubusercontent.com');
+}
 
 const TARGETS = {
   'darwin-x64': 'darwin-amd64',
@@ -43,6 +50,9 @@ function target() {
 function download(url, dest, redirects) {
   redirects = redirects || 0;
   return new Promise((resolve, reject) => {
+    let host;
+    try { host = new URL(url).hostname; } catch (e) { return reject(e); }
+    if (!allowedHost(host)) return reject(new Error(`refusing to download from untrusted host ${host}`));
     https
       .get(url, { headers: { 'User-Agent': 'podcli-install' } }, (res) => {
         if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location && redirects < 6) {
@@ -66,6 +76,57 @@ function download(url, dest, redirects) {
   });
 }
 
+function fetchText(url, redirects) {
+  redirects = redirects || 0;
+  return new Promise((resolve, reject) => {
+    let host;
+    try { host = new URL(url).hostname; } catch (e) { return reject(e); }
+    if (!allowedHost(host)) return reject(new Error(`refusing to fetch from untrusted host ${host}`));
+    https
+      .get(url, { headers: { 'User-Agent': 'podcli-install' } }, (res) => {
+        if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location && redirects < 6) {
+          res.resume();
+          return resolve(fetchText(res.headers.location, redirects + 1));
+        }
+        if (res.statusCode === 404) { res.resume(); return resolve(null); }
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode} for ${url}`)); }
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => { body += c; });
+        res.on('end', () => resolve(body));
+      })
+      .on('error', reject);
+  });
+}
+
+function parseChecksums(text) {
+  const out = {};
+  for (const line of text.split('\n')) {
+    const f = line.trim().split(/\s+/);
+    if (f.length < 2) continue;
+    out[path.basename(f[f.length - 1])] = f[0].toLowerCase();
+  }
+  return out;
+}
+
+function sha256(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+// verify checks dest against checksums.txt for this release. Fails closed on a
+// mismatch; fails open (warning) when the manifest or entry is absent.
+async function verify(dest, name, tag) {
+  const text = await fetchText(`https://github.com/${REPO}/releases/download/v${tag}/checksums.txt`);
+  if (!text) { console.error('podcli: no checksums.txt in release — skipped verification'); return; }
+  const want = parseChecksums(text)[name];
+  if (!want) { console.error(`podcli: no checksum entry for ${name} — skipped verification`); return; }
+  const got = sha256(dest);
+  if (got !== want) {
+    fs.rmSync(dest, { force: true });
+    throw new Error(`checksum mismatch for ${name}: got ${got} want ${want}`);
+  }
+}
+
 async function ensure() {
   const dest = binPath();
   fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -74,8 +135,10 @@ async function ensure() {
     fs.copyFileSync(src, dest);
   } else {
     const ext = process.platform === 'win32' ? '.exe' : '';
-    const url = `https://github.com/${REPO}/releases/download/v${version}/podcli-${target()}${ext}`;
+    const name = `podcli-${target()}${ext}`;
+    const url = `https://github.com/${REPO}/releases/download/v${version}/${name}`;
     await download(url, dest);
+    await verify(dest, name, version);
   }
   if (process.platform !== 'win32') fs.chmodSync(dest, 0o755);
   return dest;

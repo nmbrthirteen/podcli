@@ -72,7 +72,7 @@ def _save_brand(data: dict):
 
 def _probe_duration(path: str) -> float:
     out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+        [os.environ.get("PODCLI_FFPROBE", "ffprobe"), "-v", "error", "-show_entries", "format=duration",
          "-of", "default=nw=1:nk=1", path],
         capture_output=True, text=True,
     )

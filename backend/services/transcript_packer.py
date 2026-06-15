@@ -62,8 +62,18 @@ def legacy_md5_cache_path(video_path: str) -> str:
     return os.path.join(_legacy_cache_dir(), hashlib.md5(raw.encode()).hexdigest() + ".json")
 
 
+def _engine_cache_suffix() -> str:
+    """Namespace the cache by engine so a whisper.cpp run doesn't reuse a
+    whisper-py transcript (their timings/word splits differ). whisper-py keeps
+    the bare filename, which the TS transcript cache also writes."""
+    engine = os.environ.get("PODCLI_ENGINE", "whisper-py").strip().lower()
+    if engine in ("whispercpp", "whisper-cpp", "whisper.cpp", "cpp"):
+        return "-whispercpp"
+    return ""
+
+
 def transcript_json_path(cache_hash: str) -> str:
-    return os.path.join(_transcripts_cache_dir(), f"{cache_hash}.json")
+    return os.path.join(_transcripts_cache_dir(), f"{cache_hash}{_engine_cache_suffix()}.json")
 
 
 def load_cached_transcript_for_video(video_path: str) -> dict[str, Any] | None:

@@ -177,6 +177,36 @@ func downloadOnce(url, tmp, label string) (bool, error) {
 	return true, nil
 }
 
+// symlinkTargetInside reports whether a symlink at linkPath pointing to linkname
+// resolves within root (root has a trailing separator). Absolute targets and
+// any path that escapes via .. are rejected — this is the symlink half of the
+// zip-slip defense, since the path guard alone only validates the link's own
+// location, not where it points.
+func symlinkTargetInside(linkPath, linkname, root string) bool {
+	if filepath.IsAbs(linkname) {
+		return false
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(linkPath), linkname))
+	return strings.HasPrefix(resolved+string(os.PathSeparator), root)
+}
+
+// ParseChecksums parses sha256sum-style "<hex>  <name>" lines into a name->hash
+// map, keyed by basename so it matches the asset filenames consumers request.
+func ParseChecksums(data []byte) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		out[filepath.Base(fields[len(fields)-1])] = strings.ToLower(fields[0])
+	}
+	return out
+}
+
+// Sha256File returns the lowercase hex SHA-256 of the file at path.
+func Sha256File(path string) (string, error) { return sha256file(path) }
+
 func sha256file(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -230,16 +260,16 @@ func WhisperCLIBin() string {
 	return filepath.Join(paths.RuntimeDir(), "whisper", "whisper-cli"+exeSuffix())
 }
 
-func latestReleaseAssetURL(name string) (string, error) {
+func latestReleaseAssets() (map[string]string, error) {
 	req, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+podcliRepo+"/releases/latest", nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("no published release (HTTP %d)", resp.StatusCode)
+		return nil, fmt.Errorf("no published release (HTTP %d)", resp.StatusCode)
 	}
 	var rel struct {
 		Assets []struct {
@@ -248,14 +278,92 @@ func latestReleaseAssetURL(name string) (string, error) {
 		} `json:"assets"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(rel.Assets))
+	for _, a := range rel.Assets {
+		out[a.Name] = a.URL
+	}
+	return out, nil
+}
+
+func latestReleaseAssetURL(name string) (string, error) {
+	assets, err := latestReleaseAssets()
+	if err != nil {
 		return "", err
 	}
-	for _, a := range rel.Assets {
-		if a.Name == name {
-			return a.URL, nil
-		}
+	if u, ok := assets[name]; ok {
+		return u, nil
 	}
 	return "", fmt.Errorf("asset %s not in latest release", name)
+}
+
+// allowedReleaseHost pins binary downloads to GitHub's own hosts so a redirect
+// can't divert a download to an attacker-controlled host.
+func allowedReleaseHost(h string) bool {
+	h = strings.ToLower(h)
+	switch h {
+	case "github.com", "api.github.com", "objects.githubusercontent.com", "codeload.github.com":
+		return true
+	}
+	return strings.HasSuffix(h, ".githubusercontent.com")
+}
+
+func releaseHTTPClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			if !allowedReleaseHost(req.URL.Hostname()) {
+				return fmt.Errorf("refusing redirect to untrusted host %q", req.URL.Hostname())
+			}
+			return nil
+		},
+	}
+}
+
+func httpGetBytes(url string) ([]byte, error) {
+	resp, err := releaseHTTPClient().Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+}
+
+// verifyReleaseAsset checks the file at path against the release's checksums.txt.
+// It fails closed on a real checksum mismatch, but fails open (with a warning)
+// when checksums.txt or the asset's entry is absent — so a release published
+// before checksum manifests, or a CI hiccup, never bricks an install.
+func verifyReleaseAsset(assets map[string]string, assetName, path string) error {
+	sumsURL, ok := assets["checksums.txt"]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "  (no checksums.txt in release — skipped verification of %s)\n", assetName)
+		return nil
+	}
+	data, err := httpGetBytes(sumsURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  (could not fetch checksums.txt: %v — skipped verification of %s)\n", err, assetName)
+		return nil
+	}
+	want, ok := ParseChecksums(data)[assetName]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s — skipped verification)\n", assetName)
+		return nil
+	}
+	got, err := sha256file(path)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(got, want) {
+		os.Remove(path)
+		return fmt.Errorf("checksum mismatch for %s: got %s want %s", assetName, got, want)
+	}
+	return nil
 }
 
 func EnsureWhisperCpp() (string, error) {
@@ -264,14 +372,21 @@ func EnsureWhisperCpp() (string, error) {
 		return bin, nil
 	}
 	name := fmt.Sprintf("whisper-cli-%s-%s%s", runtime.GOOS, runtime.GOARCH, exeSuffix())
-	url, err := latestReleaseAssetURL(name)
+	assets, err := latestReleaseAssets()
 	if err != nil {
 		return "", err
+	}
+	url, ok := assets[name]
+	if !ok {
+		return "", fmt.Errorf("asset %s not in latest release", name)
 	}
 	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 		return "", err
 	}
 	if err := fetch(url, bin, "whisper-cli"); err != nil {
+		return "", err
+	}
+	if err := verifyReleaseAsset(assets, name, bin); err != nil {
 		return "", err
 	}
 	if runtime.GOOS != "windows" {
@@ -540,6 +655,9 @@ func extractTarGz(archive, dest string) error {
 				return err
 			}
 		case tar.TypeSymlink:
+			if !symlinkTargetInside(target, h.Linkname, root) {
+				return fmt.Errorf("unsafe symlink %s -> %s in archive", h.Name, h.Linkname)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
@@ -548,11 +666,17 @@ func extractTarGz(archive, dest string) error {
 				return err
 			}
 		case tar.TypeLink:
+			linkTarget := filepath.Join(dest, h.Linkname)
+			if !strings.HasPrefix(linkTarget, root) {
+				return fmt.Errorf("unsafe hardlink %s -> %s in archive", h.Name, h.Linkname)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
 			os.Remove(target)
-			os.Link(filepath.Join(dest, h.Linkname), target)
+			if err := os.Link(linkTarget, target); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

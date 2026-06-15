@@ -17,6 +17,7 @@ import (
 
 	"podcli/internal/config"
 	"podcli/internal/paths"
+	"podcli/internal/provision"
 )
 
 const repo = "nmbrthirteen/podcli"
@@ -34,9 +35,39 @@ func managedBin() string {
 	return filepath.Join(paths.BinDir(), "podcli"+exeExt())
 }
 
+func assetName() string {
+	return fmt.Sprintf("podcli-%s-%s%s", runtime.GOOS, runtime.GOARCH, exeExt())
+}
+
 func assetURL(tag string) string {
-	return fmt.Sprintf("https://github.com/%s/releases/download/v%s/podcli-%s-%s%s",
-		repo, tag, runtime.GOOS, runtime.GOARCH, exeExt())
+	return fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", repo, tag, assetName())
+}
+
+func checksumsURL(tag string) string {
+	return fmt.Sprintf("https://github.com/%s/releases/download/v%s/checksums.txt", repo, tag)
+}
+
+func allowedHost(h string) bool {
+	h = strings.ToLower(h)
+	switch h {
+	case "github.com", "api.github.com", "objects.githubusercontent.com", "codeload.github.com":
+		return true
+	}
+	return strings.HasSuffix(h, ".githubusercontent.com")
+}
+
+func guardedClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			if !allowedHost(req.URL.Hostname()) {
+				return fmt.Errorf("refusing redirect to untrusted host %q", req.URL.Hostname())
+			}
+			return nil
+		},
+	}
 }
 
 func latestTag(timeout time.Duration) (string, error) {
@@ -126,12 +157,51 @@ func apply(tag string) error {
 	if err := downloadFile(assetURL(tag), staged); err != nil {
 		return err
 	}
+	if err := verifyStaged(tag, staged); err != nil {
+		os.Remove(staged)
+		return err
+	}
 	if runtime.GOOS != "windows" {
 		if err := os.Chmod(staged, 0o755); err != nil {
 			return err
 		}
 	}
 	return swap(staged, dest)
+}
+
+// verifyStaged checks the downloaded binary against the release's checksums.txt.
+// Fails closed on a mismatch; fails open (warning) only when checksums.txt is
+// absent, so an older release without a manifest still updates.
+func verifyStaged(tag, staged string) error {
+	resp, err := guardedClient().Get(checksumsURL(tag))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Fprintln(os.Stderr, "  (no checksums.txt in release — skipped verification)")
+		return nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d fetching checksums.txt", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	want, ok := provision.ParseChecksums(data)[assetName()]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s — skipped verification)\n", assetName())
+		return nil
+	}
+	got, err := provision.Sha256File(staged)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(got, want) {
+		return fmt.Errorf("checksum mismatch: got %s want %s", got, want)
+	}
+	return nil
 }
 
 // swap replaces dest with staged. On Windows a running .exe can't be overwritten,
@@ -149,19 +219,12 @@ func swap(staged, dest string) error {
 	return os.Rename(staged, dest)
 }
 
-func downloadFile(url, dest string, redirects ...int) error {
-	depth := 0
-	if len(redirects) > 0 {
-		depth = redirects[0]
-	}
-	resp, err := http.Get(url)
+func downloadFile(url, dest string) error {
+	resp, err := guardedClient().Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if loc := resp.Header.Get("Location"); loc != "" && resp.StatusCode/100 == 3 && depth < 6 {
-		return downloadFile(loc, dest, depth+1)
-	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}

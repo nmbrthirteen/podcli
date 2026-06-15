@@ -93,17 +93,28 @@ func EnsureRemotion() (string, error) {
 		return RemotionDir(), nil
 	}
 	name := fmt.Sprintf("remotion-bundle-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
-	url, err := latestReleaseAssetURL(name)
+	assets, err := latestReleaseAssets()
 	if err != nil {
 		return "", err
+	}
+	url, ok := assets[name]
+	if !ok {
+		return "", fmt.Errorf("asset %s not in latest release", name)
 	}
 	archive := filepath.Join(os.TempDir(), "podcli-"+name)
 	if err := fetch(url, archive, "remotion"); err != nil {
 		return "", err
 	}
 	defer os.Remove(archive)
-	os.RemoveAll(RemotionDir())
-	os.RemoveAll(filepath.Join(paths.RuntimeDir(), "node_modules"))
+	if err := verifyReleaseAsset(assets, name, archive); err != nil {
+		return "", err
+	}
+	if err := os.RemoveAll(RemotionDir()); err != nil {
+		return "", err
+	}
+	if err := os.RemoveAll(filepath.Join(paths.RuntimeDir(), "node_modules")); err != nil {
+		return "", err
+	}
 	if err := extractTarGz(archive, paths.RuntimeDir()); err != nil {
 		return "", err
 	}
@@ -149,15 +160,22 @@ func EnsureStudio() (string, error) {
 	if have(server) {
 		return StudioDir(), nil
 	}
-	url, err := latestReleaseAssetURL("studio-bundle.tar.gz")
+	assets, err := latestReleaseAssets()
 	if err != nil {
 		return "", err
+	}
+	url, ok := assets["studio-bundle.tar.gz"]
+	if !ok {
+		return "", fmt.Errorf("asset studio-bundle.tar.gz not in latest release")
 	}
 	archive := filepath.Join(os.TempDir(), "podcli-studio-bundle.tar.gz")
 	if err := fetch(url, archive, "studio"); err != nil {
 		return "", err
 	}
 	defer os.Remove(archive)
+	if err := verifyReleaseAsset(assets, "studio-bundle.tar.gz", archive); err != nil {
+		return "", err
+	}
 	if err := os.RemoveAll(StudioDir()); err != nil {
 		return "", err
 	}
@@ -231,11 +249,16 @@ func extractTarGzStrip1(archive, dest string) error {
 				return err
 			}
 		case tar.TypeSymlink:
+			if !symlinkTargetInside(target, h.Linkname, root) {
+				return fmt.Errorf("unsafe symlink %s -> %s in archive", h.Name, h.Linkname)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
 			os.Remove(target)
-			os.Symlink(h.Linkname, target)
+			if err := os.Symlink(h.Linkname, target); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

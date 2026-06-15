@@ -143,6 +143,11 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          sha256sum * > "$RUNNER_TEMP/checksums.txt"
+          mv "$RUNNER_TEMP/checksums.txt" checksums.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
@@ -157,6 +162,14 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+      - name: Assert NPM_TOKEN is set
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not set — refusing to publish. The GitHub release and assets are already published; set the secret and re-run this job." >&2
+            exit 1
+          fi
       - name: Publish wrapper pinned to the tag
         working-directory: npm
         env:
