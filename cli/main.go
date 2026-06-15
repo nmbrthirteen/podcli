@@ -168,6 +168,16 @@ func setup(args []string) int {
 	} else {
 		fmt.Printf("  whisper: %s\n", wc)
 	}
+	if nb, err := provision.EnsureNode(); err != nil {
+		fmt.Fprintf(os.Stderr, "  node:    skipped (%v) — Web UI will use system Node if present\n", err)
+	} else {
+		fmt.Printf("  node:    %s\n", nb)
+	}
+	if sd, err := provision.EnsureStudio(); err != nil {
+		fmt.Fprintf(os.Stderr, "  studio:  skipped (%v) — Web UI needs a published release\n", err)
+	} else {
+		fmt.Printf("  studio:  %s\n", sd)
+	}
 	fmt.Println("Done.")
 	return 0
 }
@@ -197,6 +207,16 @@ func doctor() {
 		fmt.Printf("  whisper:  %s (hermetic)\n", wc)
 	} else {
 		fmt.Printf("  whisper:  PATH fallback (install whisper-cli, or provisioned once hosted)\n")
+	}
+	if nd := engine.Node(); nd != "" {
+		fmt.Printf("  node:     %s (hermetic)\n", nd)
+	} else {
+		fmt.Printf("  node:     PATH fallback (Web UI uses system Node, or run `podcli setup`)\n")
+	}
+	if ss := engine.StudioServer(); ss != "" {
+		fmt.Printf("  studio:   %s\n", ss)
+	} else {
+		fmt.Printf("  studio:   not provisioned (Web UI needs a published release)\n")
 	}
 	fmt.Println("\nModels")
 	fmt.Printf("  base:     %s\n", presence(provision.ModelPath("base")))

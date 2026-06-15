@@ -88,6 +88,26 @@ func FFmpeg() string     { return runtimeBin("ffmpeg", "ffmpeg") }
 func FFprobe() string    { return runtimeBin("ffmpeg", "ffprobe") }
 func WhisperCLI() string { return runtimeBin("whisper", "whisper-cli") }
 
+func Node() string {
+	for _, p := range []string{
+		filepath.Join(paths.RuntimeDir(), "node", "bin", "node"),
+		filepath.Join(paths.RuntimeDir(), "node", "node.exe"),
+	} {
+		if exists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+func StudioServer() string {
+	p := filepath.Join(paths.RuntimeDir(), "studio", "web-server.mjs")
+	if exists(p) {
+		return p
+	}
+	return ""
+}
+
 func Run(args []string) (int, error) {
 	root, ok := BackendRoot()
 	if !ok {
@@ -111,6 +131,12 @@ func Run(args []string) (int, error) {
 	}
 	if wc := WhisperCLI(); wc != "" {
 		env = append(env, "PODCLI_WHISPER_CLI="+wc)
+	}
+	if nd := Node(); nd != "" {
+		env = append(env, "PODCLI_NODE="+nd)
+	}
+	if ss := StudioServer(); ss != "" {
+		env = append(env, "PODCLI_STUDIO="+filepath.Dir(ss))
 	}
 	cmd.Env = env
 

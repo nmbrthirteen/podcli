@@ -88,8 +88,25 @@ jobs:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
 
+  studio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build studio bundle
+        run: |
+          npm ci
+          sh scripts/build-studio.sh dist/studio
+          tar -czf studio-bundle.tar.gz -C dist/studio .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: studio-bundle.tar.gz
+          path: studio-bundle.tar.gz
+
   release:
-    needs: [build, whisper]
+    needs: [build, whisper, studio]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

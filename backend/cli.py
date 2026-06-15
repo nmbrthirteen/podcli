@@ -3562,20 +3562,32 @@ def interactive_menu():
         elif choice == "webui":
             import subprocess as sp
             import shutil as _shutil
-            repo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+            backend_dir = os.path.dirname(os.path.abspath(__file__))
             port = os.environ.get("PORT", "3847")
-            # The studio is a Node/TypeScript app that the native binary does not
-            # ship; it only runs from a source checkout with deps installed.
-            if not os.path.exists(os.path.join(repo, "package.json")):
-                print(f"\n  {yellow}The Web UI studio isn't bundled in the native install yet.{reset}")
-                print(f"  {dim}Run it from a source checkout:{reset} {accent}git clone … && npm install && npm run build && PORT={port} npm run ui:prod{reset}\n")
-            elif _shutil.which("npm") is None:
-                print(f"\n  {yellow}Node.js / npm not found on PATH — the studio needs them to build and serve.{reset}\n")
-            else:
+            node = os.environ.get("PODCLI_NODE") or _shutil.which("node")
+            studio = os.environ.get("PODCLI_STUDIO") or os.path.join(backend_dir, "..", "studio")
+            server = os.path.join(studio, "web-server.mjs")
+            repo = os.path.join(backend_dir, "..")
+            if node and os.path.exists(server):
+                # Bundled studio: hermetic Node serves it, rendering delegated to
+                # this same Python backend + ffmpeg via the env below.
+                env = {
+                    **os.environ,
+                    "PORT": str(port),
+                    "PODCLI_BACKEND": backend_dir,
+                    "PYTHON_PATH": sys.executable,
+                    "PODCLI_HOME": paths["home"],
+                    "PODCLI_DATA": os.path.dirname(paths["output"]),
+                    "FFMPEG_PATH": os.environ.get("PODCLI_FFMPEG", "ffmpeg"),
+                    "FFPROBE_PATH": os.environ.get("PODCLI_FFPROBE", "ffprobe"),
+                }
+                print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
+                sp.run([node, server], env=env)
+            elif os.path.exists(os.path.join(repo, "package.json")) and _shutil.which("npm"):
+                # Source checkout (dev): build + serve via npm.
+                _npm_shell = sys.platform == "win32"
                 spa = os.path.join(repo, "dist", "ui", "public", "index.html")
                 ok = True
-                # npm is npm.cmd on Windows; subprocess can't run a batch file without a shell.
-                _npm_shell = sys.platform == "win32"
                 if not os.path.exists(spa):
                     print(f"\n  {gray}Building the studio (first run)…{reset}\n")
                     ok = sp.run(["npm", "run", "build"], cwd=repo, shell=_npm_shell).returncode == 0
@@ -3584,6 +3596,9 @@ def interactive_menu():
                 if ok:
                     print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
                     sp.run(["npm", "run", "ui:prod"], cwd=repo, shell=_npm_shell)
+            else:
+                print(f"\n  {yellow}Studio isn't provisioned yet.{reset}")
+                print(f"  {dim}Run{reset} {accent}podcli setup{reset} {dim}to fetch the bundled studio + Node.{reset}\n")
         elif choice == "assets":
             _interactive_assets()
         elif choice == "presets":

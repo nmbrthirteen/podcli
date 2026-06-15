@@ -60,7 +60,9 @@ export const paths = {
   corrections: join(home, "corrections.json"),
   thumbnailConfig: join(home, "thumbnail-config.json"),
   integrations: join(home, "integrations.json"),
-  pythonBackend: join(projectRoot, "backend", "main.py"),
+  pythonBackend: process.env.PODCLI_BACKEND
+    ? join(resolve(process.env.PODCLI_BACKEND), "main.py")
+    : join(projectRoot, "backend", "main.py"),
   pythonPath: detectPython(),
   ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
   ffprobePath: process.env.FFPROBE_PATH || "ffprobe",
