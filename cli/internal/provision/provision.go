@@ -489,9 +489,10 @@ func EnsurePython(requirements string) (string, error) {
 }
 
 func pipInstall(pybin, requirements string) error {
-	fmt.Fprintf(os.Stderr, "  installing python deps (%s)\n", filepath.Base(requirements))
-	cmd := exec.Command(pybin, "-m", "pip", "install", "--disable-pip-version-check", "-q", "-r", requirements)
+	fmt.Fprintf(os.Stderr, "  installing python deps (%s) — pulls ~80MB, first run takes a minute\n", filepath.Base(requirements))
+	cmd := exec.Command(pybin, "-m", "pip", "install", "--disable-pip-version-check", "--progress-bar=on", "-r", requirements)
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	return cmd.Run()
 }
 
