@@ -82,12 +82,16 @@ def load_cached_transcript_for_video(video_path: str) -> dict[str, Any] | None:
     if os.path.exists(canonical):
         with open(canonical, encoding="utf-8") as f:
             return json.load(f)
-    legacy = legacy_md5_cache_path(video_path)
-    if os.path.exists(legacy):
-        with open(legacy, encoding="utf-8") as f:
-            data = json.load(f)
-        save_cached_transcript_for_video(video_path, data)
-        return data
+    # The legacy md5 cache predates the engine split and only ever held
+    # whisper-py output, so don't let a whisper.cpp run adopt it under its own
+    # namespace.
+    if _engine_cache_suffix() == "":
+        legacy = legacy_md5_cache_path(video_path)
+        if os.path.exists(legacy):
+            with open(legacy, encoding="utf-8") as f:
+                data = json.load(f)
+            save_cached_transcript_for_video(video_path, data)
+            return data
     return None
 
 

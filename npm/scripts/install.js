@@ -31,7 +31,7 @@ const TARGETS = {
 function defaultHome() {
   const h = os.homedir();
   if (process.platform === 'darwin') return path.join(h, 'Library', 'Application Support', 'podcli');
-  if (process.platform === 'win32') return process.env.LOCALAPPDATA || path.join(h, 'AppData', 'Local', 'podcli');
+  if (process.platform === 'win32') return path.join(process.env.LOCALAPPDATA || path.join(h, 'AppData', 'Local'), 'podcli');
   return process.env.XDG_DATA_HOME ? path.join(process.env.XDG_DATA_HOME, 'podcli') : path.join(h, '.local', 'share', 'podcli');
 }
 

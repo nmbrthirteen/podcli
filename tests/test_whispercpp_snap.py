@@ -55,6 +55,9 @@ class EnergySnapTests(unittest.TestCase):
         out = _snap_words_to_voiced(words, self.wav)
         self.assertEqual(out[0]["start"], 0.1)  # word over speech untouched
         self.assertLessEqual(out[1]["start"], 1.2)  # stranded word clamped back
+        # a word clamped to the upper bound must keep positive duration
+        for w in out:
+            self.assertGreater(w["end"], w["start"])
 
     def test_all_silence_leaves_words_unchanged(self):
         silent = tempfile.mktemp(suffix=".wav")

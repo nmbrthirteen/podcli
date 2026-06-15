@@ -58,6 +58,7 @@ func allowedHost(h string) bool {
 
 func guardedClient() *http.Client {
 	return &http.Client{
+		Transport: &http.Transport{ResponseHeaderTimeout: 30 * time.Second},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
@@ -210,11 +211,20 @@ func swap(staged, dest string) error {
 	if runtime.GOOS == "windows" {
 		old := dest + ".old"
 		os.Remove(old)
+		moved := false
 		if _, err := os.Stat(dest); err == nil {
 			if err := os.Rename(dest, old); err != nil {
 				return err
 			}
+			moved = true
 		}
+		if err := os.Rename(staged, dest); err != nil {
+			if moved {
+				os.Rename(old, dest) // restore the original so the CLI isn't bricked
+			}
+			return err
+		}
+		return nil
 	}
 	return os.Rename(staged, dest)
 }

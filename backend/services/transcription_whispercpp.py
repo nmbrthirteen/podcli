@@ -126,7 +126,10 @@ def _snap_words_to_voiced(words: list[dict], wav_path: str) -> list[dict]:
         if s < prev_end:
             s = prev_end
         if e <= s:
-            e = min(s + 0.05, hi)
+            # A word clamped to hi would otherwise collapse to zero length; a
+            # tiny overhang past the voiced pad is harmless, a zero-length
+            # caption event is not.
+            e = s + 0.05
         prev_end = e
         out.append({**w, "start": round(s, 3), "end": round(e, 3)})
     return out

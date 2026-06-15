@@ -9,7 +9,7 @@ openai-whisper>=20231117
 # speechbrain>=1.0.0
 
 # Face detection (optional, for smart cropping)
-opencv-python-headless>=4.8.0
+opencv-python-headless>=4.8.1.78
 numpy>=1.24.0
 
 # Thumbnails
@@ -19,8 +19,8 @@ Pillow>=10.0.0
 questionary>=2.0.0
 
 # Utilities
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 
 # YouTube analytics (optional — only needed for live OAuth sync; CSV import works without these)
-google-api-python-client>=2.0.0
+google-api-python-client>=2.0.1
 google-auth-oauthlib>=1.0.0

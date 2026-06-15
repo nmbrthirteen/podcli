@@ -11,8 +11,9 @@ on:
     tags:
       - 'v*'
 
+# Default to read-only; only the release job that publishes assets gets write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -138,6 +139,8 @@ jobs:
   release:
     needs: [build, whisper, studio, remotion]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:

@@ -62,7 +62,8 @@ def _load_words():
 
 def _render(style: str) -> str:
     words = _load_words()
-    out = tempfile.mktemp(suffix=".ass")
+    fd, out = tempfile.mkstemp(suffix=".ass")
+    os.close(fd)
     try:
         render_captions(words, style, out, time_offset=0.0)
         with open(out, encoding="utf-8") as f:

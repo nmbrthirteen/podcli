@@ -73,3 +73,24 @@ func TestExtractTarGzRejectsEscapingSymlink(t *testing.T) {
 		t.Fatal("expected extractTarGz to reject escaping symlink, got nil error")
 	}
 }
+
+func TestExtractTarGzRejectsEscapingHardlink(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: "evil", Typeflag: tar.TypeLink, Linkname: "../../../../etc/passwd", Mode: 0o644}); err != nil {
+		t.Fatal(err)
+	}
+	tw.Close()
+	gz.Close()
+
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "evil.tar.gz")
+	if err := os.WriteFile(archive, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "out")
+	if err := extractTarGz(archive, dest); err == nil {
+		t.Fatal("expected extractTarGz to reject escaping hardlink, got nil error")
+	}
+}
