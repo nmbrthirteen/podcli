@@ -594,7 +594,7 @@ def cmd_process(args):
                     enable_diarization=not config.get("no_speakers", False),
                     progress_callback=_transcribe_progress,
                 )
-            except RuntimeError as e:
+            except (RuntimeError, FileNotFoundError, subprocess.CalledProcessError) as e:
                 _spin_stop.set()
                 spin_thread.join(timeout=1)
                 print(f"\r{' ' * 70}\r  ✗ {e}\n", flush=True)

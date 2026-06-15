@@ -34,7 +34,7 @@ def _tokens_to_words(tokens: list[dict]) -> list[dict]:
 
     def flush():
         nonlocal cur_text, cur_start, cur_end
-        text = cur_text.strip()
+        text = cur_text.strip().lstrip("▁").strip()
         if text and cur_start is not None:
             words.append({
                 "word": text,
@@ -166,7 +166,7 @@ def transcribe_file(
             cmd += ["--vad", "--vad-model", vad_model]
         if language:
             cmd += ["-l", language]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
 
         with open(out_base + ".json", encoding="utf-8") as f:
             data = json.load(f)

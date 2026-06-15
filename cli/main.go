@@ -63,11 +63,13 @@ func main() {
 func runEngine(args []string) int {
 	update.NotifyIfOutdated(Version)
 	if transcribeEngine(args) == "whispercpp" {
-		if _, err := provision.EnsureModel("base"); err != nil {
+		model, err := provision.EnsureModel(transcribeModel(args))
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "podcli: provisioning model:", err)
 			return 1
 		}
 		os.Setenv("PODCLI_ENGINE", "whispercpp")
+		os.Setenv("PODCLI_WHISPERCPP_MODEL", model)
 	}
 	code, err := engine.Run(args)
 	if err != nil {
@@ -75,6 +77,15 @@ func runEngine(args []string) int {
 		return 1
 	}
 	return code
+}
+
+func transcribeModel(args []string) string {
+	for _, arg := range args {
+		if arg == "--fast" {
+			return "tiny.en"
+		}
+	}
+	return "base"
 }
 
 func configCmd(args []string) int {
