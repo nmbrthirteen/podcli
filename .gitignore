@@ -44,3 +44,4 @@ episodes/
 *.srt
 uploads/
 output/
+cli/internal/backend/files/

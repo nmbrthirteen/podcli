@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"podcli/internal/backend"
 	"podcli/internal/config"
 	"podcli/internal/engine"
 	"podcli/internal/paths"
@@ -144,8 +145,15 @@ func setup(args []string) int {
 	} else {
 		fmt.Printf("  ffmpeg: %s\n", fp)
 	}
-	if root, ok := engine.BackendRoot(); ok {
-		reqs := filepath.Join(root, "requirements-runtime.txt")
+	backendDir := filepath.Join(paths.RuntimeDir(), "backend")
+	if err := backend.Extract(backendDir); err != nil {
+		fmt.Fprintf(os.Stderr, "  backend: skipped (%v) — falling back to repo/PODCLI_BACKEND\n", err)
+		backendDir, _ = engine.BackendRoot()
+	} else {
+		fmt.Printf("  backend: %s\n", backendDir)
+	}
+	if backendDir != "" {
+		reqs := filepath.Join(backendDir, "requirements-runtime.txt")
 		if pb, err := provision.EnsurePython(reqs); err != nil {
 			fmt.Fprintf(os.Stderr, "  python: skipped (%v) — using dev venv / system python\n", err)
 		} else {

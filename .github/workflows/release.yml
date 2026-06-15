@@ -38,6 +38,7 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          go generate ./internal/backend/   # sync repo backend into files/ for go:embed
           EXT=""
           [ "${{ matrix.goos }}" = "windows" ] && EXT=".exe"
           OUT="podcli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
