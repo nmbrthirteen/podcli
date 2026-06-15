@@ -588,12 +588,18 @@ def cmd_process(args):
             def _transcribe_progress(pct, msg):
                 _spin_msg[0] = f"{msg} ({pct}%)" if pct < 100 else msg
 
-            result = transcribe_file(
-                file_path=video_path,
-                model_size=config.get("whisper_model", "base"),
-                enable_diarization=not config.get("no_speakers", False),
-                progress_callback=_transcribe_progress,
-            )
+            try:
+                result = transcribe_file(
+                    file_path=video_path,
+                    model_size=config.get("whisper_model", "base"),
+                    enable_diarization=not config.get("no_speakers", False),
+                    progress_callback=_transcribe_progress,
+                )
+            except RuntimeError as e:
+                _spin_stop.set()
+                spin_thread.join(timeout=1)
+                print(f"\r{' ' * 70}\r  ✗ {e}\n", flush=True)
+                sys.exit(1)
             _spin_stop.set()
             spin_thread.join(timeout=1)
             words = result["words"]

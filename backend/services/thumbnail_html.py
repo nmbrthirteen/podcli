@@ -173,7 +173,7 @@ def _build_remotion_screenshot_command(
     wait_ms: int,
 ) -> Optional[list[str]]:
     """Build a Remotion-backed screenshot command if the repo can run it."""
-    node_bin = shutil.which("node")
+    node_bin = os.environ.get("PODCLI_NODE") or shutil.which("node")
     repo_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
     renderer_pkg = os.path.join(repo_root, "node_modules", "@remotion", "renderer", "package.json")
     if not node_bin or not os.path.exists(script_path) or not os.path.exists(renderer_pkg):

@@ -105,8 +105,38 @@ jobs:
           name: studio-bundle.tar.gz
           path: studio-bundle.tar.gz
 
+  remotion:
+    # Per-platform: @rspack and the Remotion compositor ship native binaries, so
+    # the bundle is not portable across os/arch.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, goos: darwin, goarch: arm64 }
+          - { runner: macos-13, goos: darwin, goarch: amd64 }
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+          - { runner: windows-latest, goos: windows, goarch: amd64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build remotion bundle
+        shell: bash
+        run: |
+          sh scripts/build-remotion.sh dist/remotion-bundle
+          OUT="remotion-bundle-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+          tar -czf "$OUT" -C dist/remotion-bundle .
+          echo "ASSET=$OUT" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}
+
   release:
-    needs: [build, whisper, studio]
+    needs: [build, whisper, studio, remotion]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

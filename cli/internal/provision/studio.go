@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -78,6 +79,67 @@ func EnsureNode() (string, error) {
 		return "", fmt.Errorf("node missing after extraction in %s", NodeDir())
 	}
 	return bin, nil
+}
+
+func RemotionDir() string    { return filepath.Join(paths.RuntimeDir(), "remotion") }
+func RemotionScript() string { return filepath.Join(RemotionDir(), "render.mjs") }
+
+// EnsureRemotion fetches the per-platform Remotion render bundle (remotion/ +
+// a production node_modules with native bindings) and extracts it into the
+// runtime dir so remotion/ and node_modules/ sit beside backend/. Per-platform
+// because @rspack and the Remotion compositor ship native binaries.
+func EnsureRemotion() (string, error) {
+	if have(RemotionScript()) {
+		return RemotionDir(), nil
+	}
+	name := fmt.Sprintf("remotion-bundle-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	url, err := latestReleaseAssetURL(name)
+	if err != nil {
+		return "", err
+	}
+	archive := filepath.Join(os.TempDir(), "podcli-"+name)
+	if err := fetch(url, archive, "remotion"); err != nil {
+		return "", err
+	}
+	defer os.Remove(archive)
+	os.RemoveAll(RemotionDir())
+	os.RemoveAll(filepath.Join(paths.RuntimeDir(), "node_modules"))
+	if err := extractTarGz(archive, paths.RuntimeDir()); err != nil {
+		return "", err
+	}
+	if !have(RemotionScript()) {
+		return "", fmt.Errorf("remotion render.mjs missing after extraction")
+	}
+	return RemotionDir(), nil
+}
+
+// PrewarmRemotion compiles the project-independent composition bundle once into
+// the managed dir so the first caption render skips the ~20s bundling step.
+func PrewarmRemotion() error {
+	node := NodeBin()
+	if !have(node) || !have(RemotionScript()) {
+		return fmt.Errorf("node/remotion not provisioned")
+	}
+	cmd := exec.Command(node, RemotionScript(), "--prebundle")
+	cmd.Dir = RemotionDir()
+	cmd.Env = append(os.Environ(), "PODCLI_CACHE_DIR="+filepath.Join(RemotionDir(), ".bundle-cache"))
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// EnsureRemotionBrowser pre-downloads the Chrome Headless Shell the Remotion
+// renderer needs, so the first caption render works offline. Best-effort: if it
+// fails, the renderer downloads the browser on first use.
+func EnsureRemotionBrowser() error {
+	node := NodeBin()
+	if !have(node) || !have(RemotionScript()) {
+		return fmt.Errorf("node/remotion not provisioned")
+	}
+	cmd := exec.Command(node, "-e",
+		"import('@remotion/renderer').then(r=>r.ensureBrowser()).then(()=>process.exit(0)).catch(e=>{console.error(String(e));process.exit(1)})")
+	cmd.Dir = RemotionDir()
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // EnsureStudio fetches the prebuilt, platform-independent studio bundle (server +

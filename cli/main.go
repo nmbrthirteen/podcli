@@ -188,8 +188,25 @@ func setup(args []string) int {
 	} else {
 		fmt.Printf("  studio:  %s\n", sd)
 	}
+	if rd, err := provision.EnsureRemotion(); err != nil {
+		fmt.Fprintf(os.Stderr, "  remotion: skipped (%v) — captions/thumbnails need a published release\n", err)
+	} else {
+		fmt.Printf("  remotion: %s\n", rd)
+		if err := provision.PrewarmRemotion(); err != nil {
+			fmt.Fprintf(os.Stderr, "  bundle:   deferred to first render (%v)\n", err)
+		} else {
+			fmt.Printf("  bundle:   prebuilt\n")
+		}
+		if err := provision.EnsureRemotionBrowser(); err != nil {
+			fmt.Fprintf(os.Stderr, "  browser:  deferred to first render (%v)\n", err)
+		} else {
+			fmt.Printf("  browser:  ready\n")
+		}
+	}
 	if engine.MCPServer() != "" {
-		if err := registerMCPServer(); err != nil {
+		if mcpRegisteredToSelf() {
+			fmt.Printf("  mcp:     already registered\n")
+		} else if err := registerMCPServer(); err != nil {
 			fmt.Fprintf(os.Stderr, "  mcp:     not registered (%v) — run `podcli mcp install`\n", err)
 		} else {
 			fmt.Printf("  mcp:     registered with Claude Code\n")
@@ -215,6 +232,19 @@ func registerMCPServer() error {
 		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func mcpRegisteredToSelf() bool {
+	claude, err := exec.LookPath("claude")
+	if err != nil {
+		return false
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	out, err := exec.Command(claude, "mcp", "get", "podcli").CombinedOutput()
+	return err == nil && strings.Contains(string(out), self)
 }
 
 func mcpInstall() int {
@@ -269,6 +299,11 @@ func doctor() {
 	} else {
 		fmt.Printf("  mcp:      not provisioned (needs a published release)\n")
 	}
+	if rs := provision.RemotionScript(); fileExists(rs) {
+		fmt.Printf("  remotion: %s\n", rs)
+	} else {
+		fmt.Printf("  remotion: not provisioned (captions/thumbnails need a published release)\n")
+	}
 	fmt.Println("\nModels")
 	fmt.Printf("  base:     %s\n", presence(provision.ModelPath("base")))
 	fmt.Printf("  vad:      %s\n", presence(provision.VADModelPath()))
@@ -279,6 +314,11 @@ func presence(p string) string {
 		return fmt.Sprintf("%s (%s)", p, humanBytes(fi.Size()))
 	}
 	return "not provisioned — run `podcli setup`"
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func humanBytes(n int64) string {

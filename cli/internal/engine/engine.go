@@ -21,7 +21,7 @@ type stderrFilter struct{ buf []byte }
 func isStderrNoise(line string) bool {
 	return strings.HasPrefix(line, "objc[") ||
 		strings.Contains(line, "FP16 is not supported") ||
-		strings.Contains(line, "warnings.warn")
+		strings.HasPrefix(strings.TrimSpace(line), "warnings.warn(")
 }
 
 func (w *stderrFilter) Write(p []byte) (int, error) {
@@ -166,7 +166,7 @@ func nodeEnv() []string {
 	if fp := FFprobe(); fp != "" {
 		env = append(env, "FFPROBE_PATH="+fp)
 	}
-	if proj := ProjectDir(); proj != "" {
+	if proj, ok := ProjectDir(); ok {
 		if os.Getenv("PODCLI_HOME") == "" {
 			env = append(env, "PODCLI_HOME="+filepath.Join(proj, ".podcli"))
 		}
@@ -204,14 +204,19 @@ func RunMCP() (int, error) {
 // working directory itself. This keeps episode data, presets, and .env
 // project-local — the behavior of the old in-repo launcher — now that the
 // backend lives in the global runtime dir instead of beside the data.
-func ProjectDir() string {
+// ProjectDir returns the nearest ancestor of the working directory holding a
+// .podcli dir or .podcli-home marker, and whether one was found. Only an
+// established project pins data locally; in an unmarked dir the second return is
+// false so callers leave the backend's default home rather than scattering
+// .podcli/ into arbitrary directories.
+func ProjectDir() (string, bool) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return ""
+		return "", false
 	}
 	for {
 		if exists(filepath.Join(dir, ".podcli")) || exists(filepath.Join(dir, ".podcli-home")) {
-			return dir
+			return dir, true
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -219,10 +224,7 @@ func ProjectDir() string {
 		}
 		dir = parent
 	}
-	if cwd, err := os.Getwd(); err == nil {
-		return cwd
-	}
-	return ""
+	return "", false
 }
 
 func Run(args []string) (int, error) {
@@ -258,7 +260,7 @@ func Run(args []string) (int, error) {
 	}
 	// Pin data + .env to the user's project dir so the global runtime backend
 	// doesn't strand project-local episodes/presets. Explicit env wins.
-	if proj := ProjectDir(); proj != "" {
+	if proj, ok := ProjectDir(); ok {
 		if os.Getenv("PODCLI_HOME") == "" {
 			env = append(env, "PODCLI_HOME="+filepath.Join(proj, ".podcli"))
 		}
