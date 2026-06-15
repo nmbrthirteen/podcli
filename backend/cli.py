@@ -3561,20 +3561,29 @@ def interactive_menu():
             return
         elif choice == "webui":
             import subprocess as sp
+            import shutil as _shutil
             repo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-            spa = os.path.join(repo, "dist", "ui", "public", "index.html")
             port = os.environ.get("PORT", "3847")
-            ok = True
-            # npm is npm.cmd on Windows; subprocess can't run a batch file without a shell.
-            _npm_shell = sys.platform == "win32"
-            if not os.path.exists(spa):
-                print(f"\n  {gray}Building the studio (first run)…{reset}\n")
-                ok = sp.run(["npm", "run", "build"], cwd=repo, shell=_npm_shell).returncode == 0
-                if not ok:
-                    print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
-            if ok:
-                print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
-                sp.run(["npm", "run", "ui:prod"], cwd=repo, shell=_npm_shell)
+            # The studio is a Node/TypeScript app that the native binary does not
+            # ship; it only runs from a source checkout with deps installed.
+            if not os.path.exists(os.path.join(repo, "package.json")):
+                print(f"\n  {yellow}The Web UI studio isn't bundled in the native install yet.{reset}")
+                print(f"  {dim}Run it from a source checkout:{reset} {accent}git clone … && npm install && npm run build && PORT={port} npm run ui:prod{reset}\n")
+            elif _shutil.which("npm") is None:
+                print(f"\n  {yellow}Node.js / npm not found on PATH — the studio needs them to build and serve.{reset}\n")
+            else:
+                spa = os.path.join(repo, "dist", "ui", "public", "index.html")
+                ok = True
+                # npm is npm.cmd on Windows; subprocess can't run a batch file without a shell.
+                _npm_shell = sys.platform == "win32"
+                if not os.path.exists(spa):
+                    print(f"\n  {gray}Building the studio (first run)…{reset}\n")
+                    ok = sp.run(["npm", "run", "build"], cwd=repo, shell=_npm_shell).returncode == 0
+                    if not ok:
+                        print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
+                if ok:
+                    print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
+                    sp.run(["npm", "run", "ui:prod"], cwd=repo, shell=_npm_shell)
         elif choice == "assets":
             _interactive_assets()
         elif choice == "presets":
