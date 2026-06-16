@@ -995,6 +995,52 @@ app.get("/api/preview/:filename", (req, res) => {
   streamVideo(req, res, filePath);
 });
 
+// Clips now render into the user's working dir, not a single output root, so the
+// library streams them by history id from wherever they live. The output_path
+// recorded in clips.json IS the allowlist: only files podcli itself logged are
+// servable, and only as regular files (symlinks resolved, extension checked).
+async function serveClipById(
+  req: Request,
+  res: Response,
+  id: string,
+  mode: "preview" | "download",
+) {
+  const entry = await clipsHistory.findById(id);
+  if (!entry || !entry.output_path) {
+    res.status(404).json({ error: "Clip not found" });
+    return;
+  }
+  let real: string;
+  try {
+    real = realpathSync(entry.output_path);
+  } catch {
+    res.status(404).json({ error: "File no longer exists" });
+    return;
+  }
+  if (!statSync(real).isFile() || !/\.(mp4|mov|mkv|webm)$/i.test(real)) {
+    res.status(400).json({ error: "Unsupported clip file" });
+    return;
+  }
+  if (mode === "download") {
+    res.download(real);
+    return;
+  }
+  const mimeTypes: Record<string, string> = {
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska",
+  };
+  streamVideo(req, res, real, mimeTypes[extname(real).toLowerCase()] || "video/mp4");
+}
+
+app.get("/api/clips/:id/preview", (req, res) => {
+  void serveClipById(req, res, req.params.id, "preview");
+});
+
+app.get("/api/clips/:id/download", (req, res) => {
+  void serveClipById(req, res, req.params.id, "download");
+});
+
 /**
  * GET /api/stream-source — Stream the source video for in-browser preview
  * Accepts ?path= query param (must be a file previously validated via /select-file or /upload)

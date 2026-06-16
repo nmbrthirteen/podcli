@@ -83,8 +83,7 @@ export default function ClipDetail() {
 
   const tc = clip.thumbnail_config || {};
   const dirty = title !== clip.title || captionStyle !== clip.caption_style;
-  const file = basename(clip.output_path);
-  const previewUrl = `/api/preview/${file}?t=${bust}`;
+  const previewUrl = `/api/clips/${clip.id}/preview?t=${bust}`;
   const source = thumbImage ? `Image · ${basename(thumbImage)}` : thumbTimestamp != null ? `Frame @ ${fmt(thumbTimestamp)}` : "Auto";
 
   const patch = (body: any) => api(`/clips/${clip.id}`, { method: "PATCH", body: JSON.stringify(body) });
@@ -167,7 +166,7 @@ export default function ClipDetail() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
           <h1 style={{ margin: 0 }}>{clip.title}</h1>
           <div className="set-actions">
-            <a className="btn btn-ghost btn-sm" href={`/api/download/${file}`} download style={{ textDecoration: "none" }}>Download</a>
+            <a className="btn btn-ghost btn-sm" href={`/api/clips/${clip.id}/download`} download style={{ textDecoration: "none" }}>Download</a>
             <button className="btn btn-ghost btn-sm" onClick={reopen} disabled={busy !== null}>{busy === "reopen" ? <div className="spinner sm" /> : "Reopen in editor"}</button>
             {davinciOn && <button className="btn btn-ghost btn-sm" onClick={exportDavinci} disabled={busy !== null}>{busy === "davinci" ? <div className="spinner sm" /> : "Export for DaVinci"}</button>}
             <button className="btn btn-danger btn-sm" onClick={del} disabled={busy !== null}>{busy === "delete" ? <div className="spinner sm" /> : "Delete"}</button>

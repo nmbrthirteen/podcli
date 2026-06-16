@@ -166,17 +166,7 @@ func nodeEnv() []string {
 	if fp := FFprobe(); fp != "" {
 		env = append(env, "FFPROBE_PATH="+fp)
 	}
-	if proj, ok := ProjectDir(); ok {
-		if os.Getenv("PODCLI_HOME") == "" {
-			env = append(env, "PODCLI_HOME="+filepath.Join(proj, ".podcli"))
-		}
-		if os.Getenv("PODCLI_DATA") == "" {
-			env = append(env, "PODCLI_DATA="+filepath.Join(proj, "data"))
-		}
-		if os.Getenv("PODCLI_ENV_FILE") == "" {
-			env = append(env, "PODCLI_ENV_FILE="+filepath.Join(proj, ".env"))
-		}
-	}
+	env = append(env, DataEnv()...)
 	return env
 }
 
@@ -199,32 +189,32 @@ func RunMCP() (int, error) {
 	return 0, nil
 }
 
-// ProjectDir resolves the user's project root: the nearest ancestor of the
-// working directory holding a .podcli dir or .podcli-home marker, else the
-// working directory itself. This keeps episode data, presets, and .env
-// project-local — the behavior of the old in-repo launcher — now that the
-// backend lives in the global runtime dir instead of beside the data.
-// ProjectDir resolves where a run's data lives: the nearest ancestor of the
-// working directory holding a .podcli/.podcli-home marker, else the working
-// directory itself. Data is always project-local — never the global runtime dir,
-// where setup/self-update would overwrite it. The bool is false only when the
-// working directory can't be determined.
-func ProjectDir() (string, bool) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", false
+// DataEnv tells the backend where data lives. The brand brain (presets,
+// knowledge, assets, history, config) and the transcript cache live in the
+// global managed dir so they follow the user across directories; only rendered
+// clips go under the working directory (PODCLI_OUTPUT). Explicit env always wins
+// so power users and tests can override any single path.
+func DataEnv() []string {
+	var env []string
+	home := paths.Home()
+	if os.Getenv("PODCLI_HOME") == "" {
+		env = append(env, "PODCLI_HOME="+home)
 	}
-	for dir := cwd; ; {
-		if exists(filepath.Join(dir, ".podcli")) || exists(filepath.Join(dir, ".podcli-home")) {
-			return dir, true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
+	if os.Getenv("PODCLI_DATA") == "" {
+		env = append(env, "PODCLI_DATA="+filepath.Join(home, "data"))
 	}
-	return cwd, true
+	if os.Getenv("PODCLI_ENV_FILE") == "" {
+		env = append(env, "PODCLI_ENV_FILE="+filepath.Join(home, ".env"))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if os.Getenv("PODCLI_CWD") == "" {
+			env = append(env, "PODCLI_CWD="+cwd)
+		}
+		if os.Getenv("PODCLI_OUTPUT") == "" {
+			env = append(env, "PODCLI_OUTPUT="+filepath.Join(cwd, "podcli-clips"))
+		}
+	}
+	return env
 }
 
 func Run(args []string) (int, error) {
@@ -258,19 +248,7 @@ func Run(args []string) (int, error) {
 	if ss := StudioServer(); ss != "" {
 		env = append(env, "PODCLI_STUDIO="+filepath.Dir(ss))
 	}
-	// Pin data + .env to the user's project dir so the global runtime backend
-	// doesn't strand project-local episodes/presets. Explicit env wins.
-	if proj, ok := ProjectDir(); ok {
-		if os.Getenv("PODCLI_HOME") == "" {
-			env = append(env, "PODCLI_HOME="+filepath.Join(proj, ".podcli"))
-		}
-		if os.Getenv("PODCLI_DATA") == "" {
-			env = append(env, "PODCLI_DATA="+filepath.Join(proj, "data"))
-		}
-		if os.Getenv("PODCLI_ENV_FILE") == "" {
-			env = append(env, "PODCLI_ENV_FILE="+filepath.Join(proj, ".env"))
-		}
-	}
+	env = append(env, DataEnv()...)
 	cmd.Env = env
 
 	err := cmd.Run()

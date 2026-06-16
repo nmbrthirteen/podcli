@@ -153,17 +153,24 @@ def _auto_migrate_cli(args) -> None:
     summary = auto_migrate_legacy_if_pending(quiet=True)
     if not summary:
         return
+    home = summary.get("home_migration") or {}
+    imported_home = home.get("imported")
     moved_cache = summary.get("moved_json") or summary.get("moved_remotion_bundle")
     moved_presets = (summary.get("presets_migration") or {}).get("moved")
-    if moved_cache or moved_presets:
+    copied_env = (summary.get("env_migration") or {}).get("copied")
+    if imported_home or moved_cache or moved_presets or copied_env:
         gray = "\033[38;5;245m"
         green = "\033[38;2;74;222;128m"
         reset = "\033[0m"
+        if imported_home:
+            print(f"  {green}✓{reset} {gray}Imported your presets, knowledge & assets → {home.get('target_home')}{reset}")
         if moved_cache:
-            print(f"  {green}✓{reset} {gray}Migrated legacy cache → {summary.get('target_dir')}{reset}")
+            print(f"  {green}✓{reset} {gray}Migrated transcript cache → {summary.get('target_dir')}{reset}")
         if moved_presets:
             pm = summary.get("presets_migration") or {}
             print(f"  {green}✓{reset} {gray}Migrated presets → {pm.get('target_dir')}{reset}")
+        if copied_env:
+            print(f"  {green}✓{reset} {gray}Copied .env → {(summary.get('env_migration') or {}).get('target')}{reset}")
         print()
 
 
@@ -286,7 +293,11 @@ def _resolve_output_dir(
     if explicit_output_dir:
         return explicit_output_dir
 
-    base_output_dir = configured_output_dir or os.path.join(os.path.dirname(video_path), "clips")
+    base_output_dir = (
+        configured_output_dir
+        or os.environ.get("PODCLI_OUTPUT")
+        or os.path.join(os.path.dirname(video_path), "clips")
+    )
     if not preset_name:
         return base_output_dir
 
@@ -2619,6 +2630,15 @@ def _print_config_result(action: str, data: dict) -> None:
 
     if action == "migrate":
         print(f"\n  {bold}Legacy migration{reset}")
+        home_mig = data.get("home_migration") or {}
+        if home_mig.get("imported") or home_mig.get("skipped_existing"):
+            print(f"  {gray}brand brain (presets, knowledge, assets, history, config){reset}")
+            print(f"    {gray}from{reset}: {home_mig.get('legacy_home')}")
+            print(f"    {gray}to{reset}:   {home_mig.get('target_home')}")
+            if home_mig.get("skipped_existing"):
+                print(f"    {gray}skipped{reset}: global home already has data")
+            else:
+                print(f"    {gray}imported{reset}: yes")
         print(f"  {gray}cache{reset}")
         print(f"    {gray}from{reset}: {data.get('legacy_dir')}")
         print(f"    {gray}to{reset}:   {data.get('target_dir')}")
@@ -2637,6 +2657,10 @@ def _print_config_result(action: str, data: dict) -> None:
             print(f"    {gray}moved{reset}:    {presets.get('moved')}")
             if presets.get("skipped"):
                 print(f"    {gray}skipped{reset}:  {presets['skipped']} (already in target)")
+        env_mig = data.get("env_migration") or {}
+        if env_mig.get("copied"):
+            print(f"  {gray}.env{reset}")
+            print(f"    {gray}to{reset}:   {env_mig.get('target')}")
         if not data.get("dry_run"):
             print(f"\n  {green}✓{reset} Migration complete")
         print()

@@ -44,6 +44,7 @@ def _build_paths() -> dict[str, str]:
     home = _resolve_home()
     project_root = _project_root()
     data_dir = Path(os.environ.get("PODCLI_DATA", str(project_root / "data"))).expanduser().resolve()
+    output_dir = Path(os.environ.get("PODCLI_OUTPUT", str(data_dir / "output"))).expanduser().resolve()
     return {
         "home": str(home),
         "project_root": str(project_root),
@@ -51,7 +52,7 @@ def _build_paths() -> dict[str, str]:
         "transcripts": str(data_dir / "cache" / "transcripts"),
         "packed": str(home / "packed"),
         "working": str(data_dir / "working"),
-        "output": str(data_dir / "output"),
+        "output": str(output_dir),
         "logs": str(data_dir / "logs"),
         "assets": str(home / "assets"),
         "assetsRegistry": str(home / "assets" / "registry.json"),

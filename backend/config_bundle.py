@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,12 +61,38 @@ def _migration_marker_path() -> Path:
     return _data_dir() / MIGRATION_MARKER_NAME
 
 
+# The old ./podcli kept everything project-local. The native CLI keeps the brand
+# brain (presets, knowledge, assets, history, config) and the transcript cache in
+# the global managed dir so they follow the user across directories; only clips
+# stay in the working dir. Migration therefore reads the *working directory* —
+# the old ./podcli folder the user is standing in — and imports it into the global
+# home/cache. PODCLI_CWD is injected by the Go launcher; getcwd() is the fallback.
+def _legacy_project_dir() -> Path:
+    return Path(os.environ.get("PODCLI_CWD") or os.getcwd()).expanduser().resolve()
+
+
+def _global_home() -> Path:
+    return Path(paths["home"]).resolve()
+
+
+def _legacy_home_dir() -> Path:
+    return _legacy_project_dir() / ".podcli"
+
+
 def _legacy_cache_dir() -> Path:
-    return Path(paths["project_root"]) / ".podcli" / "cache"
+    # Old layouts stored the transcript cache under <proj>/.podcli/cache (original)
+    # or <proj>/data/cache (interim project-local). Prefer whichever holds content.
+    proj = _legacy_project_dir()
+    for candidate in (proj / ".podcli" / "cache", proj / "data" / "cache"):
+        if candidate.is_dir() and any(candidate.iterdir()):
+            return candidate
+    return proj / ".podcli" / "cache"
 
 
 def _legacy_presets_dir() -> Path:
-    return Path(paths["project_root"]) / "presets"
+    # Ancient layout kept presets at <proj>/presets, outside .podcli. Presets
+    # inside .podcli/presets are covered by the brand-brain import instead.
+    return _legacy_project_dir() / "presets"
 
 
 def _legacy_presets_has_content() -> bool:
@@ -73,8 +100,28 @@ def _legacy_presets_has_content() -> bool:
     return legacy.is_dir() and any(legacy.glob("*.json"))
 
 
+def _legacy_env_file() -> Path:
+    return _legacy_project_dir() / ".env"
+
+
+def _legacy_env_pending() -> bool:
+    return _legacy_env_file().is_file() and not (_global_home() / ".env").exists()
+
+
+def _legacy_home_pending() -> bool:
+    legacy = _legacy_home_dir()
+    if legacy.resolve() == _global_home():
+        return False
+    return _has_managed_content(legacy) and not _has_managed_content(_global_home())
+
+
 def _legacy_migration_pending() -> bool:
-    return _legacy_cache_has_content() or _legacy_presets_has_content()
+    return (
+        _legacy_home_pending()
+        or _legacy_cache_has_content()
+        or _legacy_presets_has_content()
+        or _legacy_env_pending()
+    )
 
 
 def _read_json(path: Path) -> Any:
@@ -231,7 +278,7 @@ def migrate_legacy_cache(*, dry_run: bool = False) -> dict[str, Any]:
         "dry_run": dry_run,
     }
 
-    if not legacy.is_dir():
+    if not legacy.is_dir() or legacy.resolve() == target.resolve():
         return result
 
     target.mkdir(parents=True, exist_ok=True)
@@ -319,6 +366,54 @@ def migrate_legacy_presets(*, dry_run: bool = False) -> dict[str, Any]:
     return result
 
 
+def migrate_legacy_home(*, dry_run: bool = False) -> dict[str, Any]:
+    """Import a project-local .podcli brand brain (presets, knowledge, assets,
+    history, config) from the working dir into the global home. Only runs when the
+    global home is still empty so it never clobbers an existing global profile."""
+    legacy = _legacy_home_dir()
+    home = _global_home()
+    result: dict[str, Any] = {
+        "legacy_home": str(legacy),
+        "target_home": str(home),
+        "imported": False,
+        "dry_run": dry_run,
+    }
+    if legacy.resolve() == home or not _has_managed_content(legacy):
+        return result
+    if _has_managed_content(home):
+        result["skipped_existing"] = True
+        return result
+    if dry_run:
+        result["imported"] = True
+        return result
+    # Reuse export/import so asset files get archived and absolute path references
+    # inside presets/config are rewritten to the new global home.
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle = os.path.join(tmp, "legacy-home.zip")
+        export_config(bundle, source_home=str(legacy))
+        import_config(bundle, target_home=str(home), activate=False)
+    result["imported"] = True
+    return result
+
+
+def migrate_legacy_env(*, dry_run: bool = False) -> dict[str, Any]:
+    src = _legacy_env_file()
+    dest = _global_home() / ".env"
+    result: dict[str, Any] = {
+        "source": str(src),
+        "target": str(dest),
+        "copied": False,
+        "dry_run": dry_run,
+    }
+    if not src.is_file() or dest.exists():
+        return result
+    if not dry_run:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src), str(dest))
+    result["copied"] = True
+    return result
+
+
 def auto_migrate_legacy_if_pending(*, quiet: bool = True) -> dict[str, Any] | None:
     if not _legacy_migration_pending():
         return None
@@ -328,28 +423,31 @@ def auto_migrate_legacy_if_pending(*, quiet: bool = True) -> dict[str, Any] | No
 def ensure_legacy_migrated(*, quiet: bool = True) -> dict[str, Any]:
     marker = _migration_marker_path()
     had_marker = marker.exists()
+    home_summary = migrate_legacy_home(dry_run=False)
     summary = migrate_legacy_cache(dry_run=False)
     presets_summary = migrate_legacy_presets(dry_run=False)
+    env_summary = migrate_legacy_env(dry_run=False)
+    summary["home_migration"] = home_summary
     summary["presets_migration"] = presets_summary
+    summary["env_migration"] = env_summary
     try:
         from services.transcript_packer import migrate_transcript_cache_layout
 
         layout = migrate_transcript_cache_layout()
         summary["transcript_layout"] = layout
-        changed = bool(
-            summary.get("moved_json")
-            or summary.get("moved_remotion_bundle")
-            or summary.get("removed_duplicate_remotion_bundle")
-            or layout.get("moved_to_transcripts")
-            or presets_summary.get("moved")
-        )
+        layout_moved = layout.get("moved_to_transcripts")
     except Exception:
-        changed = bool(
-            summary.get("moved_json")
-            or summary.get("moved_remotion_bundle")
-            or summary.get("removed_duplicate_remotion_bundle")
-            or presets_summary.get("moved")
-        )
+        summary["transcript_layout"] = {"moved_to_transcripts": 0, "skipped": 0}
+        layout_moved = 0
+    changed = bool(
+        home_summary.get("imported")
+        or summary.get("moved_json")
+        or summary.get("moved_remotion_bundle")
+        or summary.get("removed_duplicate_remotion_bundle")
+        or layout_moved
+        or presets_summary.get("moved")
+        or env_summary.get("copied")
+    )
     if not had_marker or changed:
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(
@@ -539,8 +637,10 @@ def get_config_status() -> dict[str, Any]:
         "home": get_active_home(),
         "cache": paths["cache"],
         "profile_marker": paths["profileMarker"],
+        "legacy_home_pending": _legacy_home_pending(),
         "legacy_cache_pending": _legacy_cache_has_content(),
         "legacy_presets_pending": _legacy_presets_has_content(),
+        "legacy_env_pending": _legacy_env_pending(),
         "migration_marker": str(marker) if marker.exists() else None,
         "migration": migration_info,
     }
@@ -560,8 +660,9 @@ def run_config_action(
     if act == "migrate":
         if dry_run:
             cache = migrate_legacy_cache(dry_run=True)
-            presets = migrate_legacy_presets(dry_run=True)
-            cache["presets_migration"] = presets
+            cache["home_migration"] = migrate_legacy_home(dry_run=True)
+            cache["presets_migration"] = migrate_legacy_presets(dry_run=True)
+            cache["env_migration"] = migrate_legacy_env(dry_run=True)
             return cache
         return ensure_legacy_migrated(quiet=True)
     if act == "export":

@@ -110,11 +110,18 @@ func configCmd(args []string) int {
 	return 0
 }
 
-// transcribeEngine resolves which engine a process/studio run will use, honoring
-// --engine, PODCLI_ENGINE, then defaulting to whisper.cpp on a hermetic Python
-// (which has no openai-whisper).
+// transcribeEngine resolves which engine a run will use, honoring --engine,
+// PODCLI_ENGINE, then defaulting to whisper.cpp on a hermetic Python (which has
+// no openai-whisper). Covers every entry point that can transcribe: the no-arg
+// interactive menu, process, studio, and transcribe.
 func transcribeEngine(args []string) string {
-	if len(args) == 0 || (args[0] != "process" && args[0] != "studio") {
+	cmd := ""
+	if len(args) > 0 {
+		cmd = args[0]
+	}
+	switch cmd {
+	case "", "process", "studio", "transcribe":
+	default:
 		return ""
 	}
 	sel := strings.ToLower(os.Getenv("PODCLI_ENGINE"))
@@ -275,8 +282,9 @@ func doctor() {
 	fmt.Printf("  home:     %s\n", paths.Home())
 	fmt.Printf("  runtime:  %s\n", paths.RuntimeDir())
 	fmt.Printf("  models:   %s\n", paths.ModelsDir())
-	if proj, ok := engine.ProjectDir(); ok {
-		fmt.Printf("  project:  %s  (episodes, presets, .env resolve here)\n", proj)
+	fmt.Printf("  presets/knowledge/assets/history/cache: %s  (global — follow you everywhere)\n", paths.Home())
+	if cwd, err := os.Getwd(); err == nil {
+		fmt.Printf("  clips:    %s  (rendered into your working directory)\n", filepath.Join(cwd, "podcli-clips"))
 	}
 	fmt.Println("\nEngine resolution")
 	if root, ok := engine.BackendRoot(); ok {
