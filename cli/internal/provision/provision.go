@@ -129,6 +129,41 @@ func download(url, dest, wantSHA, label string) error {
 	return nil
 }
 
+// verifyDownload checks a downloaded archive against an upstream sha256sum-style
+// manifest. Fails closed on a mismatch (removes the file); fails open with a
+// warning when the manifest or its entry can't be fetched, so a transient
+// network issue on the sums file doesn't block provisioning.
+func verifyDownload(archive, sumsURL, name string) error {
+	resp, err := downloadHTTPClient().Get(sumsURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  (could not fetch checksums for %s — skipped verification)\n", name)
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "  (no checksums for %s — skipped verification)\n", name)
+		return nil
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return err
+	}
+	want := ParseChecksums(data)[name]
+	if want == "" {
+		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s — skipped verification)\n", name)
+		return nil
+	}
+	got, err := sha256file(archive)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		os.Remove(archive)
+		return fmt.Errorf("checksum mismatch for %s: got %s want %s", name, got, want)
+	}
+	return nil
+}
+
 func downloadOnce(url, tmp, label string) (bool, error) {
 	var start int64
 	if fi, err := os.Stat(tmp); err == nil {
@@ -584,20 +619,20 @@ func PythonBin() string {
 // pythonAssetURL resolves a python-build-standalone install_only tarball for
 // this platform via the GitHub latest-release API, so it tracks upstream
 // without a hardcoded version that rots.
-func pythonAssetURL() (string, error) {
+func pythonAssetURL() (url, name, sumsURL string, err error) {
 	triple, ok := pyTriples[runtime.GOOS+"/"+runtime.GOARCH]
 	if !ok {
-		return "", fmt.Errorf("no python build for %s/%s", runtime.GOOS, runtime.GOARCH)
+		return "", "", "", fmt.Errorf("no python build for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	req, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest", nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := releaseHTTPClient().Do(req)
 	if err != nil {
-		return "", err
+		return "", "", "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("github api: HTTP %d", resp.StatusCode)
+		return "", "", "", fmt.Errorf("github api: HTTP %d", resp.StatusCode)
 	}
 	var rel struct {
 		Assets []struct {
@@ -606,29 +641,36 @@ func pythonAssetURL() (string, error) {
 		} `json:"assets"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		return "", err
+		return "", "", "", err
 	}
-	match := func(prefer string) string {
+	sums := ""
+	for _, a := range rel.Assets {
+		if a.Name == "SHA256SUMS" {
+			sums = a.URL
+			break
+		}
+	}
+	match := func(prefer string) (string, string) {
 		for _, a := range rel.Assets {
 			if strings.Contains(a.Name, triple) && strings.HasSuffix(a.Name, "install_only.tar.gz") && strings.Contains(a.Name, prefer) {
-				return a.URL
+				return a.URL, a.Name
 			}
 		}
-		return ""
+		return "", ""
 	}
-	if u := match("cpython-3.12."); u != "" {
-		return u, nil
+	if u, n := match("cpython-3.12."); u != "" {
+		return u, n, sums, nil
 	}
-	if u := match("cpython-3."); u != "" {
-		return u, nil
+	if u, n := match("cpython-3."); u != "" {
+		return u, n, sums, nil
 	}
-	return "", fmt.Errorf("no install_only python asset for %s", triple)
+	return "", "", "", fmt.Errorf("no install_only python asset for %s", triple)
 }
 
 func EnsurePython(requirements string) (string, error) {
 	bin := PythonBin()
 	if !have(bin) {
-		url, err := pythonAssetURL()
+		url, name, sumsURL, err := pythonAssetURL()
 		if err != nil {
 			return "", err
 		}
@@ -636,6 +678,11 @@ func EnsurePython(requirements string) (string, error) {
 		archive := filepath.Join(os.TempDir(), "podcli-py-"+hex.EncodeToString(sum[:8])+".tar.gz")
 		if err := fetch(url, archive, "cpython"); err != nil {
 			return "", err
+		}
+		if sumsURL != "" {
+			if err := verifyDownload(archive, sumsURL, name); err != nil {
+				return "", err
+			}
 		}
 		err = extractTarGz(archive, paths.RuntimeDir())
 		os.Remove(archive)

@@ -27,7 +27,7 @@
 <p align="center"><sub>▶ <a href="https://x.com/nikasiradze_/status/2056061654664708570">Watch with sound on X</a></sub></p>
 
 ```bash
-./podcli process episode.mp4
+podcli process episode.mp4
 ```
 
 One command transcribes, picks the best moments, crops to the face, and burns captions in. Nothing leaves your machine.
@@ -70,7 +70,7 @@ The first half is **video processing** — podcli's core engine. The second half
 Drag your video into the Web UI, or use the CLI:
 
 ```bash
-./podcli process episode.mp4
+podcli process episode.mp4
 ```
 
 ### 2. Get clips automatically
@@ -147,7 +147,7 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 - **Preset system** — save named configurations per show
 - **MCP server** — 17 tools for Claude Desktop / Claude Code integration
 - **Web UI** — single-page flow at `localhost:3847`
-- **CLI** — one-command processing: `./podcli process episode.mp4`
+- **CLI** — one-command processing: `podcli process episode.mp4`
 
 ---
 
@@ -196,7 +196,7 @@ podcli process episode.mp4   # transcribe + export clips
 ### Web UI
 
 ```bash
-./setup.sh --ui
+podcli            # then choose "Open Web UI"
 # → http://localhost:3847
 ```
 
@@ -211,17 +211,17 @@ podcli process episode.mp4   # transcribe + export clips
 
 ```bash
 # One command. Auto-transcribes, picks moments, renders clips.
-./podcli process episode.mp4
+podcli process episode.mp4
 ```
 
 With more control:
 
 ```bash
 # Use an existing transcript instead of transcribing
-./podcli process episode.mp4 --transcript transcript.txt --top 5
+podcli process episode.mp4 --transcript transcript.txt --top 5
 
 # Full options
-./podcli process episode.mp4 \
+podcli process episode.mp4 \
   --transcript transcript.txt \
   --top 8 \
   --caption-style branded \
@@ -232,9 +232,9 @@ With more control:
 ### Presets
 
 ```bash
-./podcli presets save myshow --caption-style branded --logo logo.png --top 5
-./podcli presets list
-./podcli process video.mp4 --preset myshow
+podcli presets save myshow --caption-style branded --logo logo.png --top 5
+podcli presets list
+podcli process video.mp4 --preset myshow
 ```
 
 ### Content Workflow (PodStack)
@@ -289,29 +289,24 @@ Manage via the web UI at `/knowledge.html` (drag & drop, inline editor) or throu
 
 podcli is a [Model Context Protocol](https://modelcontextprotocol.io) server — Claude can use it as a tool to create clips through conversation.
 
+**Claude Code** — register the bundled MCP server in one command:
+
+```bash
+podcli mcp install
+```
+
 **Claude Desktop** — add to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "podcli": {
-      "command": "node",
-      "args": ["/path/to/podcli/dist/index.js"],
-      "env": {
-        "PYTHON_PATH": "/path/to/podcli/venv/bin/python3"
-      }
+      "command": "podcli",
+      "args": ["mcp"]
     }
   }
 }
 ```
-
-**Claude Code:**
-
-```bash
-claude mcp add podcli -- node /path/to/podcli/dist/index.js
-```
-
-Run `./setup.sh --mcp` to get the exact config with your paths filled in.
 
 ### MCP Tools
 

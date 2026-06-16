@@ -60,6 +60,9 @@ func EnsureNode() (string, error) {
 		return "", err
 	}
 	defer os.Remove(archive)
+	if err := verifyDownload(archive, fmt.Sprintf("https://nodejs.org/dist/v%s/SHASUMS256.txt", nodeVersion), base+"."+ext); err != nil {
+		return "", err
+	}
 	if err := os.RemoveAll(NodeDir()); err != nil {
 		return "", err
 	}
