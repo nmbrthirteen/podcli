@@ -151,59 +151,43 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 
 ---
 
-## Prerequisites
+## Install
 
-| Tool                       | Install                                                                                                                                              |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Node.js** >= 18          | [nodejs.org](https://nodejs.org)                                                                                                                     |
-| **Python** >= 3.10         | [python.org](https://python.org)                                                                                                                     |
-| **FFmpeg**                 | `brew install ffmpeg` / `sudo apt install ffmpeg`                                                                                                    |
-| **Claude Code** (optional) | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) — needed for PodStack slash commands                                            |
-| **Codex** (optional)       | [openai.com/codex](https://openai.com/index/introducing-codex/) — alternative AI engine for clip suggestion (auto-detected if Claude is unavailable) |
-
-## Quick Start
+No prerequisites — the install fetches a self-contained binary, and the first run
+provisions everything it needs (Python, Node, FFmpeg, whisper.cpp, models) into a
+managed directory. You don't need Go, Node, Python, or FFmpeg installed.
 
 **macOS / Linux**
 
 ```bash
-git clone https://github.com/nmbrthirteen/podcli.git
-cd podcli
-chmod +x setup.sh podcli
-./setup.sh
+curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh
 ```
 
-**Windows**
+**Windows (PowerShell)**
 
 ```powershell
-git clone https://github.com/nmbrthirteen/podcli.git
-cd podcli
+irm https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.ps1 | iex
 ```
 
-Then double-click **`install.cmd`** (or run it in a terminal). It installs everything and keeps the window open so you can see the result. To launch the studio afterwards:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File setup.ps1 -Ui
-```
-
-This will:
-
-1. Check system dependencies (Node, Python, FFmpeg)
-2. Create a Python virtual environment and install packages
-3. Install Node packages and build TypeScript
-4. Set up PodStack slash commands and knowledge base templates
-5. Create the local `.podcli/` data directory
-6. Launch the web UI at **http://localhost:3847**
-
-### Setup options
+**With npm** (if you already have Node):
 
 ```bash
-./setup.sh              # full install + launch UI
-./setup.sh --install    # install only
-./setup.sh --ui         # launch UI only (skip install)
-./setup.sh --mcp        # print MCP config for Claude
+npm install -g podcli
 ```
 
-On Windows, use `.\setup.ps1` with `-Install`, `-Ui`, or `-Mcp`, and run the CLI via `podcli.cmd` (e.g. `podcli process video.mp4 --top 5`).
+Then just run it — the first launch sets itself up:
+
+```bash
+podcli                       # interactive menu (and Web UI)
+podcli process episode.mp4   # transcribe + export clips
+```
+
+**Optional**, for AI clip suggestion and the PodStack slash commands: install
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) or
+[Codex](https://openai.com/index/introducing-codex/) (auto-detected).
+
+> Building from source needs Go 1.23+ (and Node for the studio bundle); see
+> [`plans/native-cli.md`](plans/native-cli.md).
 
 ---
 
