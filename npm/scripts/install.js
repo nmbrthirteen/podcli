@@ -21,7 +21,6 @@ function allowedHost(h) {
 }
 
 const TARGETS = {
-  'darwin-x64': 'darwin-amd64',
   'darwin-arm64': 'darwin-arm64',
   'linux-x64': 'linux-amd64',
   'linux-arm64': 'linux-arm64',
