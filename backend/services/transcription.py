@@ -115,19 +115,20 @@ def transcribe_file(
     if progress_callback:
         progress_callback(5, "Loading Whisper model...")
 
+    # Native installs ship whisper.cpp, not openai-whisper. Fall back to it
+    # automatically — whether whisper is missing OR a broken install fails to
+    # load/run — unless the user explicitly asked for the whisper-py engine.
     try:
         import whisper
-    except ImportError as e:
-        # Native installs ship whisper.cpp, not openai-whisper. Fall back to it
-        # automatically unless the user explicitly asked for the whisper-py engine.
+
+        model = whisper.load_model(model_size)
+    except Exception as e:
         if not requested and _whispercpp_ready(model_size):
             return _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
         raise RuntimeError(
             "The whisper-py engine needs the full source install (openai-whisper + torch). "
             "This native install ships whisper.cpp — rerun with --engine whispercpp."
         ) from e
-
-    model = whisper.load_model(model_size)
 
     if progress_callback:
         progress_callback(10, f"Transcribing with Whisper ({model_size})...")

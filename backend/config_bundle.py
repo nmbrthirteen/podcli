@@ -104,8 +104,15 @@ def _legacy_env_file() -> Path:
     return _legacy_project_dir() / ".env"
 
 
+def _global_env_file() -> Path:
+    # Match the file the launcher/loader actually reads (PODCLI_ENV_FILE), so the
+    # migrated secrets land where they'll be loaded and "pending" clears correctly.
+    return Path(os.environ.get("PODCLI_ENV_FILE") or (_global_home() / ".env"))
+
+
 def _legacy_env_pending() -> bool:
-    return _legacy_env_file().is_file() and not (_global_home() / ".env").exists()
+    src = _legacy_env_file()
+    return src.is_file() and src.resolve() != _global_env_file().resolve() and not _global_env_file().exists()
 
 
 def _legacy_home_pending() -> bool:
@@ -116,6 +123,9 @@ def _legacy_home_pending() -> bool:
 
 
 def _legacy_migration_pending() -> bool:
+    # Never treat the global managed dir itself as a legacy project to import.
+    if _legacy_project_dir().resolve() == _global_home().resolve():
+        return False
     return (
         _legacy_home_pending()
         or _legacy_cache_has_content()
@@ -346,7 +356,7 @@ def migrate_legacy_presets(*, dry_run: bool = False) -> dict[str, Any]:
         "skipped": 0,
         "dry_run": dry_run,
     }
-    if not legacy.is_dir():
+    if not legacy.is_dir() or legacy.resolve() == target.resolve():
         return result
     target.mkdir(parents=True, exist_ok=True)
     for src in legacy.glob("*.json"):
@@ -398,14 +408,14 @@ def migrate_legacy_home(*, dry_run: bool = False) -> dict[str, Any]:
 
 def migrate_legacy_env(*, dry_run: bool = False) -> dict[str, Any]:
     src = _legacy_env_file()
-    dest = _global_home() / ".env"
+    dest = _global_env_file()
     result: dict[str, Any] = {
         "source": str(src),
         "target": str(dest),
         "copied": False,
         "dry_run": dry_run,
     }
-    if not src.is_file() or dest.exists():
+    if not src.is_file() or src.resolve() == dest.resolve() or dest.exists():
         return result
     if not dry_run:
         dest.parent.mkdir(parents=True, exist_ok=True)

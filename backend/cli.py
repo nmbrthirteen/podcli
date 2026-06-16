@@ -2093,6 +2093,11 @@ def cmd_thumbnails(args):
     video = getattr(args, "video", None)
     as_json = getattr(args, "json", False)
 
+    # Interactive callers build a bare namespace without --output's argparse
+    # default, so fall back to the same default the CLI documents.
+    if not getattr(args, "output", None):
+        args.output = "./thumbnails"
+
     # An exact timestamp wins: extract that frame from the video and use it as the photo.
     timestamp = getattr(args, "timestamp", None)
     if photo is None and video and timestamp is not None:
@@ -3474,7 +3479,10 @@ def interactive_menu():
                     "PODCLI_BACKEND": backend_dir,
                     "PYTHON_PATH": sys.executable,
                     "PODCLI_HOME": paths["home"],
-                    "PODCLI_DATA": os.path.dirname(paths["output"]),
+                    # data_dir is the cache's parent — output is now decoupled
+                    # (clips render to the working dir), so don't derive it from output.
+                    "PODCLI_DATA": os.path.dirname(paths["cache"]),
+                    "PODCLI_OUTPUT": paths["output"],
                     "FFMPEG_PATH": os.environ.get("PODCLI_FFMPEG", "ffmpeg"),
                     "FFPROBE_PATH": os.environ.get("PODCLI_FFPROBE", "ffprobe"),
                 }
@@ -4402,6 +4410,7 @@ def _interactive_thumbnails():
         video=video or None,
         logo=None,
         variations=3,
+        output="./thumbnails",
     )
     cmd_thumbnails(args_ns)
 

@@ -2491,7 +2491,10 @@ async function main() {
     res.sendFile(join(publicDir, "index.html"));
   });
 
-  app.listen(PORT, () => {
+  // Bind to loopback by default — the studio serves local files (clips, assets,
+  // source video) with no auth. Set PODCLI_HOST=0.0.0.0 to expose it on the LAN.
+  const HOST = process.env.PODCLI_HOST || "127.0.0.1";
+  app.listen(PORT, HOST, () => {
     log.info(`podcli running at http://localhost:${PORT}`);
   });
 }
