@@ -142,8 +142,7 @@ func downloadOnce(url, tmp, label string) (bool, error) {
 	if start > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", start))
 	}
-	client := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: 60 * time.Second}}
-	resp, err := client.Do(req)
+	resp, err := downloadHTTPClient().Do(req)
 	if err != nil {
 		return false, err
 	}
@@ -263,7 +262,7 @@ func WhisperCLIBin() string {
 func latestReleaseAssets() (map[string]string, error) {
 	req, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+podcliRepo+"/releases/latest", nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := releaseHTTPClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -317,6 +316,43 @@ func releaseHTTPClient() *http.Client {
 				return fmt.Errorf("too many redirects")
 			}
 			if !allowedReleaseHost(req.URL.Hostname()) {
+				return fmt.Errorf("refusing redirect to untrusted host %q", req.URL.Hostname())
+			}
+			return nil
+		},
+	}
+}
+
+// allowedDownloadHost pins large-binary/model downloads to their known source
+// hosts and CDNs. Several of these payloads (Node, CPython, ffmpeg) are not
+// checksum-verified, so blocking redirects to unknown hosts is the main defense
+// against a diverted download. Initial request URLs are hardcoded (trusted);
+// this only constrains where a redirect may land.
+func allowedDownloadHost(h string) bool {
+	h = strings.ToLower(h)
+	for _, base := range []string{
+		"github.com",            // release assets
+		"githubusercontent.com", // objects.* / release-assets.* CDN
+		"huggingface.co",        // whisper.cpp models + cdn-lfs*.huggingface.co
+		"nodejs.org",            // hermetic Node
+		"evermeet.cx",           // macOS ffmpeg
+		"johnvansickle.com",     // linux ffmpeg
+	} {
+		if h == base || strings.HasSuffix(h, "."+base) {
+			return true
+		}
+	}
+	return false
+}
+
+func downloadHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{ResponseHeaderTimeout: 60 * time.Second},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			if !allowedDownloadHost(req.URL.Hostname()) {
 				return fmt.Errorf("refusing redirect to untrusted host %q", req.URL.Hostname())
 			}
 			return nil
@@ -541,7 +577,7 @@ func pythonAssetURL() (string, error) {
 	}
 	req, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest", nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := releaseHTTPClient().Do(req)
 	if err != nil {
 		return "", err
 	}
