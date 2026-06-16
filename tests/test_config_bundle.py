@@ -83,6 +83,31 @@ class ConfigBundleTests(unittest.TestCase):
         self.assertTrue(registry["assets"][0]["path"].startswith(os.path.realpath(self.dst_home)))
         self.assertTrue(os.path.exists(registry["assets"][0]["path"]))
 
+    def test_import_rewrites_preset_and_ui_state_asset_paths(self):
+        # Regression: a preset/ui-state asset path stored as its literal (possibly
+        # symlinked, e.g. macOS /var) value must be rewritten to the new home on
+        # import — otherwise it leaks the source machine's path and breaks once the
+        # source is gone. self.asset_file is the literal src path (under a tmpdir,
+        # which is symlinked on macOS so raw != realpath — exactly the failure case).
+        with open(os.path.join(self.src_home, "presets", "branded.json"), "w", encoding="utf-8") as f:
+            json.dump({"caption_style": "branded", "logo_path": self.asset_file}, f)
+        with open(os.path.join(self.src_home, "ui-state.json"), "w", encoding="utf-8") as f:
+            json.dump({"settings": {"logoPath": self.asset_file}}, f)
+
+        export_config(self.bundle, source_home=self.src_home)
+        import_config(self.bundle, target_home=self.dst_home)
+
+        home_real = os.path.realpath(self.dst_home)
+        with open(os.path.join(self.dst_home, "presets", "branded.json"), encoding="utf-8") as f:
+            preset = json.load(f)
+        with open(os.path.join(self.dst_home, "ui-state.json"), encoding="utf-8") as f:
+            ui = json.load(f)
+
+        self.assertTrue(preset["logo_path"].startswith(home_real), preset["logo_path"])
+        self.assertTrue(os.path.exists(preset["logo_path"]))
+        self.assertTrue(ui["settings"]["logoPath"].startswith(home_real), ui["settings"]["logoPath"])
+        self.assertNotIn(self.src_home, preset["logo_path"])
+
 
     def test_import_restores_backup_on_failure(self):
         export_config(self.bundle, source_home=self.src_home)

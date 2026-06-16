@@ -2109,6 +2109,8 @@ app.post("/api/claude-suggest", async (req, res) => {
         score: c.score,
         suggested_caption_style: c.suggested_caption_style || "hormozi",
       }));
+      // Deselection is positional; replacing the list invalidates old indices.
+      uiState.deselectedIndices = [];
       uiState.phase = "review";
       broadcastSSE("state-sync", uiState);
     }

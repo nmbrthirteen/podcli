@@ -550,16 +550,16 @@ def _render_with_remotion(
         if stdout:
             lines = [l.strip() for l in stdout.strip().split("\n") if l.strip()]
             if lines:
-                print(f"  Remotion: {lines[-1][:120]}", flush=True)
+                print(f"  Remotion: {lines[-1][:120]}", file=sys.stderr, flush=True)
 
-        print("  Remotion: falling back to ASS for this clip", flush=True)
+        print("  Remotion: falling back to ASS for this clip", file=sys.stderr, flush=True)
         return False, None
 
     except subprocess.TimeoutExpired:
-        print("  Remotion: timed out, using ASS for this clip", flush=True)
+        print("  Remotion: timed out, using ASS for this clip", file=sys.stderr, flush=True)
         return False, None
     except Exception:
-        print("  Remotion: render error, using ASS for this clip", flush=True)
+        print("  Remotion: render error, using ASS for this clip", file=sys.stderr, flush=True)
         return False, None
     finally:
         try:
@@ -700,6 +700,7 @@ def generate_clip(
         print(
             f"  Boundary revert: post-trim duration {duration:.1f}s < "
             f"75% of asked {llm_total:.1f}s - using original range",
+            file=sys.stderr,
             flush=True,
         )
         start_second = llm_start_second

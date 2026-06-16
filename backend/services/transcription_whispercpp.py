@@ -22,6 +22,7 @@ def _extract_wav(media_path: str, wav_path: str, ffmpeg: str = "ffmpeg") -> None
         [ffmpeg, "-y", "-loglevel", "error", "-i", media_path,
          "-ar", "16000", "-ac", "1", wav_path],
         check=True,
+        timeout=1800,
     )
 
 
@@ -169,7 +170,7 @@ def transcribe_file(
             cmd += ["--vad", "--vad-model", vad_model]
         if language:
             cmd += ["-l", language]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=7200)
 
         with open(out_base + ".json", encoding="utf-8") as f:
             data = json.load(f)

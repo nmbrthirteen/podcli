@@ -122,6 +122,18 @@ def _legacy_home_pending() -> bool:
     return _has_managed_content(legacy) and not _has_managed_content(_global_home())
 
 
+def _asset_alias_keys(raw: str, source: Path) -> list[str]:
+    """Every string form an asset path may take in stored JSON. Presets/ui-state
+    keep the literal value the user/app wrote, which differs from its realpath
+    whenever a path component is a symlink (e.g. macOS /var -> /private/var). The
+    bundle rewrite matches literally, so register raw, expanded, and resolved."""
+    keys: list[str] = []
+    for k in (raw, str(Path(raw).expanduser()) if raw else "", str(source), str(source.resolve())):
+        if k and k not in keys:
+            keys.append(k)
+    return keys
+
+
 def _legacy_migration_pending() -> bool:
     # Never treat the global managed dir itself as a legacy project to import.
     if _legacy_project_dir().resolve() == _global_home().resolve():
@@ -207,16 +219,18 @@ def export_config(bundle_path: str, source_home: str | None = None) -> dict[str,
         for index, item in enumerate(raw_assets):
             if not isinstance(item, dict):
                 continue
-            source = Path(str(item.get("path", ""))).expanduser()
+            raw_path = str(item.get("path", ""))
+            source = Path(raw_path).expanduser()
             if not source.exists():
                 continue
             archive_name = _archive_name_for(index, str(item.get("name", "asset")), source)
             archive_path = f"{ASSET_ARCHIVE_DIR}/{archive_name}"
             zf.write(source, arcname=archive_path)
             registry_export.append({**item, "path": archive_path})
-            path_map[str(source.resolve())] = archive_path
+            for key in _asset_alias_keys(raw_path, source):
+                path_map[key] = archive_path
 
-        extra_sources: list[Path] = []
+        extra_sources: list[tuple[str, Path]] = []
         for rel in ["ui-state.json"]:
             src = home / rel
             if src.exists():
@@ -225,7 +239,7 @@ def export_config(bundle_path: str, source_home: str | None = None) -> dict[str,
                     for candidate in _collect_asset_paths(raw):
                         candidate_path = Path(candidate).expanduser()
                         if candidate_path.exists():
-                            extra_sources.append(candidate_path)
+                            extra_sources.append((candidate, candidate_path))
 
         presets_dir = home / "presets"
         if presets_dir.exists():
@@ -236,16 +250,19 @@ def export_config(bundle_path: str, source_home: str | None = None) -> dict[str,
                 for candidate in _collect_asset_paths(raw):
                     candidate_path = Path(candidate).expanduser()
                     if candidate_path.exists():
-                        extra_sources.append(candidate_path)
+                        extra_sources.append((candidate, candidate_path))
 
-        for source in extra_sources:
+        for raw_candidate, source in extra_sources:
             resolved = str(source.resolve())
             if resolved in path_map:
+                # Already archived; still register this literal so its JSON gets rewritten.
+                path_map.setdefault(raw_candidate, path_map[resolved])
                 continue
             archive_name = _archive_name_for(len(path_map), source.stem or "asset", source)
             archive_path = f"{ASSET_ARCHIVE_DIR}/{archive_name}"
             zf.write(source, arcname=archive_path)
-            path_map[resolved] = archive_path
+            for key in _asset_alias_keys(raw_candidate, source):
+                path_map[key] = archive_path
 
         zf.writestr("assets/registry.json", json.dumps({"assets": registry_export}, indent=2) + "\n")
         manifest["path_map"] = path_map
