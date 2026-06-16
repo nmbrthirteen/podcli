@@ -6,8 +6,8 @@ and Remotion, generates `checksums.txt`, and publishes a GitHub release. End use
 install with no prerequisites:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh
-# Windows: irm https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.ps1 | iex
+curl -fsSL https://podcli.com/install.sh | sh
+# Windows: irm https://podcli.com/install.ps1 | iex
 ```
 
 Platforms: macOS arm64, Linux x64/arm64, Windows x64. (npm isn't used — the
