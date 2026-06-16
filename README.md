@@ -169,12 +169,6 @@ curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh
 irm https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.ps1 | iex
 ```
 
-**With npm** (if you already have Node):
-
-```bash
-npm install -g podcli
-```
-
 Then just run it — the first launch sets itself up:
 
 ```bash
