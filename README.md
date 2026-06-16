@@ -169,18 +169,15 @@ curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh
 irm https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.ps1 | iex
 ```
 
-**With npm** (if you already have Node):
-
-```bash
-npm install -g podcli
-```
-
 Then just run it — the first launch sets itself up:
 
 ```bash
 podcli                       # interactive menu (and Web UI)
 podcli process episode.mp4   # transcribe + export clips
 ```
+
+Supported platforms: macOS (Apple Silicon), Linux (x64 / arm64), Windows (x64).
+Intel Macs are coming in a follow-up release.
 
 **Optional**, for AI clip suggestion and the PodStack slash commands: install
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or

@@ -21,6 +21,9 @@ case "$arch" in
   *) err "unsupported architecture: $arch" ;;
 esac
 target="${goos}-${goarch}"
+if [ "$target" = "darwin-amd64" ]; then
+  err "Intel Macs aren't supported yet (coming in v2.0.1). Apple Silicon, Linux, and Windows are available."
+fi
 bin_dir="$home_dir/bin"
 mkdir -p "$bin_dir"
 
