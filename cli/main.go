@@ -60,8 +60,34 @@ func main() {
 	}
 }
 
+// wantsRuntime gates first-run auto-provisioning: only commands that need the
+// backend trigger the download, not lightweight ones like config.
+func wantsRuntime(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	switch args[0] {
+	case "process", "transcribe", "studio", "auto":
+		return true
+	}
+	return false
+}
+
+// ensureRuntime self-provisions on first run so `podcli` works without a separate
+// `podcli setup`. Not called on the mcp path, whose stdout is the JSON-RPC channel.
+func ensureRuntime() {
+	if _, ok := engine.BackendRoot(); ok {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "First run — setting up podcli (one-time download)…")
+	setup(nil)
+}
+
 func runEngine(args []string) int {
 	update.NotifyIfOutdated(Version)
+	if wantsRuntime(args) {
+		ensureRuntime()
+	}
 	if transcribeEngine(args) == "whispercpp" {
 		model, err := provision.EnsureModel(transcribeModel(args))
 		if err != nil {

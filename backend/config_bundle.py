@@ -61,12 +61,8 @@ def _migration_marker_path() -> Path:
     return _data_dir() / MIGRATION_MARKER_NAME
 
 
-# The old ./podcli kept everything project-local. The native CLI keeps the brand
-# brain (presets, knowledge, assets, history, config) and the transcript cache in
-# the global managed dir so they follow the user across directories; only clips
-# stay in the working dir. Migration therefore reads the *working directory* —
-# the old ./podcli folder the user is standing in — and imports it into the global
-# home/cache. PODCLI_CWD is injected by the Go launcher; getcwd() is the fallback.
+# Migration reads the working directory (the old project-local ./podcli folder)
+# and imports it into the global store. PODCLI_CWD is injected by the launcher.
 def _legacy_project_dir() -> Path:
     return Path(os.environ.get("PODCLI_CWD") or os.getcwd()).expanduser().resolve()
 
@@ -123,10 +119,8 @@ def _legacy_home_pending() -> bool:
 
 
 def _asset_alias_keys(raw: str, source: Path) -> list[str]:
-    """Every string form an asset path may take in stored JSON. Presets/ui-state
-    keep the literal value the user/app wrote, which differs from its realpath
-    whenever a path component is a symlink (e.g. macOS /var -> /private/var). The
-    bundle rewrite matches literally, so register raw, expanded, and resolved."""
+    """All string forms of an asset path. The rewrite matches the literal stored
+    value, which differs from its realpath through a symlink (macOS /var)."""
     keys: list[str] = []
     for k in (raw, str(Path(raw).expanduser()) if raw else "", str(source), str(source.resolve())):
         if k and k not in keys:
@@ -394,9 +388,8 @@ def migrate_legacy_presets(*, dry_run: bool = False) -> dict[str, Any]:
 
 
 def migrate_legacy_home(*, dry_run: bool = False) -> dict[str, Any]:
-    """Import a project-local .podcli brand brain (presets, knowledge, assets,
-    history, config) from the working dir into the global home. Only runs when the
-    global home is still empty so it never clobbers an existing global profile."""
+    """Import a project-local .podcli into the global home — only when the global
+    home is empty, so it never clobbers an existing profile."""
     legacy = _legacy_home_dir()
     home = _global_home()
     result: dict[str, Any] = {
