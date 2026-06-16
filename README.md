@@ -160,13 +160,13 @@ managed directory. You don't need Go, Node, Python, or FFmpeg installed.
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh
+curl -fsSL https://podcli.com/install.sh | sh
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.ps1 | iex
+irm https://podcli.com/install.ps1 | iex
 ```
 
 Then just run it — the first launch sets itself up:
