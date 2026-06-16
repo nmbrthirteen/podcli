@@ -2,7 +2,7 @@
 
 const path = require("node:path");
 const rendererRoot = path.resolve(__dirname, "..", "..", "node_modules", "@remotion", "renderer", "dist");
-const {openBrowser} = require("@remotion/renderer");
+const {openBrowser, ensureBrowser} = require("@remotion/renderer");
 const {screenshot} = require(path.join(rendererRoot, "puppeteer-screenshot.js"));
 
 const [htmlPath, outputPath, widthArg, heightArg, waitMsArg] = process.argv.slice(2);
@@ -46,6 +46,10 @@ const waitForAssets = async (page) => {
 };
 
 (async () => {
+  // Download the Chrome Headless Shell if it isn't cached yet. renderMedia does
+  // this implicitly; openBrowser does not, so without it the first thumbnail
+  // render just times out connecting to a browser that was never provisioned.
+  await ensureBrowser({logLevel: "error"});
   const browser = await openBrowser("chrome", {logLevel: "error"});
   const closeBrowser = () => { try { browser.close({silent: true}); } catch {} };
   process.on("SIGINT", () => { closeBrowser(); process.exit(1); });

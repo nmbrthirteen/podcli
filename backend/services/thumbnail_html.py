@@ -657,6 +657,11 @@ def generate_thumbnail(
         if not commands:
             raise RuntimeError("No browser screenshot command available")
 
+        # Run from the runtime root (where caption rendering runs too) so Remotion's
+        # Chrome Headless Shell caches under a stable .remotion/ and is reused across
+        # working directories instead of re-downloading into each one.
+        screenshot_cwd = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
         for cmd in commands:
             cmd_label = " ".join(cmd[:3]) if len(cmd) > 3 else " ".join(cmd)
             try:
@@ -665,6 +670,7 @@ def generate_thumbnail(
                     capture_output=True,
                     text=True,
                     timeout=timeout_s,
+                    cwd=screenshot_cwd,
                     # .cmd/npx shims need cmd.exe on Windows; shell=True with a list breaks on POSIX.
                     shell=sys.platform == "win32",
                 )
