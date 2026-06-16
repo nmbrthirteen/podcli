@@ -174,7 +174,8 @@ PodStack ships one source-of-truth (`commands/`) and installs to the right locat
 | opencode | `.opencode/commands/*.md` | `AGENTS.md` |
 | Generic | `commands/*.md` | `AGENTS.md` |
 
-Install: `./setup.sh --host <name>`. See `README.md` for per-host usage examples.
+These command files ship with podcli; place the set for your tool (left column) in
+its command dir. See `README.md` for per-host usage examples.
 
 ---
 

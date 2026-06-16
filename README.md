@@ -63,7 +63,7 @@ The first half is **video processing** — podcli's core engine. The second half
 ### 1. Drop in your episode
 
 ```bash
-./setup.sh --ui
+podcli            # then choose "Open Web UI"
 # → http://localhost:3847
 ```
 
@@ -347,8 +347,9 @@ podcli mcp install
 
 ```
 podcli/
-├── podcli                    # CLI entry point
-├── setup.sh                  # one-command install & launch
+├── cli/                      # Go launcher (native binary, provisioning, self-update)
+├── install.sh / install.ps1 # node-less installers
+├── setup.sh                  # dev environment setup (venv + npm)
 ├── package.json
 ├── CLAUDE.md                 # PodStack master config
 │
