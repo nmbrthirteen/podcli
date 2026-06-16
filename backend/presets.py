@@ -40,7 +40,7 @@ DEFAULT_PRESET = {
     "energy_boost": True,
     "quality": "max",
     "no_speakers": False,
-    "allow_ass_fallback": False,
+    "allow_ass_fallback": True,
     "use_ass_captions": False,
     "generate_thumbnails": True,
     "generate_content": True,

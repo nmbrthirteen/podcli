@@ -46,9 +46,6 @@ const waitForAssets = async (page) => {
 };
 
 (async () => {
-  // Download the Chrome Headless Shell if it isn't cached yet. renderMedia does
-  // this implicitly; openBrowser does not, so without it the first thumbnail
-  // render just times out connecting to a browser that was never provisioned.
   await ensureBrowser({logLevel: "error"});
   const browser = await openBrowser("chrome", {logLevel: "error"});
   const closeBrowser = () => { try { browser.close({silent: true}); } catch {} };
