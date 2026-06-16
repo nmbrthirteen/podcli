@@ -523,6 +523,20 @@ func extractTarXz(archive string, bins []string, dest string) error {
 		return err
 	}
 	defer os.RemoveAll(tmp)
+	listing, err := exec.Command("tar", "-tf", archive).Output()
+	if err != nil {
+		return fmt.Errorf("tar list (is tar installed?): %w", err)
+	}
+	for _, name := range strings.Split(string(listing), "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		clean := filepath.Clean(name)
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("refusing archive with unsafe path: %q", name)
+		}
+	}
 	cmd := exec.Command("tar", "-xf", archive, "-C", tmp)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

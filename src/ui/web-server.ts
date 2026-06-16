@@ -1792,13 +1792,11 @@ const knowledgeUpload = multer({
       await mkdir(paths.knowledge, { recursive: true });
       cb(null, paths.knowledge);
     },
-    filename: (_req, file, cb) => cb(null, file.originalname),
+    filename: (_req, file, cb) => cb(null, basename(file.originalname)),
   }),
   fileFilter: (_req, file, cb) => {
-    if (
-      file.originalname.endsWith(".md") ||
-      file.originalname.endsWith(".txt")
-    ) {
+    const name = basename(file.originalname);
+    if (name.endsWith(".md") || name.endsWith(".txt")) {
       cb(null, true);
     } else {
       cb(new Error("Only .md and .txt files are allowed"));
