@@ -2122,6 +2122,77 @@ app.post("/api/claude-suggest", async (req, res) => {
   }
 });
 
+// --- Find user-pasted moments (paste a description/quotes, AI locates them) ---
+
+app.post("/api/find-moment", async (req, res) => {
+  const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+  if (!text) {
+    res.status(400).json({ error: "Paste a moment or description to search for." });
+    return;
+  }
+  const segs = uiState.transcript?.segments;
+  if (!segs || !Array.isArray(segs) || segs.length === 0) {
+    res
+      .status(400)
+      .json({ error: "No transcript loaded. Transcribe or import one first." });
+    return;
+  }
+
+  try {
+    const existing = uiState.suggestions.map((s) => ({
+      start_second: s.start_second,
+      end_second: s.end_second,
+      title: s.title,
+    }));
+    const result = await executor.execute<{ clips?: SuggestedClip[] }>(
+      "find_moment",
+      { text, segments: segs, existing_clips: existing, max_results: 8 },
+      (event) =>
+        broadcastSSE("job-update", { progress: event.percent, message: event.message }),
+    );
+
+    const found = result.data?.clips ?? [];
+    // Append to existing suggestions, skipping anything at a range we already have.
+    const seen = new Set(
+      uiState.suggestions.map(
+        (s) => `${Math.round(s.start_second * 10)}-${Math.round(s.end_second * 10)}`,
+      ),
+    );
+    const added: SuggestedClip[] = [];
+    for (const c of found) {
+      const key = `${Math.round(c.start_second * 10)}-${Math.round(c.end_second * 10)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      added.push({
+        clip_id: `manual-${Date.now()}-${added.length}`,
+        title: c.title,
+        start_second: c.start_second,
+        end_second: c.end_second,
+        duration: c.duration ?? c.end_second - c.start_second,
+        segments: c.segments,
+        reasoning: c.reasoning ?? "",
+        preview_text: c.preview_text ?? "",
+        content_type: c.content_type,
+        score: c.score,
+        suggested_caption_style: c.suggested_caption_style || "hormozi",
+      });
+    }
+
+    if (added.length > 0) {
+      uiState.suggestions = [...uiState.suggestions, ...added];
+      uiState.phase = "review";
+      uiState.lastUpdated = Date.now();
+      persistState();
+      broadcastSSE("state-sync", uiState);
+    }
+
+    res.json({ clips: added, found: found.length, added: added.length });
+  } catch (err: unknown) {
+    const msg = errMsg(err);
+    res.status(500).json({ error: `Moment search failed: ${msg.substring(0, 200)}` });
+  }
+});
+
 // --- Per-clip content generation (titles, descriptions, tags) ---
 
 app.post("/api/generate-content", async (req, res) => {

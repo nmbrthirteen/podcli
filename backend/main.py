@@ -377,6 +377,32 @@ def handle_suggest_clips(task_id: str, params: dict):
     emit_result(task_id, "success", data={"clips": clips})
 
 
+def handle_find_moment(task_id: str, params: dict):
+    """Locate user-pasted/described moments in the transcript via the AI CLI."""
+    from services.claude_suggest import find_moments_from_text
+
+    text = (params.get("text") or params.get("description") or "").strip()
+    segments = params.get("segments", [])
+    existing_clips = params.get("existing_clips", [])
+    max_results = params.get("max_results", 8)
+
+    if not text:
+        emit_result(task_id, "error", error="text is required")
+        return
+    if not segments:
+        emit_result(task_id, "error", error="segments is required")
+        return
+
+    clips = find_moments_from_text(
+        text,
+        segments,
+        existing_clips,
+        progress_callback=lambda pct, msg: emit_progress(task_id, "searching", pct, msg),
+        max_results=max_results,
+    )
+    emit_result(task_id, "success", data={"clips": clips})
+
+
 def handle_generate_content(task_id: str, params: dict):
     """Generate titles, descriptions, tags for a clip using PodStack knowledge base."""
     from services.content_generator import generate_clip_content
@@ -485,6 +511,7 @@ TASK_HANDLERS = {
     "presets": handle_presets,
     "corrections": handle_corrections,
     "suggest_clips": handle_suggest_clips,
+    "find_moment": handle_find_moment,
     "generate_content": handle_generate_content,
     "manage_integrations": handle_manage_integrations,
     "run_integration_tool": handle_run_integration_tool,
