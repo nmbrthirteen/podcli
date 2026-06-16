@@ -424,20 +424,25 @@ def _render_with_remotion(
         return False, None
 
     # Check node is available
-    node_path = shutil.which("node")
+    node_path = os.environ.get("PODCLI_NODE") or shutil.which("node")
     if not node_path:
         _remotion_available = False
         return False, None
 
-    remotion_env = {**os.environ, "PODCLI_CACHE_DIR": paths["cache"]}
+    # Cache the compiled bundle next to the render script. The compositions are
+    # project-independent, so a single global bundle (in the managed runtime dir
+    # for native installs) is reused across every project instead of rebuilt per
+    # data/cache.
+    bundle_cache_root = os.path.join(os.path.dirname(render_script), ".bundle-cache")
+    remotion_env = {**os.environ, "PODCLI_CACHE_DIR": bundle_cache_root}
 
-    cache_dir = os.path.join(paths["cache"], "remotion-bundle")
+    cache_dir = os.path.join(bundle_cache_root, "remotion-bundle")
     bundle_index = os.path.join(cache_dir, "index.html")
     if not os.path.exists(bundle_index):
         try:
             r = subprocess.run(
                 [node_path, render_script, "--prebundle"],
-                timeout=30,
+                timeout=180,
                 cwd=project_root,
                 env=remotion_env,
                 capture_output=True,
@@ -545,16 +550,16 @@ def _render_with_remotion(
         if stdout:
             lines = [l.strip() for l in stdout.strip().split("\n") if l.strip()]
             if lines:
-                print(f"  Remotion: {lines[-1][:120]}", flush=True)
+                print(f"  Remotion: {lines[-1][:120]}", file=sys.stderr, flush=True)
 
-        print("  Remotion: falling back to ASS for this clip", flush=True)
+        print("  Remotion: falling back to ASS for this clip", file=sys.stderr, flush=True)
         return False, None
 
     except subprocess.TimeoutExpired:
-        print("  Remotion: timed out, using ASS for this clip", flush=True)
+        print("  Remotion: timed out, using ASS for this clip", file=sys.stderr, flush=True)
         return False, None
     except Exception:
-        print("  Remotion: render error, using ASS for this clip", flush=True)
+        print("  Remotion: render error, using ASS for this clip", file=sys.stderr, flush=True)
         return False, None
     finally:
         try:
@@ -695,6 +700,7 @@ def generate_clip(
         print(
             f"  Boundary revert: post-trim duration {duration:.1f}s < "
             f"75% of asked {llm_total:.1f}s - using original range",
+            file=sys.stderr,
             flush=True,
         )
         start_second = llm_start_second

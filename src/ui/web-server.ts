@@ -995,6 +995,52 @@ app.get("/api/preview/:filename", (req, res) => {
   streamVideo(req, res, filePath);
 });
 
+// Clips now render into the user's working dir, not a single output root, so the
+// library streams them by history id from wherever they live. The output_path
+// recorded in clips.json IS the allowlist: only files podcli itself logged are
+// servable, and only as regular files (symlinks resolved, extension checked).
+async function serveClipById(
+  req: Request,
+  res: Response,
+  id: string,
+  mode: "preview" | "download",
+) {
+  const entry = await clipsHistory.findById(id);
+  if (!entry || !entry.output_path) {
+    res.status(404).json({ error: "Clip not found" });
+    return;
+  }
+  let real: string;
+  try {
+    real = realpathSync(entry.output_path);
+  } catch {
+    res.status(404).json({ error: "File no longer exists" });
+    return;
+  }
+  if (!statSync(real).isFile() || !/\.(mp4|mov|mkv|webm)$/i.test(real)) {
+    res.status(400).json({ error: "Unsupported clip file" });
+    return;
+  }
+  if (mode === "download") {
+    res.download(real);
+    return;
+  }
+  const mimeTypes: Record<string, string> = {
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska",
+  };
+  streamVideo(req, res, real, mimeTypes[extname(real).toLowerCase()] || "video/mp4");
+}
+
+app.get("/api/clips/:id/preview", (req, res) => {
+  void serveClipById(req, res, req.params.id, "preview");
+});
+
+app.get("/api/clips/:id/download", (req, res) => {
+  void serveClipById(req, res, req.params.id, "download");
+});
+
 /**
  * GET /api/stream-source — Stream the source video for in-browser preview
  * Accepts ?path= query param (must be a file previously validated via /select-file or /upload)
@@ -1746,13 +1792,11 @@ const knowledgeUpload = multer({
       await mkdir(paths.knowledge, { recursive: true });
       cb(null, paths.knowledge);
     },
-    filename: (_req, file, cb) => cb(null, file.originalname),
+    filename: (_req, file, cb) => cb(null, basename(file.originalname)),
   }),
   fileFilter: (_req, file, cb) => {
-    if (
-      file.originalname.endsWith(".md") ||
-      file.originalname.endsWith(".txt")
-    ) {
+    const name = basename(file.originalname);
+    if (name.endsWith(".md") || name.endsWith(".txt")) {
       cb(null, true);
     } else {
       cb(new Error("Only .md and .txt files are allowed"));
@@ -2063,6 +2107,8 @@ app.post("/api/claude-suggest", async (req, res) => {
         score: c.score,
         suggested_caption_style: c.suggested_caption_style || "hormozi",
       }));
+      // Deselection is positional; replacing the list invalidates old indices.
+      uiState.deselectedIndices = [];
       uiState.phase = "review";
       broadcastSSE("state-sync", uiState);
     }
@@ -2073,6 +2119,77 @@ app.post("/api/claude-suggest", async (req, res) => {
     res
       .status(500)
       .json({ error: `Suggestion failed: ${msg.substring(0, 200)}` });
+  }
+});
+
+// --- Find user-pasted moments (paste a description/quotes, AI locates them) ---
+
+app.post("/api/find-moment", async (req, res) => {
+  const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+  if (!text) {
+    res.status(400).json({ error: "Paste a moment or description to search for." });
+    return;
+  }
+  const segs = uiState.transcript?.segments;
+  if (!segs || !Array.isArray(segs) || segs.length === 0) {
+    res
+      .status(400)
+      .json({ error: "No transcript loaded. Transcribe or import one first." });
+    return;
+  }
+
+  try {
+    const existing = uiState.suggestions.map((s) => ({
+      start_second: s.start_second,
+      end_second: s.end_second,
+      title: s.title,
+    }));
+    const result = await executor.execute<{ clips?: SuggestedClip[] }>(
+      "find_moment",
+      { text, segments: segs, existing_clips: existing, max_results: 8 },
+      (event) =>
+        broadcastSSE("job-update", { progress: event.percent, message: event.message }),
+    );
+
+    const found = result.data?.clips ?? [];
+    // Append to existing suggestions, skipping anything at a range we already have.
+    const seen = new Set(
+      uiState.suggestions.map(
+        (s) => `${Math.round(s.start_second * 10)}-${Math.round(s.end_second * 10)}`,
+      ),
+    );
+    const added: SuggestedClip[] = [];
+    for (const c of found) {
+      const key = `${Math.round(c.start_second * 10)}-${Math.round(c.end_second * 10)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      added.push({
+        clip_id: `manual-${Date.now()}-${added.length}`,
+        title: c.title,
+        start_second: c.start_second,
+        end_second: c.end_second,
+        duration: c.duration ?? c.end_second - c.start_second,
+        segments: c.segments,
+        reasoning: c.reasoning ?? "",
+        preview_text: c.preview_text ?? "",
+        content_type: c.content_type,
+        score: c.score,
+        suggested_caption_style: c.suggested_caption_style || "hormozi",
+      });
+    }
+
+    if (added.length > 0) {
+      uiState.suggestions = [...uiState.suggestions, ...added];
+      uiState.phase = "review";
+      uiState.lastUpdated = Date.now();
+      persistState();
+      broadcastSSE("state-sync", uiState);
+    }
+
+    res.json({ clips: added, found: found.length, added: added.length });
+  } catch (err: unknown) {
+    const msg = errMsg(err);
+    res.status(500).json({ error: `Moment search failed: ${msg.substring(0, 200)}` });
   }
 });
 
@@ -2374,7 +2491,10 @@ async function main() {
     res.sendFile(join(publicDir, "index.html"));
   });
 
-  app.listen(PORT, () => {
+  // Bind to loopback by default — the studio serves local files (clips, assets,
+  // source video) with no auth. Set PODCLI_HOST=0.0.0.0 to expose it on the LAN.
+  const HOST = process.env.PODCLI_HOST || "127.0.0.1";
+  app.listen(PORT, HOST, () => {
     log.info(`podcli running at http://localhost:${PORT}`);
   });
 }

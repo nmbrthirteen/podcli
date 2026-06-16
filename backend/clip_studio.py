@@ -37,6 +37,9 @@ os.chdir(os.path.join(ROOT, "backend"))
 
 FFMPEG = os.environ.get("PODCLI_FFMPEG", "ffmpeg")
 NODE = os.environ.get("PODCLI_NODE", "node")
+# Share the prewarmed, project-independent composition bundle with the fragment
+# caption render (clip_generator) and the bookend render.
+os.environ.setdefault("PODCLI_CACHE_DIR", os.path.join(ROOT, "remotion", ".bundle-cache"))
 
 # Brand config: remembered handle / platforms / colors / outro title so they
 # don't have to be retyped each run. CLI flags override these; these override
@@ -69,7 +72,7 @@ def _save_brand(data: dict):
 
 def _probe_duration(path: str) -> float:
     out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+        [os.environ.get("PODCLI_FFPROBE", "ffprobe"), "-v", "error", "-show_entries", "format=duration",
          "-of", "default=nw=1:nk=1", path],
         capture_output=True, text=True,
     )
@@ -236,7 +239,8 @@ def main():
     video = os.path.abspath(video)
     if not os.path.exists(video):
         raise SystemExit(f"Video not found: {video}")
-    out_dir = os.path.join(ROOT, "data", "output")
+    data_dir = os.environ.get("PODCLI_DATA") or os.path.join(ROOT, "data")
+    out_dir = os.path.join(data_dir, "output")
     os.makedirs(out_dir, exist_ok=True)
 
     # Need a transcript if cutting by paragraph or if rendering captions.

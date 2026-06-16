@@ -173,7 +173,7 @@ def _build_remotion_screenshot_command(
     wait_ms: int,
 ) -> Optional[list[str]]:
     """Build a Remotion-backed screenshot command if the repo can run it."""
-    node_bin = shutil.which("node")
+    node_bin = os.environ.get("PODCLI_NODE") or shutil.which("node")
     repo_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
     renderer_pkg = os.path.join(repo_root, "node_modules", "@remotion", "renderer", "package.json")
     if not node_bin or not os.path.exists(script_path) or not os.path.exists(renderer_pkg):
@@ -657,6 +657,8 @@ def generate_thumbnail(
         if not commands:
             raise RuntimeError("No browser screenshot command available")
 
+        screenshot_cwd = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
         for cmd in commands:
             cmd_label = " ".join(cmd[:3]) if len(cmd) > 3 else " ".join(cmd)
             try:
@@ -665,6 +667,7 @@ def generate_thumbnail(
                     capture_output=True,
                     text=True,
                     timeout=timeout_s,
+                    cwd=screenshot_cwd,
                     # .cmd/npx shims need cmd.exe on Windows; shell=True with a list breaks on POSIX.
                     shell=sys.platform == "win32",
                 )

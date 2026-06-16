@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 import textwrap
 import time
@@ -26,7 +27,7 @@ for _stream in (sys.stdout, sys.stderr):
         except (ValueError, OSError):
             pass
 
-_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+_env_file = os.environ.get("PODCLI_ENV_FILE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
 try:
     from dotenv import load_dotenv
     load_dotenv(_env_file)
@@ -152,17 +153,24 @@ def _auto_migrate_cli(args) -> None:
     summary = auto_migrate_legacy_if_pending(quiet=True)
     if not summary:
         return
+    home = summary.get("home_migration") or {}
+    imported_home = home.get("imported")
     moved_cache = summary.get("moved_json") or summary.get("moved_remotion_bundle")
     moved_presets = (summary.get("presets_migration") or {}).get("moved")
-    if moved_cache or moved_presets:
+    copied_env = (summary.get("env_migration") or {}).get("copied")
+    if imported_home or moved_cache or moved_presets or copied_env:
         gray = "\033[38;5;245m"
         green = "\033[38;2;74;222;128m"
         reset = "\033[0m"
+        if imported_home:
+            print(f"  {green}✓{reset} {gray}Imported your presets, knowledge & assets → {home.get('target_home')}{reset}")
         if moved_cache:
-            print(f"  {green}✓{reset} {gray}Migrated legacy cache → {summary.get('target_dir')}{reset}")
+            print(f"  {green}✓{reset} {gray}Migrated transcript cache → {summary.get('target_dir')}{reset}")
         if moved_presets:
             pm = summary.get("presets_migration") or {}
             print(f"  {green}✓{reset} {gray}Migrated presets → {pm.get('target_dir')}{reset}")
+        if copied_env:
+            print(f"  {green}✓{reset} {gray}Copied .env → {(summary.get('env_migration') or {}).get('target')}{reset}")
         print()
 
 
@@ -285,7 +293,11 @@ def _resolve_output_dir(
     if explicit_output_dir:
         return explicit_output_dir
 
-    base_output_dir = configured_output_dir or os.path.join(os.path.dirname(video_path), "clips")
+    base_output_dir = (
+        configured_output_dir
+        or os.environ.get("PODCLI_OUTPUT")
+        or os.path.join(os.path.dirname(video_path), "clips")
+    )
     if not preset_name:
         return base_output_dir
 
@@ -313,7 +325,7 @@ def _should_enter_post_render_loop(config: dict, interrupted: bool, results: lis
 def cmd_studio(args):
     """Cut a fragment + wrap it with Remotion intro/outro bookends.
 
-    Thin wrapper around scripts/clip_studio.py (which orchestrates the
+    Thin wrapper around clip_studio.py (which orchestrates the
     fragment render, bookend renders, and the concat). Runs it as a
     subprocess with this same interpreter so the venv is reused.
     """
@@ -321,8 +333,7 @@ def cmd_studio(args):
         print("Error: provide either --start and --end, or --paragraph \"text\"", file=sys.stderr)
         sys.exit(1)
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    script = os.path.join(project_root, "scripts", "clip_studio.py")
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clip_studio.py")
     if not os.path.exists(script):
         print(f"Error: clip_studio.py not found at {script}", file=sys.stderr)
         sys.exit(1)
@@ -416,6 +427,8 @@ def cmd_process(args):
             save_corrections(merged)
 
     # CLI overrides
+    if getattr(args, "engine", None):
+        os.environ["PODCLI_ENGINE"] = args.engine
     if args.caption_style:
         config["caption_style"] = args.caption_style
     if args.crop:
@@ -586,12 +599,18 @@ def cmd_process(args):
             def _transcribe_progress(pct, msg):
                 _spin_msg[0] = f"{msg} ({pct}%)" if pct < 100 else msg
 
-            result = transcribe_file(
-                file_path=video_path,
-                model_size=config.get("whisper_model", "base"),
-                enable_diarization=not config.get("no_speakers", False),
-                progress_callback=_transcribe_progress,
-            )
+            try:
+                result = transcribe_file(
+                    file_path=video_path,
+                    model_size=config.get("whisper_model", "base"),
+                    enable_diarization=not config.get("no_speakers", False),
+                    progress_callback=_transcribe_progress,
+                )
+            except (RuntimeError, FileNotFoundError, subprocess.CalledProcessError) as e:
+                _spin_stop.set()
+                spin_thread.join(timeout=1)
+                print(f"\r{' ' * 70}\r  ✗ {e}\n", flush=True)
+                sys.exit(1)
             _spin_stop.set()
             spin_thread.join(timeout=1)
             words = result["words"]
@@ -1103,160 +1122,10 @@ def _print_clips(clips: list):
 
 
 def _find_moment_with_claude(description: str, segments: list, existing_clips: list) -> list:
-    """Use Claude to find a specific moment described by the user."""
-    from services.claude_suggest import _find_ai_cli_candidates, _run_ai_command
-    from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
+    """Use Claude/Codex to find a specific moment described by the user."""
+    from services.claude_suggest import find_moments_from_text
 
-    candidates = _find_ai_cli_candidates()
-    if not candidates:
-        print("         ⚠ No AI CLI available for moment search")
-        return []
-
-    # Build transcript text
-    lines = []
-    for seg in segments:
-        speaker = seg.get("speaker", "")
-        speaker_label = f"[{speaker}] " if speaker else ""
-        start = seg.get("start", 0)
-        text = seg.get("text", "").strip()
-        if text:
-            lines.append(f"[{start:.1f}s] {speaker_label}{text}")
-    transcript_text = "\n".join(lines)
-
-    # Build list of existing clip timestamps to avoid
-    existing_desc = ""
-    if existing_clips:
-        existing_desc = "\n\nALREADY SELECTED (do not re-suggest these):\n"
-        for c in existing_clips:
-            existing_desc += f"- {c['start_second']}s-{c['end_second']}s: {c['title']}\n"
-
-    import tempfile, subprocess, json as _json
-
-    prompt = f"""Find the moment the user is describing in this podcast transcript. Return ONLY valid JSON.
-
-USER WANTS: "{description}"
-{existing_desc}
-RULES:
-- Find the EXACT moment matching the user's description
-- Return 1-3 matching moments (best match first)
-- All timestamps in SECONDS as numbers
-- Duration target: {TARGET_CLIP_DURATION_MIN}-{TARGET_CLIP_DURATION_MAX} seconds, max {MAX_CLIP_DURATION} seconds
-- Cut tight: start at the hook, end when the point lands
-- Use segments to cut filler if needed
-
-Return this JSON:
-{{
-  "clips": [
-    {{
-      "title": "First sentence of the moment",
-      "start_second": 123.4,
-      "end_second": 158.4,
-      "segments": [{{"start": 123.4, "end": 158.4}}],
-      "duration": 35,
-      "content_type": "guest_story",
-      "scores": {{"standalone": 4, "hook": 5, "relevance": 4, "quotability": 3}},
-      "total_score": 16,
-      "quote": "The key quote",
-      "why": "Why this matches what the user asked for"
-    }}
-  ]
-}}
-
-Transcript:
-{transcript_text}"""
-
-    project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir=project_dir) as f:
-        f.write(prompt)
-        prompt_file = f.name
-
-    try:
-        for idx, (cli_path, engine) in enumerate(candidates):
-            if idx > 0:
-                print(f"         ⚠ Retrying moment search with {'Claude' if engine == 'claude' else 'Codex'}")
-            try:
-                result = _run_ai_command(
-                    cli_path=cli_path,
-                    engine=engine,
-                    prompt=prompt,
-                    prompt_file=prompt_file,
-                    project_dir=project_dir,
-                    timeout=300,
-                )
-            except Exception:
-                continue
-
-            if result.returncode != 0 or not result.stdout.strip():
-                continue
-
-            response = result.stdout.strip()
-            if "```" in response:
-                import re
-                fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", response, re.DOTALL)
-                if fence_match:
-                    response = fence_match.group(1).strip()
-
-            try:
-                json_start = response.find("{")
-                if json_start >= 0:
-                    decoder = _json.JSONDecoder()
-                    data, _ = decoder.raw_decode(response, json_start)
-                else:
-                    data = _json.loads(response)
-            except Exception:
-                continue
-
-            found = []
-            for c in data.get("clips", []):
-                scores = c.get("scores", {})
-                total = sum(scores.values()) if scores else c.get("total_score", 0)
-                raw_segments = c.get("segments", [])
-                keep_segments = []
-                for seg in raw_segments:
-                    s = round(float(seg.get("start", 0)), 1)
-                    e = round(float(seg.get("end", 0)), 1)
-                    if e > s:
-                        keep_segments.append({"start": s, "end": e})
-
-                start_sec = round(float(c.get("start_second", 0)), 1)
-                end_sec = round(float(c.get("end_second", 0)), 1)
-                if not keep_segments and end_sec > start_sec:
-                    keep_segments = [{"start": start_sec, "end": end_sec}]
-
-                kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
-                if kept_duration < MIN_CLIP_DURATION or kept_duration > MAX_CLIP_DURATION:
-                    continue
-
-                found.append({
-                    "title": c.get("title", "Untitled")[:55],
-                    "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
-                    "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
-                    "segments": keep_segments,
-                    "duration": round(kept_duration),
-                    "score": total,
-                    "content_type": c.get("content_type", "unknown"),
-                    "reasoning": c.get("why", ""),
-                    "preview_text": c.get("quote", "")[:120],
-                    "suggested_caption_style": "hormozi",
-                    "quote": c.get("quote", ""),
-                    "why": c.get("why", ""),
-                    "reasons": [c.get("content_type", "")],
-                    "preview": c.get("quote", "")[:120],
-                })
-
-            if found:
-                return found
-
-        return []
-
-    except Exception as e:
-        print(f"         ⚠ Search error: {e}")
-        return []
-    finally:
-        try:
-            os.unlink(prompt_file)
-        except Exception:
-            pass
+    return find_moments_from_text(description, segments, existing_clips, max_results=3)
 
 
 def _review_clips(clips: list, segments: list, energy_scores: list | None, config: dict) -> list:
@@ -2224,6 +2093,11 @@ def cmd_thumbnails(args):
     video = getattr(args, "video", None)
     as_json = getattr(args, "json", False)
 
+    # Interactive callers build a bare namespace without --output's argparse
+    # default, so fall back to the same default the CLI documents.
+    if not getattr(args, "output", None):
+        args.output = "./thumbnails"
+
     # An exact timestamp wins: extract that frame from the video and use it as the photo.
     timestamp = getattr(args, "timestamp", None)
     if photo is None and video and timestamp is not None:
@@ -2611,6 +2485,15 @@ def _print_config_result(action: str, data: dict) -> None:
 
     if action == "migrate":
         print(f"\n  {bold}Legacy migration{reset}")
+        home_mig = data.get("home_migration") or {}
+        if home_mig.get("imported") or home_mig.get("skipped_existing"):
+            print(f"  {gray}brand brain (presets, knowledge, assets, history, config){reset}")
+            print(f"    {gray}from{reset}: {home_mig.get('legacy_home')}")
+            print(f"    {gray}to{reset}:   {home_mig.get('target_home')}")
+            if home_mig.get("skipped_existing"):
+                print(f"    {gray}skipped{reset}: global home already has data")
+            else:
+                print(f"    {gray}imported{reset}: yes")
         print(f"  {gray}cache{reset}")
         print(f"    {gray}from{reset}: {data.get('legacy_dir')}")
         print(f"    {gray}to{reset}:   {data.get('target_dir')}")
@@ -2629,6 +2512,10 @@ def _print_config_result(action: str, data: dict) -> None:
             print(f"    {gray}moved{reset}:    {presets.get('moved')}")
             if presets.get("skipped"):
                 print(f"    {gray}skipped{reset}:  {presets['skipped']} (already in target)")
+        env_mig = data.get("env_migration") or {}
+        if env_mig.get("copied"):
+            print(f"  {gray}.env{reset}")
+            print(f"    {gray}to{reset}:   {env_mig.get('target')}")
         if not data.get("dry_run"):
             print(f"\n  {green}✓{reset} Migration complete")
         print()
@@ -3024,8 +2911,20 @@ def cmd_info(args):
     print(f"    Platform:     {info['system']}")
     print(f"    Encoder:      {info['best']}")
     print(f"    Available:    {', '.join(info['available'])}")
+    import importlib.util
+    try:
+        diarization_available = importlib.util.find_spec("pyannote.audio") is not None
+    except (ImportError, ValueError):
+        diarization_available = False
+    if not diarization_available:
+        speakers_status = f"{yellow}✗ not available in this install (source install only)"
+    elif hf_token:
+        speakers_status = f"{green}✓ configured"
+    else:
+        speakers_status = f"{yellow}✗ set HF_TOKEN in .env"
+
     print(f"    AI CLI:       {green}{('Claude' if ai_engine == 'claude' else 'Codex') + ' (' + ai_path + ')' if ai_path else f'{yellow}not found — install Claude Code or Codex'}{reset}")
-    print(f"    Speakers:     {green + '✓ configured' if hf_token else yellow + '✗ set HF_TOKEN in .env'}{reset}")
+    print(f"    Speakers:     {speakers_status}{reset}")
     print()
 
 
@@ -3084,7 +2983,12 @@ def print_banner():
                         hf_token = line.strip().split("=", 1)[1].strip()
                         break
 
-    speakers_ok = bool(hf_token)
+    import importlib.util
+    try:
+        _diarization_ok = importlib.util.find_spec("pyannote.audio") is not None
+    except (ImportError, ValueError):
+        _diarization_ok = False
+    speakers_ok = bool(hf_token) and _diarization_ok
 
     # Check AI CLI (Claude Code or Codex)
     from services.claude_suggest import _find_ai_cli
@@ -3235,6 +3139,7 @@ def main():
     proc.add_argument("-n", "--top", type=int, help="Number of top clips to export (default: 5)")
     proc.add_argument("-o", "--output", help="Output directory (default: ./clips)")
     proc.add_argument("-p", "--preset", help="Load a saved preset")
+    proc.add_argument("--engine", choices=["whisper-py", "whispercpp"], help="Transcription engine (default: whisper-py; whispercpp is the native, PyTorch-free path)")
     proc.add_argument("--fast", action="store_true", help="Draft mode: tiny Whisper, heuristic selection, center crop, low quality")
     proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
     proc.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
@@ -3558,20 +3463,47 @@ def interactive_menu():
             return
         elif choice == "webui":
             import subprocess as sp
-            repo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-            spa = os.path.join(repo, "dist", "ui", "public", "index.html")
+            import shutil as _shutil
+            backend_dir = os.path.dirname(os.path.abspath(__file__))
             port = os.environ.get("PORT", "3847")
-            ok = True
-            # npm is npm.cmd on Windows; subprocess can't run a batch file without a shell.
-            _npm_shell = sys.platform == "win32"
-            if not os.path.exists(spa):
-                print(f"\n  {gray}Building the studio (first run)…{reset}\n")
-                ok = sp.run(["npm", "run", "build"], cwd=repo, shell=_npm_shell).returncode == 0
-                if not ok:
-                    print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
-            if ok:
+            node = os.environ.get("PODCLI_NODE") or _shutil.which("node")
+            studio = os.environ.get("PODCLI_STUDIO") or os.path.join(backend_dir, "..", "studio")
+            server = os.path.join(studio, "web-server.mjs")
+            repo = os.path.join(backend_dir, "..")
+            if node and os.path.exists(server):
+                # Bundled studio: hermetic Node serves it, rendering delegated to
+                # this same Python backend + ffmpeg via the env below.
+                env = {
+                    **os.environ,
+                    "PORT": str(port),
+                    "PODCLI_BACKEND": backend_dir,
+                    "PYTHON_PATH": sys.executable,
+                    "PODCLI_HOME": paths["home"],
+                    # data_dir is the cache's parent — output is now decoupled
+                    # (clips render to the working dir), so don't derive it from output.
+                    "PODCLI_DATA": os.path.dirname(paths["cache"]),
+                    "PODCLI_OUTPUT": paths["output"],
+                    "FFMPEG_PATH": os.environ.get("PODCLI_FFMPEG", "ffmpeg"),
+                    "FFPROBE_PATH": os.environ.get("PODCLI_FFPROBE", "ffprobe"),
+                }
                 print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
-                sp.run(["npm", "run", "ui:prod"], cwd=repo, shell=_npm_shell)
+                sp.run([node, server], env=env)
+            elif os.path.exists(os.path.join(repo, "package.json")) and _shutil.which("npm"):
+                # Source checkout (dev): build + serve via npm.
+                _npm_shell = sys.platform == "win32"
+                spa = os.path.join(repo, "dist", "ui", "public", "index.html")
+                ok = True
+                if not os.path.exists(spa):
+                    print(f"\n  {gray}Building the studio (first run)…{reset}\n")
+                    ok = sp.run(["npm", "run", "build"], cwd=repo, shell=_npm_shell).returncode == 0
+                    if not ok:
+                        print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
+                if ok:
+                    print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
+                    sp.run(["npm", "run", "ui:prod"], cwd=repo, shell=_npm_shell)
+            else:
+                print(f"\n  {yellow}Studio isn't provisioned yet.{reset}")
+                print(f"  {dim}Run{reset} {accent}podcli setup{reset} {dim}to fetch the bundled studio + Node.{reset}\n")
         elif choice == "assets":
             _interactive_assets()
         elif choice == "presets":
@@ -4478,6 +4410,7 @@ def _interactive_thumbnails():
         video=video or None,
         logo=None,
         variations=3,
+        output="./thumbnails",
     )
     cmd_thumbnails(args_ns)
 

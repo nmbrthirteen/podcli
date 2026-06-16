@@ -1,0 +1,6 @@
+# Real-audio fixtures and captured baselines may contain podcast content —
+# never commit them. The committable parity surface is the synthetic transcript,
+# the goldens (*.ass.expected), and the harness code.
+local/
+baseline/
+candidate/

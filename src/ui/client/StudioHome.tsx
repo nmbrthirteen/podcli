@@ -130,7 +130,7 @@ export default function StudioHome() {
                       {thumb ? (
                         <img className="clip-card-media" src={`/api/image?path=${encodeURIComponent(thumb)}`} alt="" />
                       ) : file ? (
-                        <video className="clip-card-media" src={`/api/preview/${file}#t=0.1`} muted preload="metadata" playsInline />
+                        <video className="clip-card-media" src={`/api/clips/${c.id}/preview#t=0.1`} muted preload="metadata" playsInline />
                       ) : (
                         <div className="clip-card-media empty">▶</div>
                       )}

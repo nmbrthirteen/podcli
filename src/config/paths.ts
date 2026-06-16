@@ -7,6 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..", "..");
 const homeMarker = join(projectRoot, ".podcli-home");
 const dataDir = resolve(process.env.PODCLI_DATA || join(projectRoot, "data"));
+const outputDir = resolve(process.env.PODCLI_OUTPUT || join(dataDir, "output"));
 
 function resolveHome(): string {
   if (process.env.PODCLI_HOME) {
@@ -49,7 +50,7 @@ export const paths = {
   transcripts: join(dataDir, "cache", "transcripts"),
   packed: join(home, "packed"),
   working: join(dataDir, "working"),
-  output: join(dataDir, "output"),
+  output: outputDir,
   logs: join(dataDir, "logs"),
   assets: join(home, "assets"),
   assetsRegistry: join(home, "assets", "registry.json"),
@@ -60,7 +61,9 @@ export const paths = {
   corrections: join(home, "corrections.json"),
   thumbnailConfig: join(home, "thumbnail-config.json"),
   integrations: join(home, "integrations.json"),
-  pythonBackend: join(projectRoot, "backend", "main.py"),
+  pythonBackend: process.env.PODCLI_BACKEND
+    ? join(resolve(process.env.PODCLI_BACKEND), "main.py")
+    : join(projectRoot, "backend", "main.py"),
   pythonPath: detectPython(),
   ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
   ffprobePath: process.env.FFPROBE_PATH || "ffprobe",

@@ -8,10 +8,75 @@ Produces word-level timestamps with speaker labels by:
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from typing import Optional, Callable
+
+
+def _managed_home() -> str:
+    h = os.environ.get("PODCLI_HOME")
+    if h:
+        return h
+    home = os.path.expanduser("~")
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Application Support", "podcli")
+    if sys.platform == "win32":
+        return os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local", "podcli")
+    return os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share", "podcli")
+
+
+def _whispercpp_cli() -> Optional[str]:
+    """Resolve the whisper.cpp binary: explicit env, PATH, then the hermetic
+    runtime location the native installer provisions."""
+    cli = os.environ.get("PODCLI_WHISPER_CLI")
+    if cli and (os.path.exists(cli) or shutil.which(cli)):
+        return cli
+    found = shutil.which("whisper-cli") or shutil.which("whisper-cpp")
+    if found:
+        return found
+    exe = "whisper-cli.exe" if sys.platform == "win32" else "whisper-cli"
+    hermetic = os.path.join(_managed_home(), "runtime", "whisper", exe)
+    return hermetic if os.path.exists(hermetic) else None
+
+
+def _whispercpp_model(model_size: str) -> str:
+    return os.environ.get("PODCLI_WHISPERCPP_MODEL") or os.path.join(
+        _managed_home(), "models", f"ggml-{model_size}.bin"
+    )
+
+
+def _whispercpp_ready(model_size: str) -> bool:
+    return _whispercpp_cli() is not None and os.path.exists(_whispercpp_model(model_size))
+
+
+def _transcribe_with_whispercpp(file_path, model_size, language, progress_callback):
+    from services import transcription_whispercpp as wcpp
+
+    if progress_callback:
+        progress_callback(10, "Transcribing with whisper.cpp...")
+
+    cli = _whispercpp_cli() or "whisper-cli"
+    model = _whispercpp_model(model_size)
+    if not os.path.exists(model):
+        raise FileNotFoundError(
+            f"whisper.cpp model not found: {model}. "
+            "Set PODCLI_WHISPERCPP_MODEL or run provisioning."
+        )
+    vad = os.environ.get("PODCLI_WHISPERCPP_VAD", "").strip().lower() in ("1", "true", "yes", "on")
+    result = wcpp.transcribe_file(
+        file_path,
+        model_path=model,
+        whisper_cli=cli,
+        ffmpeg=os.environ.get("PODCLI_FFMPEG", "ffmpeg"),
+        language=language,
+        vad=vad,
+        vad_model=os.environ.get("PODCLI_WHISPERCPP_VAD_MODEL") or None,
+    )
+    if progress_callback:
+        progress_callback(100, "Transcription complete")
+    return result
 
 
 def transcribe_file(
@@ -39,15 +104,31 @@ def transcribe_file(
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
 
+    requested = os.environ.get("PODCLI_ENGINE", "").strip().lower()
+    engine = requested or "whisper-py"
+    if engine in ("whispercpp", "whisper-cpp", "whisper.cpp", "cpp"):
+        return _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
+
     # ================================================================
     # Step 1: Whisper transcription
     # ================================================================
     if progress_callback:
         progress_callback(5, "Loading Whisper model...")
 
-    import whisper
+    # Native installs ship whisper.cpp, not openai-whisper. Fall back to it
+    # automatically — whether whisper is missing OR a broken install fails to
+    # load/run — unless the user explicitly asked for the whisper-py engine.
+    try:
+        import whisper
 
-    model = whisper.load_model(model_size)
+        model = whisper.load_model(model_size)
+    except Exception as e:
+        if not requested and _whispercpp_ready(model_size):
+            return _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
+        raise RuntimeError(
+            "The whisper-py engine needs the full source install (openai-whisper + torch). "
+            "This native install ships whisper.cpp — rerun with --engine whispercpp."
+        ) from e
 
     if progress_callback:
         progress_callback(10, f"Transcribing with Whisper ({model_size})...")

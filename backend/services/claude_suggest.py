@@ -375,6 +375,163 @@ def _dedupe_clips_by_range(clips: list[dict]) -> list[dict]:
     return deduped
 
 
+def find_moments_from_text(
+    description: str,
+    segments: list[dict],
+    existing_clips: Optional[list[dict]] = None,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    max_results: int = 3,
+) -> list[dict]:
+    """Locate the moment(s) the user described/pasted in the transcript via an AI
+    CLI. Returns clip dicts (same shape as suggest_with_claude). Status goes to
+    progress_callback; warnings to stderr — never stdout, which is the task
+    runner's JSON-RPC channel."""
+    existing_clips = existing_clips or []
+    candidates = _find_ai_cli_candidates()
+    if not candidates:
+        print("No AI CLI available for moment search", file=sys.stderr, flush=True)
+        return []
+
+    if progress_callback:
+        progress_callback(15, "Reading transcript...")
+    transcript_text = _build_transcript_text(segments)
+
+    existing_desc = ""
+    if existing_clips:
+        existing_desc = "\n\nALREADY SELECTED (do not re-suggest these):\n"
+        for c in existing_clips:
+            existing_desc += f"- {c.get('start_second')}s-{c.get('end_second')}s: {c.get('title', '')}\n"
+
+    upper = max(1, int(max_results))
+    prompt = f"""Find the moment(s) the user is describing in this podcast transcript. Return ONLY valid JSON.
+
+USER WANTS: "{description}"
+{existing_desc}
+RULES:
+- Find the EXACT moment(s) matching what the user pasted/described
+- The user may list several moments — return one clip per distinct moment they mention
+- Return 1-{upper} matching moments (best match first)
+- All timestamps in SECONDS as numbers
+- Duration target: {TARGET_CLIP_DURATION_MIN}-{TARGET_CLIP_DURATION_MAX} seconds, max {MAX_CLIP_DURATION} seconds
+- Cut tight: start at the hook, end when the point lands
+- Use segments to cut filler if needed
+
+Return this JSON:
+{{
+  "clips": [
+    {{
+      "title": "First sentence of the moment",
+      "start_second": 123.4,
+      "end_second": 158.4,
+      "segments": [{{"start": 123.4, "end": 158.4}}],
+      "duration": 35,
+      "content_type": "guest_story",
+      "scores": {{"standalone": 4, "hook": 5, "relevance": 4, "quotability": 3}},
+      "total_score": 16,
+      "quote": "The key quote",
+      "why": "Why this matches what the user asked for"
+    }}
+  ]
+}}
+
+Transcript:
+{transcript_text}"""
+
+    # Prompt goes to .podcli/tmp/ (gitignored), not the repo root, so a crash
+    # mid-run never litters the working tree with transcript dumps.
+    project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    from utils.prompt_files import write_prompt_file
+    prompt_file = write_prompt_file(prompt)
+
+    try:
+        for idx, (cli_path, engine) in enumerate(candidates):
+            if progress_callback:
+                label = "Claude" if engine == "claude" else "Codex"
+                progress_callback(40, f"Searching transcript with {label}...")
+            try:
+                result = _run_ai_command(
+                    cli_path=cli_path,
+                    engine=engine,
+                    prompt=prompt,
+                    prompt_file=prompt_file,
+                    project_dir=project_dir,
+                    timeout=300,
+                )
+            except Exception:
+                continue
+
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
+
+            response = result.stdout.strip()
+            if "```" in response:
+                import re
+
+                fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", response, re.DOTALL)
+                if fence_match:
+                    response = fence_match.group(1).strip()
+
+            try:
+                json_start = response.find("{")
+                if json_start >= 0:
+                    data, _ = json.JSONDecoder().raw_decode(response, json_start)
+                else:
+                    data = json.loads(response)
+            except Exception:
+                continue
+
+            found = []
+            for c in data.get("clips", []):
+                scores = c.get("scores", {})
+                total = sum(scores.values()) if scores else c.get("total_score", 0)
+                keep_segments = []
+                for seg in c.get("segments", []):
+                    s = round(float(seg.get("start", 0)), 1)
+                    e = round(float(seg.get("end", 0)), 1)
+                    if e > s:
+                        keep_segments.append({"start": s, "end": e})
+
+                start_sec = round(float(c.get("start_second", 0)), 1)
+                end_sec = round(float(c.get("end_second", 0)), 1)
+                if not keep_segments and end_sec > start_sec:
+                    keep_segments = [{"start": start_sec, "end": end_sec}]
+
+                kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
+                if kept_duration < MIN_CLIP_DURATION or kept_duration > MAX_CLIP_DURATION:
+                    continue
+
+                found.append({
+                    "title": c.get("title", "Untitled")[:55],
+                    "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
+                    "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
+                    "segments": keep_segments,
+                    "duration": round(kept_duration),
+                    "score": total,
+                    "content_type": c.get("content_type", "unknown"),
+                    "reasoning": c.get("why", ""),
+                    "preview_text": c.get("quote", "")[:120],
+                    "suggested_caption_style": "hormozi",
+                    "quote": c.get("quote", ""),
+                    "why": c.get("why", ""),
+                    "reasons": [c.get("content_type", "")],
+                    "preview": c.get("quote", "")[:120],
+                })
+
+            if found:
+                return _dedupe_clips_by_range(found)
+
+        return []
+
+    except Exception as e:
+        print(f"Moment search error: {e}", file=sys.stderr, flush=True)
+        return []
+    finally:
+        try:
+            os.unlink(prompt_file)
+        except Exception:
+            pass
+
+
 def suggest_with_claude(
     segments: list[dict],
     top_n: int = 5,

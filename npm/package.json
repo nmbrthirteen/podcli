@@ -1,0 +1,31 @@
+{
+  "name": "podcli",
+  "version": "2.0.0",
+  "description": "AI podcast clip generator — native CLI. Transcribe, find viral moments, export vertical clips with burned captions.",
+  "bin": {
+    "podcli": "bin/podcli.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nmbrthirteen/podcli.git"
+  },
+  "keywords": [
+    "podcast",
+    "clips",
+    "shorts",
+    "whisper",
+    "ffmpeg",
+    "cli"
+  ]
+}

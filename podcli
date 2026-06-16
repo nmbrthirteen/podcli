@@ -17,6 +17,25 @@ else
   PYTHON="python3"
 fi
 
+# ── Native CLI upgrade notice ──
+# This in-repo bash launcher is superseded by the native `podcli` binary. Running
+# the native CLI in this same directory auto-migrates this project's data on first
+# run. Printed to stderr so command stdout (JSON, pipes) stays clean.
+{
+  U_ACCENT="\033[38;2;212;135;74m"
+  U_BOLD="\033[1m"
+  U_DIM="\033[2m"
+  U_RESET="\033[0m"
+  NATIVE_BIN="$(command -v podcli 2>/dev/null)"
+  echo -e "  ${U_BOLD}podcli now ships as a native CLI.${U_RESET} ${U_DIM}You're running the old in-repo launcher.${U_RESET}" >&2
+  if [ -n "$NATIVE_BIN" ] && [ "$NATIVE_BIN" != "$0" ] && [ "$NATIVE_BIN" != "$SCRIPT_DIR/podcli" ]; then
+    echo -e "  Run ${U_ACCENT}podcli${U_RESET} in this folder instead — it auto-migrates this project's data on first run." >&2
+  else
+    echo -e "  Install ${U_ACCENT}npm i -g podcli${U_RESET}, then run ${U_ACCENT}podcli${U_RESET} here — it auto-migrates this project's data on first run." >&2
+  fi
+  echo "" >&2
+}
+
 # ── PodStack slash commands → launch an AI agent ──
 CMD="$1"
 # Strip leading / or -- prefix (user might try /prep-episode, --prep-episode, or prep-episode)

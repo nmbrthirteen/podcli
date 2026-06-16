@@ -531,6 +531,9 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
       const [results, setResults] = useState([]);
       const [error, setError] = useState(null);
       const [previewFile, setPreviewFile] = useState(null);
+      const [momentText, setMomentText] = useState('');
+      const [findingMoment, setFindingMoment] = useState(false);
+      const [momentNotice, setMomentNotice] = useState(null);
 
       const [retryIdx, setRetryIdx] = useState(null);
       const [retryJobId, setRetryJobId] = useState(null);
@@ -901,6 +904,27 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
         } catch (e) { setError('Browse failed: ' + e.message); }
         finally { setBrowsing(false); }
       }, []);
+
+      const findMoment = async () => {
+        const text = momentText.trim();
+        if (!text || findingMoment) return;
+        setFindingMoment(true); setError(null); setMomentNotice(null);
+        try {
+          const d = await api('/find-moment', { method: 'POST', body: JSON.stringify({ text }) });
+          if (d.error) { setError(d.error); return; }
+          if (!d.added) {
+            setMomentNotice(d.found ? 'Those moments are already in your clips.' : "Couldn't find that moment — try different wording or a direct quote.");
+            return;
+          }
+          // suggestions refresh via the SSE state-sync broadcast
+          setMomentText('');
+          setMomentNotice(`Added ${d.added} moment${d.added !== 1 ? 's' : ''}.`);
+        } catch {
+          setError('Moment search failed.');
+        } finally {
+          setFindingMoment(false);
+        }
+      };
 
       const startExport = async () => {
         setPhase('exporting'); setResults([]);
@@ -1482,6 +1506,30 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                   {videoPath.trim() && (transcriptText.trim() || transcript) && (
                     <McpHints phase={phase} videoPath={videoPath} transcript={transcript} transcriptText={transcriptText} suggestions={suggestions} mcpConnected={mcpConnected} />
                   )}
+                </div>
+              )}
+
+              {/* Find a specific moment — paste a quote/description, AI locates it */}
+              {(transcript || transcriptText) && phase !== 'parsing' && phase !== 'suggesting' && phase !== 'exporting' && (
+                <div className="section" style={{ marginTop: 16 }}>
+                  <div className="section-label">Find a specific moment</div>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    placeholder="Paste a quote or describe the moment(s) you want — the AI searches the transcript and adds them to your clips."
+                    value={momentText}
+                    onChange={(e) => { setMomentText(e.target.value); setMomentNotice(null); }}
+                    disabled={findingMoment}
+                    style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
+                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                    <button className="btn btn-primary btn-sm" onClick={findMoment} disabled={!momentText.trim() || findingMoment}>
+                      {findingMoment
+                        ? <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div className="spinner sm" />Searching{'…'}</span>
+                        : 'Find moments'}
+                    </button>
+                    {momentNotice && <span style={{ color: 'var(--text2)', fontSize: 13 }}>{momentNotice}</span>}
+                  </div>
                 </div>
               )}
 

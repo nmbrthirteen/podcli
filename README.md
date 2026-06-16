@@ -27,7 +27,7 @@
 <p align="center"><sub>▶ <a href="https://x.com/nikasiradze_/status/2056061654664708570">Watch with sound on X</a></sub></p>
 
 ```bash
-./podcli process episode.mp4
+podcli process episode.mp4
 ```
 
 One command transcribes, picks the best moments, crops to the face, and burns captions in. Nothing leaves your machine.
@@ -63,14 +63,14 @@ The first half is **video processing** — podcli's core engine. The second half
 ### 1. Drop in your episode
 
 ```bash
-./setup.sh --ui
+podcli            # then choose "Open Web UI"
 # → http://localhost:3847
 ```
 
 Drag your video into the Web UI, or use the CLI:
 
 ```bash
-./podcli process episode.mp4
+podcli process episode.mp4
 ```
 
 ### 2. Get clips automatically
@@ -147,63 +147,47 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 - **Preset system** — save named configurations per show
 - **MCP server** — 17 tools for Claude Desktop / Claude Code integration
 - **Web UI** — single-page flow at `localhost:3847`
-- **CLI** — one-command processing: `./podcli process episode.mp4`
+- **CLI** — one-command processing: `podcli process episode.mp4`
 
 ---
 
-## Prerequisites
+## Install
 
-| Tool                       | Install                                                                                                                                              |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Node.js** >= 18          | [nodejs.org](https://nodejs.org)                                                                                                                     |
-| **Python** >= 3.10         | [python.org](https://python.org)                                                                                                                     |
-| **FFmpeg**                 | `brew install ffmpeg` / `sudo apt install ffmpeg`                                                                                                    |
-| **Claude Code** (optional) | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) — needed for PodStack slash commands                                            |
-| **Codex** (optional)       | [openai.com/codex](https://openai.com/index/introducing-codex/) — alternative AI engine for clip suggestion (auto-detected if Claude is unavailable) |
-
-## Quick Start
+No prerequisites — the install fetches a self-contained binary, and the first run
+provisions everything it needs (Python, Node, FFmpeg, whisper.cpp, models) into a
+managed directory. You don't need Go, Node, Python, or FFmpeg installed.
 
 **macOS / Linux**
 
 ```bash
-git clone https://github.com/nmbrthirteen/podcli.git
-cd podcli
-chmod +x setup.sh podcli
-./setup.sh
+curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh
 ```
 
-**Windows**
+**Windows (PowerShell)**
 
 ```powershell
-git clone https://github.com/nmbrthirteen/podcli.git
-cd podcli
+irm https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.ps1 | iex
 ```
 
-Then double-click **`install.cmd`** (or run it in a terminal). It installs everything and keeps the window open so you can see the result. To launch the studio afterwards:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File setup.ps1 -Ui
-```
-
-This will:
-
-1. Check system dependencies (Node, Python, FFmpeg)
-2. Create a Python virtual environment and install packages
-3. Install Node packages and build TypeScript
-4. Set up PodStack slash commands and knowledge base templates
-5. Create the local `.podcli/` data directory
-6. Launch the web UI at **http://localhost:3847**
-
-### Setup options
+**With npm** (if you already have Node):
 
 ```bash
-./setup.sh              # full install + launch UI
-./setup.sh --install    # install only
-./setup.sh --ui         # launch UI only (skip install)
-./setup.sh --mcp        # print MCP config for Claude
+npm install -g podcli
 ```
 
-On Windows, use `.\setup.ps1` with `-Install`, `-Ui`, or `-Mcp`, and run the CLI via `podcli.cmd` (e.g. `podcli process video.mp4 --top 5`).
+Then just run it — the first launch sets itself up:
+
+```bash
+podcli                       # interactive menu (and Web UI)
+podcli process episode.mp4   # transcribe + export clips
+```
+
+**Optional**, for AI clip suggestion and the PodStack slash commands: install
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) or
+[Codex](https://openai.com/index/introducing-codex/) (auto-detected).
+
+> Building from source needs Go 1.23+ (and Node for the studio bundle); see
+> [`plans/native-cli.md`](plans/native-cli.md).
 
 ---
 
@@ -212,7 +196,7 @@ On Windows, use `.\setup.ps1` with `-Install`, `-Ui`, or `-Mcp`, and run the CLI
 ### Web UI
 
 ```bash
-./setup.sh --ui
+podcli            # then choose "Open Web UI"
 # → http://localhost:3847
 ```
 
@@ -227,17 +211,17 @@ On Windows, use `.\setup.ps1` with `-Install`, `-Ui`, or `-Mcp`, and run the CLI
 
 ```bash
 # One command. Auto-transcribes, picks moments, renders clips.
-./podcli process episode.mp4
+podcli process episode.mp4
 ```
 
 With more control:
 
 ```bash
 # Use an existing transcript instead of transcribing
-./podcli process episode.mp4 --transcript transcript.txt --top 5
+podcli process episode.mp4 --transcript transcript.txt --top 5
 
 # Full options
-./podcli process episode.mp4 \
+podcli process episode.mp4 \
   --transcript transcript.txt \
   --top 8 \
   --caption-style branded \
@@ -248,9 +232,9 @@ With more control:
 ### Presets
 
 ```bash
-./podcli presets save myshow --caption-style branded --logo logo.png --top 5
-./podcli presets list
-./podcli process video.mp4 --preset myshow
+podcli presets save myshow --caption-style branded --logo logo.png --top 5
+podcli presets list
+podcli process video.mp4 --preset myshow
 ```
 
 ### Content Workflow (PodStack)
@@ -305,29 +289,24 @@ Manage via the web UI at `/knowledge.html` (drag & drop, inline editor) or throu
 
 podcli is a [Model Context Protocol](https://modelcontextprotocol.io) server — Claude can use it as a tool to create clips through conversation.
 
+**Claude Code** — register the bundled MCP server in one command:
+
+```bash
+podcli mcp install
+```
+
 **Claude Desktop** — add to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "podcli": {
-      "command": "node",
-      "args": ["/path/to/podcli/dist/index.js"],
-      "env": {
-        "PYTHON_PATH": "/path/to/podcli/venv/bin/python3"
-      }
+      "command": "podcli",
+      "args": ["mcp"]
     }
   }
 }
 ```
-
-**Claude Code:**
-
-```bash
-claude mcp add podcli -- node /path/to/podcli/dist/index.js
-```
-
-Run `./setup.sh --mcp` to get the exact config with your paths filled in.
 
 ### MCP Tools
 
@@ -368,8 +347,9 @@ Run `./setup.sh --mcp` to get the exact config with your paths filled in.
 
 ```
 podcli/
-├── podcli                    # CLI entry point
-├── setup.sh                  # one-command install & launch
+├── cli/                      # Go launcher (native binary, provisioning, self-update)
+├── install.sh / install.ps1 # node-less installers
+├── setup.sh                  # dev environment setup (venv + npm)
 ├── package.json
 ├── CLAUDE.md                 # PodStack master config
 │

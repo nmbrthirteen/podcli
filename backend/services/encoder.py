@@ -159,7 +159,7 @@ def _encoder_cache_path() -> str:
 def _ffmpeg_fingerprint() -> str:
     """Cheap fingerprint (path + mtime) to invalidate cache when ffmpeg changes."""
     import shutil
-    ffbin = shutil.which("ffmpeg") or "ffmpeg"
+    ffbin = os.environ.get("PODCLI_FFMPEG") or shutil.which("ffmpeg") or "ffmpeg"
     try:
         st = os.stat(ffbin)
         return f"{ffbin}:{int(st.st_mtime)}:{st.st_size}"

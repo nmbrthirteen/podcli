@@ -1,0 +1,183 @@
+# Cuts a release on a v* tag: cross-compiles the Go launcher for all 5 targets,
+# builds whisper.cpp per platform, publishes both as release assets (the names
+# the npm wrapper, self-update, and provisioner expect), then publishes npm.
+#
+# The whisper.cpp matrix below is unverified until the first tagged run — the
+# binary name / cmake flags may need adjustment for the pinned whisper.cpp ref.
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Default to read-only; only the release job that publishes assets gets write.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Build launcher
+        working-directory: cli
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          go generate ./...   # sync backend + PodStack commands for go:embed
+          EXT=""
+          [ "${{ matrix.goos }}" = "windows" ] && EXT=".exe"
+          OUT="podcli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
+          go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" -o "../${OUT}" .
+          echo "ASSET=${OUT}" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}
+
+  whisper:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, goos: darwin, goarch: arm64 }
+          - { runner: macos-13, goos: darwin, goarch: amd64 }
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+          - { runner: windows-latest, goos: windows, goarch: amd64 }
+    runs-on: ${{ matrix.runner }}
+    env:
+      WHISPER_REF: v1.7.4 # pin a known-good whisper.cpp tag
+    steps:
+      - name: Clone whisper.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ env.WHISPER_REF }}
+      - name: Build (static; Metal embedded on macOS)
+        shell: bash
+        run: |
+          EXTRA=""
+          if [ "${{ matrix.goos }}" = "darwin" ]; then EXTRA="-DGGML_METAL_EMBED_LIBRARY=ON"; fi
+          cmake -B build -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release $EXTRA
+          cmake --build build --config Release --target whisper-cli -j
+      - name: Stage asset
+        shell: bash
+        run: |
+          EXT=""; [ "${{ matrix.goos }}" = "windows" ] && EXT=".exe"
+          SRC=$(find build -name "whisper-cli${EXT}" -type f | head -1)
+          OUT="whisper-cli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
+          cp "$SRC" "$OUT"
+          echo "ASSET=$OUT" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}
+
+  studio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build studio bundle
+        run: |
+          npm ci
+          sh scripts/build-studio.sh dist/studio
+          tar -czf studio-bundle.tar.gz -C dist/studio .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: studio-bundle.tar.gz
+          path: studio-bundle.tar.gz
+
+  remotion:
+    # Per-platform: @rspack and the Remotion compositor ship native binaries, so
+    # the bundle is not portable across os/arch.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, goos: darwin, goarch: arm64 }
+          - { runner: macos-13, goos: darwin, goarch: amd64 }
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+          - { runner: windows-latest, goos: windows, goarch: amd64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build remotion bundle
+        shell: bash
+        run: |
+          sh scripts/build-remotion.sh dist/remotion-bundle
+          OUT="remotion-bundle-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+          tar -czf "$OUT" -C dist/remotion-bundle .
+          echo "ASSET=$OUT" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}
+
+  release:
+    needs: [build, whisper, studio, remotion]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          sha256sum * > "$RUNNER_TEMP/checksums.txt"
+          mv "$RUNNER_TEMP/checksums.txt" checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Assert NPM_TOKEN is set
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not set — refusing to publish. The GitHub release and assets are already published; set the secret and re-run this job." >&2
+            exit 1
+          fi
+      - name: Publish wrapper pinned to the tag
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          npm publish --access public
