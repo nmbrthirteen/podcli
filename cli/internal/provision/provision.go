@@ -731,7 +731,9 @@ func extractTarGz(archive, dest string) error {
 			return err
 		}
 		target := filepath.Join(dest, h.Name)
-		if !strings.HasPrefix(target, root) {
+		// Allow the archive's own root entry ("./" from `tar -C dir .`), which
+		// resolves to dest itself; reject only paths that escape dest.
+		if target != filepath.Clean(dest) && !strings.HasPrefix(target, root) {
 			return fmt.Errorf("unsafe path in archive: %s", h.Name)
 		}
 		switch h.Typeflag {
