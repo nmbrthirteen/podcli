@@ -94,10 +94,17 @@ def _write_pairs(pairs: dict[str, str]) -> None:
         if k not in seen and v is not None:
             out_lines.append(f"{k}={v}")
 
-    tmp = f"{path}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write("\n".join(out_lines).rstrip("\n") + "\n")
-    os.replace(tmp, path)
+    # Create the temp 0600 up front so the secret is never world-readable, even
+    # briefly. os.replace makes the destination inherit this inode (and mode).
+    tmp = f"{path}.{os.getpid()}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(out_lines).rstrip("\n") + "\n")
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     try:
         os.chmod(path, 0o600)
     except OSError:
