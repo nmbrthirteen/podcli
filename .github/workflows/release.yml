@@ -17,14 +17,17 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # darwin builds on macOS so the arm64 binary is signed in a way Apple
+    # Silicon's kernel accepts; cross-compiling it on Linux yields a binary the
+    # kernel SIGKILLs at exec.
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
-          - { goos: darwin, goarch: arm64 }
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
-          - { goos: windows, goarch: amd64 }
+          - { runner: macos-14, goos: darwin, goarch: arm64 }
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-latest, goos: linux, goarch: arm64 }
+          - { runner: ubuntu-latest, goos: windows, goarch: amd64 }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
