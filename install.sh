@@ -61,6 +61,13 @@ fi
 
 cp "$tmp/$asset" "$bin_dir/podcli"
 chmod 0755 "$bin_dir/podcli"
+
+# Apple Silicon's kernel kills cross-compiled (Linux-built) arm64 binaries whose
+# signature it won't accept, even with a valid-on-disk ad-hoc signature. Re-sign
+# ad-hoc on the Mac so the binary runs.
+if [ "$goos" = "darwin" ] && command -v codesign >/dev/null 2>&1; then
+  codesign --force --sign - "$bin_dir/podcli" >/dev/null 2>&1 || true
+fi
 echo "  installed: $bin_dir/podcli"
 
 linked=""
