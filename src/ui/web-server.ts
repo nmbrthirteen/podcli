@@ -1426,6 +1426,33 @@ app.post("/api/clips/:id/thumbnail/select", async (req, res) => {
   res.json({ ok: true, preview_path: pick });
 });
 
+// --- Secrets/settings stored in the global .env (e.g. HF_TOKEN) ---
+
+app.get("/api/settings", async (_req, res) => {
+  try {
+    const result = await executor.execute<{ settings?: unknown[] }>("manage_env", { action: "list" });
+    res.json(result.data ?? { settings: [] });
+  } catch (err: unknown) {
+    res.status(500).json({ error: errMsg(err) });
+  }
+});
+
+app.post("/api/settings", async (req, res) => {
+  const key = typeof req.body?.key === "string" ? req.body.key : "";
+  const value = typeof req.body?.value === "string" ? req.body.value : "";
+  if (!key) {
+    res.status(400).json({ error: "key is required" });
+    return;
+  }
+  try {
+    const action = value.trim() ? "set" : "unset";
+    const result = await executor.execute("manage_env", { action, key, value });
+    res.json(result.data ?? { ok: true });
+  } catch (err: unknown) {
+    res.status(500).json({ error: errMsg(err) });
+  }
+});
+
 app.get("/api/youtube/config", (_req, res) => {
   try {
     const all = JSON.parse(readFileSync(paths.integrations, "utf-8"));
