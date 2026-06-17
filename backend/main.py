@@ -377,6 +377,18 @@ def handle_suggest_clips(task_id: str, params: dict):
     emit_result(task_id, "success", data={"clips": clips})
 
 
+def handle_manage_env(task_id: str, params: dict):
+    """List/set/unset user secrets in the global .env (e.g. HF_TOKEN)."""
+    from services.env_settings import run_env_action
+
+    try:
+        data = run_env_action(params.get("action", "list"), params.get("key"), params.get("value"))
+    except ValueError as e:
+        emit_result(task_id, "error", error=str(e))
+        return
+    emit_result(task_id, "success", data=data)
+
+
 def handle_find_moment(task_id: str, params: dict):
     """Locate user-pasted/described moments in the transcript via the AI CLI."""
     from services.claude_suggest import find_moments_from_text
@@ -512,6 +524,7 @@ TASK_HANDLERS = {
     "corrections": handle_corrections,
     "suggest_clips": handle_suggest_clips,
     "find_moment": handle_find_moment,
+    "manage_env": handle_manage_env,
     "generate_content": handle_generate_content,
     "manage_integrations": handle_manage_integrations,
     "run_integration_tool": handle_run_integration_tool,

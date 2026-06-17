@@ -8,6 +8,9 @@ export default function ConfigPage() {
   const [activate, setActivate] = useState(false);
   const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [settings, setSettings] = useState<any[]>([]);
+  const [secretInputs, setSecretInputs] = useState<Record<string, string>>({});
+  const [savingKey, setSavingKey] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function loadStatus() {
@@ -15,9 +18,32 @@ export default function ConfigPage() {
     setStatusError(null);
   }
 
+  async function loadSettings() {
+    try {
+      const data = await api<any>("/settings");
+      setSettings(data.settings || []);
+    } catch { /* settings are optional */ }
+  }
+
   useEffect(() => {
     loadStatus().catch((e) => setStatusError(e.message));
+    loadSettings();
   }, []);
+
+  async function saveSetting(key: string) {
+    setSavingKey(key);
+    setMsg(null);
+    try {
+      await api("/settings", { method: "POST", body: JSON.stringify({ key, value: secretInputs[key] ?? "" }) });
+      setSecretInputs((p) => ({ ...p, [key]: "" }));
+      setMsg({ text: `${key} saved.`, ok: true });
+      await loadSettings();
+    } catch (e: any) {
+      setMsg({ text: e.message, ok: false });
+    } finally {
+      setSavingKey(null);
+    }
+  }
 
   async function onMigrate() {
     setMsg({ text: "Migrating…", ok: true });
@@ -82,6 +108,43 @@ export default function ConfigPage() {
           ))
         )}
       </div>
+
+      {settings.length > 0 && (
+        <div className="section">
+          <div className="section-label">Secrets</div>
+          {settings.map((s) => (
+            <div key={s.key} style={{ marginBottom: 16 }}>
+              <label className="field-label">
+                {s.label}{" "}
+                <span style={{ color: s.set ? "var(--green)" : "var(--text3)", fontSize: 11 }}>
+                  {s.set ? `set · ${s.preview}` : "not set"}
+                </span>
+              </label>
+              <div className="set-file">
+                <input
+                  type="password"
+                  placeholder={s.set ? "Enter a new value to replace" : "e.g. hf_…"}
+                  value={secretInputs[s.key] ?? ""}
+                  onChange={(e) => setSecretInputs((p) => ({ ...p, [s.key]: e.target.value }))}
+                  style={{ fontSize: 13, flex: 1 }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => saveSetting(s.key)}
+                  disabled={savingKey === s.key || !(secretInputs[s.key] ?? "").trim()}
+                >
+                  {savingKey === s.key ? "Saving…" : "Save"}
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6 }}>
+                {s.help}{" "}
+                <a href={s.url} target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>Get token →</a>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="section">
         <div className="section-label">Actions</div>

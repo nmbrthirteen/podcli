@@ -88,7 +88,8 @@ def run_diarization(
             "     → https://huggingface.co/pyannote/speaker-diarization-3.1\n"
             "     → https://huggingface.co/pyannote/segmentation-3.0\n"
             "     → https://huggingface.co/pyannote/speaker-diarization-community-1\n"
-            "  3. Add to your .env file: HF_TOKEN=hf_your_token_here"
+            "  3. Set it: podcli env set HF_TOKEN hf_your_token_here\n"
+            "     (or in the Web UI: Config → Secrets)"
         )
         if progress_callback:
             progress_callback(0, msg)

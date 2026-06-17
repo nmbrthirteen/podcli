@@ -2777,6 +2777,36 @@ def cmd_youtube(args):
         return
 
 
+def cmd_env(args):
+    """Manage secrets/settings in the global .env."""
+    from services.env_settings import run_env_action
+
+    accent = "\033[38;2;212;135;74m"
+    green = "\033[38;2;74;222;128m"
+    gray = "\033[38;5;245m"
+    reset = "\033[0m"
+    action = getattr(args, "env_action", None) or "list"
+    try:
+        if action == "set":
+            run_env_action("set", args.key, args.value)
+            print(f"  {green}✓{reset} {args.key} set")
+        elif action == "unset":
+            run_env_action("unset", args.key)
+            print(f"  {green}✓{reset} {args.key} removed")
+        else:
+            data = run_env_action("list")
+            print(f"\n  {gray}Settings ({data['path']}){reset}\n")
+            for s in data["settings"]:
+                mark = f"{green}set{reset}" if s["set"] else f"{gray}not set{reset}"
+                val = f" {gray}{s['preview']}{reset}" if s["set"] else ""
+                print(f"  {accent}{s['key']}{reset} — {s['label']}  [{mark}]{val}")
+                print(f"    {gray}{s['help']}{reset}")
+                print(f"    {gray}{s['url']}{reset}\n")
+    except ValueError as e:
+        print(f"  ✗ {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_config(args):
     """Export, import, and activate config profiles."""
     from config_bundle import run_config_action
@@ -3334,6 +3364,16 @@ def main():
     cfg_use = cfg_sub.add_parser("use", help="Activate a config root for future runs")
     cfg_use.add_argument("home", help="Path to the config root to activate")
 
+    # ── env (secrets / settings) ──
+    env_p = sub.add_parser("env", help="Manage secrets/settings stored in .env (e.g. HF_TOKEN)")
+    env_sub = env_p.add_subparsers(dest="env_action")
+    env_sub.add_parser("list", help="Show known settings and whether they're set")
+    env_set = env_sub.add_parser("set", help="Set a setting")
+    env_set.add_argument("key", help="Setting key, e.g. HF_TOKEN")
+    env_set.add_argument("value", help="Value")
+    env_unset = env_sub.add_parser("unset", help="Remove a setting")
+    env_unset.add_argument("key", help="Setting key, e.g. HF_TOKEN")
+
     # ── cache ──
     cache_p = sub.add_parser("cache", help="Manage transcription cache")
     cache_sub = cache_p.add_subparsers(dest="cache_action")
@@ -3387,6 +3427,8 @@ def main():
         cmd_youtube(args)
     elif args.command == "config":
         cmd_config(args)
+    elif args.command == "env":
+        cmd_env(args)
     elif args.command == "cache":
         cmd_cache(args)
     elif args.command == "info":
