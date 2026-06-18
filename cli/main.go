@@ -171,6 +171,7 @@ func transcribeEngine(args []string) string {
 func setup(args []string) int {
 	size := "base"
 	vad := false
+	speakers := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--model":
@@ -180,6 +181,8 @@ func setup(args []string) int {
 			}
 		case "--vad":
 			vad = true
+		case "--speakers":
+			speakers = true
 		}
 	}
 	fmt.Printf("Provisioning into %s\n", paths.Home())
@@ -216,6 +219,13 @@ func setup(args []string) int {
 		} else {
 			fmt.Printf("  python: %s\n", pb)
 		}
+	}
+	if speakers {
+		if err := provision.EnsureSpeakerDeps(); err != nil {
+			fmt.Fprintf(os.Stderr, "  speakers: failed (%v)\n", err)
+			return 1
+		}
+		fmt.Printf("  speakers: pyannote.audio installed (set HF_TOKEN to use)\n")
 	}
 	if wc, err := provision.EnsureWhisperCpp(); err != nil {
 		fmt.Fprintf(os.Stderr, "  whisper: skipped (%v) — backend will use PATH whisper-cli\n", err)
@@ -403,8 +413,8 @@ Launcher commands:
   doctor               Show resolved paths, interpreter, backend, ffmpeg, models
   version              Print version
   update               Check for and apply a newer release
-  setup [--model base] [--vad]
-                       Provision runtimes + models into the managed dir
+  setup [--model base] [--vad] [--speakers]
+                       Provision runtimes + models (--speakers adds pyannote+torch, ~2GB)
   mcp                  Run the MCP server (stdio) for Claude/Codex
   mcp install          Register the MCP server with Claude Code
   config set update.auto off    Disable auto-update (also: PODCLI_NO_UPDATE=1)
