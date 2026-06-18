@@ -176,7 +176,7 @@ export default function ClipDetail() {
 
       <div className="clip-detail">
         <div className="clip-detail-player">
-          {file ? <ClipPlayer key={previewUrl} src={previewUrl} onTime={(t) => (playerTime.current = t)} /> : <div className="phone-empty">No rendered output</div>}
+          {clip.output_path ? <ClipPlayer key={previewUrl} src={previewUrl} onTime={(t) => (playerTime.current = t)} /> : <div className="phone-empty">No rendered output</div>}
           <button className="btn btn-ghost btn-sm" style={{ width: "100%", marginTop: 10 }} onClick={() => setReframing(true)}>Reframe (fix camera)</button>
           <div className="clip-meta">
             <span>{fmt(clip.start_second)}–{fmt(clip.end_second)} · {clip.duration}s</span>
