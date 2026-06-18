@@ -73,7 +73,7 @@ def run_diarization(
     try:
         from pyannote.audio import Pipeline
     except ImportError:
-        msg = "pyannote.audio not installed — run: pip install pyannote.audio"
+        msg = "Speaker detection not installed — run: podcli setup --speakers"
         if progress_callback:
             progress_callback(0, msg)
         raise ImportError(msg)

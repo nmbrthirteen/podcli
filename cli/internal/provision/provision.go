@@ -709,6 +709,21 @@ func pipInstall(pybin, requirements string) error {
 	return cmd.Run()
 }
 
+// EnsureSpeakerDeps installs the speaker-diarization stack (pyannote.audio pulls
+// torch) into the hermetic Python. Opt-in because it's a large download (~2GB)
+// most users don't need.
+func EnsureSpeakerDeps() error {
+	bin := PythonBin()
+	if !have(bin) {
+		return fmt.Errorf("python not provisioned — run `podcli setup` first")
+	}
+	fmt.Fprintln(os.Stderr, "  installing speaker deps (pyannote.audio + torch) — large download (~2GB), several minutes")
+	cmd := exec.Command(bin, "-m", "pip", "install", "--disable-pip-version-check", "--progress-bar=on", "pyannote.audio>=3.1.0", "speechbrain")
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	return cmd.Run()
+}
+
 func extractTarGz(archive, dest string) error {
 	f, err := os.Open(archive)
 	if err != nil {

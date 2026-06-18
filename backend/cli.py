@@ -2947,11 +2947,11 @@ def cmd_info(args):
     except (ImportError, ValueError):
         diarization_available = False
     if not diarization_available:
-        speakers_status = f"{yellow}✗ not available in this install (source install only)"
+        speakers_status = f"{yellow}✗ not installed — run: podcli setup --speakers (pyannote + torch, ~2GB)"
     elif hf_token:
         speakers_status = f"{green}✓ configured"
     else:
-        speakers_status = f"{yellow}✗ set HF_TOKEN in .env"
+        speakers_status = f"{yellow}✗ set a token — run: podcli env set HF_TOKEN <token>"
 
     print(f"    AI CLI:       {green}{('Claude' if ai_engine == 'claude' else 'Codex') + ' (' + ai_path + ')' if ai_path else f'{yellow}not found — install Claude Code or Codex'}{reset}")
     print(f"    Speakers:     {speakers_status}{reset}")
@@ -3081,7 +3081,10 @@ def print_banner():
     print()
 
     if not speakers_ok:
-        print(f"  {yellow}⚠ Speaker detection not set up — run: podcli info{reset}")
+        if not _diarization_ok:
+            print(f"  {yellow}⚠ Speaker detection not installed — run: podcli setup --speakers{reset}")
+        else:
+            print(f"  {yellow}⚠ Speaker detection needs a token — run: podcli env set HF_TOKEN <token>{reset}")
 
     print()
 
