@@ -9,6 +9,9 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 out="${1:-$here/dist/studio}"
 cd "$here"
 
+# Type-check the SPA — vite/esbuild don't, so undefined-var bugs in the client
+# would otherwise ship silently (blank pages at runtime).
+npx tsc --noEmit -p src/ui/client/tsconfig.json
 npm run build   # tsc + vite -> dist/ui/web-server.js + dist/ui/public
 
 rm -rf "$out"
