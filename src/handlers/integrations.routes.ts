@@ -126,11 +126,18 @@ export function registerConfigIntegrationRoutes(
   });
 
   app.get("/api/integration-info", (_req, res) => {
-    const distPath = join(projectRoot, "dist", "index.js");
+    const packagedMcpPath = join(projectRoot, "runtime", "studio", "mcp-server.mjs");
+    const sourceMcpPath = join(projectRoot, "dist", "index.js");
+    const mcpPath = process.env.PODCLI_STUDIO
+      ? join(process.env.PODCLI_STUDIO, "mcp-server.mjs")
+      : existsSync(packagedMcpPath)
+        ? packagedMcpPath
+        : sourceMcpPath;
     res.json({
-      dist_path: distPath,
+      mcp_path: mcpPath,
+      dist_path: mcpPath,
       project_root: projectRoot,
-      server_ok: existsSync(distPath),
+      server_ok: existsSync(mcpPath),
     });
   });
 }

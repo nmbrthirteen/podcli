@@ -82,9 +82,7 @@ export default function ConfigPage() {
   const rows: Array<[string, string]> = status
     ? [
         ["Config home", status.home || ""],
-        ["Data / cache", status.cache || ""],
-        ["Profile marker", status.profile_marker || ""],
-        ["Migration", status.migration?.already_migrated ? "Up to date" : "Ran on load"],
+        ["Cache", status.cache || ""],
       ]
     : [];
 
@@ -117,13 +115,13 @@ export default function ConfigPage() {
               <label className="field-label">
                 {s.label}{" "}
                 <span style={{ color: s.set ? "var(--green)" : "var(--text3)", fontSize: 11 }}>
-                  {s.set ? `set · ${s.preview}` : "not set"}
+                  {s.set ? s.preview : "not set"}
                 </span>
               </label>
               <div className="set-file">
                 <input
                   type="password"
-                  placeholder={s.set ? "Enter a new value to replace" : "e.g. hf_…"}
+                  placeholder={s.set ? "Replace token" : "hf_..."}
                   value={secretInputs[s.key] ?? ""}
                   onChange={(e) => setSecretInputs((p) => ({ ...p, [s.key]: e.target.value }))}
                   style={{ fontSize: 13, flex: 1 }}
@@ -137,10 +135,7 @@ export default function ConfigPage() {
                   {savingKey === s.key ? "Saving…" : "Save"}
                 </button>
               </div>
-              <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6 }}>
-                {s.help}{" "}
-                <a href={s.url} target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>Get token →</a>
-              </div>
+              <a href={s.url} target="_blank" rel="noopener" className="set-link">Get token</a>
             </div>
           ))}
         </div>
@@ -149,12 +144,12 @@ export default function ConfigPage() {
       <div className="section">
         <div className="section-label">Actions</div>
         <div className="set-actions">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onMigrate}>Run path migration</button>
-          <button type="button" className="btn btn-primary btn-sm" onClick={onExport}>Download profile (.zip)</button>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onExport}>Export profile</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onMigrate}>Migrate paths</button>
         </div>
 
         <div style={{ marginTop: 18 }}>
-          <label className="field-label">Import profile bundle</label>
+          <label className="field-label">Import profile</label>
           <div className="set-file">
             <input
               type="file"
@@ -169,7 +164,7 @@ export default function ConfigPage() {
           </div>
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12, color: "var(--text2)" }}>
             <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} />
-            Set imported folder as active config home
+            Use imported profile
           </label>
         </div>
 

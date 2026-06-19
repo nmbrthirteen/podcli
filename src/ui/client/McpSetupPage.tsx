@@ -10,9 +10,9 @@ const STATUS_STYLE: Record<StatusKind, React.CSSProperties> = {
 };
 
 export default function McpSetupPage() {
-  const [distPath, setDistPath] = useState<string | null>(null);
+  const [mcpPath, setMcpPath] = useState<string | null>(null);
   const [statusKind, setStatusKind] = useState<StatusKind>("warn");
-  const [statusText, setStatusText] = useState("Checking connection…");
+  const [statusText, setStatusText] = useState("Checking…");
   const desktopRef = useRef<HTMLPreElement>(null);
   const codeRef = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState<Record<string, boolean>>({});
@@ -20,13 +20,13 @@ export default function McpSetupPage() {
   useEffect(() => {
     api<any>("/integration-info")
       .then((data) => {
-        setDistPath(data.dist_path);
+        setMcpPath(data.mcp_path || data.dist_path);
         if (data.server_ok) {
           setStatusKind("ok");
-          setStatusText(`Server running · ${data.tools_count} tools available`);
+          setStatusText("Ready");
         } else {
           setStatusKind("err");
-          setStatusText("Server not built — run: npm run build");
+          setStatusText("Not built");
         }
       })
       .catch(() => {
@@ -42,12 +42,12 @@ export default function McpSetupPage() {
     });
   }
 
-  const dist = distPath ?? "<path-to>/dist/index.js";
+  const serverPath = mcpPath ?? "<path-to>/mcp-server.mjs";
   const desktopJson = `{
   "mcpServers": {
     "podcli": {
       "command": "node",
-      "args": ["${dist}"]
+      "args": ["${serverPath}"]
     }
   }
 }`;
@@ -60,10 +60,6 @@ export default function McpSetupPage() {
 
       <div className="section" style={{ marginTop: 18 }}>
         <div className="section-label">Claude Desktop</div>
-        <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.6 }}>
-          Add to <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS) or
-          <code> %APPDATA%\Claude\claude_desktop_config.json</code> (Windows), then restart Claude.
-        </div>
         <div className="code-block">
           <div className="code-block-head">
             <span>claude_desktop_config.json</span>
@@ -84,7 +80,7 @@ export default function McpSetupPage() {
               {copied.code ? "Copied" : "Copy"}
             </button>
           </div>
-          <pre ref={codeRef}>{`claude mcp add podcli node ${dist}`}</pre>
+          <pre ref={codeRef}>podcli mcp install</pre>
         </div>
       </div>
     </div>

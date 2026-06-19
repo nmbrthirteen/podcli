@@ -394,13 +394,13 @@ h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.1
 .section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.8px; color: var(--text2); margin-bottom: 10px; text-transform: uppercase; }
 
 /* ─── Form Elements ─── */
-input[type="text"], input[type="number"], select, textarea {
+input[type="text"], input[type="number"], input[type="password"], select, textarea {
   width: 100%; background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 11px 14px;
   color: var(--text); font-family: inherit; font-size: 14px;
   outline: none; transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
-input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:focus, select:focus, textarea:focus {
   border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle);
 }
 textarea {
@@ -1078,6 +1078,8 @@ input[type="range"]::-webkit-slider-thumb {
 .set-note.ok { background: var(--green-subtle); color: var(--green); }
 .set-note.err { background: var(--red-subtle); color: var(--red); }
 .set-file { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.set-link { display: inline-block; margin-top: 6px; font-size: 12px; color: var(--accent); text-decoration: none; }
+.set-link:hover { color: var(--accent-hover); }
 .int-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
 .int-row:last-child { border-bottom: none; }
 .int-row .name { font-size: 14px; font-weight: 600; }
