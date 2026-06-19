@@ -30,9 +30,25 @@ const home = resolveHome();
 
 // Hermetic installs run from a bundled runtime where the backend lives outside
 // projectRoot; the launcher points PODCLI_BACKEND at it.
-const backendDir = process.env.PODCLI_BACKEND
-  ? resolve(process.env.PODCLI_BACKEND)
-  : join(projectRoot, "backend");
+function resolveBackendDir(): string {
+  if (process.env.PODCLI_BACKEND) {
+    return resolve(process.env.PODCLI_BACKEND);
+  }
+
+  const sourceBackend = join(projectRoot, "backend");
+  if (existsSync(join(sourceBackend, "cli.py"))) {
+    return sourceBackend;
+  }
+
+  const runtimeBackend = join(projectRoot, "runtime", "backend");
+  if (existsSync(join(runtimeBackend, "cli.py"))) {
+    return runtimeBackend;
+  }
+
+  return sourceBackend;
+}
+
+const backendDir = resolveBackendDir();
 
 function detectPython(): string {
   if (process.env.PYTHON_PATH) return process.env.PYTHON_PATH;
