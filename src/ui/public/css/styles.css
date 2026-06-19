@@ -452,6 +452,7 @@ select {
   transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
 }
 .title-option:hover { border-color: var(--accent); background: var(--accent-subtle); }
+.title-option.selected { border-color: var(--accent); background: var(--accent-subtle); }
 .copy-btn {
   padding: 3px 9px; cursor: pointer; background: transparent;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
