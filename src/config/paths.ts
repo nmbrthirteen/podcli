@@ -28,6 +28,12 @@ function resolveHome(): string {
 
 const home = resolveHome();
 
+// Hermetic installs run from a bundled runtime where the backend lives outside
+// projectRoot; the launcher points PODCLI_BACKEND at it.
+const backendDir = process.env.PODCLI_BACKEND
+  ? resolve(process.env.PODCLI_BACKEND)
+  : join(projectRoot, "backend");
+
 function detectPython(): string {
   if (process.env.PYTHON_PATH) return process.env.PYTHON_PATH;
   const isWindows = process.platform === "win32";
@@ -44,6 +50,7 @@ function detectPython(): string {
 export const paths = {
   home,
   projectRoot,
+  backendDir,
   homeMarker,
   dataDir,
   cache: join(dataDir, "cache"),
@@ -61,9 +68,7 @@ export const paths = {
   corrections: join(home, "corrections.json"),
   thumbnailConfig: join(home, "thumbnail-config.json"),
   integrations: join(home, "integrations.json"),
-  pythonBackend: process.env.PODCLI_BACKEND
-    ? join(resolve(process.env.PODCLI_BACKEND), "main.py")
-    : join(projectRoot, "backend", "main.py"),
+  pythonBackend: join(backendDir, "main.py"),
   pythonPath: detectPython(),
   ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
   ffprobePath: process.env.FFPROBE_PATH || "ffprobe",
