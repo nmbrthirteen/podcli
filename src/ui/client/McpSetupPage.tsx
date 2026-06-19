@@ -43,14 +43,18 @@ export default function McpSetupPage() {
   }
 
   const serverPath = mcpPath ?? "<path-to>/mcp-server.mjs";
-  const desktopJson = `{
-  "mcpServers": {
-    "podcli": {
-      "command": "node",
-      "args": ["${serverPath}"]
-    }
-  }
-}`;
+  const desktopJson = JSON.stringify(
+    {
+      mcpServers: {
+        podcli: {
+          command: "node",
+          args: [serverPath],
+        },
+      },
+    },
+    null,
+    2
+  );
 
   return (
     <div className="app" style={{ maxWidth: 780 }}>
