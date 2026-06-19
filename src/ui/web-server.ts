@@ -1327,7 +1327,7 @@ function runPy(scriptAndArgs: string[]): Promise<{ code: number; stdout: string;
 }
 
 const runCli = (args: string[]) =>
-  runPy([join(paths.projectRoot, "backend", "cli.py"), "--no-banner", ...args]);
+  runPy([join(paths.backendDir, "cli.py"), "--no-banner", ...args]);
 
 // Composite a thumbnail PNG onto the start of a clip. stripStart > 0 removes a
 // prior card first (avoids stacking on re-bake). Returns the bake's success.
@@ -1720,7 +1720,7 @@ app.post("/api/clips/:id/davinci", async (req, res) => {
     res.status(400).json({ error: "rendered file missing" });
     return;
   }
-  const cli = join(paths.projectRoot, "backend", "services", "integrations", "davinci_resolve", "cli.py");
+  const cli = join(paths.backendDir, "services", "integrations", "davinci_resolve", "cli.py");
   const r = await runPy([cli, "--source", clip.output_path, "--title", clip.title]);
   if (r.code !== 0) {
     res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "export failed" });
