@@ -50,8 +50,9 @@ export default function ClipDetail() {
   const [captionStyle, setCaptionStyle] = useState("");
   const [line1, setLine1] = useState("");
   const [line2, setLine2] = useState("");
-  const [thumbImage, setThumbImage] = useState<string | null>(null);
-  const [thumbTimestamp, setThumbTimestamp] = useState<number | null>(null);
+  const [textOpts, setTextOpts] = useState<[string, string][]>([]);
+  const [frameOpts, setFrameOpts] = useState<any[]>([]);
+  const [selFrame, setSelFrame] = useState<{ path: string; info?: any } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [bust, setBust] = useState(1);
@@ -69,8 +70,6 @@ export default function ClipDetail() {
           const tc = found.thumbnail_config || {};
           setLine1(tc.line1 ?? "");
           setLine2(tc.line2 ?? "");
-          setThumbImage(tc.image_path ?? null);
-          setThumbTimestamp(tc.image_path ? null : tc.timestamp ?? null);
         }
       })
       .finally(() => setLoading(false));
@@ -88,7 +87,6 @@ export default function ClipDetail() {
   const tc = clip.thumbnail_config || {};
   const dirty = title !== clip.title || captionStyle !== clip.caption_style;
   const previewUrl = `/api/clips/${clip.id}/preview?t=${bust}`;
-  const source = thumbImage ? `Image · ${basename(thumbImage)}` : thumbTimestamp != null ? `Frame @ ${fmt(thumbTimestamp)}` : "Auto";
 
   const patch = (body: any) => api(`/clips/${clip.id}`, { method: "PATCH", body: JSON.stringify(body) });
 
@@ -101,39 +99,40 @@ export default function ClipDetail() {
     } catch (e: any) { setMsg(`Save failed: ${e.message}`); } finally { setBusy(null); }
   };
 
-  const useCurrentFrame = () => { setThumbTimestamp(clip.start_second + playerTime.current); setThumbImage(null); setMsg(null); };
+  const loadOptions = async () => {
+    setBusy("options"); setMsg(null);
+    try {
+      const r = await api(`/clips/${clip.id}/thumbnail/options?texts=6&frames=6`);
+      if (r.error) throw new Error(r.error);
+      setTextOpts(r.texts || []);
+      setFrameOpts(r.frames || []);
+      if ((r.frames || []).length) setSelFrame({ path: r.frames[0].path, info: r.frames[0] });
+      if (!(r.texts || []).length && !(r.frames || []).length) setMsg("No options — is the AI CLI installed and the source video available?");
+    } catch (e: any) { setMsg(`Options failed: ${e.message}`); } finally { setBusy(null); }
+  };
 
-  const uploadImage = async (f: File) => {
+  const uploadFrame = async (f: File) => {
     setBusy("upload"); setMsg(null);
     try {
       const fd = new FormData(); fd.append("file", f);
       const r = await upload<any>("/upload", fd);
       if (!r.file_path) throw new Error("upload failed");
-      setThumbImage(r.file_path); setThumbTimestamp(null);
+      setSelFrame({ path: r.file_path });
     } catch (e: any) { setMsg(`Upload failed: ${e.message}`); } finally { setBusy(null); }
   };
 
-  const generate = async () => {
-    setBusy("thumb"); setMsg(null);
+  const renderThumb = async () => {
+    if (!selFrame) { setMsg("Select or upload a frame first"); return; }
+    setBusy("render"); setMsg(null);
     try {
-      const cfg: ThumbnailConfig = { line1: line1 || undefined, line2: line2 || undefined };
-      if (thumbImage) cfg.image_path = thumbImage;
-      else if (thumbTimestamp != null) cfg.timestamp = thumbTimestamp;
-      const p = await patch({ thumbnail_config: cfg });
-      if (p.error) throw new Error(p.error);
-      const r = await api(`/clips/${clip.id}/thumbnail`, { method: "POST", body: "{}" });
+      const r = await api(`/clips/${clip.id}/thumbnail/render`, {
+        method: "POST",
+        body: JSON.stringify({ line1: line1 || undefined, line2: line2 || undefined, frame_path: selFrame.path, frame_info: selFrame.info }),
+      });
       if (r.error) throw new Error(r.error);
       setBust(Date.now()); load();
-    } catch (e: any) { setMsg(`Thumbnail failed: ${e.message}`); } finally { setBusy(null); }
-  };
-
-  const pickVariation = async (p: string) => {
-    setBusy("pick");
-    try {
-      const r = await api(`/clips/${clip.id}/thumbnail/select`, { method: "POST", body: JSON.stringify({ path: p }) });
-      if (r.error) throw new Error(r.error);
-      setBust(Date.now()); load();
-    } catch (e: any) { setMsg(`Pick failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg("Thumbnail generated");
+    } catch (e: any) { setMsg(`Generate failed: ${e.message}`); } finally { setBusy(null); }
   };
 
   const reopen = async () => {
@@ -232,17 +231,27 @@ export default function ClipDetail() {
           </div>
 
           <div className="section">
-            <label style={labelStyle}>Thumbnail</label>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>Thumbnail</label>
+              <button className="btn btn-ghost btn-sm" onClick={loadOptions} disabled={busy !== null}>
+                {busy === "options" ? <><div className="spinner sm" /> Finding options…</> : (textOpts.length || frameOpts.length ? "Refresh options" : "Get options")}
+              </button>
+            </div>
+
             <div className="thumb-edit">
               <div className="thumb-edit-preview">
                 <div className="thumb-stage">
-                  {tc.preview_path ? (
+                  {busy === "render" ? (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 8, color: "var(--text2)", fontSize: 11 }}>
+                      <div className="spinner sm" /> Rendering…
+                    </div>
+                  ) : tc.preview_path ? (
                     <img key={`gen-${bust}`} src={img(tc.preview_path, bust)} alt="thumbnail" />
-                  ) : thumbImage ? (
-                    <img src={img(thumbImage, bust)} alt="thumbnail source" />
+                  ) : selFrame ? (
+                    <img src={img(selFrame.path, bust)} alt="selected frame" />
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: 11, textAlign: "center", padding: 12 }}>
-                      Generate to preview
+                      Get options, pick a frame, then generate
                     </div>
                   )}
                 </div>
@@ -251,27 +260,41 @@ export default function ClipDetail() {
                 <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%", fontSize: 14, padding: "9px 12px" }} />
                 <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", fontSize: 14, padding: "9px 12px", marginTop: 8 }} />
                 <div className="set-actions" style={{ marginTop: 10 }}>
-                  <button className="btn btn-ghost btn-sm" onClick={useCurrentFrame} disabled={busy !== null}>Use current frame</button>
+                  <button className="btn btn-primary btn-sm" onClick={renderThumb} disabled={busy !== null || !selFrame}>
+                    {busy === "render" ? <div className="spinner sm" /> : (tc.preview_path ? "Regenerate" : "Generate")}
+                  </button>
                   <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} disabled={busy !== null}>
-                    {busy === "upload" ? <div className="spinner sm" /> : "Upload image"}
+                    {busy === "upload" ? <div className="spinner sm" /> : "Upload frame"}
                   </button>
-                  <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,.webp" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
+                  <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,.webp" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && uploadFrame(e.target.files[0])} />
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>Source · {source}</div>
-                <div style={{ marginTop: 12 }}>
-                  <button className="btn btn-primary btn-sm" onClick={generate} disabled={busy !== null}>
-                    {busy === "thumb" ? <div className="spinner sm" /> : (tc.variations?.length ? "Regenerate" : "Generate thumbnail")}
-                  </button>
-                </div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>Leave Line 1 &amp; 2 empty to auto-write the text.</div>
               </div>
             </div>
-            {(tc.variations?.length ?? 0) > 0 && (
-              <div className="thumb-variations" style={{ marginTop: 14 }}>
-                {tc.variations!.map((v) => (
-                  <button key={v} className={`thumb-variation ${tc.preview_path === v ? "selected" : ""}`} onClick={() => pickVariation(v)} disabled={busy !== null}>
-                    <img src={img(v, bust)} alt="" />
-                  </button>
-                ))}
+
+            {textOpts.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Text options · click to use</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {textOpts.map(([l1, l2], i) => (
+                    <button key={i} className={`title-option ${line1 === l1 && line2 === l2 ? "selected" : ""}`} onClick={() => { setLine1(l1); setLine2(l2); }}>
+                      <strong>{l1}</strong>{l2 ? ` · ${l2}` : ""}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {frameOpts.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Frame options · click to select</div>
+                <div className="thumb-variations">
+                  {frameOpts.map((f, i) => (
+                    <button key={i} className={`thumb-variation ${selFrame?.path === f.path ? "selected" : ""}`} onClick={() => setSelFrame({ path: f.path, info: f })} disabled={busy !== null}>
+                      <img src={img(f.path, bust)} alt="" />
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -291,11 +314,14 @@ export default function ClipDetail() {
                   <div>
                     <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Title options · click to use</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                      {clip.generated_titles.map((t, i) => (
-                        <button key={i} className="title-option" onClick={() => { setTitle(t.replace(/^\d+\.\s*/, "")); }}>
-                          {t}
-                        </button>
-                      ))}
+                      {clip.generated_titles.map((t, i) => {
+                        const clean = t.replace(/^\d+\.\s*/, "");
+                        return (
+                          <button key={i} className={`title-option ${title === clean ? "selected" : ""}`} onClick={() => { setTitle(clean); setMsg("Title set — click Save to apply"); }}>
+                            {t}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 ) : null}

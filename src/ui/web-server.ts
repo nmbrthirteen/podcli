@@ -1443,6 +1443,63 @@ app.post("/api/clips/:id/thumbnail/select", async (req, res) => {
   res.json({ ok: true, preview_path: pick });
 });
 
+// Candidate headline texts + face frames for the two-step thumbnail picker.
+app.get("/api/clips/:id/thumbnail/options", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
+  const tc = clip.thumbnail_config || {};
+  const clamp = (v: any, d: number) => Math.min(Math.max(parseInt(String(v)) || d, 1), 8);
+  const outDir = join(paths.output, "thumbnails", String(clip.id), "frames");
+  const r = await runCli([
+    "thumbnail-options", tc.text || clip.title,
+    "--output", outDir,
+    "--video", clip.source_video,
+    "--start", String(clip.start_second),
+    "--end", String(clip.end_second),
+    "--texts", String(clamp(req.query.texts, 6)),
+    "--frames", String(clamp(req.query.frames, 6)),
+  ]);
+  if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "options failed" }); return; }
+  const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
+  try { res.json(JSON.parse(jsonLine || "{}")); } catch { res.status(500).json({ error: "bad options output" }); }
+});
+
+// Render one final thumbnail from a chosen frame + headline (empty lines = AI writes the text).
+app.post("/api/clips/:id/thumbnail/render", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
+  const tc = clip.thumbnail_config || {};
+  const { line1, line2, frame_path, frame_info } = req.body || {};
+  if (!frame_path) { res.status(400).json({ error: "select a frame first" }); return; }
+  // Only allow frames podcli itself produced (candidate frames) or the user uploaded —
+  // never an arbitrary server path passed through to the renderer.
+  const resolvedFrame = resolve(String(frame_path));
+  const frameRoots = [resolve(join(paths.output, "thumbnails", String(clip.id))), resolve(uploadDir)];
+  const inAllowedRoot = frameRoots.some((root) => resolvedFrame === root || resolvedFrame.startsWith(root + path.sep));
+  if (!inAllowedRoot || !existsSync(resolvedFrame)) { res.status(400).json({ error: "invalid frame" }); return; }
+  const outDir = join(paths.output, "thumbnails", String(clip.id));
+  await mkdir(outDir, { recursive: true });
+  const out = join(outDir, `thumb_${uuidv4().slice(0, 8)}.png`);
+  const args = ["thumbnail-render", tc.text || clip.title, "--frame", resolvedFrame, "--output", out];
+  if (line1) args.push("--line1", String(line1));
+  if (line2) args.push("--line2", String(line2));
+  if (frame_info) args.push("--frame-info", JSON.stringify(frame_info));
+  const r = await runCli(args);
+  if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "render failed" }); return; }
+  const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
+  let outPath = "";
+  try { outPath = JSON.parse(jsonLine || "{}").path || ""; } catch { /* no path */ }
+  if (!outPath || !existsSync(outPath)) { res.status(500).json({ error: "no thumbnail produced" }); return; }
+  if (clip.output_path && existsSync(clip.output_path)) {
+    const bake = await bakeThumbnailCard(clip.output_path, outPath, tc.card_seconds || 0);
+    if (!bake.ok) { res.status(500).json({ error: `rendered but bake into clip failed: ${bake.error}` }); return; }
+  }
+  const merged = { ...tc, line1: line1 || undefined, line2: line2 || undefined, preview_path: outPath, card_seconds: 1.5 };
+  const edit = await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
+  if (edit.code !== 0) { res.status(500).json({ error: stripAnsi(edit.stderr || edit.stdout) || "thumbnail metadata update failed" }); return; }
+  res.json({ ok: true, preview_path: outPath });
+});
+
 // --- Secrets/settings stored in the global .env (e.g. HF_TOKEN) ---
 
 app.get("/api/settings", async (_req, res) => {

@@ -2121,6 +2121,45 @@ def cmd_thumbnail_config(args):
     raise ValueError(f"unknown thumbnail-config action: {action}")
 
 
+def cmd_thumbnail_options(args):
+    """Emit candidate headline text pairs and face frames for the thumbnail picker."""
+    from services.thumbnail_ai import generate_headline_variations, extract_candidate_frames
+
+    os.makedirs(args.output, exist_ok=True)
+    texts = generate_headline_variations(args.title, args.texts) or []
+    frames = []
+    if args.video:
+        frames = extract_candidate_frames(
+            args.video, args.output, count=args.frames,
+            start_second=args.start, end_second=args.end,
+        ) or []
+    print(json.dumps({"texts": [list(t) for t in texts], "frames": frames}))
+
+
+def cmd_thumbnail_render(args):
+    """Render one final thumbnail from a chosen frame + headline.
+
+    Empty line1/line2 let the AI write the text; a chosen frame is used as-is.
+    """
+    from services.thumbnail_ai import generate_thumbnail_with_template
+    from services.asset_store import resolve_logo
+
+    frame_info = json.loads(args.frame_info) if args.frame_info else None
+    out = generate_thumbnail_with_template(
+        title=args.title,
+        frame_path=args.frame,
+        output_path=args.output,
+        logo_path=resolve_logo(args.logo) if args.logo else None,
+        frame_info=frame_info,
+        line1_override=args.line1 or None,
+        line2_override=args.line2 or None,
+    )
+    if not out:
+        print("thumbnail render failed", file=sys.stderr)
+        sys.exit(1)
+    print(json.dumps({"path": out}))
+
+
 def cmd_thumbnails(args):
     """Generate thumbnail variations for a title."""
     from services.thumbnail_ai import generate_variations
@@ -3332,6 +3371,26 @@ def main():
     tcfg_imp.add_argument("path", help="Source .json path")
     tcfg_sub.add_parser("reset", help="Remove the override and revert to the generic default")
 
+    # ── thumbnail-options (candidate text + frames for the picker) ──
+    topt = sub.add_parser("thumbnail-options", help="Emit candidate headline texts and face frames as JSON")
+    topt.add_argument("title", help="Clip/episode title to base headlines on")
+    topt.add_argument("-o", "--output", required=True, help="Directory to write candidate frames into")
+    topt.add_argument("--video", help="Source video to extract face frames from")
+    topt.add_argument("--start", type=float, help="Frame window start (seconds)")
+    topt.add_argument("--end", type=float, help="Frame window end (seconds)")
+    topt.add_argument("--texts", type=int, default=6, help="Number of headline options")
+    topt.add_argument("--frames", type=int, default=6, help="Number of frame options")
+
+    # ── thumbnail-render (one final thumbnail from a chosen frame + headline) ──
+    trnd = sub.add_parser("thumbnail-render", help="Render one thumbnail PNG from a chosen frame + headline")
+    trnd.add_argument("title", help="Clip/episode title")
+    trnd.add_argument("--frame", required=True, help="Background frame image path")
+    trnd.add_argument("-o", "--output", required=True, help="Destination PNG path")
+    trnd.add_argument("--line1", help="Headline line 1 (empty = AI writes it)")
+    trnd.add_argument("--line2", help="Headline line 2 (empty = AI writes it)")
+    trnd.add_argument("--frame-info", dest="frame_info", help="JSON face metadata for the frame")
+    trnd.add_argument("--logo", help="Logo (asset name or path)")
+
     # ── swap-thumbnail ──
     st = sub.add_parser("swap-thumbnail", help="Regenerate thumbnail on an existing clip")
     st.add_argument("clip", help="Path to rendered clip (.mp4)")
@@ -3473,6 +3532,10 @@ def main():
         cmd_thumbnails(args)
     elif args.command == "thumbnail-config":
         cmd_thumbnail_config(args)
+    elif args.command == "thumbnail-options":
+        cmd_thumbnail_options(args)
+    elif args.command == "thumbnail-render":
+        cmd_thumbnail_render(args)
     elif args.command == "swap-thumbnail":
         cmd_swap_thumbnail(args)
     elif args.command == "bake-thumbnail":

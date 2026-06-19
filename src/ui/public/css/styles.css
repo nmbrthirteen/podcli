@@ -430,10 +430,22 @@ select {
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:active:not(:disabled) { transform: translateY(4px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18); }
 .btn-primary:disabled { opacity: 0.25; cursor: not-allowed; }
-.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
-.btn-ghost:hover { border-color: var(--border-hover); color: var(--text); }
-.btn-danger { background: transparent; color: var(--text3); border: 1px solid var(--border); }
-.btn-danger:hover:not(:disabled) { border-color: var(--red-border); color: var(--red); background: var(--red-subtle); }
+.btn-ghost {
+  background: var(--surface3); color: var(--text);
+  box-shadow: 0 4px 0 0 var(--bg), 0 9px 16px -7px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(255, 255, 255, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+.btn-ghost:hover:not(:disabled) { background: #2c2c34; }
+.btn-ghost:active:not(:disabled) { transform: translateY(4px); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.10); }
+.btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-danger {
+  background: var(--surface3); color: var(--text2);
+  box-shadow: 0 4px 0 0 var(--bg), 0 9px 16px -7px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(255, 255, 255, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+.btn-danger:hover:not(:disabled) { color: var(--red); box-shadow: 0 4px 0 0 var(--bg), 0 9px 16px -7px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--red-border), inset 0 1px 0 rgba(255, 255, 255, 0.10); }
+.btn-danger:active:not(:disabled) { transform: translateY(4px); box-shadow: 0 0 0 1px var(--red-border), inset 0 1px 0 rgba(255, 255, 255, 0.10); }
+.btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: var(--radius-sm); }
 .btn-go {
   width: 100%; padding: 14px; font-size: 15px; justify-content: center;
@@ -452,13 +464,7 @@ select {
   transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
 }
 .title-option:hover { border-color: var(--accent); background: var(--accent-subtle); }
-.copy-btn {
-  padding: 3px 9px; cursor: pointer; background: transparent;
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  color: var(--text2); font-family: inherit; font-size: 11px; font-weight: 600;
-  transition: border-color 0.15s var(--ease), color 0.15s var(--ease);
-}
-.copy-btn:hover { border-color: var(--border-hover); color: var(--text); }
+.title-option.selected { border-color: var(--accent); background: var(--accent-subtle); }
 .pill { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
 .pill-blue { background: var(--accent-subtle); color: var(--accent); }
 
