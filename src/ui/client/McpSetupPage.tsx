@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "./lib";
+import CopyButton from "./CopyButton";
 
 type StatusKind = "warn" | "ok" | "err";
 
@@ -15,7 +16,6 @@ export default function McpSetupPage() {
   const [statusText, setStatusText] = useState("Checking…");
   const desktopRef = useRef<HTMLPreElement>(null);
   const codeRef = useRef<HTMLPreElement>(null);
-  const [copied, setCopied] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     api<any>("/integration-info")
@@ -35,13 +35,6 @@ export default function McpSetupPage() {
       });
   }, []);
 
-  function copyBlock(id: string, ref: React.RefObject<HTMLPreElement>) {
-    navigator.clipboard.writeText(ref.current?.innerText ?? "").then(() => {
-      setCopied((c) => ({ ...c, [id]: true }));
-      setTimeout(() => setCopied((c) => ({ ...c, [id]: false })), 1500);
-    });
-  }
-
   const serverPath = mcpPath ?? "<path-to>/mcp-server.mjs";
   const desktopJson = JSON.stringify(
     {
@@ -58,7 +51,7 @@ export default function McpSetupPage() {
 
   return (
     <div className="app" style={{ maxWidth: 780 }}>
-      <div className="header"><h1>MCP Setup</h1></div>
+      <div className="header"><h1>MCP setup</h1></div>
 
       <span className="pill" style={{ ...STATUS_STYLE[statusKind], fontSize: 11 }}>{statusText}</span>
 
@@ -67,9 +60,7 @@ export default function McpSetupPage() {
         <div className="code-block">
           <div className="code-block-head">
             <span>claude_desktop_config.json</span>
-            <button className="btn btn-ghost btn-sm" style={{ padding: "3px 10px" }} onClick={() => copyBlock("desktop", desktopRef)}>
-              {copied.desktop ? "Copied" : "Copy"}
-            </button>
+            <CopyButton className="btn btn-ghost btn-sm" style={{ padding: "3px 10px" }} getText={() => desktopRef.current?.innerText ?? ""} />
           </div>
           <pre ref={desktopRef}>{desktopJson}</pre>
         </div>
@@ -80,9 +71,7 @@ export default function McpSetupPage() {
         <div className="code-block">
           <div className="code-block-head">
             <span>terminal</span>
-            <button className="btn btn-ghost btn-sm" style={{ padding: "3px 10px" }} onClick={() => copyBlock("code", codeRef)}>
-              {copied.code ? "Copied" : "Copy"}
-            </button>
+            <CopyButton className="btn btn-ghost btn-sm" style={{ padding: "3px 10px" }} getText={() => codeRef.current?.innerText ?? ""} />
           </div>
           <pre ref={codeRef}>podcli mcp install</pre>
         </div>

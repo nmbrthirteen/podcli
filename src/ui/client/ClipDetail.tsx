@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from "react-router-dom";
 import { api, upload, fmt, basename, labelStyle } from "./lib";
 import ClipPlayer from "./ClipPlayer";
 import ReframeEditor from "./ReframeEditor";
+import CopyButton from "./CopyButton";
 
 interface ThumbnailConfig {
   text?: string;
@@ -107,7 +108,7 @@ export default function ClipDetail() {
       setTextOpts(r.texts || []);
       setFrameOpts(r.frames || []);
       if ((r.frames || []).length) setSelFrame({ path: r.frames[0].path, info: r.frames[0] });
-      if (!(r.texts || []).length && !(r.frames || []).length) setMsg("No options — is the AI CLI installed and the source video available?");
+      if (!(r.texts || []).length && !(r.frames || []).length) setMsg("No options. Is the AI CLI installed and the source video available?");
     } catch (e: any) { setMsg(`Options failed: ${e.message}`); } finally { setBusy(null); }
   };
 
@@ -168,13 +169,9 @@ export default function ClipDetail() {
       };
       const r = await api("/generate-content", { method: "POST", body: JSON.stringify(body) });
       if (r.error) throw new Error(r.error);
-      if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing — is claude/codex installed?");
+      if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing. Is claude/codex installed?");
       load();
     } catch (e: any) { setMsg(`Content generation failed: ${e.message}`); } finally { setBusy(null); }
-  };
-
-  const copy = (text: string) => {
-    navigator.clipboard?.writeText(text).then(() => setMsg("Copied to clipboard"), () => {});
   };
 
   const del = async () => {
@@ -206,7 +203,7 @@ export default function ClipDetail() {
           {clip.output_path ? <ClipPlayer key={previewUrl} src={previewUrl} onTime={(t) => (playerTime.current = t)} /> : <div className="phone-empty">No rendered output</div>}
           <button className="btn btn-ghost btn-sm" style={{ width: "100%", marginTop: 10 }} onClick={() => setReframing(true)}>Reframe (fix camera)</button>
           <div className="clip-meta">
-            <span>{fmt(clip.start_second)}–{fmt(clip.end_second)} · {clip.duration}s</span>
+            <span>{fmt(clip.start_second)}-{fmt(clip.end_second)} · {clip.duration}s</span>
             <span>{clip.crop_strategy}</span>
             {clip.content_type && <span>{clip.content_type}</span>}
             {clip.file_size_mb != null && <span>{clip.file_size_mb.toFixed(1)}MB</span>}
@@ -268,7 +265,7 @@ export default function ClipDetail() {
                   </button>
                   <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,.webp" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && uploadFrame(e.target.files[0])} />
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>Leave Line 1 &amp; 2 empty to auto-write the text.</div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>Leave line 1 and line 2 empty to auto-write the text.</div>
               </div>
             </div>
 
@@ -317,7 +314,7 @@ export default function ClipDetail() {
                       {clip.generated_titles.map((t, i) => {
                         const clean = t.replace(/^\d+\.\s*/, "");
                         return (
-                          <button key={i} className={`title-option ${title === clean ? "selected" : ""}`} onClick={() => { setTitle(clean); setMsg("Title set — click Save to apply"); }}>
+                          <button key={i} className={`title-option ${title === clean ? "selected" : ""}`} onClick={() => { setTitle(clean); setMsg("Title set. Click save to apply"); }}>
                             {t}
                           </button>
                         );
@@ -329,7 +326,7 @@ export default function ClipDetail() {
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                       <span style={{ fontSize: 11, color: "var(--text3)" }}>Description</span>
-                      <button className="copy-btn" onClick={() => copy(clip.description!)}>Copy</button>
+                      <CopyButton text={clip.description} />
                     </div>
                     <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{clip.description}</div>
                   </div>
@@ -338,7 +335,7 @@ export default function ClipDetail() {
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                       <span style={{ fontSize: 11, color: "var(--text3)" }}>Tags</span>
-                      <button className="copy-btn" onClick={() => copy(clip.tags!)}>Copy</button>
+                      <CopyButton text={clip.tags} />
                     </div>
                     <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>{clip.tags}</div>
                   </div>
@@ -347,7 +344,7 @@ export default function ClipDetail() {
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                       <span style={{ fontSize: 11, color: "var(--text3)" }}>Hashtags</span>
-                      <button className="copy-btn" onClick={() => copy(clip.hashtags!)}>Copy</button>
+                      <CopyButton text={clip.hashtags} />
                     </div>
                     <div style={{ fontSize: 12, color: "var(--accent)", lineHeight: 1.6 }}>{clip.hashtags}</div>
                   </div>

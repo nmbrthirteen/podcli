@@ -90,7 +90,7 @@ export default function StudioHome() {
 
       {exporting > 0 && (
         <div className="set-note ok" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-          <div className="spinner sm" /> Exporting {exporting} clip{exporting > 1 ? "s" : ""} — they appear here as each finishes.
+          <div className="spinner sm" /> Exporting {exporting} clip{exporting > 1 ? "s" : ""}. They appear here as each finishes.
         </div>
       )}
 
@@ -100,8 +100,7 @@ export default function StudioHome() {
         </div>
       ) : episodes.length === 0 ? (
         <div className="drop-zone" style={{ textAlign: "center", padding: "48px 20px" }}>
-          <div className="icon" style={{ fontSize: 28 }}>🎬</div>
-          <div className="label" style={{ marginTop: 8 }}>
+          <div className="label">
             <Link to="/episode" style={{ color: "var(--accent)" }}>Start a new episode</Link>
           </div>
         </div>

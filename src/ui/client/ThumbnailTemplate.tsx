@@ -17,13 +17,13 @@ const GROUPS: { group: string; items: Field[] }[] = [
     { k: "box_width", t: "text" }, { k: "box_min_height", t: "text" },
     { k: "box_border_width", t: "num" }, { k: "box_fill_color", t: "color" }, { k: "box_padding", t: "text" },
   ]},
-  { group: "Headline — line 1", items: [
+  { group: "Headline: line 1", items: [
     { k: "text_color", t: "color" }, { k: "line1_color", t: "color" },
     { k: "line1_font_size", t: "text" }, { k: "line1_font_weight", t: "num" },
     { k: "line1_letter_spacing", t: "text" }, { k: "line1_line_height", t: "num" },
     { k: "line1_margin_bottom", t: "text" }, { k: "line1_uppercase", t: "bool" }, { k: "line1_nowrap", t: "bool" },
   ]},
-  { group: "Highlight — line 2", items: [
+  { group: "Highlight: line 2", items: [
     { k: "accent_color", t: "color" }, { k: "line2_text_color", t: "color" },
     { k: "line2_font_size", t: "text" }, { k: "line2_font_weight", t: "num" },
     { k: "line2_font_style", t: "select", opts: ["italic", "normal"] },
@@ -73,7 +73,7 @@ export default function ThumbnailTemplate() {
     try {
       const r = await api("/thumbnail-config", { method: "PUT", body: JSON.stringify(cfg) });
       if (r.error) throw new Error(r.error);
-      setMsg("Saved — new thumbnails use this template");
+      setMsg("Saved. New thumbnails use this template");
     } catch (e: any) { setMsg(`Save failed: ${e.message}`); } finally { setBusy(null); }
   };
 
@@ -93,7 +93,7 @@ export default function ThumbnailTemplate() {
       const r = await api("/thumbnail-config", { method: "PUT", body: JSON.stringify(parsed) });
       if (r.error) throw new Error(r.error);
       await load();
-      setMsg("Imported — new thumbnails use this template");
+      setMsg("Imported. New thumbnails use this template");
     } catch (e: any) { setMsg(`Import failed: ${e.message}`); } finally { setBusy(null); }
   };
 

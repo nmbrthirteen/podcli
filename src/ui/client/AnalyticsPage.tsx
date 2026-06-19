@@ -60,7 +60,7 @@ export default function AnalyticsPage() {
       const r = await api("/youtube/config", { method: "PUT", body: JSON.stringify({ client_id: clientId, ...(clientSecret ? { client_secret: clientSecret } : {}) }) });
       if (r.error) throw new Error(r.error);
       setClientSecret(""); setHasSecret(true);
-      setMsg("Saved — now run  podcli youtube auth  in your terminal to authorize");
+      setMsg("Saved. Run  podcli youtube auth  in your terminal to authorize");
     } catch (e: any) { setMsg(`Save failed: ${e.message}`); } finally { setBusy(false); }
   };
 
@@ -95,7 +95,7 @@ export default function AnalyticsPage() {
     try {
       const r = await api("/youtube/learn", { method: "POST", body: "{}" });
       if (r.error) throw new Error(r.error);
-      setMsg("Analysis written to the knowledge base — Claude will use it when picking shorts");
+      setMsg("Analysis written to the knowledge base. Claude will use it when picking shorts");
     } catch (e: any) { setMsg(`Analysis failed: ${e.message}`); } finally { setBusy(false); }
   };
 
@@ -160,7 +160,7 @@ export default function AnalyticsPage() {
         <div className="section">
           <div className="section-label">Link clips to uploads</div>
           {proposals.length === 0 ? (
-            <div style={{ fontSize: 13, color: "var(--text2)" }}>No proposals — every clip is linked, or no upload matched.</div>
+            <div style={{ fontSize: 13, color: "var(--text2)" }}>No proposals. Every clip is linked, or no upload matched.</div>
           ) : (
             proposals.map((p) => (
               <div key={p.clip_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
@@ -181,19 +181,18 @@ export default function AnalyticsPage() {
 
       {!data || data.published === 0 ? (
         <div className="drop-zone" style={{ textAlign: "center", padding: "48px 20px", color: "var(--text2)" }}>
-          <div className="icon" style={{ fontSize: 26 }}>📊</div>
           <div className="label" style={{ marginTop: 8 }}>No performance data yet.</div>
           <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>
-            Connect YouTube and Sync, or Import a YouTube Studio analytics CSV.
+            Connect YouTube and sync, or import a YouTube Studio analytics CSV.
           </div>
         </div>
       ) : (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 8 }}>
-            <Group title="Retention by content type — what holds viewers" rows={data.byContentType} metric="avgRetention" />
-            <Group title="CTR by caption style — packaging" rows={data.byCaptionStyle} metric="avgCtr" />
+            <Group title="Retention by content type: what holds viewers" rows={data.byContentType} metric="avgRetention" />
+            <Group title="CTR by caption style: packaging" rows={data.byCaptionStyle} metric="avgCtr" />
             <Group title="Retention by length" rows={data.byLength} metric="avgRetention" />
-            <Group title="Views by content type — reach" rows={data.byContentType} metric="avgViews" />
+            <Group title="Views by content type: reach" rows={data.byContentType} metric="avgViews" />
           </div>
 
           <div className="section">

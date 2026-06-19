@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import CopyButton from './CopyButton';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
     const api = async (path, opts = {}) => {
@@ -461,10 +462,14 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
         }).catch(() => { });
       }, [phase, videoPath, !!transcript, !!transcriptText, suggestions?.length, mcpConnected]);
 
-      const copyPrompt = (prompt, idx) => {
-        navigator.clipboard.writeText(prompt).then(() => {
+      const markCopied = (idx) => {
           setCopied(idx);
           setTimeout(() => setCopied(null), 1500);
+      };
+
+      const copyPrompt = (prompt, idx) => {
+        navigator.clipboard.writeText(prompt).then(() => {
+          markCopied(idx);
         }).catch(() => { });
       };
 
@@ -475,9 +480,9 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
         <div className="mcp-hints">
           <div className="mcp-hints-header" style={{ cursor: 'pointer' }} onClick={() => setCollapsed(!collapsed)}>
             <div className="mcp-hints-icon">AI</div>
-            <div className="mcp-hints-title">MCP Prompts</div>
+            <div className="mcp-hints-title">MCP prompts</div>
             <div className="mcp-hints-subtitle">
-              {collapsed ? `${hints.length} prompts` : 'click to copy'}
+              {collapsed ? `${hints.length} prompts` : 'Click to copy'}
             </div>
             <span style={{ fontSize: 10, color: 'var(--text3)', transition: 'transform 0.2s', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0)', marginLeft: 4 }}>{'\u25BC'}</span>
           </div>
@@ -492,9 +497,14 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     {copied === i ? 'Copied!' : hint.prompt}
                   </span>
                   <span className="mcp-hint-desc">{hint.description}</span>
-                  <button className="mcp-hint-copy" onClick={e => { e.stopPropagation(); copyPrompt(hint.prompt, i); }} title="Copy prompt">
-                    {copied === i ? '\u2713' : '\u2398'}
-                  </button>
+                  <CopyButton
+                    className="mcp-hint-copy"
+                    text={hint.prompt}
+                    title="Copy prompt"
+                    iconOnly
+                    stopPropagation
+                    onCopied={() => markCopied(i)}
+                  />
                 </div>
               ))}
             </div>
@@ -646,6 +656,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
       };
 
       const deletePreset = async (name) => {
+        if (!confirm(`Delete preset "${name}"?`)) return;
         try {
           await api('/presets', { method: 'POST', body: JSON.stringify({ action: 'delete', name }) });
           if (activePreset === name) setActivePreset('');
@@ -673,6 +684,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
 
       const deleteClipEdit = () => {
         if (editingClip === null) return;
+        if (!confirm(`Delete clip "${editForm.title}" from this batch?`)) return;
         setSuggestions(prev => prev.filter((_, i) => i !== editingClip));
         setDeselected(prev => {
           const next = new Set();
@@ -913,7 +925,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
           const d = await api('/find-moment', { method: 'POST', body: JSON.stringify({ text }) });
           if (d.error) { setError(d.error); return; }
           if (!d.added) {
-            setMomentNotice(d.found ? 'Those moments are already in your clips.' : "Couldn't find that moment — try different wording or a direct quote.");
+            setMomentNotice(d.found ? 'Those moments are already in your clips.' : "Couldn't find that moment. Try different wording or a direct quote.");
             return;
           }
           // suggestions refresh via the SSE state-sync broadcast
@@ -988,7 +1000,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
           parts.push('Then find the 5-8 best viral-worthy moments and call suggest_clips.');
         } else {
           parts.push('Use get_ui_state with include_transcript=true to read the full transcript.');
-          parts.push('Find the 5-8 best viral-worthy moments — hot takes, strong opinions, funny moments, actionable advice, and emotional stories.');
+          parts.push('Find the 5-8 best viral-worthy moments: hot takes, strong opinions, funny moments, actionable advice, and emotional stories.');
           parts.push('Then call suggest_clips with your suggestions.');
         }
         const settings = [];
@@ -1138,7 +1150,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                 )}
                 {speakerStatus && !speakerStatus.configured && (
                   <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'rgba(250,204,21,0.08)', color: '#facc15', border: '1px solid rgba(250,204,21,0.2)', cursor: 'pointer' }}
-                    title="Speaker detection not configured — click to learn more"
+                    title="Speaker detection not configured. Click to learn more"
                     onClick={() => window.open('https://huggingface.co/pyannote/speaker-diarization-3.1', '_blank')}>
                     Speakers ✗
                   </span>
@@ -1155,7 +1167,6 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
 
           {speakerStatus && !speakerStatus.configured && !sessionStorage.getItem('dismiss-speaker') && (
             <div className="fade-in" style={{ margin: '0 0 16px', padding: '14px 16px', background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.15)', borderRadius: 'var(--radius)', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-              <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1 }}>🎙️</span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Set up speaker detection</div>
                 <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>
@@ -1191,7 +1202,6 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                       </div>
                     ) : (
                       <>
-                        <div className="icon">{'\uD83C\uDFAC'}</div>
                         <div className="label"><strong>Browse</strong> to select a video file</div>
                       </>
                     )}
@@ -1214,7 +1224,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
               <div className="section">
                 <div className="section-label">Transcript</div>
                 <div className="tabs">
-                  <div className={`tab ${transcriptMode === 'import' ? 'active' : ''}`} onClick={() => setTranscriptMode('import')}>Paste Transcript</div>
+                  <div className={`tab ${transcriptMode === 'import' ? 'active' : ''}`} onClick={() => setTranscriptMode('import')}>Paste transcript</div>
                   <div className={`tab ${transcriptMode === 'whisper' ? 'active' : ''}`} onClick={() => setTranscriptMode('whisper')}>Auto (Whisper)</div>
                 </div>
                 {transcriptMode === 'import' && (
@@ -1223,7 +1233,6 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                       <div className={`drop-zone ${transcriptDragOver ? 'drag-over' : ''}`}
                         onDragOver={e => { preventDef(e); setTranscriptDragOver(true); }} onDragLeave={() => setTranscriptDragOver(false)}
                         onDrop={handleTranscriptDrop} style={{ marginBottom: 10, padding: '22px 20px' }}>
-                        <div className="icon">{'\uD83D\uDCC4'}</div>
                         <div className="label">Drop a transcript file or <strong>browse</strong></div>
                         <input type="file" accept=".txt,.json,.srt,.vtt" onChange={handleTranscriptFileSelect} disabled={isProcessing} />
                       </div>
@@ -1235,7 +1244,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                         <button className="btn btn-ghost btn-sm" onClick={() => { setTranscriptText(''); setTranscriptFileName(''); }} style={{ padding: '4px 10px', fontSize: 11 }}>Clear</button>
                       </div>
                     )}
-                    <textarea placeholder={'Speaker (00:00)\nText of what they said...\n\nSpeaker2 (00:15)\nMore text...\n\n— or paste JSON / drag a .txt file above —'}
+                    <textarea placeholder={'Speaker (00:00)\nText of what they said...\n\nSpeaker2 (00:15)\nMore text...\n\nOr paste JSON / drag a .txt file above.'}
                       value={transcriptText} onChange={e => { setTranscriptText(e.target.value); setTranscriptFileName(''); }}
                       disabled={isProcessing} style={{ minHeight: transcriptText ? 80 : 120 }}
                       onDragOver={e => { preventDef(e); setTranscriptDragOver(true); }} onDrop={handleTranscriptDrop} />
@@ -1342,7 +1351,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
 
                 <div className="settings-grid">
                   <div>
-                    <label className="field-label">Caption Style</label>
+                    <label className="field-label">Caption style</label>
                     <select value={captionStyle} onChange={e => onCaptionChange(e.target.value)} disabled={isProcessing}>
                       <option value="branded">Branded</option><option value="hormozi">Hormozi</option>
                       <option value="karaoke">Karaoke</option><option value="subtle">Subtle</option>
@@ -1351,7 +1360,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                   <div>
                     <label className="field-label">Crop</label>
                     <select value={cropStrategy} onChange={e => onCropChange(e.target.value)} disabled={isProcessing}>
-                      <option value="speaker">Speaker Aware</option><option value="face">Face Detection</option><option value="center">Center</option>
+                      <option value="speaker">Speaker aware</option><option value="face">Face detection</option><option value="center">Center</option>
                     </select>
                   </div>
                 </div>
@@ -1501,7 +1510,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     disabled={!videoPath.trim() || (transcriptMode === 'import' && !transcriptText.trim()) || (transcriptMode === 'whisper' && !transcript) || browsing || transcribing}
                     onClick={copyGeneratePrompt}
                     style={generateCopied ? { background: 'var(--green)', transition: 'background 0.2s' } : {}}>
-                    {phase === 'suggesting' ? 'Claude is analyzing...' : generateCopied ? 'Copied — paste in Claude' : 'Find Best Moments'}
+                    {phase === 'suggesting' ? 'Claude is analyzing...' : generateCopied ? 'Copied. Paste in Claude' : 'Find best moments'}
                   </button>
                   {videoPath.trim() && (transcriptText.trim() || transcript) && (
                     <McpHints phase={phase} videoPath={videoPath} transcript={transcript} transcriptText={transcriptText} suggestions={suggestions} mcpConnected={mcpConnected} />
@@ -1509,14 +1518,14 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                 </div>
               )}
 
-              {/* Find a specific moment — paste a quote/description, AI locates it */}
+              {/* Find a specific moment: paste a quote/description, AI locates it */}
               {(transcript || transcriptText) && phase !== 'parsing' && phase !== 'suggesting' && phase !== 'exporting' && (
                 <div className="section" style={{ marginTop: 16 }}>
                   <div className="section-label">Find a specific moment</div>
                   <textarea
                     className="input"
                     rows={3}
-                    placeholder="Paste a quote or describe the moment(s) you want — the AI searches the transcript and adds them to your clips."
+                    placeholder="Paste a quote or describe the moment you want. The AI searches the transcript and adds it to your clips."
                     value={momentText}
                     onChange={(e) => { setMomentText(e.target.value); setMomentNotice(null); }}
                     disabled={findingMoment}
@@ -1677,7 +1686,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                       <button className="btn btn-ghost" onClick={() => {
                         setPhase('idle'); setResults([]); setSuggestions([]); setBatchJobId(null); setFile(null); setTranscript(null); setActiveClipIdx(null); setPreviewSrc(null); setEnergyData({}); setCachedTranscript(false); autoTranscribeRef.current = '';
                         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', phase: 'idle', suggestions: [], deselectedIndices: [] }) }).catch(() => { });
-                      }}>Start Over</button>
+                      }}>Start over</button>
                       {phase === 'done' && <button className="btn btn-ghost" onClick={() => { setPhase('review'); setResults([]); setBatchJobId(null); }}>Re-export</button>}
                     </div>
                   )}
@@ -1689,7 +1698,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     <div className="fade-in" style={{ marginTop: 20, padding: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                         <div style={{ width: 20, height: 20, borderRadius: 6, background: 'rgba(74,222,128,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'var(--green)' }}>P</div>
-                        <span style={{ fontSize: 13, fontWeight: 700 }}>PodStack — next steps</span>
+                        <span style={{ fontSize: 13, fontWeight: 700 }}>PodStack: next steps</span>
                       </div>
                       <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 12 }}>
                         Clips are rendered. Now generate titles, descriptions, and thumbnails in Claude Code:
@@ -1843,14 +1852,14 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
           {editingClip !== null && suggestions[editingClip] && (
             <div className="clip-edit-overlay" onClick={() => setEditingClip(null)}>
               <div className="clip-edit-panel" onClick={e => e.stopPropagation()}>
-                <h3>Edit Clip #{editingClip + 1}</h3>
+                <h3>Edit clip #{editingClip + 1}</h3>
                 <div className="edit-field">
                   <label>Title</label>
                   <input type="text" value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
                     onKeyDown={e => { if (e.key === 'Enter') saveClipEdit(); }} autoFocus />
                 </div>
                 <div className="edit-field">
-                  <label>Time Range</label>
+                  <label>Time range</label>
                   <div className="time-row">
                     <div>
                       <input type="number" step="0.5" value={editForm.start} onChange={e => setEditForm(f => ({ ...f, start: parseFloat(e.target.value) || 0 }))}

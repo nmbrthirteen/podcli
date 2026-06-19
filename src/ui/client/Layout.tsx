@@ -36,7 +36,7 @@ export default function Layout() {
         <NavLink to="/knowledge" className="sidebar-link"><Icon name="knowledge" /> Knowledge</NavLink>
         <NavLink to="/config" className="sidebar-link"><Icon name="config" /> Config</NavLink>
         <NavLink to="/integrations" className="sidebar-link"><Icon name="integrations" /> Integrations</NavLink>
-        <NavLink to="/mcp" className="sidebar-link"><Icon name="config" /> MCP Setup</NavLink>
+        <NavLink to="/mcp" className="sidebar-link"><Icon name="config" /> MCP setup</NavLink>
 
         <div className="sidebar-section">Insights</div>
         <NavLink to="/analytics" className="sidebar-link"><Icon name="analytics" /> Analytics</NavLink>

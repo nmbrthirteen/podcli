@@ -96,17 +96,16 @@ export default function KnowledgePage() {
       return (
         <div className="app">
           <div className="header">
-            <h1>Knowledge Base</h1>
+            <h1>Knowledge base</h1>
             {kbDir && <div className="dir-path">{kbDir}</div>}
           </div>
 
           <div
-            className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
+            className={`drop-zone knowledge-drop-zone ${dragOver ? 'drag-over' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
           >
-            <div className="dz-icon">{'\uD83D\uDCC4'}</div>
             <div className="dz-text">
               Drop <strong>.md files</strong> here or click to browse
             </div>

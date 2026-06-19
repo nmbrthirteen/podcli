@@ -157,7 +157,7 @@ export default function ReframeEditor({
         </div>
 
         <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>
-          {detectingCuts ? "Detecting camera switches…" : cuts.length ? `${cuts.length} camera switch${cuts.length > 1 ? "es" : ""} detected — a keyframe near one snaps to it` : "No camera switches detected"}
+          {detectingCuts ? "Detecting camera switches…" : cuts.length ? `${cuts.length} camera switch${cuts.length > 1 ? "es" : ""} detected. A keyframe near one snaps to it.` : "No camera switches detected"}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
