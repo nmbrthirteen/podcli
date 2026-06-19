@@ -1470,11 +1470,17 @@ app.post("/api/clips/:id/thumbnail/render", async (req, res) => {
   if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
   const tc = clip.thumbnail_config || {};
   const { line1, line2, frame_path, frame_info } = req.body || {};
-  if (!frame_path || !existsSync(String(frame_path))) { res.status(400).json({ error: "select a frame first" }); return; }
+  if (!frame_path) { res.status(400).json({ error: "select a frame first" }); return; }
+  // Only allow frames podcli itself produced (candidate frames) or the user uploaded —
+  // never an arbitrary server path passed through to the renderer.
+  const resolvedFrame = resolve(String(frame_path));
+  const frameRoots = [resolve(join(paths.output, "thumbnails", String(clip.id))), resolve(uploadDir)];
+  const inAllowedRoot = frameRoots.some((root) => resolvedFrame === root || resolvedFrame.startsWith(root + path.sep));
+  if (!inAllowedRoot || !existsSync(resolvedFrame)) { res.status(400).json({ error: "invalid frame" }); return; }
   const outDir = join(paths.output, "thumbnails", String(clip.id));
   await mkdir(outDir, { recursive: true });
   const out = join(outDir, `thumb_${uuidv4().slice(0, 8)}.png`);
-  const args = ["thumbnail-render", tc.text || clip.title, "--frame", String(frame_path), "--output", out];
+  const args = ["thumbnail-render", tc.text || clip.title, "--frame", resolvedFrame, "--output", out];
   if (line1) args.push("--line1", String(line1));
   if (line2) args.push("--line2", String(line2));
   if (frame_info) args.push("--frame-info", JSON.stringify(frame_info));
@@ -1484,12 +1490,13 @@ app.post("/api/clips/:id/thumbnail/render", async (req, res) => {
   let outPath = "";
   try { outPath = JSON.parse(jsonLine || "{}").path || ""; } catch { /* no path */ }
   if (!outPath || !existsSync(outPath)) { res.status(500).json({ error: "no thumbnail produced" }); return; }
-  if (existsSync(clip.output_path)) {
+  if (clip.output_path && existsSync(clip.output_path)) {
     const bake = await bakeThumbnailCard(clip.output_path, outPath, tc.card_seconds || 0);
     if (!bake.ok) { res.status(500).json({ error: `rendered but bake into clip failed: ${bake.error}` }); return; }
   }
   const merged = { ...tc, line1: line1 || undefined, line2: line2 || undefined, preview_path: outPath, card_seconds: 1.5 };
-  await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
+  const edit = await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
+  if (edit.code !== 0) { res.status(500).json({ error: stripAnsi(edit.stderr || edit.stdout) || "thumbnail metadata update failed" }); return; }
   res.json({ ok: true, preview_path: outPath });
 });
 
