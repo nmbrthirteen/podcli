@@ -115,7 +115,7 @@ export default function ConfigPage() {
               <label className="field-label">
                 {s.label}{" "}
                 <span style={{ color: s.set ? "var(--green)" : "var(--text3)", fontSize: 11 }}>
-                  {s.set ? s.preview : "not set"}
+                  {s.set ? (s.preview || "set") : "not set"}
                 </span>
               </label>
               <div className="set-file">
