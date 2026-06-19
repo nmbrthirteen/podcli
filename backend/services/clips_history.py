@@ -8,7 +8,8 @@ file; this module is the Python writer used by the CLI.
 Entry shape (all fields beyond the core render record are optional):
   id, source_video, start_second, end_second, caption_style, crop_strategy,
   logo_path?, title, output_path, file_size_mb, duration, created_at,
-  content_type?, transcript_slice?, youtube_video_id?, metrics?
+  content_type?, transcript_slice?, youtube_video_id?, metrics?,
+  generated_titles?, description?, tags?, hashtags?
 
 metrics? = {views?, retention?, ctr?, impressions?, fetched_at?}  (Phase 2)
 

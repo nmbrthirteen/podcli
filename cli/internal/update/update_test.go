@@ -1,8 +1,11 @@
 package update
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,5 +44,33 @@ func TestNewer(t *testing.T) {
 		if got := newer(c.remote, c.current); got != c.want {
 			t.Errorf("newer(%q, %q) = %v, want %v", c.remote, c.current, got, c.want)
 		}
+	}
+}
+
+func TestSelfUpdateFailureOmitsPackageManagerFallback(t *testing.T) {
+	var out bytes.Buffer
+	printSelfUpdateFailure(&out, errors.New("boom"))
+
+	got := out.String()
+	for _, unwanted := range []string{"npm", "bun", "package manager"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("failure output contains %q:\n%s", unwanted, got)
+		}
+	}
+	if !strings.Contains(got, "Your installed podcli was left unchanged.") {
+		t.Fatalf("failure output should say the install is unchanged:\n%s", got)
+	}
+}
+
+func TestDownloadFailureSuggestsRetry(t *testing.T) {
+	var out bytes.Buffer
+	printSelfUpdateFailure(&out, &phaseError{phase: phaseDownload, err: errors.New("network down")})
+
+	got := out.String()
+	if !strings.Contains(got, "Download failed.") {
+		t.Fatalf("download failure output should identify the download failure:\n%s", got)
+	}
+	if strings.Contains(got, "latest release binary manually") {
+		t.Fatalf("download failure output should not suggest manual install first:\n%s", got)
 	}
 }

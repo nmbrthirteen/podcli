@@ -24,6 +24,7 @@ import { mkdir, readdir, unlink } from "fs/promises";
 import path from "path";
 import { join, dirname, basename, extname, resolve } from "path";
 import { execSync, spawn } from "child_process";
+import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
@@ -40,6 +41,7 @@ import { sliceTranscript, sliceWords, findContentType } from "../utils/transcrip
 import { errMsg } from "../utils/errors.js";
 import type {
   BatchClipsResult,
+  ClipHistoryEntry,
   ClipResult,
   ProgressEvent,
   SuggestedClip,
@@ -1077,24 +1079,39 @@ app.get("/api/stream-source", (req, res) => {
   streamVideo(req, res, filePath, mimeTypes[extname(filePath).toLowerCase()] || "video/mp4");
 });
 
-app.get("/api/thumbnail-config", (_req, res) => {
-  try {
-    res.json(JSON.parse(readFileSync(paths.thumbnailConfig, "utf-8")));
-  } catch {
-    res.json({});
-  }
+// Route through the CLI so the Studio and the renderer resolve the same config
+// path (a direct read here can miss it under the launcher's data dir).
+app.get("/api/thumbnail-config", async (_req, res) => {
+  const r = await runCli(["thumbnail-config", "show"]);
+  if (r.code !== 0) { res.json({}); return; }
+  try { res.json(JSON.parse(r.stdout)); } catch { res.json({}); }
 });
 
-app.put("/api/thumbnail-config", (req, res) => {
+app.put("/api/thumbnail-config", async (req, res) => {
+  const tmp = join(tmpdir(), `podcli-tc-${uuidv4().slice(0, 8)}.json`);
   try {
-    let current: Record<string, unknown> = {};
-    try { current = JSON.parse(readFileSync(paths.thumbnailConfig, "utf-8")); } catch { /* new file */ }
-    const merged = { ...current, ...(req.body || {}) };
-    writeFileSync(paths.thumbnailConfig, JSON.stringify(merged, null, 2), "utf-8");
+    writeFileSync(tmp, JSON.stringify(req.body || {}), "utf-8");
+    const r = await runCli(["thumbnail-config", "import", tmp]);
+    if (r.code !== 0) throw new Error(stripAnsi(r.stderr || r.stdout) || "save failed");
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
+  } finally {
+    try { await unlink(tmp); } catch { /* best effort */ }
   }
+});
+
+app.get("/api/thumbnail-config/export", async (_req, res) => {
+  const r = await runCli(["thumbnail-config", "show"]);
+  if (r.code !== 0) { res.status(500).json({ error: "export failed" }); return; }
+  res.setHeader("Content-Disposition", 'attachment; filename="thumbnail-config.json"');
+  res.type("application/json").send(r.stdout);
+});
+
+app.post("/api/thumbnail-config/reset", async (_req, res) => {
+  const r = await runCli(["thumbnail-config", "reset"]);
+  if (r.code !== 0) { res.status(500).json({ error: stripAnsi(r.stderr || r.stdout) || "reset failed" }); return; }
+  res.json({ ok: true });
 });
 
 app.get("/api/image", (req, res) => {
@@ -2244,7 +2261,20 @@ app.post("/api/generate-content", async (req, res) => {
         }),
     );
 
-    res.json(result.data);
+    const data: any = result.data || {};
+    // Persist onto the clip's history entry so the generated metadata survives a
+    // reload — generation is expensive and was previously discarded after display.
+    const clipId = clip?.id ? await clipsHistory.resolveId(String(clip.id)) : null;
+    if (clipId) {
+      const patch: Partial<ClipHistoryEntry> = {};
+      if (Array.isArray(data.titles) && data.titles.length) patch.generated_titles = data.titles;
+      if (data.description) patch.description = data.description;
+      if (data.tags) patch.tags = data.tags;
+      if (data.hashtags) patch.hashtags = data.hashtags;
+      if (Object.keys(patch).length) await clipsHistory.update(clipId, patch);
+    }
+
+    res.json(data);
   } catch (err: any) {
     res.status(500).json({
       error: `Content generation failed: ${err.message?.substring(0, 200)}`,

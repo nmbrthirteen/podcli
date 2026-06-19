@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api, labelStyle } from "./lib";
 
 type Cfg = Record<string, any>;
@@ -58,23 +58,54 @@ function padToPreview(pad: any): string {
 
 export default function ThumbnailTemplate() {
   const [cfg, setCfg] = useState<Cfg | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    api("/thumbnail-config").then((d) => setCfg(d && typeof d === "object" ? d : {})).catch(() => setCfg({}));
-  }, []);
+  const load = () => api("/thumbnail-config").then((d) => setCfg(d && typeof d === "object" ? d : {})).catch(() => setCfg({}));
+  useEffect(() => { load(); }, []);
 
   if (!cfg) return <div className="app"><div style={{ display: "flex", gap: 10, alignItems: "center", color: "var(--text2)", padding: 40 }}><div className="spinner sm" /> Loading…</div></div>;
 
   const set = (k: string, v: any) => setCfg({ ...cfg, [k]: v });
   const save = async () => {
-    setBusy(true); setMsg(null);
+    setBusy("save"); setMsg(null);
     try {
       const r = await api("/thumbnail-config", { method: "PUT", body: JSON.stringify(cfg) });
       if (r.error) throw new Error(r.error);
       setMsg("Saved — new thumbnails use this template");
-    } catch (e: any) { setMsg(`Save failed: ${e.message}`); } finally { setBusy(false); }
+    } catch (e: any) { setMsg(`Save failed: ${e.message}`); } finally { setBusy(null); }
+  };
+
+  const exportCfg = () => {
+    const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "thumbnail-config.json"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importCfg = async (f: File) => {
+    setBusy("import"); setMsg(null);
+    try {
+      const parsed = JSON.parse(await f.text());
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not a config object");
+      const r = await api("/thumbnail-config", { method: "PUT", body: JSON.stringify(parsed) });
+      if (r.error) throw new Error(r.error);
+      await load();
+      setMsg("Imported — new thumbnails use this template");
+    } catch (e: any) { setMsg(`Import failed: ${e.message}`); } finally { setBusy(null); }
+  };
+
+  const reset = async () => {
+    if (!window.confirm("Reset to the generic default template? Your current settings will be removed.")) return;
+    setBusy("reset"); setMsg(null);
+    try {
+      const r = await api("/thumbnail-config/reset", { method: "POST", body: "{}" });
+      if (r.error) throw new Error(r.error);
+      await load();
+      setMsg("Reset to the generic default template");
+    } catch (e: any) { setMsg(`Reset failed: ${e.message}`); } finally { setBusy(null); }
   };
 
   const field = (f: Field) => {
@@ -135,8 +166,12 @@ export default function ThumbnailTemplate() {
               </span>
             </div>
           </div>
-          <div style={{ marginTop: 16 }}>
-            <button className="btn btn-primary btn-sm" onClick={save} disabled={busy}>{busy ? <div className="spinner sm" /> : "Save template"}</button>
+          <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <button className="btn btn-primary btn-sm" onClick={save} disabled={busy !== null}>{busy === "save" ? <div className="spinner sm" /> : "Save template"}</button>
+            <button className="btn btn-ghost btn-sm" onClick={exportCfg} disabled={busy !== null}>Export</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => importRef.current?.click()} disabled={busy !== null}>{busy === "import" ? <div className="spinner sm" /> : "Import"}</button>
+            <button className="btn btn-ghost btn-sm" onClick={reset} disabled={busy !== null}>{busy === "reset" ? <div className="spinner sm" /> : "Reset to default"}</button>
+            <input ref={importRef} type="file" accept=".json,application/json" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && importCfg(e.target.files[0])} />
           </div>
           {msg && <div className="set-note ok" style={{ marginTop: 12 }}>{msg}</div>}
         </div>

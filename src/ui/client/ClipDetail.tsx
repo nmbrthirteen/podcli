@@ -29,6 +29,10 @@ interface Clip {
   content_type?: string;
   transcript_slice?: string;
   thumbnail_config?: ThumbnailConfig;
+  generated_titles?: string[];
+  description?: string;
+  tags?: string;
+  hashtags?: string;
 }
 
 const CAPTION_STYLES = ["branded", "hormozi", "karaoke", "subtle"];
@@ -150,6 +154,30 @@ export default function ClipDetail() {
     } catch (e: any) { setMsg(`DaVinci export failed: ${e.message}`); } finally { setBusy(null); }
   };
 
+  const generateContent = async () => {
+    setBusy("content"); setMsg(null);
+    try {
+      const body = {
+        clip: {
+          id: clip.id, title: clip.title,
+          start_second: clip.start_second, end_second: clip.end_second,
+          content_type: clip.content_type,
+        },
+        transcript_segments: clip.transcript_slice
+          ? [{ start: clip.start_second, text: clip.transcript_slice }]
+          : [],
+      };
+      const r = await api("/generate-content", { method: "POST", body: JSON.stringify(body) });
+      if (r.error) throw new Error(r.error);
+      if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing — is claude/codex installed?");
+      load();
+    } catch (e: any) { setMsg(`Content generation failed: ${e.message}`); } finally { setBusy(null); }
+  };
+
+  const copy = (text: string) => {
+    navigator.clipboard?.writeText(text).then(() => setMsg("Copied to clipboard"), () => {});
+  };
+
   const del = async () => {
     if (!window.confirm(`Delete "${clip.title}"? This removes the rendered file too.`)) return;
     setBusy("delete"); setMsg(null);
@@ -244,6 +272,60 @@ export default function ClipDetail() {
                     <img src={img(v, bust)} alt="" />
                   </button>
                 ))}
+              </div>
+            )}
+          </div>
+
+          <div className="section">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>Titles & description</label>
+              <button className="btn btn-ghost btn-sm" onClick={generateContent} disabled={busy !== null}>
+                {busy === "content" ? <div className="spinner sm" /> : (clip.generated_titles?.length || clip.description ? "Regenerate" : "Generate")}
+              </button>
+            </div>
+            {!clip.generated_titles?.length && !clip.description ? (
+              <div style={{ fontSize: 12, color: "var(--text3)" }}>Generate titles, a description, tags, and hashtags for this clip.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {clip.generated_titles?.length ? (
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Title options · click to use</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      {clip.generated_titles.map((t, i) => (
+                        <button key={i} className="title-option" onClick={() => { setTitle(t.replace(/^\d+\.\s*/, "")); }}>
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {clip.description ? (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, color: "var(--text3)" }}>Description</span>
+                      <button className="copy-btn" onClick={() => copy(clip.description!)}>Copy</button>
+                    </div>
+                    <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{clip.description}</div>
+                  </div>
+                ) : null}
+                {clip.tags ? (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, color: "var(--text3)" }}>Tags</span>
+                      <button className="copy-btn" onClick={() => copy(clip.tags!)}>Copy</button>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>{clip.tags}</div>
+                  </div>
+                ) : null}
+                {clip.hashtags ? (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, color: "var(--text3)" }}>Hashtags</span>
+                      <button className="copy-btn" onClick={() => copy(clip.hashtags!)}>Copy</button>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--accent)", lineHeight: 1.6 }}>{clip.hashtags}</div>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>

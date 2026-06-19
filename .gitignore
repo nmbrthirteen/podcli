@@ -5,6 +5,16 @@ venv/
 # Build output
 dist/
 
+# Tool caches
+.cache/
+**/.cache/
+.bundle-cache/
+**/.bundle-cache/
+.vite/
+.turbo/
+.next/
+*.tsbuildinfo
+
 # Data directory
 data/
 .podcli/

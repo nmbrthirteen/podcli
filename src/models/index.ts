@@ -238,6 +238,12 @@ export interface ClipHistoryEntry {
   thumbnail_config?: ClipThumbnailConfig;
   youtube_video_id?: string;
   metrics?: ClipPerformanceMetrics;
+  // AI-generated publishing metadata (titles/description/tags/hashtags), persisted
+  // so it survives a page reload instead of vanishing after generation.
+  generated_titles?: string[];
+  description?: string;
+  tags?: string;
+  hashtags?: string;
 }
 
 // === Knowledge Base Models ===

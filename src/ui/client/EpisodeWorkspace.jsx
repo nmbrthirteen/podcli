@@ -1814,7 +1814,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     </div>
                   )}
                   {activePreset && (
-                    <div className="preview-tag" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(212,135,74,0.2)' }}>
+                    <div className="preview-tag" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(219,139,72,0.2)' }}>
                       Preset {'\u00B7'} <strong>{activePreset}</strong>
                     </div>
                   )}
