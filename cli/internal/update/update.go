@@ -1,10 +1,10 @@
-// Package update checks GitHub Releases for a newer podcli and (once releases
-// publish per-platform binaries) applies it. For now a manual update points the
-// user at their package manager, matching the npm/bun reinstall fallback.
+// Package update checks GitHub Releases for a newer podcli and applies the
+// release binary for this platform.
 package update
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +22,27 @@ import (
 
 const repo = "nmbrthirteen/podcli"
 
+type updatePhase string
+
+const (
+	phaseDownload updatePhase = "download"
+	phaseVerify   updatePhase = "verify"
+	phaseInstall  updatePhase = "install"
+)
+
+type phaseError struct {
+	phase updatePhase
+	err   error
+}
+
+func (e *phaseError) Error() string {
+	return e.err.Error()
+}
+
+func (e *phaseError) Unwrap() error {
+	return e.err
+}
+
 func exeExt() string {
 	if runtime.GOOS == "windows" {
 		return ".exe"
@@ -29,8 +50,7 @@ func exeExt() string {
 	return ""
 }
 
-// managedBin is the binary the npm shim and direct installs both exec, so
-// replacing it updates podcli regardless of how it was installed.
+// managedBin is the binary direct installs exec, so replacing it updates podcli.
 func managedBin() string {
 	return filepath.Join(paths.BinDir(), "podcli"+exeExt())
 }
@@ -139,12 +159,31 @@ func Run(current string) int {
 	}
 	fmt.Printf("Updating podcli %s → %s ...\n", current, tag)
 	if err := apply(tag); err != nil {
-		fmt.Fprintf(os.Stderr, "podcli: self-update failed (%v).\n", err)
-		fmt.Fprintln(os.Stderr, "Reinstall via your package manager:  npm i -g podcli   (or: bun add -g podcli)")
+		printSelfUpdateFailure(os.Stderr, err)
 		return 1
 	}
 	fmt.Printf("Updated to podcli %s.\n", tag)
 	return 0
+}
+
+func printSelfUpdateFailure(w io.Writer, err error) {
+	fmt.Fprintf(w, "podcli: self-update failed (%v).\n", err)
+	fmt.Fprintln(w, "Your installed podcli was left unchanged.")
+
+	if phaseOf(err) == phaseDownload {
+		fmt.Fprintln(w, "Download failed. Check your network connection, then run `podcli update` again.")
+		return
+	}
+
+	fmt.Fprintln(w, "Run `podcli update` again. If it keeps failing, install the latest release binary manually.")
+}
+
+func phaseOf(err error) updatePhase {
+	var pe *phaseError
+	if errors.As(err, &pe) {
+		return pe.phase
+	}
+	return ""
 }
 
 // apply downloads the release binary for this platform and swaps the managed
@@ -152,22 +191,25 @@ func Run(current string) int {
 func apply(tag string) error {
 	dest := managedBin()
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return err
+		return &phaseError{phase: phaseInstall, err: err}
 	}
 	staged := dest + ".new"
 	if err := downloadFile(assetURL(tag), staged); err != nil {
-		return err
+		return &phaseError{phase: phaseDownload, err: err}
 	}
 	if err := verifyStaged(tag, staged); err != nil {
 		os.Remove(staged)
-		return err
+		return &phaseError{phase: phaseVerify, err: err}
 	}
 	if runtime.GOOS != "windows" {
 		if err := os.Chmod(staged, 0o755); err != nil {
-			return err
+			return &phaseError{phase: phaseInstall, err: err}
 		}
 	}
-	return swap(staged, dest)
+	if err := swap(staged, dest); err != nil {
+		return &phaseError{phase: phaseInstall, err: err}
+	}
+	return nil
 }
 
 // verifyStaged checks the downloaded binary against the release's checksums.txt.

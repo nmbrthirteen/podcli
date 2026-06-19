@@ -2072,6 +2072,55 @@ def cmd_init_thumbnail(args):
     )
 
 
+def cmd_thumbnail_config(args):
+    """Show, export, import, or reset the thumbnail template config.
+
+    Resolves the same config path the renderer uses, so the Web UI (which shells
+    out to this command) and generated thumbnails never disagree on it.
+    """
+    from services.thumbnail_html import _load_config
+
+    action = getattr(args, "tc_action", None) or "show"
+    target = paths["thumbnailConfig"]
+
+    if action == "show":
+        print(json.dumps(_load_config(), indent=2, ensure_ascii=False))
+        return
+
+    if action == "export":
+        dest = os.path.abspath(os.path.expanduser(args.path))
+        os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+        # Copy the override verbatim for a clean round-trip; seed from defaults
+        # when there is none yet.
+        if os.path.exists(target):
+            shutil.copyfile(target, dest)
+        else:
+            with open(dest, "w", encoding="utf-8") as f:
+                json.dump(_load_config(), f, indent=2, ensure_ascii=False)
+        print(f"Exported thumbnail config to {dest}")
+        return
+
+    if action == "import":
+        src = os.path.abspath(os.path.expanduser(args.path))
+        with open(src, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("thumbnail config must be a JSON object")
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        print(f"Imported thumbnail config -> {target}")
+        return
+
+    if action == "reset":
+        if os.path.exists(target):
+            os.remove(target)
+        print("Reset thumbnail config — using the generic default template.")
+        return
+
+    raise ValueError(f"unknown thumbnail-config action: {action}")
+
+
 def cmd_thumbnails(args):
     """Generate thumbnail variations for a title."""
     from services.thumbnail_ai import generate_variations
@@ -3273,6 +3322,16 @@ def main():
     thumb.add_argument("--line2", help="Explicit second thumbnail line")
     thumb.add_argument("--json", action="store_true", help="Emit JSON {paths:[...]} to stdout")
 
+    # ── thumbnail-config ──
+    tcfg = sub.add_parser("thumbnail-config", help="Show, export, import, or reset the thumbnail template")
+    tcfg_sub = tcfg.add_subparsers(dest="tc_action")
+    tcfg_sub.add_parser("show", help="Print the effective thumbnail config (defaults + overrides) as JSON")
+    tcfg_exp = tcfg_sub.add_parser("export", help="Write the current thumbnail config to a file")
+    tcfg_exp.add_argument("path", help="Destination .json path")
+    tcfg_imp = tcfg_sub.add_parser("import", help="Replace the thumbnail config from a file")
+    tcfg_imp.add_argument("path", help="Source .json path")
+    tcfg_sub.add_parser("reset", help="Remove the override and revert to the generic default")
+
     # ── swap-thumbnail ──
     st = sub.add_parser("swap-thumbnail", help="Regenerate thumbnail on an existing clip")
     st.add_argument("clip", help="Path to rendered clip (.mp4)")
@@ -3412,6 +3471,8 @@ def main():
         cmd_studio(args)
     elif args.command == "thumbnails":
         cmd_thumbnails(args)
+    elif args.command == "thumbnail-config":
+        cmd_thumbnail_config(args)
     elif args.command == "swap-thumbnail":
         cmd_swap_thumbnail(args)
     elif args.command == "bake-thumbnail":

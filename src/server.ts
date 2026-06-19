@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { readFileSync, writeFileSync } from "fs";
 
 import {
   transcribeToolDef,
@@ -1887,6 +1888,52 @@ export function createServer(): McpServer {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
         };
+      }
+    },
+  );
+
+  // =============================================
+  // Tool: manage_thumbnail_config
+  // =============================================
+  server.tool(
+    "manage_thumbnail_config",
+    "Show, export, import, or reset the thumbnail template (colors, fonts, frame, box, layout) podcli uses to generate thumbnails. 'show' returns the effective config; 'export' writes it to a file path; 'import' replaces it from a file path; 'reset' reverts to the generic default.",
+    {
+      action: z.enum(["show", "export", "import", "reset"]).describe("Config action"),
+      path: z.string().optional().describe("File path for export (destination) or import (source)"),
+    },
+    async ({ action, path: filePath }) => {
+      try {
+        if ((action === "export" || action === "import") && !filePath) {
+          return mcpError(`'path' is required for action '${action}'.`);
+        }
+        const base = "http://localhost:3847/api/thumbnail-config";
+        if (action === "show") {
+          const res = await fetch(base);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return { content: [{ type: "text" as const, text: JSON.stringify(await res.json(), null, 2) }] };
+        }
+        if (action === "export") {
+          const res = await fetch(base);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          writeFileSync(filePath!, JSON.stringify(await res.json(), null, 2), "utf-8");
+          return { content: [{ type: "text" as const, text: `Exported thumbnail config to ${filePath}` }] };
+        }
+        if (action === "import") {
+          const parsed = JSON.parse(readFileSync(filePath!, "utf-8"));
+          const res = await fetch(base, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parsed) });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return { content: [{ type: "text" as const, text: `Imported thumbnail config from ${filePath}` }] };
+        }
+        const res = await fetch(`${base}/reset`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return { content: [{ type: "text" as const, text: "Reset thumbnail config to the generic default." }] };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
+          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+        }
+        return mcpError(msg);
       }
     },
   );
