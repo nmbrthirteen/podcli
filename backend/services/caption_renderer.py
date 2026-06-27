@@ -132,13 +132,12 @@ def render_captions(
     return output_path
 
 
-CAPTION_GAP_FILL_MAX = 0.4  # seconds — hold a caption through short pauses, not long ones
+CAPTION_GAP_FILL_MAX = 0.4  # seconds
 
 
 def _hold_through_gap(chunks: list[list[dict]], idx: int, end: float, offset: float) -> float:
-    """Extend a chunk's end toward the next chunk's start so a pause landing on a
-    chunk boundary doesn't blank the screen. Capped so long pauses still clear the
-    caption, and never overlaps the next chunk."""
+    """Extend a chunk's end toward the next chunk's start so a pause on a chunk
+    boundary doesn't blank the screen. Capped, and never overlaps the next chunk."""
     for j in range(idx + 1, len(chunks)):
         if chunks[j]:
             next_start = max(0, chunks[j][0]["start"] - offset)

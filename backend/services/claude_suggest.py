@@ -360,13 +360,9 @@ def _should_bucket_initial_selection(segments: list[dict]) -> bool:
 
 
 def _dedupe_clips_by_range(clips: list[dict]) -> list[dict]:
-    """Collapse duplicate/overlapping clip suggestions, keeping the higher-scored
-    one, and return them sorted by start time.
-
-    Exact rounded-range matching misses near-duplicates (e.g. 100.0-140.0 vs
-    102.5-141.5 are the same moment), so two clips that overlap by more than half
-    of the shorter clip's duration are treated as duplicates.
-    """
+    """Collapse overlapping clip suggestions (>50% of the shorter clip), keeping
+    the higher-scored one, sorted by start time. Exact-range matching would miss
+    near-duplicates like 100.0-140.0 vs 102.5-141.5."""
     kept: list[dict] = []
     # Highest-scored first so the survivor of an overlap is the better clip.
     for clip in sorted(clips, key=lambda c: c.get("score", 0), reverse=True):
@@ -388,10 +384,9 @@ def _dedupe_clips_by_range(clips: list[dict]) -> list[dict]:
 
 
 def _select_top_by_score(clips: list[dict], top_n: int) -> list[dict]:
-    """Keep the highest-scored `top_n` clips, then order the survivors by start
-    time for display. Selection must rank by score first — truncating an
-    already start-sorted list ships the earliest clips, not the best ones.
-    """
+    """Keep the highest-scored `top_n` clips, then order them by start time.
+    Ranking by score must come before truncation — otherwise the earliest clips
+    ship, not the best ones."""
     if len(clips) <= top_n:
         return sorted(clips, key=lambda c: c.get("start_second", 0))
     ranked = sorted(clips, key=lambda c: c.get("score", 0), reverse=True)[:top_n]

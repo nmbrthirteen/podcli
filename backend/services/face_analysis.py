@@ -101,12 +101,13 @@ def analyze_faces(
         small = cv2.resize(roi, (16, 16))
         return cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.int16)
 
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    if total_frames <= 0:
-        total_frames = max(1, int(duration * fps))
-    # Sample evenly without per-frame seeks: grab() advances cheaply, retrieve()
-    # decodes only the sampled frames. A cap.set() per sample re-decoded from the
-    # nearest keyframe each time — far slower, especially on long videos.
+    # Some containers under-report CAP_PROP_FRAME_COUNT, which would confine
+    # sampling to the front of the video; fall back to duration*fps.
+    reported_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    est_frames = int(duration * fps) if duration and fps else 0
+    total_frames = max(reported_frames, est_frames, 1)
+    # grab() advances cheaply, retrieve() decodes only the sampled frames — far
+    # cheaper than a cap.set() seek (keyframe re-decode) per sample.
     step = max(1, total_frames // sample_count)
     frame_idx = -1
     sampled = 0
@@ -119,7 +120,8 @@ def analyze_faces(
         ret, frame = cap.retrieve()
         if not ret:
             continue
-        t = frame_idx / fps
+        pos_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+        t = pos_ms / 1000.0 if pos_ms and pos_ms > 0 else frame_idx / fps
 
         faces = detect_faces(detector, frame, width, height)
         current_mouth_gray: dict[int, "np.ndarray"] = {}

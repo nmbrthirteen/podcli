@@ -84,7 +84,7 @@ Clips come out as **upload-ready Shorts**: 1080x1920, 9:16 vertical, with burned
 Open the project in **Claude Code** and run:
 
 ```
-/prep-episode
+/produce-shorts
 ```
 
 This runs the [PodStack](https://github.com/nmbrthirteen/podstack) pipeline — a gstack-style workflow that gives you:
@@ -135,7 +135,7 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 - **`/generate-descriptions`** — descriptions + hashtags + SEO keywords
 - **`/plan-thumbnails`** — thumbnail text + designer briefs for both formats
 - **`/review-content`** — paranoid brand check (banned words, voice, title rules)
-- **`/prep-episode`** — full pipeline: transcript → publish-ready package
+- **`/produce-shorts`** — full pipeline: transcript → publish-ready package
 - **`/publish-checklist`** — pre/post-publish optimization
 - **`/retro-episode`** — performance analysis after publishing
 
@@ -240,7 +240,7 @@ Open the project in Claude Code, then use slash commands:
 
 ```bash
 # Full pipeline — transcript to publish-ready package
-/prep-episode
+/produce-shorts
 
 # Individual steps
 /process-transcript        # extract moments from a transcript
@@ -356,7 +356,7 @@ podcli/
 │   ├── generate-descriptions.md
 │   ├── plan-thumbnails.md
 │   ├── review-content.md
-│   ├── prep-episode.md
+│   ├── produce-shorts.md
 │   ├── publish-checklist.md
 │   └── retro-episode.md
 │

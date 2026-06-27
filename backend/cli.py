@@ -261,9 +261,8 @@ def _ensure_ssl_certs():
             except Exception:
                 pass
 
-    # Method 4: Last resort — disable SSL verification, but only when the user
-    # has explicitly opted in. Silently turning off process-wide TLS verification
-    # is a downgrade attack surface, so default to failing loudly instead.
+    # Method 4: disable SSL verification only on explicit opt-in — silently
+    # turning off TLS verification is a downgrade risk.
     if os.environ.get("PODCLI_INSECURE_SSL", "").strip().lower() in ("1", "true", "yes", "on"):
         ssl._create_default_https_context = ssl._create_unverified_context
         os.environ["PYTHONHTTPSVERIFY"] = "0"

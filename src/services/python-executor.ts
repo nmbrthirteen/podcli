@@ -10,22 +10,18 @@ const isWindows = process.platform === "win32";
 function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
   if (proc.pid === undefined) return;
   try {
-    if (isWindows) {
-      proc.kill(signal);
-    } else {
-      // Negative pid targets the whole process group. The child is spawned
-      // detached (a group leader), so its ffmpeg/whisper children die too
-      // instead of running to completion after the parent gives up.
-      process.kill(-proc.pid, signal);
-    }
+    // Negative pid kills the whole group — the child is a detached group
+    // leader, so its ffmpeg/whisper children die with it.
+    if (isWindows) proc.kill(signal);
+    else process.kill(-proc.pid, signal);
   } catch {
     // Already exited.
   }
 }
 
 function parseResultLine<T>(stdout: string): TaskResult<T> | null {
-  // The backend may print stray lines to stdout; the result is the last line
-  // that parses to a JSON object carrying a status field.
+  // The result is the last stdout line that parses to a JSON object with a
+  // status field; the backend may also print stray lines.
   const lines = stdout.trim().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
@@ -36,7 +32,7 @@ function parseResultLine<T>(stdout: string): TaskResult<T> | null {
         return parsed as TaskResult<T>;
       }
     } catch {
-      // Not the result line — keep scanning upward.
+      continue;
     }
   }
   return null;
@@ -95,8 +91,8 @@ export class PythonExecutor {
         stdout += chunk.toString();
       });
 
-      // Progress events arrive on stderr, one JSON object per line. Buffer
-      // across chunks so an event split over a chunk boundary isn't dropped.
+      // Buffer across chunks so a progress event split over a chunk boundary
+      // isn't dropped.
       let stderrBuffer = "";
       proc.stderr.on("data", (chunk: Buffer) => {
         const raw = chunk.toString();
@@ -115,7 +111,7 @@ export class PythonExecutor {
               onProgress(event);
             }
           } catch {
-            // Regular log line, ignore
+            continue;
           }
         }
       });
@@ -124,11 +120,9 @@ export class PythonExecutor {
         finish(() => reject(new Error(`Failed to spawn Python process: ${err.message}`)));
       });
 
-      // A child that crashes before we finish writing the request makes stdin
-      // emit EPIPE; without a handler that unhandled error crashes the server.
-      proc.stdin.on("error", () => {
-        // The close/error handlers surface the real failure.
-      });
+      // Without this, an EPIPE from a fast-crashing child becomes an unhandled
+      // error that crashes the server.
+      proc.stdin.on("error", () => {});
 
       proc.on("close", (code) => {
         finish(() => {
@@ -152,15 +146,11 @@ export class PythonExecutor {
         });
       });
 
-      // Send request and close stdin
       try {
         proc.stdin.write(JSON.stringify(request) + "\n");
         proc.stdin.end();
-      } catch {
-        // EPIPE — surfaced by the stdin 'error'/'close' handlers above.
-      }
+      } catch {}
 
-      // Timeout guard: SIGTERM the group for a graceful exit, then SIGKILL.
       timer = setTimeout(() => {
         killProcessTree(proc, "SIGTERM");
         setTimeout(() => killProcessTree(proc, "SIGKILL"), 2000).unref();

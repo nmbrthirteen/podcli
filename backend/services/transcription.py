@@ -86,10 +86,9 @@ def _attach_speakers_and_faces(
     num_speakers,
     progress_callback,
 ):
-    """Run speaker diarization + face analysis on a transcribed result and merge
-    them in. Shared by the whisper-py and whisper.cpp paths so speaker-aware
-    framing works regardless of transcription engine — face analysis needs only
-    OpenCV, so face_map is populated even when diarization is unavailable."""
+    """Merge speaker diarization + face analysis into a transcribed result.
+    Shared by both engines; face analysis (OpenCV) runs even when diarization
+    is unavailable."""
     segments = base.get("segments") or []
     words = base.get("words") or []
     duration = base.get("duration") or (segments[-1]["end"] if segments else 0.0)
@@ -240,10 +239,8 @@ def transcribe_file(
 
     if use_cpp:
         base = _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
-        # whisper.cpp is the no-torch path — native installs use it precisely
-        # because pyannote/torch isn't available (and importing a broken torch
-        # can hard-crash the process). Skip diarization here but still run face
-        # analysis (OpenCV only), which is what restores speaker-aware framing.
+        # whisper.cpp is the no-torch path: importing torch for diarization can
+        # hard-crash native runtimes. Skip diarization, keep face analysis (OpenCV).
         return _attach_speakers_and_faces(
             file_path, base, False, num_speakers, progress_callback
         )

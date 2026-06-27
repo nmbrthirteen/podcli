@@ -176,18 +176,14 @@ function loadPersistedState(): UIState {
 
 const uiState: UIState = loadPersistedState();
 
-// Source files the server itself confirmed the user selected (native dialog,
-// upload, or explicit select). /api/stream-source streams only these — a forged
-// POST /api/ui-state can set uiState.videoPath for display but cannot grant
-// read access to arbitrary files on disk.
+// Files the server confirmed the user selected; /api/stream-source serves only
+// these, so a forged /api/ui-state can't grant reads of arbitrary files.
 const allowedSourcePaths = new Set<string>();
 function registerSourcePath(p: string | undefined | null): void {
   if (!p) return;
   try {
     allowedSourcePaths.add(realpathSync(path.resolve(p)));
-  } catch {
-    // Not resolvable yet — don't register.
-  }
+  } catch {}
 }
 registerSourcePath(uiState.videoPath);
 
@@ -1073,8 +1069,8 @@ app.get("/api/stream-source", (req, res) => {
     return;
   }
 
-  // Media-extension gate: only audio/video can be streamed, so this endpoint
-  // can never serve token/key/.env files regardless of the path validation below.
+  // Extension gate: only media/image types stream, so this never serves
+  // .env/key/token files regardless of the path checks below.
   const mediaMime: Record<string, string> = {
     ".mp4": "video/mp4",
     ".m4v": "video/mp4",
@@ -1085,6 +1081,12 @@ app.get("/api/stream-source", (req, res) => {
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
     ".m4a": "audio/mp4",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
   };
   const mime = mediaMime[extname(filePath).toLowerCase()];
   if (!mime) {
@@ -1107,8 +1109,6 @@ app.get("/api/stream-source", (req, res) => {
     relativeToUploads !== "" &&
     !relativeToUploads.startsWith("..") &&
     !path.isAbsolute(relativeToUploads);
-  // Only files the server confirmed the user selected, or uploads, are allowed —
-  // never an arbitrary path injected via POST /api/ui-state.
   if (!allowedSourcePaths.has(resolvedPath) && !isUploadedFile) {
     res
       .status(403)
