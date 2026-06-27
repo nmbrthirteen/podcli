@@ -261,11 +261,19 @@ def _ensure_ssl_certs():
             except Exception:
                 pass
 
-    # Method 4: Last resort — disable SSL verification for this session
-    # This is safe because we're only downloading Whisper models from known URLs
-    ssl._create_default_https_context = ssl._create_unverified_context
-    os.environ["PYTHONHTTPSVERIFY"] = "0"
-    print("  ⚠ SSL verification disabled for this session (model downloads only)")
+    # Method 4: Last resort — disable SSL verification, but only when the user
+    # has explicitly opted in. Silently turning off process-wide TLS verification
+    # is a downgrade attack surface, so default to failing loudly instead.
+    if os.environ.get("PODCLI_INSECURE_SSL", "").strip().lower() in ("1", "true", "yes", "on"):
+        ssl._create_default_https_context = ssl._create_unverified_context
+        os.environ["PYTHONHTTPSVERIFY"] = "0"
+        print("  ⚠ SSL verification DISABLED (PODCLI_INSECURE_SSL set) — model downloads only")
+    else:
+        print(
+            "  ✗ Could not configure SSL certificates. Install certifi "
+            "(pip install certifi) or, to download models without verification, "
+            "re-run with PODCLI_INSECURE_SSL=1."
+        )
 
 
 def _sanitize_path_component(value: str) -> str:
@@ -3299,6 +3307,9 @@ def main():
     studio.add_argument("--save-brand", action="store_true",
                         help="Save handle/platforms/outro-title/accent/bg as the default brand and exit")
 
+    # ── ui (Studio web dashboard) ──
+    sub.add_parser("ui", aliases=["webui"], help="Open the Studio web UI (http://localhost:3847)")
+
     # ── presets ──
     pre = sub.add_parser("presets", help="Manage presets")
     pre_sub = pre.add_subparsers(dest="presets_action")
@@ -3562,8 +3573,64 @@ def main():
         cmd_info(args)
     elif args.command == "init-thumbnail":
         cmd_init_thumbnail(args)
+    elif args.command in ("ui", "webui"):
+        launch_webui()
     else:
         interactive_menu()
+
+
+def launch_webui():
+    """Launch the Studio web UI server (http://localhost:3847)."""
+    import subprocess as sp
+    import shutil as _shutil
+
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    yellow = "\033[38;2;250;204;21m"
+    dim = "\033[2m"
+    reset = "\033[0m"
+
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    port = os.environ.get("PORT", "3847")
+    node = os.environ.get("PODCLI_NODE") or _shutil.which("node")
+    studio = os.environ.get("PODCLI_STUDIO") or os.path.join(backend_dir, "..", "studio")
+    server = os.path.join(studio, "web-server.mjs")
+    repo = os.path.join(backend_dir, "..")
+
+    if node and os.path.exists(server):
+        # Bundled studio: hermetic Node serves it, rendering delegated to this
+        # same Python backend + ffmpeg via the env below.
+        env = {
+            **os.environ,
+            "PORT": str(port),
+            "PODCLI_BACKEND": backend_dir,
+            "PYTHON_PATH": sys.executable,
+            "PODCLI_HOME": paths["home"],
+            # data_dir is the cache's parent — output is now decoupled
+            # (clips render to the working dir), so don't derive it from output.
+            "PODCLI_DATA": os.path.dirname(paths["cache"]),
+            "PODCLI_OUTPUT": paths["output"],
+            "FFMPEG_PATH": os.environ.get("PODCLI_FFMPEG", "ffmpeg"),
+            "FFPROBE_PATH": os.environ.get("PODCLI_FFPROBE", "ffprobe"),
+        }
+        print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
+        sp.run([node, server], env=env)
+    elif os.path.exists(os.path.join(repo, "package.json")) and _shutil.which("npm"):
+        # Source checkout (dev): build + serve via npm.
+        _npm_shell = sys.platform == "win32"
+        spa = os.path.join(repo, "dist", "ui", "public", "index.html")
+        ok = True
+        if not os.path.exists(spa):
+            print(f"\n  {gray}Building the studio (first run)…{reset}\n")
+            ok = sp.run(["npm", "run", "build"], cwd=repo, shell=_npm_shell).returncode == 0
+            if not ok:
+                print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
+        if ok:
+            print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
+            sp.run(["npm", "run", "ui:prod"], cwd=repo, shell=_npm_shell)
+    else:
+        print(f"\n  {yellow}Studio isn't provisioned yet.{reset}")
+        print(f"  {dim}Run{reset} {accent}podcli setup{reset} {dim}to fetch the bundled studio + Node.{reset}\n")
 
 
 def interactive_menu():
@@ -3631,48 +3698,7 @@ def interactive_menu():
             _interactive_process()
             return
         elif choice == "webui":
-            import subprocess as sp
-            import shutil as _shutil
-            backend_dir = os.path.dirname(os.path.abspath(__file__))
-            port = os.environ.get("PORT", "3847")
-            node = os.environ.get("PODCLI_NODE") or _shutil.which("node")
-            studio = os.environ.get("PODCLI_STUDIO") or os.path.join(backend_dir, "..", "studio")
-            server = os.path.join(studio, "web-server.mjs")
-            repo = os.path.join(backend_dir, "..")
-            if node and os.path.exists(server):
-                # Bundled studio: hermetic Node serves it, rendering delegated to
-                # this same Python backend + ffmpeg via the env below.
-                env = {
-                    **os.environ,
-                    "PORT": str(port),
-                    "PODCLI_BACKEND": backend_dir,
-                    "PYTHON_PATH": sys.executable,
-                    "PODCLI_HOME": paths["home"],
-                    # data_dir is the cache's parent — output is now decoupled
-                    # (clips render to the working dir), so don't derive it from output.
-                    "PODCLI_DATA": os.path.dirname(paths["cache"]),
-                    "PODCLI_OUTPUT": paths["output"],
-                    "FFMPEG_PATH": os.environ.get("PODCLI_FFMPEG", "ffmpeg"),
-                    "FFPROBE_PATH": os.environ.get("PODCLI_FFPROBE", "ffprobe"),
-                }
-                print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
-                sp.run([node, server], env=env)
-            elif os.path.exists(os.path.join(repo, "package.json")) and _shutil.which("npm"):
-                # Source checkout (dev): build + serve via npm.
-                _npm_shell = sys.platform == "win32"
-                spa = os.path.join(repo, "dist", "ui", "public", "index.html")
-                ok = True
-                if not os.path.exists(spa):
-                    print(f"\n  {gray}Building the studio (first run)…{reset}\n")
-                    ok = sp.run(["npm", "run", "build"], cwd=repo, shell=_npm_shell).returncode == 0
-                    if not ok:
-                        print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
-                if ok:
-                    print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
-                    sp.run(["npm", "run", "ui:prod"], cwd=repo, shell=_npm_shell)
-            else:
-                print(f"\n  {yellow}Studio isn't provisioned yet.{reset}")
-                print(f"  {dim}Run{reset} {accent}podcli setup{reset} {dim}to fetch the bundled studio + Node.{reset}\n")
+            launch_webui()
         elif choice == "assets":
             _interactive_assets()
         elif choice == "presets":

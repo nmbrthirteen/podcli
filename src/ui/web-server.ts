@@ -176,6 +176,21 @@ function loadPersistedState(): UIState {
 
 const uiState: UIState = loadPersistedState();
 
+// Source files the server itself confirmed the user selected (native dialog,
+// upload, or explicit select). /api/stream-source streams only these — a forged
+// POST /api/ui-state can set uiState.videoPath for display but cannot grant
+// read access to arbitrary files on disk.
+const allowedSourcePaths = new Set<string>();
+function registerSourcePath(p: string | undefined | null): void {
+  if (!p) return;
+  try {
+    allowedSourcePaths.add(realpathSync(path.resolve(p)));
+  } catch {
+    // Not resolvable yet — don't register.
+  }
+}
+registerSourcePath(uiState.videoPath);
+
 // Debounced save to disk
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 function persistState() {
@@ -359,6 +374,7 @@ app.post("/api/upload", upload.single("file"), (req, res) => {
     res.status(400).json({ error: "No file uploaded" });
     return;
   }
+  registerSourcePath(req.file.path);
   res.json({
     file_path: req.file.path,
     filename: req.file.originalname,
@@ -376,6 +392,7 @@ app.post("/api/select-file", (req, res) => {
     return;
   }
   const stat = statSync(file_path);
+  registerSourcePath(file_path);
   res.json({
     file_path,
     filename: basename(file_path),
@@ -422,6 +439,7 @@ app.get("/api/browse-file", (_req, res) => {
     }
 
     const stat = statSync(filePath);
+    registerSourcePath(filePath);
     res.json({
       file_path: filePath,
       filename: basename(filePath),
@@ -594,6 +612,7 @@ app.post("/api/transcribe", async (req, res) => {
       uiState.transcript = result.data as unknown as typeof uiState.transcript;
       uiState.videoPath = file_path;
       uiState.filePath = file_path;
+      registerSourcePath(file_path);
       uiState.lastUpdated = Date.now();
       persistState();
       // Cache it
@@ -1053,30 +1072,51 @@ app.get("/api/stream-source", (req, res) => {
     res.status(404).json({ error: "File not found" });
     return;
   }
-  // Validate the path is the current session video or within the uploads directory
-  const resolvedPath = path.resolve(filePath);
-  const isSessionVideo =
-    uiState.videoPath && resolvedPath === path.resolve(uiState.videoPath);
+
+  // Media-extension gate: only audio/video can be streamed, so this endpoint
+  // can never serve token/key/.env files regardless of the path validation below.
+  const mediaMime: Record<string, string> = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+  };
+  const mime = mediaMime[extname(filePath).toLowerCase()];
+  if (!mime) {
+    res.status(403).json({ error: "Access denied: unsupported media type" });
+    return;
+  }
+
+  // realpath defeats symlinks pointing outside the allowed set.
+  let resolvedPath: string;
+  try {
+    resolvedPath = realpathSync(path.resolve(filePath));
+  } catch {
+    res.status(404).json({ error: "File not found" });
+    return;
+  }
+
   const uploadsRoot = path.resolve(join(paths.working, "uploads"));
   const relativeToUploads = path.relative(uploadsRoot, resolvedPath);
   const isUploadedFile =
     relativeToUploads !== "" &&
     !relativeToUploads.startsWith("..") &&
     !path.isAbsolute(relativeToUploads);
-  if (!isSessionVideo && !isUploadedFile) {
+  // Only files the server confirmed the user selected, or uploads, are allowed —
+  // never an arbitrary path injected via POST /api/ui-state.
+  if (!allowedSourcePaths.has(resolvedPath) && !isUploadedFile) {
     res
       .status(403)
-      .json({ error: "Access denied: path not in allowed directories" });
+      .json({ error: "Access denied: path not in allowed sources" });
     return;
   }
 
-  const mimeTypes: Record<string, string> = {
-    ".webm": "video/webm",
-    ".mov": "video/quicktime",
-    ".avi": "video/x-msvideo",
-    ".mkv": "video/x-matroska",
-  };
-  streamVideo(req, res, filePath, mimeTypes[extname(filePath).toLowerCase()] || "video/mp4");
+  streamVideo(req, res, filePath, mime);
 });
 
 // Route through the CLI so the Studio and the renderer resolve the same config
