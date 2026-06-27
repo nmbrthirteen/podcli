@@ -176,6 +176,17 @@ function loadPersistedState(): UIState {
 
 const uiState: UIState = loadPersistedState();
 
+// Files the server confirmed the user selected; /api/stream-source serves only
+// these, so a forged /api/ui-state can't grant reads of arbitrary files.
+const allowedSourcePaths = new Set<string>();
+function registerSourcePath(p: string | undefined | null): void {
+  if (!p) return;
+  try {
+    allowedSourcePaths.add(realpathSync(path.resolve(p)));
+  } catch {}
+}
+registerSourcePath(uiState.videoPath);
+
 // Debounced save to disk
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 function persistState() {
@@ -359,6 +370,7 @@ app.post("/api/upload", upload.single("file"), (req, res) => {
     res.status(400).json({ error: "No file uploaded" });
     return;
   }
+  registerSourcePath(req.file.path);
   res.json({
     file_path: req.file.path,
     filename: req.file.originalname,
@@ -376,6 +388,7 @@ app.post("/api/select-file", (req, res) => {
     return;
   }
   const stat = statSync(file_path);
+  registerSourcePath(file_path);
   res.json({
     file_path,
     filename: basename(file_path),
@@ -422,6 +435,7 @@ app.get("/api/browse-file", (_req, res) => {
     }
 
     const stat = statSync(filePath);
+    registerSourcePath(filePath);
     res.json({
       file_path: filePath,
       filename: basename(filePath),
@@ -594,6 +608,7 @@ app.post("/api/transcribe", async (req, res) => {
       uiState.transcript = result.data as unknown as typeof uiState.transcript;
       uiState.videoPath = file_path;
       uiState.filePath = file_path;
+      registerSourcePath(file_path);
       uiState.lastUpdated = Date.now();
       persistState();
       // Cache it
@@ -1053,30 +1068,55 @@ app.get("/api/stream-source", (req, res) => {
     res.status(404).json({ error: "File not found" });
     return;
   }
-  // Validate the path is the current session video or within the uploads directory
-  const resolvedPath = path.resolve(filePath);
-  const isSessionVideo =
-    uiState.videoPath && resolvedPath === path.resolve(uiState.videoPath);
+
+  // Extension gate: only media/image types stream, so this never serves
+  // .env/key/token files regardless of the path checks below.
+  const mediaMime: Record<string, string> = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+  };
+  const mime = mediaMime[extname(filePath).toLowerCase()];
+  if (!mime) {
+    res.status(403).json({ error: "Access denied: unsupported media type" });
+    return;
+  }
+
+  // realpath defeats symlinks pointing outside the allowed set.
+  let resolvedPath: string;
+  try {
+    resolvedPath = realpathSync(path.resolve(filePath));
+  } catch {
+    res.status(404).json({ error: "File not found" });
+    return;
+  }
+
   const uploadsRoot = path.resolve(join(paths.working, "uploads"));
   const relativeToUploads = path.relative(uploadsRoot, resolvedPath);
   const isUploadedFile =
     relativeToUploads !== "" &&
     !relativeToUploads.startsWith("..") &&
     !path.isAbsolute(relativeToUploads);
-  if (!isSessionVideo && !isUploadedFile) {
+  if (!allowedSourcePaths.has(resolvedPath) && !isUploadedFile) {
     res
       .status(403)
-      .json({ error: "Access denied: path not in allowed directories" });
+      .json({ error: "Access denied: path not in allowed sources" });
     return;
   }
 
-  const mimeTypes: Record<string, string> = {
-    ".webm": "video/webm",
-    ".mov": "video/quicktime",
-    ".avi": "video/x-msvideo",
-    ".mkv": "video/x-matroska",
-  };
-  streamVideo(req, res, filePath, mimeTypes[extname(filePath).toLowerCase()] || "video/mp4");
+  streamVideo(req, res, filePath, mime);
 });
 
 // Route through the CLI so the Studio and the renderer resolve the same config
@@ -2608,8 +2648,16 @@ async function main() {
   // Bind to loopback by default — the studio serves local files (clips, assets,
   // source video) with no auth. Set PODCLI_HOST=0.0.0.0 to expose it on the LAN.
   const HOST = process.env.PODCLI_HOST || "127.0.0.1";
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     log.info(`podcli running at http://localhost:${PORT}`);
+  });
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      log.error(`Port ${PORT} is already in use — is the studio already running? Set PORT to use another.`);
+    } else {
+      log.error("Web server failed to start", { err: err.message });
+    }
+    process.exit(1);
   });
 }
 

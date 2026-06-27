@@ -1106,8 +1106,6 @@ def _track_and_crop(
     # breaks on every layout transition. For mixed layouts, use
     # simple per-frame largest-face following instead.
     is_mixed = face_map.get("is_mixed_layout", False) if face_map else False
-    if is_mixed and not is_mixed:  # disabled — checking below
-        pass
     if is_mixed:
         # Build a time→speaker lookup from segments
         def _speaker_at(t_sec: float) -> str | None:

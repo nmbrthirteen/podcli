@@ -67,7 +67,7 @@ func wantsRuntime(args []string) bool {
 		return true
 	}
 	switch args[0] {
-	case "process", "transcribe", "studio", "auto":
+	case "process", "transcribe", "studio", "auto", "ui", "webui":
 		return true
 	}
 	return false
@@ -398,6 +398,7 @@ Usage:
 
 Engine commands (routed to the processing backend):
   process <video>      Transcribe a video and export short-form clips
+  ui                   Open the Studio web dashboard (http://localhost:3847)
   studio <video>       Cut a fragment + intro/outro bookends
   clips                Browse and edit saved clips
   thumbnails           Generate thumbnails

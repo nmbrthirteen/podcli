@@ -44,8 +44,13 @@ export class ClipsHistory {
     // Write to a temp file and atomically rename so a crash or a concurrent
     // reader never sees a half-written clips.json.
     const tmp = `${this.historyPath}.${process.pid}.${uuidv4().slice(0, 8)}.tmp`;
-    await writeFile(tmp, JSON.stringify(entries, null, 2), "utf-8");
-    await rename(tmp, this.historyPath);
+    try {
+      await writeFile(tmp, JSON.stringify(entries, null, 2), "utf-8");
+      await rename(tmp, this.historyPath);
+    } catch (err) {
+      await rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    }
   }
 
   // Run load → mutate → save as one critical section, queued behind any

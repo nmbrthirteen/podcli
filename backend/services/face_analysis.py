@@ -101,12 +101,27 @@ def analyze_faces(
         small = cv2.resize(roi, (16, 16))
         return cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.int16)
 
-    for i in range(sample_count):
-        t = i * duration / sample_count
-        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
-        ret, frame = cap.read()
+    # Some containers under-report CAP_PROP_FRAME_COUNT, which would confine
+    # sampling to the front of the video; fall back to duration*fps.
+    reported_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    est_frames = int(duration * fps) if duration and fps else 0
+    total_frames = max(reported_frames, est_frames, 1)
+    # grab() advances cheaply, retrieve() decodes only the sampled frames — far
+    # cheaper than a cap.set() seek (keyframe re-decode) per sample.
+    step = max(1, total_frames // sample_count)
+    frame_idx = -1
+    sampled = 0
+    while sampled < sample_count:
+        if not cap.grab():
+            break
+        frame_idx += 1
+        if frame_idx % step != 0:
+            continue
+        ret, frame = cap.retrieve()
         if not ret:
             continue
+        pos_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+        t = pos_ms / 1000.0 if pos_ms and pos_ms > 0 else frame_idx / fps
 
         faces = detect_faces(detector, frame, width, height)
         current_mouth_gray: dict[int, "np.ndarray"] = {}
@@ -139,9 +154,10 @@ def analyze_faces(
         prev_mouth_gray = current_mouth_gray
         faces_per_frame.append(frame_faces)
 
-        if progress_callback and i % 20 == 0:
-            pct = 10 + int(60 * i / sample_count)
-            progress_callback(pct, f"Analyzing faces... {i}/{sample_count}")
+        if progress_callback and sampled % 20 == 0:
+            pct = 10 + int(60 * sampled / sample_count)
+            progress_callback(pct, f"Analyzing faces... {sampled}/{sample_count}")
+        sampled += 1
 
     cap.release()
 

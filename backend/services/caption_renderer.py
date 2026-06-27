@@ -132,6 +132,21 @@ def render_captions(
     return output_path
 
 
+CAPTION_GAP_FILL_MAX = 0.4  # seconds
+
+
+def _hold_through_gap(chunks: list[list[dict]], idx: int, end: float, offset: float) -> float:
+    """Extend a chunk's end toward the next chunk's start so a pause on a chunk
+    boundary doesn't blank the screen. Capped, and never overlaps the next chunk."""
+    for j in range(idx + 1, len(chunks)):
+        if chunks[j]:
+            next_start = max(0, chunks[j][0]["start"] - offset)
+            if next_start > end:
+                return min(next_start, end + CAPTION_GAP_FILL_MAX)
+            return end
+    return end
+
+
 def _render_hormozi(words: list[dict], style: dict, offset: float) -> str:
     """
     Hormozi style: Show 2-3 words at a time, smooth karaoke-fill highlight.
@@ -147,12 +162,12 @@ def _render_hormozi(words: list[dict], style: dict, offset: float) -> str:
         chunk = words[i : i + chunk_size]
         chunks.append(chunk)
 
-    for chunk in chunks:
+    for idx, chunk in enumerate(chunks):
         if not chunk:
             continue
 
         chunk_start = max(0, chunk[0]["start"] - offset)
-        chunk_end = max(0, chunk[-1]["end"] - offset)
+        chunk_end = _hold_through_gap(chunks, idx, max(0, chunk[-1]["end"] - offset), offset)
 
         # Build \kf karaoke-fill parts: each word fills progressively
         parts = []
@@ -189,12 +204,12 @@ def _render_karaoke(words: list[dict], style: dict, offset: float) -> str:
     for i in range(0, len(words), sentence_size):
         sentences.append(words[i : i + sentence_size])
 
-    for sentence in sentences:
+    for idx, sentence in enumerate(sentences):
         if not sentence:
             continue
 
         sent_start = max(0, sentence[0]["start"] - offset)
-        sent_end = max(0, sentence[-1]["end"] - offset)
+        sent_end = _hold_through_gap(sentences, idx, max(0, sentence[-1]["end"] - offset), offset)
 
         parts = []
         for w in sentence:
@@ -227,12 +242,12 @@ def _render_subtle(words: list[dict], style: dict, offset: float) -> str:
     for i in range(0, len(words), line_size):
         lines.append(words[i : i + line_size])
 
-    for line_words in lines:
+    for idx, line_words in enumerate(lines):
         if not line_words:
             continue
 
         line_start = max(0, line_words[0]["start"] - offset)
-        line_end = max(0, line_words[-1]["end"] - offset)
+        line_end = _hold_through_gap(lines, idx, max(0, line_words[-1]["end"] - offset), offset)
 
         line_text = " ".join(w["word"] for w in line_words)
 
@@ -493,12 +508,12 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
         chunk = words[i : i + chunk_size]
         chunks.append(chunk)
 
-    for chunk in chunks:
+    for chunk_idx, chunk in enumerate(chunks):
         if not chunk:
             continue
 
         chunk_start = max(0, chunk[0]["start"] - offset)
-        chunk_end = max(0, chunk[-1]["end"] - offset)
+        chunk_end = _hold_through_gap(chunks, chunk_idx, max(0, chunk[-1]["end"] - offset), offset)
 
         # Normalize casing
         normalized = []

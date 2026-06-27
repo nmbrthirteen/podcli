@@ -51,6 +51,15 @@ class TranscriptionEngineTests(unittest.TestCase):
         result = tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=False)
         self.assertEqual(result["engine"], "whispercpp")
 
+    def test_whispercpp_skips_diarization_by_default(self):
+        # Regression: the cpp path must not attempt torch-backed diarization even
+        # with the default enable_diarization=True — importing a broken torch in a
+        # native runtime hard-crashes the process. Face analysis still runs.
+        os.environ["PODCLI_ENGINE"] = "whispercpp"
+        result = tr.transcribe_file(self._tmp.name, model_size="base")
+        self.assertEqual(result["engine"], "whispercpp")
+        self.assertEqual(result.get("diarization_warning"), "Speaker detection disabled")
+
     def test_explicit_whisper_py_still_errors(self):
         os.environ["PODCLI_ENGINE"] = "whisper-py"
         with self.assertRaises(RuntimeError):

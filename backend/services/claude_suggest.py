@@ -360,19 +360,37 @@ def _should_bucket_initial_selection(segments: list[dict]) -> bool:
 
 
 def _dedupe_clips_by_range(clips: list[dict]) -> list[dict]:
-    """Drop duplicate clip suggestions that share the same rounded range."""
-    deduped = []
-    seen_ranges = set()
-    for clip in sorted(clips, key=lambda c: c.get("start_second", 0)):
-        key = (
-            round(float(clip.get("start_second", 0)), 1),
-            round(float(clip.get("end_second", 0)), 1),
-        )
-        if key in seen_ranges:
-            continue
-        seen_ranges.add(key)
-        deduped.append(clip)
-    return deduped
+    """Collapse overlapping clip suggestions (>50% of the shorter clip), keeping
+    the higher-scored one, sorted by start time. Exact-range matching would miss
+    near-duplicates like 100.0-140.0 vs 102.5-141.5."""
+    kept: list[dict] = []
+    # Highest-scored first so the survivor of an overlap is the better clip.
+    for clip in sorted(clips, key=lambda c: c.get("score", 0), reverse=True):
+        start = float(clip.get("start_second", 0))
+        end = float(clip.get("end_second", 0))
+        dur = max(0.0, end - start)
+        duplicate = False
+        for k in kept:
+            k_start = float(k.get("start_second", 0))
+            k_end = float(k.get("end_second", 0))
+            overlap = max(0.0, min(end, k_end) - max(start, k_start))
+            shorter = min(dur, max(0.0, k_end - k_start)) or 1.0
+            if overlap / shorter > 0.5:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(clip)
+    return sorted(kept, key=lambda c: c.get("start_second", 0))
+
+
+def _select_top_by_score(clips: list[dict], top_n: int) -> list[dict]:
+    """Keep the highest-scored `top_n` clips, then order them by start time.
+    Ranking by score must come before truncation — otherwise the earliest clips
+    ship, not the best ones."""
+    if len(clips) <= top_n:
+        return sorted(clips, key=lambda c: c.get("start_second", 0))
+    ranked = sorted(clips, key=lambda c: c.get("score", 0), reverse=True)[:top_n]
+    return sorted(ranked, key=lambda c: c.get("start_second", 0))
 
 
 def find_moments_from_text(
@@ -695,12 +713,12 @@ def suggest_with_claude(
                     "_ai_engine": engine,
                 })
 
-            normalized.sort(key=lambda x: x["start_second"])
+            selected = _select_top_by_score(normalized, top_n)
 
-            if normalized:
+            if selected:
                 if progress_callback:
-                    progress_callback(100, f"{label} suggested {len(normalized)} clips")
-                return normalized
+                    progress_callback(100, f"{label} suggested {len(selected)} clips")
+                return selected
 
             if progress_callback:
                 progress_callback(0, f"{label} returned no usable clips")
@@ -798,7 +816,7 @@ def suggest_initial_with_claude(
 
     deduped = _dedupe_clips_by_range(aggregated)
     if len(deduped) >= top_n:
-        return deduped[:top_n]
+        return _select_top_by_score(deduped, top_n)
 
     fallback_clips = suggest_with_claude(
         segments=segments,
@@ -816,7 +834,7 @@ def suggest_initial_with_claude(
     if fallback_clips:
         deduped = _dedupe_clips_by_range(deduped + fallback_clips)
 
-    return deduped[:top_n] if deduped else None
+    return _select_top_by_score(deduped, top_n) if deduped else None
 
 
 def _bucket_coverage_seconds(existing_clips: list[dict], start: float, end: float) -> float:
@@ -959,13 +977,5 @@ def suggest_more_with_claude(
         if fallback_clips:
             aggregated.extend(fallback_clips)
 
-    deduped = []
-    seen_ranges = set()
-    for clip in sorted(aggregated, key=lambda c: c.get("start_second", 0)):
-        key = (round(float(clip.get("start_second", 0)), 1), round(float(clip.get("end_second", 0)), 1))
-        if key in seen_ranges:
-            continue
-        seen_ranges.add(key)
-        deduped.append(clip)
-
-    return deduped[:top_n] if deduped else None
+    deduped = _dedupe_clips_by_range(aggregated)
+    return _select_top_by_score(deduped, top_n) if deduped else None

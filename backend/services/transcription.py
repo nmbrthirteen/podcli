@@ -75,8 +75,118 @@ def _transcribe_with_whispercpp(file_path, model_size, language, progress_callba
         vad_model=os.environ.get("PODCLI_WHISPERCPP_VAD_MODEL") or None,
     )
     if progress_callback:
-        progress_callback(100, "Transcription complete")
+        progress_callback(50, "Transcription complete")
     return result
+
+
+def _attach_speakers_and_faces(
+    file_path,
+    base,
+    enable_diarization,
+    num_speakers,
+    progress_callback,
+):
+    """Merge speaker diarization + face analysis into a transcribed result.
+    Shared by both engines; face analysis (OpenCV) runs even when diarization
+    is unavailable."""
+    segments = base.get("segments") or []
+    words = base.get("words") or []
+    duration = base.get("duration") or (segments[-1]["end"] if segments else 0.0)
+
+    speaker_segments = []
+    speaker_summary = {"num_speakers": 0, "speakers": {}}
+    diarization_warning = None
+
+    if enable_diarization:
+        try:
+            from services.speaker_detection import (
+                extract_audio_wav,
+                run_diarization,
+                assign_speakers_to_segments,
+                assign_speakers_to_words,
+                create_speaker_summary,
+            )
+
+            if progress_callback:
+                progress_callback(55, "Extracting audio for speaker detection...")
+
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                wav_path = tmp.name
+
+            try:
+                extract_audio_wav(file_path, wav_path)
+
+                if progress_callback:
+                    progress_callback(60, "Running speaker diarization...")
+
+                speaker_segments = run_diarization(
+                    wav_path,
+                    num_speakers=num_speakers,
+                    progress_callback=lambda pct, msg: (
+                        progress_callback(60 + int(pct * 0.3), msg) if progress_callback else None
+                    ),
+                )
+
+                if speaker_segments:
+                    if progress_callback:
+                        progress_callback(92, "Assigning speakers to transcript...")
+
+                    segments = assign_speakers_to_segments(segments, speaker_segments)
+                    words = assign_speakers_to_words(words, speaker_segments)
+                    speaker_summary = create_speaker_summary(speaker_segments)
+
+                    if progress_callback:
+                        progress_callback(
+                            95,
+                            f"Found {speaker_summary['num_speakers']} speakers",
+                        )
+
+            finally:
+                if os.path.exists(wav_path):
+                    os.unlink(wav_path)
+
+        except ImportError as e:
+            diarization_warning = f"Speaker detection unavailable: {e}"
+            if progress_callback:
+                progress_callback(90, diarization_warning)
+        except PermissionError as e:
+            diarization_warning = str(e)
+            if progress_callback:
+                progress_callback(90, diarization_warning)
+        except Exception as e:
+            diarization_warning = f"Speaker detection failed: {e}"
+            if progress_callback:
+                progress_callback(90, diarization_warning)
+    else:
+        diarization_warning = "Speaker detection disabled"
+
+    face_map = None
+    try:
+        if progress_callback:
+            progress_callback(95, "Analyzing face positions...")
+        from services.face_analysis import analyze_faces
+
+        face_map = analyze_faces(
+            video_path=file_path,
+            speaker_segments=speaker_segments,
+            duration=duration,
+        )
+    except Exception as e:
+        print(f"Warning: face analysis failed: {e}", file=sys.stderr)
+
+    if progress_callback:
+        progress_callback(100, "Complete")
+
+    base["segments"] = segments
+    base["words"] = words
+    base["duration"] = round(duration, 3)
+    base["speakers"] = speaker_summary
+    base["speaker_segments"] = speaker_segments
+    if face_map:
+        base["face_map"] = face_map
+    if diarization_warning:
+        base["diarization_warning"] = diarization_warning
+    return base
 
 
 def transcribe_file(
@@ -106,30 +216,38 @@ def transcribe_file(
 
     requested = os.environ.get("PODCLI_ENGINE", "").strip().lower()
     engine = requested or "whisper-py"
-    if engine in ("whispercpp", "whisper-cpp", "whisper.cpp", "cpp"):
-        return _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
-
-    # ================================================================
-    # Step 1: Whisper transcription
-    # ================================================================
-    if progress_callback:
-        progress_callback(5, "Loading Whisper model...")
+    use_cpp = engine in ("whispercpp", "whisper-cpp", "whisper.cpp", "cpp")
 
     # Native installs ship whisper.cpp, not openai-whisper. Fall back to it
     # automatically — whether whisper is missing OR a broken install fails to
     # load/run — unless the user explicitly asked for the whisper-py engine.
-    try:
-        import whisper
+    if not use_cpp:
+        if progress_callback:
+            progress_callback(5, "Loading Whisper model...")
+        try:
+            import whisper
 
-        model = whisper.load_model(model_size)
-    except Exception as e:
-        if not requested and _whispercpp_ready(model_size):
-            return _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
-        raise RuntimeError(
-            "The whisper-py engine needs the full source install (openai-whisper + torch). "
-            "This native install ships whisper.cpp — rerun with --engine whispercpp."
-        ) from e
+            model = whisper.load_model(model_size)
+        except Exception as e:
+            if not requested and _whispercpp_ready(model_size):
+                use_cpp = True
+            else:
+                raise RuntimeError(
+                    "The whisper-py engine needs the full source install (openai-whisper + torch). "
+                    "This native install ships whisper.cpp — rerun with --engine whispercpp."
+                ) from e
 
+    if use_cpp:
+        base = _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
+        # whisper.cpp is the no-torch path: importing torch for diarization can
+        # hard-crash native runtimes. Skip diarization, keep face analysis (OpenCV).
+        return _attach_speakers_and_faces(
+            file_path, base, False, num_speakers, progress_callback
+        )
+
+    # ================================================================
+    # Step 1: Whisper transcription
+    # ================================================================
     if progress_callback:
         progress_callback(10, f"Transcribing with Whisper ({model_size})...")
 
@@ -202,110 +320,13 @@ def transcribe_file(
 
     detected_lang = result.get("language", language or "en")
 
-    # ================================================================
-    # Step 2: Speaker diarization (if enabled)
-    # ================================================================
-    speaker_segments = []
-    speaker_summary = {"num_speakers": 0, "speakers": {}}
-    diarization_warning = None
-
-    if enable_diarization:
-        try:
-            from services.speaker_detection import (
-                extract_audio_wav,
-                run_diarization,
-                assign_speakers_to_segments,
-                assign_speakers_to_words,
-                create_speaker_summary,
-            )
-
-            if progress_callback:
-                progress_callback(55, "Extracting audio for speaker detection...")
-
-            # Extract audio as WAV for pyannote
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                wav_path = tmp.name
-
-            try:
-                extract_audio_wav(file_path, wav_path)
-
-                if progress_callback:
-                    progress_callback(60, "Running speaker diarization...")
-
-                speaker_segments = run_diarization(
-                    wav_path,
-                    num_speakers=num_speakers,
-                    progress_callback=lambda pct, msg: (
-                        progress_callback(60 + int(pct * 0.3), msg) if progress_callback else None
-                    ),
-                )
-
-                if speaker_segments:
-                    if progress_callback:
-                        progress_callback(92, "Assigning speakers to transcript...")
-
-                    # Merge speaker labels into segments and words
-                    segments = assign_speakers_to_segments(segments, speaker_segments)
-                    words = assign_speakers_to_words(words, speaker_segments)
-                    speaker_summary = create_speaker_summary(speaker_segments)
-
-                    if progress_callback:
-                        progress_callback(
-                            95,
-                            f"Found {speaker_summary['num_speakers']} speakers",
-                        )
-
-            finally:
-                if os.path.exists(wav_path):
-                    os.unlink(wav_path)
-
-        except ImportError as e:
-            diarization_warning = f"Speaker detection unavailable: {e}"
-            if progress_callback:
-                progress_callback(90, diarization_warning)
-        except PermissionError as e:
-            diarization_warning = str(e)
-            if progress_callback:
-                progress_callback(90, diarization_warning)
-        except Exception as e:
-            diarization_warning = f"Speaker detection failed: {e}"
-            if progress_callback:
-                progress_callback(90, diarization_warning)
-    else:
-        diarization_warning = "Speaker detection disabled"
-
-    # Run face analysis on the video (maps speakers to face positions)
-    # Run silently — no progress callbacks to avoid interfering with CLI output
-    face_map = None
-    try:
-        if progress_callback:
-            progress_callback(95, "Analyzing face positions...")
-        from services.face_analysis import analyze_faces
-        face_map = analyze_faces(
-            video_path=file_path,
-            speaker_segments=speaker_segments,
-            duration=duration,
-        )
-    except Exception as e:
-        print(f"Warning: face analysis failed: {e}", file=sys.stderr)
-
-    if progress_callback:
-        progress_callback(100, "Complete")
-
-    result_data = {
+    base = {
         "transcript": result.get("text", "").strip(),
         "segments": segments,
         "words": words,
-        "duration": round(duration, 3),
+        "duration": duration,
         "language": detected_lang,
-        "speakers": speaker_summary,
-        "speaker_segments": speaker_segments,
     }
-
-    if face_map:
-        result_data["face_map"] = face_map
-
-    if diarization_warning:
-        result_data["diarization_warning"] = diarization_warning
-
-    return result_data
+    return _attach_speakers_and_faces(
+        file_path, base, enable_diarization, num_speakers, progress_callback
+    )

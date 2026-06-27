@@ -1186,7 +1186,7 @@ input[type="range"]::-webkit-slider-thumb {
 .clip-card-del:hover:not(:disabled) { background: var(--red-subtle); color: var(--red); box-shadow: 0 5px #1a1a1f, 0 11px 18px -5px #000000d9, 0 0 0 1px var(--red-border), inset 0 1px #ffffff24; }
 .clip-card-del:active:not(:disabled) { transform: translateY(4px); box-shadow: 0 0 0 1px var(--red-border), inset 0 1px 0 rgba(255, 255, 255, 0.10); }
 .clip-card-del:disabled { opacity: 0.4; cursor: default; }
-.clip-card-media { aspect-ratio: 9 / 16; width: 100%; display: block; object-fit: cover; background: #000; }
+.clip-card-media { aspect-ratio: 9 / 16; width: 100%; display: block; object-fit: cover; background: #000; border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0; }
 .clip-card-media.empty { display: flex; align-items: center; justify-content: center; color: var(--text3); font-size: 22px; }
 .clip-card-body { padding: 10px 11px; }
 .clip-card-title { font-size: 12.5px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -1275,7 +1275,7 @@ h1, h2, h3 { text-wrap: balance; }
 p, li, figcaption, blockquote, .subtitle, .file-preview, .card-desc, .int-row .desc, .set-note, .empty-state {
   text-wrap: pretty;
 }
-.clip-card-media, .thumb-stage img, .thumb-variation img { outline: 1px solid rgba(255, 255, 255, 0.1); outline-offset: -1px; }
+.thumb-stage img, .thumb-variation img { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
 .clip-card-meta, .clip-meta span, .clip-card-title { font-variant-numeric: tabular-nums; }
 
 /* ── Clip detail (player hero + editor) ── */
