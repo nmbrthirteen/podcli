@@ -240,8 +240,12 @@ def transcribe_file(
 
     if use_cpp:
         base = _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
+        # whisper.cpp is the no-torch path — native installs use it precisely
+        # because pyannote/torch isn't available (and importing a broken torch
+        # can hard-crash the process). Skip diarization here but still run face
+        # analysis (OpenCV only), which is what restores speaker-aware framing.
         return _attach_speakers_and_faces(
-            file_path, base, enable_diarization, num_speakers, progress_callback
+            file_path, base, False, num_speakers, progress_callback
         )
 
     # ================================================================
