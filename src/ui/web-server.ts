@@ -2648,8 +2648,16 @@ async function main() {
   // Bind to loopback by default — the studio serves local files (clips, assets,
   // source video) with no auth. Set PODCLI_HOST=0.0.0.0 to expose it on the LAN.
   const HOST = process.env.PODCLI_HOST || "127.0.0.1";
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     log.info(`podcli running at http://localhost:${PORT}`);
+  });
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      log.error(`Port ${PORT} is already in use — is the studio already running? Set PORT to use another.`);
+    } else {
+      log.error("Web server failed to start", { err: err.message });
+    }
+    process.exit(1);
   });
 }
 

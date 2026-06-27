@@ -21,7 +21,7 @@ Both share the same knowledge base at `.podcli/knowledge/`.
 | `/generate-descriptions` | Copywriter | Creates descriptions + hashtags + SEO keywords |
 | `/plan-thumbnails` | Art Director | Plans thumbnail text + layout briefs for both formats |
 | `/review-content` | Brand Guardian | Reviews output against brand voice, quality gates, banned words |
-| `/prep-episode` | Producer | Full pipeline: transcript → publish-ready package |
+| `/produce-shorts` | Producer | Full pipeline: transcript → publish-ready package |
 | `/publish-checklist` | Launch Manager | Pre/post-publish optimization checklist |
 | `/retro-episode` | Analyst | Episode performance review + learnings |
 
@@ -50,7 +50,7 @@ Both share the same knowledge base at `.podcli/knowledge/`.
                           → /plan-thumbnails → /review-content → /publish-checklist
 ```
 
-Or run everything at once: `/prep-episode`
+Or run everything at once: `/produce-shorts`
 
 After publishing: `/retro-episode`
 
@@ -99,7 +99,7 @@ When input is provided without a specific command:
 - **Asks for titles** → Run `/generate-titles`
 - **Asks for thumbnails** → Run `/plan-thumbnails`
 - **Asks for descriptions** → Run `/generate-descriptions`
-- **Says "process episode"** → Run `/prep-episode`
+- **Says "process episode"** → Run `/produce-shorts`
 - **Asks to review content** → Run `/review-content`
 
 ---
