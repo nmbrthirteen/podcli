@@ -10,6 +10,7 @@ func TestAllowedDownloadHost(t *testing.T) {
 	allow := []string{
 		"github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
 		"huggingface.co", "cdn-lfs.huggingface.co", "cdn-lfs-us-1.huggingface.co",
+		"hf.co", "us.aws.cdn.hf.co", "cas-bridge.xethub.hf.co",
 		"nodejs.org", "evermeet.cx", "johnvansickle.com", "www.johnvansickle.com",
 	}
 	for _, h := range allow {
@@ -20,7 +21,7 @@ func TestAllowedDownloadHost(t *testing.T) {
 	// Suffix spoofing must not pass: a trusted name as a left-label is not enough.
 	deny := []string{
 		"evil.com", "github.com.evil.com", "huggingface.co.attacker.net",
-		"githubusercontent.com.evil.com", "127.0.0.1", "",
+		"githubusercontent.com.evil.com", "hf.co.attacker.net", "127.0.0.1", "",
 	}
 	for _, h := range deny {
 		if allowedDownloadHost(h) {
