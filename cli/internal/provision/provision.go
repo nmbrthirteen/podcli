@@ -369,6 +369,7 @@ func allowedDownloadHost(h string) bool {
 		"github.com",            // release assets
 		"githubusercontent.com", // objects.* / release-assets.* CDN
 		"huggingface.co",        // whisper.cpp models + cdn-lfs*.huggingface.co
+		"hf.co",                 // HF CDN redirects: us.aws.cdn.hf.co, cas-bridge.xethub.hf.co
 		"nodejs.org",            // hermetic Node
 		"evermeet.cx",           // macOS ffmpeg
 		"johnvansickle.com",     // linux ffmpeg
