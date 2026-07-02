@@ -179,6 +179,14 @@ podcli process episode.mp4   # transcribe + export clips
 Supported platforms: macOS (Apple Silicon), Linux (x64 / arm64), Windows (x64).
 Intel Macs are coming in a follow-up release.
 
+To uninstall the app files while keeping your config, knowledge, presets, assets, history, and cache:
+
+```bash
+podcli uninstall
+```
+
+Add `--purge` if you want to remove the entire managed podcli folder, including user data.
+
 **Optional**, for AI clip suggestion and the PodStack slash commands: install
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or
 [Codex](https://openai.com/index/introducing-codex/) (auto-detected).
