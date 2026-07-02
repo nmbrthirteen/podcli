@@ -16,3 +16,6 @@ whisper.cpp, and models, so there is nothing else to install.
 
 Updates: `podcli update` checks for a newer release. Disable auto-update checks
 with `podcli config set update.auto off` (or `PODCLI_NO_UPDATE=1`).
+
+Uninstall app files with `podcli uninstall`; it keeps your config, knowledge,
+presets, assets, history, and cache unless you add `--purge`.
