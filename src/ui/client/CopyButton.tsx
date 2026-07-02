@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Copy, Check } from "lucide-react";
 
 type CopyButtonProps = {
   text?: string;
@@ -14,23 +15,6 @@ type CopyButtonProps = {
   style?: React.CSSProperties;
   onCopied?: () => void;
 };
-
-function CopyIcon() {
-  return (
-    <svg className="copy-button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M8 8h10v12H8z" />
-      <path d="M6 16H4V4h12v2" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg className="copy-button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M5 13l4 4L19 7" />
-    </svg>
-  );
-}
 
 export default function CopyButton({
   text,
@@ -84,11 +68,11 @@ export default function CopyButton({
       style={style}
     >
       <span className="copy-button-layer copy-button-idle">
-        <CopyIcon />
+        <Copy className="copy-button-icon" aria-hidden="true" />
         {!iconOnly && <span>{label}</span>}
       </span>
       <span className="copy-button-layer copy-button-success">
-        <CheckIcon />
+        <Check className="copy-button-icon" aria-hidden="true" />
         {!iconOnly && <span>{copiedLabel}</span>}
       </span>
     </button>

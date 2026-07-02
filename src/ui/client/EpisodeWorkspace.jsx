@@ -1,4 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import {
+  Check,
+  Heart as HeartGlyph,
+  MessageCircle,
+  Bookmark as BookmarkGlyph,
+  Forward,
+  Music,
+  User as UserGlyph,
+  Search as SearchGlyph,
+  Home as HomeGlyph,
+  Users as UsersGlyph,
+  Inbox,
+} from 'lucide-react';
 import CopyButton from './CopyButton';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -56,8 +69,8 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
       return { lastEvent, connected };
     }
 
-    const CheckIcon = () => (<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>);
-    const CheckSmall = ({ color = 'var(--green)' }) => (<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>);
+    const CheckIcon = () => <Check size={12} color="#fff" strokeWidth={2.5} />;
+    const CheckSmall = ({ color = 'var(--green)' }) => <Check size={10} color={color} strokeWidth={3} />;
 
     const PREVIEW_SCALE = 0.27;
     const px = (n) => Math.round(n * PREVIEW_SCALE);
@@ -126,53 +139,17 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
 
 
     function TikTokWireframe({ activeClip, captionStyle }) {
-      const Heart = () => (
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="#fff">
-          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-        </svg>
-      );
-      const Comment = () => (
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="#fff">
-          <path d="M20 2H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3l5 4 5-4h3a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/>
-        </svg>
-      );
-      const Bookmark = () => (
-        <svg width="24" height="28" viewBox="0 0 24 24" fill="#fff">
-          <path d="M17 3H7a2 2 0 0 0-2 2v17l7-3.5L19 22V5a2 2 0 0 0-2-2z"/>
-        </svg>
-      );
-      const Share = () => (
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="#fff">
-          <path d="M22 12L12 4v5c-7 0-10 4-10 11 2-4 5-6 10-6v5l10-7z"/>
-        </svg>
-      );
-      const MusicNote = () => (
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="#fff">
-          <path d="M9 17V5l12-2v12a4 4 0 1 1-2-3.46V6.18L11 7.82V19a4 4 0 1 1-2-3.46z"/>
-        </svg>
-      );
-      const Person = () => (
-        <svg viewBox="0 0 24 24" fill="#fff">
-          <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 6v2h16v-2c0-4-4-6-8-6z"/>
-        </svg>
-      );
-      const Search = () => (
-        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '100%', height: '100%' }}>
-          <circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/>
-        </svg>
-      );
-      const NavHome = () => (
-        <svg viewBox="0 0 24 24" fill="#fff" className="tt-nav-icon"><path d="M3 11l9-8 9 8v10h-6v-6h-6v6H3z"/></svg>
-      );
-      const NavFriends = () => (
-        <svg viewBox="0 0 24 24" fill="#fff" className="tt-nav-icon"><circle cx="9" cy="8" r="4"/><circle cx="17" cy="9" r="3"/><path d="M2 20c0-4 4-6 7-6s7 2 7 6v1H2v-1zm14-5c2 0 6 1 6 5v1h-6"/></svg>
-      );
-      const NavInbox = () => (
-        <svg viewBox="0 0 24 24" fill="#fff" className="tt-nav-icon"><path d="M3 6h18l-2 8h-7l-2 3-2-3H5z"/></svg>
-      );
-      const NavProfile = () => (
-        <svg viewBox="0 0 24 24" fill="#fff" className="tt-nav-icon"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-5 4-7 8-7s8 2 8 7"/></svg>
-      );
+      const Heart = () => <HeartGlyph size={28} fill="#fff" strokeWidth={0} />;
+      const Comment = () => <MessageCircle size={28} fill="#fff" strokeWidth={0} />;
+      const Bookmark = () => <BookmarkGlyph size={26} fill="#fff" strokeWidth={0} />;
+      const Share = () => <Forward size={28} color="#fff" fill="#fff" strokeWidth={1.5} />;
+      const MusicNote = () => <Music size={11} color="#fff" strokeWidth={2.5} />;
+      const Person = () => <UserGlyph fill="#fff" strokeWidth={0} style={{ width: '100%', height: '100%' }} />;
+      const Search = () => <SearchGlyph color="#fff" strokeWidth={2.2} style={{ width: '100%', height: '100%' }} />;
+      const NavHome = () => <HomeGlyph className="tt-nav-icon" fill="#fff" color="#fff" strokeWidth={1.5} />;
+      const NavFriends = () => <UsersGlyph className="tt-nav-icon" fill="#fff" color="#fff" strokeWidth={1.5} />;
+      const NavInbox = () => <Inbox className="tt-nav-icon" color="#fff" strokeWidth={2.2} />;
+      const NavProfile = () => <UserGlyph className="tt-nav-icon" fill="#fff" color="#fff" strokeWidth={1.5} />;
       const fmtCount = (n) => {
         if (n >= 100000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
         if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';

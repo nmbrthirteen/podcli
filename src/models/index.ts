@@ -19,6 +19,7 @@ export interface ProgressEvent {
   percent: number;
   message: string;
   clip_result?: BatchClipsResult["results"][number];
+  partial?: Record<string, unknown>;
 }
 
 // === Transcript Models ===
