@@ -176,7 +176,7 @@ export default function ThumbnailStudio() {
             <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Text options · click to use</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {textOpts.map(([l1, l2], i) => (
-                <button key={i} className={`title-option ${line1 === l1 && line2 === l2 ? "selected" : ""}`} onClick={() => { setLine1(l1); setLine2(l2); }}>
+                <button key={i} className={`title-option stream-in ${line1 === l1 && line2 === l2 ? "selected" : ""}`} style={{ animationDelay: `${i * 40}ms` }} onClick={() => { setLine1(l1); setLine2(l2); }}>
                   <strong>{l1}</strong>{l2 ? ` · ${l2}` : ""}
                 </button>
               ))}
@@ -189,7 +189,7 @@ export default function ThumbnailStudio() {
             <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Frame options · click to select</div>
             <div className="thumb-variations">
               {frameOpts.map((f, i) => (
-                <button key={i} className={`thumb-variation ${selFrame?.path === f.path ? "selected" : ""}`} onClick={() => setSelFrame({ path: f.path, info: f })} disabled={busy !== null}>
+                <button key={i} className={`thumb-variation stream-in ${selFrame?.path === f.path ? "selected" : ""}`} style={{ animationDelay: `${i * 40}ms` }} onClick={() => setSelFrame({ path: f.path, info: f })} disabled={busy !== null}>
                   <img src={img(f.path, bust)} alt="" />
                 </button>
               ))}

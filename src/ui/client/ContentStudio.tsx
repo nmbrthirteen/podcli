@@ -146,18 +146,18 @@ export default function ContentStudio() {
                     {result.titles.map((t, i) => {
                       const clean = t.replace(/^\d+\.\s*/, "");
                       return (
-                        <button key={i} className={`title-option ${copied === clean ? "selected" : ""}`} onClick={() => copy(clean)}>
+                        <button key={i} className={`title-option stream-in ${copied === clean ? "selected" : ""}`} onClick={() => copy(clean)}>
                           {t}{copied === clean ? " · copied" : ""}
                         </button>
                       );
                     })}
                   </div>
-                  {result.top_pick && <div style={{ fontSize: 12, color: "var(--accent)", marginTop: 10 }}>{result.top_pick}</div>}
+                  {result.top_pick && <div className="stream-in" style={{ fontSize: 12, color: "var(--accent)", marginTop: 10 }}>{result.top_pick}</div>}
                 </div>
               ) : null}
 
               {result.description ? (
-                <div className="section">
+                <div className="section stream-in">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>Description</span>
                     <CopyButton text={result.description} />
@@ -167,7 +167,7 @@ export default function ContentStudio() {
               ) : null}
 
               {result.tags ? (
-                <div className="section">
+                <div className="section stream-in">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>Tags</span>
                     <CopyButton text={result.tags} />
@@ -177,7 +177,7 @@ export default function ContentStudio() {
               ) : null}
 
               {result.hashtags ? (
-                <div className="section">
+                <div className="section stream-in">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>Hashtags</span>
                     <CopyButton text={result.hashtags} />

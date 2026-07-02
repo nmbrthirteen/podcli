@@ -1314,3 +1314,13 @@ p, li, figcaption, blockquote, .subtitle, .file-preview, .card-desc, .int-row .d
 
 /* ── Reframe: camera-switch (cut) markers ── */
 .rf-cut { position: absolute; top: 0; bottom: 0; width: 2px; background: #facc15; opacity: 0.75; transform: translateX(-1px); pointer-events: none; }
+
+/* ── Streamed content reveal ── */
+.stream-in { animation: stream-in 0.24s var(--ease-out) both; }
+@keyframes stream-in {
+  from { opacity: 0; transform: translateY(4px); filter: blur(6px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stream-in { animation: none; }
+}
