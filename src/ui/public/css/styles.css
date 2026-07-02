@@ -1,14 +1,14 @@
 /* ─── podcli — Shared Styles ─── */
 
 :root {
-  --bg: #08080a;
-  --bg2: #0e0e11;
-  --surface: #131316;
-  --surface2: #1a1a1f;
-  --surface3: #222228;
-  --border: #1b1b22;
-  --border-hover: #2b2833;
-  --border-h: #2b2833;
+  --bg: #141210;
+  --bg2: #191613;
+  --surface: #1e1b17;
+  --surface2: #26221d;
+  --surface3: #2f2a24;
+  --border: #2b2620;
+  --border-hover: #3d362d;
+  --border-h: #3d362d;
   --text: #e8e6df;
   --text2: #9a9388;
   --text3: #8b8579;
@@ -29,7 +29,7 @@
   --blue-subtle: rgba(96, 165, 250, 0.08);
   --blue-border: rgba(96, 165, 250, 0.18);
   --yellow: #facc15;
-  --glass-bg: rgba(22, 20, 24, 0.55);
+  --glass-bg: rgba(26, 23, 20, 0.55);
   --glass-border: rgba(255, 255, 255, 0.055);
   --glass-hi: rgba(255, 255, 255, 0.05);
   --radius: 12px;
@@ -78,7 +78,7 @@ body {
 .img-outline { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
 
 /* ─── Layout ─── */
-.app { max-width: 1080px; margin: 0 auto; padding: 48px 32px 96px; background: #0D0B0D; }
+.app { max-width: 1080px; margin: 0 auto; padding: 48px 32px 96px; }
 .header { margin-bottom: 36px; }
 .logo { font-size: 13px; font-weight: 700; letter-spacing: 1.2px; color: var(--text3); margin-bottom: 10px; text-transform: uppercase; text-decoration: none; }
 .logo span { color: var(--accent); }
@@ -453,7 +453,7 @@ select {
   box-shadow: 0 5px #1a1a1f, 0 11px 18px -5px #000000d9,
     0 0 0 1px #ffffff14, inset 0 1px #ffffff24;
 }
-.btn-ghost:hover:not(:disabled) { background: #2c2c34; }
+.btn-ghost:hover:not(:disabled) { background: var(--surface3); }
 .btn-ghost:active:not(:disabled) { transform: translateY(4px); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.10); }
 .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-danger {
@@ -833,7 +833,7 @@ select {
 }
 .card-desc { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 16px; }
 .code-block {
-  position: relative; background: #0a0a0c; border: 1px solid var(--border);
+  position: relative; background: var(--bg); border: 1px solid var(--border);
   border-radius: var(--radius-sm); overflow: hidden;
 }
 .code-header {
@@ -1314,3 +1314,13 @@ p, li, figcaption, blockquote, .subtitle, .file-preview, .card-desc, .int-row .d
 
 /* ── Reframe: camera-switch (cut) markers ── */
 .rf-cut { position: absolute; top: 0; bottom: 0; width: 2px; background: #facc15; opacity: 0.75; transform: translateX(-1px); pointer-events: none; }
+
+/* ── Streamed content reveal ── */
+.stream-in { animation: stream-in 0.24s var(--ease-out) both; }
+@keyframes stream-in {
+  from { opacity: 0; transform: translateY(4px); filter: blur(6px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stream-in { animation: none; }
+}

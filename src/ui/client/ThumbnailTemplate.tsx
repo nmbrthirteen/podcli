@@ -56,7 +56,7 @@ function padToPreview(pad: any): string {
   return parts.join(" ") || "8px 12px";
 }
 
-export default function ThumbnailTemplate() {
+export default function ThumbnailTemplate({ onBack }: { onBack?: () => void }) {
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -145,7 +145,12 @@ export default function ThumbnailTemplate() {
 
   return (
     <div className="app">
-      <div className="header"><h1>Thumbnail template</h1></div>
+      <div className="header">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
+          <h1 style={{ margin: 0 }}>Edit template</h1>
+          {onBack && <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to generator</button>}
+        </div>
+      </div>
 
       <div className="tmpl-layout">
         <div className="tmpl-preview">
