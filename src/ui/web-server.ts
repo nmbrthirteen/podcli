@@ -2404,11 +2404,16 @@ app.post("/api/generate-content", async (req, res) => {
     const result = await executor.execute(
       "generate_content",
       { clip, transcript_segments: segs },
-      (event) =>
+      (event) => {
+        if (event.partial) {
+          broadcastSSE("content-partial", event.partial);
+          return;
+        }
         broadcastSSE("job-update", {
           progress: event.percent,
           message: event.message,
-        }),
+        });
+      },
     );
 
     const data: any = result.data || {};
@@ -2487,11 +2492,16 @@ app.post("/api/content-studio/generate", async (req, res) => {
     const result = await executor.execute(
       "generate_content",
       { clip, transcript_segments: segs, mode: episode ? "episode" : "shorts" },
-      (event) =>
+      (event) => {
+        if (event.partial) {
+          broadcastSSE("content-partial", event.partial);
+          return;
+        }
         broadcastSSE("job-update", {
           progress: event.percent,
           message: event.message,
-        }),
+        });
+      },
     );
     res.json(result.data || {});
   } catch (err: any) {

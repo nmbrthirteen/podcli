@@ -18,6 +18,7 @@ export default function ContentStudio() {
   const [transcript, setTranscript] = useState("");
   const [mode, setMode] = useState<"episode" | "shorts">("shorts");
   const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [result, setResult] = useState<ContentResult | null>(null);
   const [sessionText, setSessionText] = useState("");
@@ -55,6 +56,18 @@ export default function ContentStudio() {
     }
     setBusy(true);
     setMsg(null);
+    setResult(null);
+    setStage("Starting generation...");
+    const es = new EventSource("/api/events");
+    es.addEventListener("content-partial", (e) => {
+      try { setResult(JSON.parse((e as MessageEvent).data)); } catch {}
+    });
+    es.addEventListener("job-update", (e) => {
+      try {
+        const d = JSON.parse((e as MessageEvent).data);
+        if (d.message) setStage(d.message);
+      } catch {}
+    });
     try {
       const r = await api<ContentResult>("/content-studio/generate", {
         method: "POST",
@@ -66,7 +79,9 @@ export default function ContentStudio() {
     } catch (e: any) {
       setMsg(`Generation failed: ${e.message}`);
     } finally {
+      es.close();
       setBusy(false);
+      setStage(null);
     }
   };
 
@@ -112,14 +127,15 @@ export default function ContentStudio() {
                 {busy ? <><div className="spinner sm" /> Generating…</> : "Generate"}
               </button>
             </div>
+            {busy && stage && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 10 }}>{stage}</div>}
             {msg && <div className="set-note ok" style={{ marginTop: 10, wordBreak: "break-word" }}>{msg}</div>}
           </div>
         </div>
 
         <div style={{ flex: "1 1 420px", minWidth: 320 }}>
           {!result ? (
-            <div className="section" style={{ color: "var(--text3)", fontSize: 12 }}>
-              Titles, description, tags, and hashtags appear here.
+            <div className="section" style={{ color: "var(--text3)", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
+              {busy ? <><div className="spinner sm" /> Waiting for the first lines</> : "Titles, description, tags, and hashtags appear here."}
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>

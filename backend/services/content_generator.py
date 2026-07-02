@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from typing import Optional, Callable
 
 from config.paths import paths
@@ -42,11 +43,133 @@ def load_kb_context(files: Optional[list[tuple[str, int]]] = None) -> str:
     return kb_context
 
 
+def _parse_content(raw_text: str) -> dict:
+    result = {
+        "raw_text": raw_text,
+        "titles": [],
+        "top_pick": "",
+        "description": "",
+        "tags": "",
+        "hashtags": "",
+    }
+    section = ""
+    for line in raw_text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            # Keep paragraph breaks in multi-paragraph episode descriptions.
+            if section == "description" and result["description"]:
+                result["description"] += "\n"
+            continue
+        upper = stripped.upper()
+        if upper.startswith("TITLES"):
+            section = "titles"
+            continue
+        elif upper.startswith("TOP PICK"):
+            result["top_pick"] = stripped
+            section = ""
+            continue
+        elif upper.startswith("DESCRIPTION"):
+            section = "description"
+            continue
+        elif upper.startswith("TAGS"):
+            section = "tags"
+            continue
+        elif upper.startswith("HASHTAGS"):
+            section = "hashtags"
+            continue
+
+        if section == "titles" and stripped[0:1].isdigit() and ". " in stripped[:4]:
+            result["titles"].append(stripped)
+        elif section == "description":
+            result["description"] += stripped + "\n"
+        elif section == "tags":
+            result["tags"] = stripped
+        elif section == "hashtags":
+            result["hashtags"] = stripped
+
+    result["description"] = result["description"].strip()
+    return result
+
+
+def _stream_claude_content(
+    cli_path: str,
+    prompt_file: str,
+    project_dir: str,
+    timeout: int,
+    on_partial: Callable[[dict], None],
+) -> Optional[str]:
+    """Stream one claude --print run, emitting a parsed partial package as each
+    output line completes. Returns the full response text, or None when
+    streaming is unavailable so the caller can fall back to the blocking runner.
+    """
+    cmd = (
+        f'cat "{prompt_file}" | "{cli_path}" --print --verbose '
+        f"--output-format stream-json --include-partial-messages -p -"
+    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=project_dir,
+            shell=True,
+        )
+    except Exception:
+        return None
+
+    deadline = time.monotonic() + timeout
+    text = ""
+    final_text = None
+    emitted = None
+    try:
+        for line in proc.stdout:
+            if time.monotonic() > deadline:
+                proc.kill()
+                return None
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except Exception:
+                continue
+            etype = event.get("type")
+            if etype == "stream_event":
+                delta = (event.get("event") or {}).get("delta") or {}
+                if delta.get("type") == "text_delta":
+                    chunk = delta.get("text", "")
+                    text += chunk
+                    if "\n" in chunk:
+                        parsed = _parse_content(text)
+                        snapshot = json.dumps(parsed, sort_keys=True)
+                        if snapshot != emitted:
+                            emitted = snapshot
+                            on_partial(parsed)
+            elif etype == "result":
+                final_text = event.get("result") or None
+        rc = proc.wait(timeout=max(1, int(deadline - time.monotonic())))
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return None
+
+    out = (final_text or text).strip()
+    if rc != 0 or not out:
+        return None
+    return out
+
+
 def generate_clip_content(
     clip: dict,
     transcript_segments: list[dict],
     progress_callback: Optional[Callable[[int, str], None]] = None,
     mode: str = "shorts",
+    partial_callback: Optional[Callable[[dict], None]] = None,
 ) -> Optional[dict]:
     """
     Generate titles, description, tags, and hashtags for a single clip.
@@ -164,75 +287,40 @@ HASHTAGS:
                     progress_callback(0, f"Retrying content generation with {label}...")
                 progress_callback(30, f"Asking {label} for titles & descriptions...")
 
-            try:
-                cr = _run_ai_command(
+            raw_text = None
+            if engine == "claude" and partial_callback is not None:
+                raw_text = _stream_claude_content(
                     cli_path=cli_path,
-                    engine=engine,
-                    prompt=prompt[:4000] if engine == "codex" else prompt,
                     prompt_file=prompt_file,
                     project_dir=project_dir,
                     timeout=120,
+                    on_partial=partial_callback,
                 )
-            except subprocess.TimeoutExpired:
-                continue
-            except Exception:
-                continue
 
-            if cr.returncode != 0 or not cr.stdout.strip():
-                continue
+            if raw_text is None:
+                try:
+                    cr = _run_ai_command(
+                        cli_path=cli_path,
+                        engine=engine,
+                        prompt=prompt[:4000] if engine == "codex" else prompt,
+                        prompt_file=prompt_file,
+                        project_dir=project_dir,
+                        timeout=120,
+                    )
+                except subprocess.TimeoutExpired:
+                    continue
+                except Exception:
+                    continue
 
-            raw_text = cr.stdout.strip()
+                if cr.returncode != 0 or not cr.stdout.strip():
+                    continue
+                raw_text = cr.stdout.strip()
 
             if progress_callback:
                 progress_callback(90, "Parsing content...")
 
-            result = {
-                "raw_text": raw_text,
-                "titles": [],
-                "top_pick": "",
-                "description": "",
-                "tags": "",
-                "hashtags": "",
-                "engine": engine,
-            }
-
-            lines = raw_text.split("\n")
-            section = ""
-            for line in lines:
-                stripped = line.strip()
-                if not stripped:
-                    # Keep paragraph breaks in multi-paragraph episode descriptions.
-                    if section == "description" and result["description"]:
-                        result["description"] += "\n"
-                    continue
-                upper = stripped.upper()
-                if upper.startswith("TITLES"):
-                    section = "titles"
-                    continue
-                elif upper.startswith("TOP PICK"):
-                    result["top_pick"] = stripped
-                    section = ""
-                    continue
-                elif upper.startswith("DESCRIPTION"):
-                    section = "description"
-                    continue
-                elif upper.startswith("TAGS"):
-                    section = "tags"
-                    continue
-                elif upper.startswith("HASHTAGS"):
-                    section = "hashtags"
-                    continue
-
-                if section == "titles" and stripped[0:1].isdigit() and ". " in stripped[:4]:
-                    result["titles"].append(stripped)
-                elif section == "description":
-                    result["description"] += stripped + "\n"
-                elif section == "tags":
-                    result["tags"] = stripped
-                elif section == "hashtags":
-                    result["hashtags"] = stripped
-
-            result["description"] = result["description"].strip()
+            result = _parse_content(raw_text)
+            result["engine"] = engine
             if not result["titles"] and not result["description"]:
                 continue
 

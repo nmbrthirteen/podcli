@@ -431,6 +431,9 @@ def handle_generate_content(task_id: str, params: dict):
         transcript_segments=transcript_segments,
         progress_callback=lambda pct, msg: emit_progress(task_id, "generating", pct, msg),
         mode=params.get("mode", "shorts"),
+        partial_callback=lambda partial: emit_progress(
+            task_id, "generating", 60, "Writing content...", partial=partial
+        ),
     )
 
     if result is None:
