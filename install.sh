@@ -2,6 +2,7 @@
 # podcli installer — downloads the prebuilt native binary (no Go, Node, Python,
 # or ffmpeg needed; the binary provisions those itself on first run).
 # Usage: curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh
+# Uninstall: curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh -s -- --uninstall
 set -eu
 
 REPO="nmbrthirteen/podcli"
@@ -25,6 +26,34 @@ if [ "$target" = "darwin-amd64" ]; then
   err "Intel Macs aren't supported yet (coming in v2.0.1). Apple Silicon, Linux, and Windows are available."
 fi
 bin_dir="$home_dir/bin"
+
+if [ "${1:-}" = "--uninstall" ]; then
+  echo "Uninstalling podcli…"
+  for d in /usr/local/bin "$HOME/.local/bin"; do
+    link="$d/podcli"
+    if [ -L "$link" ] && [ "$(readlink "$link")" = "$bin_dir/podcli" ]; then
+      if rm -f "$link"; then
+        echo "  removed link: $link"
+      else
+        echo "  warning: could not remove link: $link" >&2
+      fi
+    fi
+  done
+  for p in "$bin_dir" "$home_dir/runtime" "$home_dir/models" "$home_dir/tools"; do
+    if [ -e "$p" ]; then
+      if rm -rf "$p"; then
+        echo "  removed: $p"
+      else
+        echo "  warning: could not remove: $p" >&2
+      fi
+    fi
+  done
+  echo "  removed app files from: $home_dir"
+  echo "  kept user data (config, knowledge, presets, assets, history, cache)."
+  echo "  To remove everything: rm -rf '$home_dir'"
+  exit 0
+fi
+
 mkdir -p "$bin_dir"
 
 version="${PODCLI_VERSION:-}"
