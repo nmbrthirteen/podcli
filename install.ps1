@@ -1,12 +1,38 @@
 # podcli installer for Windows — downloads the prebuilt native binary (no Go,
 # Node, Python, or ffmpeg needed; the binary provisions those on first run).
 # Usage: irm https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.ps1 | iex
+# Uninstall: & ([scriptblock]::Create((irm https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.ps1))) -Uninstall
+param([switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
 $repo = 'nmbrthirteen/podcli'
 $target = 'windows-amd64'
 
 $homeDir = Join-Path $env:LOCALAPPDATA 'podcli'
 $binDir = Join-Path $homeDir 'bin'
+
+if ($Uninstall) {
+  Write-Host "Uninstalling podcli..."
+  foreach ($p in @($binDir, (Join-Path $homeDir 'runtime'), (Join-Path $homeDir 'models'), (Join-Path $homeDir 'tools'))) {
+    if (Test-Path $p) {
+      try {
+        Remove-Item $p -Recurse -Force -ErrorAction Stop
+        Write-Host "  removed: $p"
+      } catch {
+        Write-Warning "could not remove $p`: $($_.Exception.Message)"
+      }
+    }
+  }
+  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+  if ($userPath -like "*$binDir*") {
+    $parts = $userPath -split ';' | Where-Object { $_ -and ($_ -ne $binDir) }
+    [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')
+    Write-Host "  removed from user PATH (restart your terminal)"
+  }
+  Write-Host "  kept user data (config, knowledge, presets, assets, history, cache)."
+  Write-Host "  To remove everything: Remove-Item '$homeDir' -Recurse -Force"
+  exit 0
+}
+
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 
 $version = $env:PODCLI_VERSION

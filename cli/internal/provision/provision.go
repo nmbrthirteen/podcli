@@ -281,17 +281,10 @@ var ffmpegSpecs = map[string][]ffArchive{
 	},
 }
 
-func exeSuffix() string {
-	if runtime.GOOS == "windows" {
-		return ".exe"
-	}
-	return ""
-}
-
 const podcliRepo = "nmbrthirteen/podcli"
 
 func WhisperCLIBin() string {
-	return filepath.Join(paths.RuntimeDir(), "whisper", "whisper-cli"+exeSuffix())
+	return filepath.Join(paths.RuntimeDir(), "whisper", "whisper-cli"+paths.ExeSuffix())
 }
 
 func latestReleaseAssets() (map[string]string, error) {
@@ -444,7 +437,7 @@ func EnsureWhisperCpp() (string, error) {
 	if have(bin) {
 		return bin, nil
 	}
-	name := fmt.Sprintf("whisper-cli-%s-%s%s", runtime.GOOS, runtime.GOARCH, exeSuffix())
+	name := fmt.Sprintf("whisper-cli-%s-%s%s", runtime.GOOS, runtime.GOARCH, paths.ExeSuffix())
 	assets, err := latestReleaseAssets()
 	if err != nil {
 		return "", err
@@ -469,7 +462,7 @@ func EnsureWhisperCpp() (string, error) {
 }
 
 func FFmpegBin() string {
-	return filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg"+exeSuffix())
+	return filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg"+paths.ExeSuffix())
 }
 
 func EnsureFFmpeg() (string, error) {

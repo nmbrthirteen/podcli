@@ -34,6 +34,8 @@ func main() {
 		doctor()
 	case "update":
 		os.Exit(update.Run(Version))
+	case "uninstall":
+		os.Exit(uninstall(args[1:]))
 	case "setup":
 		os.Exit(setup(args[1:]))
 	case "mcp":
@@ -312,6 +314,150 @@ func mcpInstall() int {
 	return 0
 }
 
+func uninstall(args []string) int {
+	yes, dryRun, purge := false, false, false
+	for _, a := range args {
+		switch a {
+		case "--yes", "-y":
+			yes = true
+		case "--dry-run":
+			dryRun = true
+		case "--purge":
+			purge = true
+		case "--help", "-h":
+			printUninstallHelp()
+			return 0
+		default:
+			fmt.Fprintf(os.Stderr, "podcli: unknown uninstall option %q\n", a)
+			printUninstallHelp()
+			return 2
+		}
+	}
+
+	home := paths.Home()
+	self, _ := os.Executable()
+	managed := filepath.Join(paths.BinDir(), "podcli"+paths.ExeSuffix())
+	if !pathContains(paths.BinDir(), self) {
+		self = ""
+	}
+	targets := uninstallTargets(home, purge)
+	links := podcliLinks(managed, self)
+
+	fmt.Println("podcli uninstall")
+	if purge {
+		fmt.Printf("  This will remove podcli and all managed data under: %s\n", home)
+	} else {
+		fmt.Printf("  This will remove podcli's app files under: %s\n", home)
+		fmt.Println("  Your config, knowledge, presets, assets, history, and cache are kept.")
+		fmt.Println("  Use `podcli uninstall --purge` to remove everything in that folder.")
+	}
+	for _, p := range targets {
+		fmt.Printf("  remove: %s\n", p)
+	}
+	for _, p := range links {
+		fmt.Printf("  unlink: %s\n", p)
+	}
+	if dryRun {
+		fmt.Println("Dry run only — nothing removed.")
+		return 0
+	}
+	if !yes && !confirm("Continue? [y/N] ") {
+		fmt.Println("Cancelled.")
+		return 0
+	}
+
+	for _, p := range links {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "  warning: could not remove %s: %v\n", p, err)
+		}
+	}
+	runningInUse := false
+	for _, p := range targets {
+		if err := os.RemoveAll(p); err != nil {
+			if pathContains(p, self) {
+				runningInUse = true
+			}
+			fmt.Fprintf(os.Stderr, "  warning: could not remove %s: %v\n", p, err)
+		}
+	}
+	if runningInUse {
+		fmt.Fprintf(os.Stderr, "  note: the running binary is still in use and was left in place: %s\n", self)
+		fmt.Fprintln(os.Stderr, "        Delete it after this command exits, or run the installer script with --uninstall.")
+	}
+	fmt.Println("Done — podcli app files were removed.")
+	if !purge {
+		fmt.Printf("Kept user data in: %s\n", home)
+	}
+	return 0
+}
+
+func uninstallTargets(home string, purge bool) []string {
+	if purge {
+		return []string{home}
+	}
+	return []string{paths.BinDir(), paths.RuntimeDir(), paths.ModelsDir(), filepath.Join(home, "tools")}
+}
+
+func podcliLinks(managed, self string) []string {
+	// A binary running from outside the managed bin dir is user-installed;
+	// links pointing at it must survive the uninstall.
+	if !pathContains(paths.BinDir(), self) {
+		self = ""
+	}
+	var out []string
+	for _, d := range []string{"/usr/local/bin", filepath.Join(os.Getenv("HOME"), ".local", "bin")} {
+		if d == "/usr/local/bin" && paths.ExeSuffix() == ".exe" {
+			continue
+		}
+		p := filepath.Join(d, "podcli"+paths.ExeSuffix())
+		if linkPointsTo(p, managed) || (self != "" && linkPointsTo(p, self)) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func pathContains(dir, file string) bool {
+	if file == "" {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(file))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func linkPointsTo(link, target string) bool {
+	dest, err := os.Readlink(link)
+	if err != nil {
+		return false
+	}
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(link), dest)
+	}
+	return filepath.Clean(dest) == filepath.Clean(target)
+}
+
+func confirm(prompt string) bool {
+	fmt.Print(prompt)
+	var s string
+	if _, err := fmt.Scanln(&s); err != nil {
+		return false
+	}
+	s = strings.ToLower(strings.TrimSpace(s))
+	return s == "y" || s == "yes"
+}
+
+func printUninstallHelp() {
+	fmt.Println(`Usage: podcli uninstall [--yes] [--dry-run] [--purge]
+
+Removes podcli's managed binary, runtimes, models, and installer-created links.
+By default, user data (config, knowledge, presets, assets, history, cache) is kept.
+
+Options:
+  -y, --yes     Do not prompt for confirmation
+  --dry-run     Show what would be removed without deleting anything
+  --purge       Remove the entire podcli managed folder, including user data`)
+}
+
 func doctor() {
 	fmt.Printf("podcli %s\n\n", Version)
 	fmt.Println("Paths")
@@ -414,6 +560,7 @@ Launcher commands:
   doctor               Show resolved paths, interpreter, backend, ffmpeg, models
   version              Print version
   update               Check for and apply a newer release
+  uninstall            Remove podcli app files (keeps user data unless --purge)
   setup [--model base] [--vad] [--speakers]
                        Provision runtimes + models (--speakers adds pyannote+torch, ~2GB)
   mcp                  Run the MCP server (stdio) for Claude/Codex
