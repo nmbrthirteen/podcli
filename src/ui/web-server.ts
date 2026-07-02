@@ -1559,7 +1559,7 @@ app.post("/api/thumbnail-studio/options", async (req, res) => {
     // session — never an arbitrary server path passed to the extractor.
     let video: string;
     try { video = realpathSync(path.resolve(String(video_path))); } catch { res.status(400).json({ error: "video not found" }); return; }
-    if (!allowedSourcePaths.has(video)) { res.status(400).json({ error: "unknown video — upload or select it first" }); return; }
+    if (!allowedSourcePaths.has(video)) { res.status(400).json({ error: "unknown video, upload or select it first" }); return; }
     args.push("--video", video);
     if (start != null && start !== "") args.push("--start", String(Math.max(0, Number(start) || 0)));
     if (end != null && end !== "") args.push("--end", String(Math.max(0, Number(end) || 0)));

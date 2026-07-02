@@ -23,7 +23,6 @@ export default function ThumbnailStudio() {
   const [editingTemplate, setEditingTemplate] = useState(false);
 
   if (editingTemplate) {
-    // Bust the preview cache on return — template edits change how renders look.
     return <ThumbnailTemplate onBack={() => { setEditingTemplate(false); setBust(Date.now()); }} />;
   }
 
@@ -55,7 +54,7 @@ export default function ThumbnailStudio() {
   };
 
   const loadOptions = async () => {
-    if (!title.trim()) { setMsg("Enter a title first — headlines are written from it"); return; }
+    if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); return; }
     setBusy("options"); setMsg(null);
     try {
       const r = await api("/thumbnail-studio/options", {
@@ -100,12 +99,7 @@ export default function ThumbnailStudio() {
     <div className="app">
       <div className="header">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
-          <div>
-            <h1 style={{ margin: 0 }}>Thumbnail studio</h1>
-            <p style={{ color: "var(--text2)", fontSize: 13, margin: "6px 0 0" }}>
-              Generate a thumbnail from any video or image — no clip required. Uses your brand template and knowledge base.
-            </p>
-          </div>
+          <h1 style={{ margin: 0 }}>Thumbnail studio</h1>
           <button className="btn btn-ghost btn-sm" onClick={() => setEditingTemplate(true)}>Edit template</button>
         </div>
       </div>
@@ -129,15 +123,12 @@ export default function ThumbnailStudio() {
           {video && <span style={{ fontSize: 12, color: "var(--text2)" }}>{video.name}</span>}
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title — headlines are written from this" style={{ flex: "1 1 280px", fontSize: 14, padding: "10px 13px" }} />
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title to write headlines from" style={{ flex: "1 1 280px", fontSize: 14, padding: "10px 13px" }} />
           <input type="number" min={0} value={startS} onChange={(e) => setStartS(e.target.value)} placeholder="Start (s)" style={{ width: 90, fontSize: 13, padding: "9px 10px" }} />
           <input type="number" min={0} value={endS} onChange={(e) => setEndS(e.target.value)} placeholder="End (s)" style={{ width: 90, fontSize: 13, padding: "9px 10px" }} />
           <button className="btn btn-primary btn-sm" onClick={loadOptions} disabled={busy !== null}>
             {busy === "options" ? <><div className="spinner sm" /> Finding options…</> : (textOpts.length || frameOpts.length ? "Refresh options" : "Get options")}
           </button>
-        </div>
-        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>
-          Start/end narrow the frame search window. Leave empty to scan the whole video.
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api, labelStyle } from "./lib";
+import { api, basename, labelStyle } from "./lib";
 import CopyButton from "./CopyButton";
 
 interface ContentResult {
@@ -16,11 +16,12 @@ const STORE = "podcli.content-studio";
 export default function ContentStudio() {
   const [title, setTitle] = useState("");
   const [transcript, setTranscript] = useState("");
-  const [mode, setMode] = useState<"episode" | "shorts">("episode");
+  const [mode, setMode] = useState<"episode" | "shorts">("shorts");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [result, setResult] = useState<ContentResult | null>(null);
   const [sessionText, setSessionText] = useState("");
+  const [sessionName, setSessionName] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
@@ -29,11 +30,14 @@ export default function ContentStudio() {
       if (saved?.result) {
         setResult(saved.result);
         setTitle(saved.title || "");
-        setMode(saved.mode === "shorts" ? "shorts" : "episode");
+        setMode(saved.mode === "episode" ? "episode" : "shorts");
       }
-    } catch { /* stale/corrupt store */ }
+    } catch {}
     api("/ui-state")
-      .then((s) => setSessionText(s?.transcript?.transcript || s?.rawTranscriptText || ""))
+      .then((s) => {
+        setSessionText(s?.transcript?.transcript || s?.rawTranscriptText || "");
+        setSessionName(basename(s?.filePath || s?.videoPath || ""));
+      })
       .catch(() => {});
   }, []);
 
@@ -58,7 +62,7 @@ export default function ContentStudio() {
       });
       if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing. Is claude or codex installed?");
       setResult(r);
-      try { localStorage.setItem(STORE, JSON.stringify({ title, mode, result: r })); } catch { /* quota */ }
+      try { localStorage.setItem(STORE, JSON.stringify({ title, mode, result: r })); } catch {}
     } catch (e: any) {
       setMsg(`Generation failed: ${e.message}`);
     } finally {
@@ -70,9 +74,6 @@ export default function ContentStudio() {
     <div className="app">
       <div className="header">
         <h1>Content studio</h1>
-        <p style={{ color: "var(--text2)", fontSize: 13, margin: "6px 0 0" }}>
-          Transcript in — titles, description, tags, and hashtags out. Follows your knowledge base.
-        </p>
       </div>
 
       <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -90,15 +91,15 @@ export default function ContentStudio() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "18px 0 0" }}>
               <label style={{ ...labelStyle, marginBottom: 0 }}>Transcript</label>
               {sessionText && (
-                <button className="btn btn-ghost btn-sm" onClick={() => setTranscript(sessionText)} disabled={busy}>
-                  Use current episode
+                <button className="btn btn-ghost btn-sm" onClick={() => setTranscript(sessionText)} disabled={busy} title={sessionName}>
+                  Use current episode{sessionName ? ` · ${sessionName}` : ""}
                 </button>
               )}
             </div>
             <textarea
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
-              placeholder="Paste the transcript here — speaker labels and timestamps are fine but not required."
+              placeholder="Paste the transcript here"
               style={{ width: "100%", minHeight: 260, fontSize: 13, lineHeight: 1.6, padding: "10px 13px", marginTop: 8, resize: "vertical" }}
             />
 
@@ -118,7 +119,7 @@ export default function ContentStudio() {
         <div style={{ flex: "1 1 420px", minWidth: 320 }}>
           {!result ? (
             <div className="section" style={{ color: "var(--text3)", fontSize: 12 }}>
-              Results land here: 8 title options, a description, YouTube tags, and hashtags — all checked against your brand voice.
+              Titles, description, tags, and hashtags appear here.
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
