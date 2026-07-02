@@ -1513,10 +1513,8 @@ app.post("/api/clips/:id/thumbnail/render", async (req, res) => {
   if (!frame_path) { res.status(400).json({ error: "select a frame first" }); return; }
   // Only allow frames podcli itself produced (candidate frames) or the user uploaded —
   // never an arbitrary server path passed through to the renderer.
-  const resolvedFrame = resolve(String(frame_path));
-  const frameRoots = [resolve(join(paths.output, "thumbnails", String(clip.id))), resolve(uploadDir)];
-  const inAllowedRoot = frameRoots.some((root) => resolvedFrame === root || resolvedFrame.startsWith(root + path.sep));
-  if (!inAllowedRoot || !existsSync(resolvedFrame)) { res.status(400).json({ error: "invalid frame" }); return; }
+  const resolvedFrame = resolveFrameInRoots(frame_path, [join(paths.output, "thumbnails", String(clip.id)), uploadDir]);
+  if (!resolvedFrame) { res.status(400).json({ error: "invalid frame" }); return; }
   const outDir = join(paths.output, "thumbnails", String(clip.id));
   await mkdir(outDir, { recursive: true });
   const out = join(outDir, `thumb_${uuidv4().slice(0, 8)}.png`);
@@ -1543,6 +1541,22 @@ app.post("/api/clips/:id/thumbnail/render", async (req, res) => {
 // --- Thumbnail studio (standalone thumbnails, no clip required) ---
 
 const thumbStudioDir = join(paths.output, "thumbnails", "studio");
+
+// realpath both sides so a symlink planted inside an allowed root can't point
+// the renderer at a file outside it.
+function resolveFrameInRoots(framePath: unknown, roots: string[]): string | null {
+  let real: string;
+  try {
+    real = realpathSync(path.resolve(String(framePath)));
+  } catch {
+    return null;
+  }
+  const realRoot = (p: string) => {
+    try { return realpathSync(p); } catch { return resolve(p); }
+  };
+  const ok = roots.map(realRoot).some((root) => real === root || real.startsWith(root + path.sep));
+  return ok ? real : null;
+}
 
 app.post("/api/thumbnail-studio/options", async (req, res) => {
   const { title, video_path, start, end, texts, frames } = req.body || {};
@@ -1574,10 +1588,8 @@ app.post("/api/thumbnail-studio/render", async (req, res) => {
   const { title, line1, line2, frame_path, frame_info } = req.body || {};
   if (!title || !String(title).trim()) { res.status(400).json({ error: "title is required" }); return; }
   if (!frame_path) { res.status(400).json({ error: "select a frame first" }); return; }
-  const resolvedFrame = resolve(String(frame_path));
-  const frameRoots = [resolve(thumbStudioDir), resolve(uploadDir)];
-  const inAllowedRoot = frameRoots.some((root) => resolvedFrame === root || resolvedFrame.startsWith(root + path.sep));
-  if (!inAllowedRoot || !existsSync(resolvedFrame)) { res.status(400).json({ error: "invalid frame" }); return; }
+  const resolvedFrame = resolveFrameInRoots(frame_path, [thumbStudioDir, uploadDir]);
+  if (!resolvedFrame) { res.status(400).json({ error: "invalid frame" }); return; }
   await mkdir(thumbStudioDir, { recursive: true });
   const out = join(thumbStudioDir, `thumb_${uuidv4().slice(0, 8)}.png`);
   const args = ["thumbnail-render", String(title), "--frame", resolvedFrame, "--output", out];
@@ -2406,7 +2418,7 @@ app.post("/api/generate-content", async (req, res) => {
       { clip, transcript_segments: segs },
       (event) => {
         if (event.partial) {
-          broadcastSSE("content-partial", event.partial);
+          broadcastSSE("content-partial", { stream_id: clip?.id ? String(clip.id) : null, partial: event.partial });
           return;
         }
         broadcastSSE("job-update", {
@@ -2470,7 +2482,7 @@ function condenseSegments(segments: Array<{ start?: number; text?: string }>): A
 }
 
 app.post("/api/content-studio/generate", async (req, res) => {
-  const { title, transcript_text, mode } = req.body || {};
+  const { title, transcript_text, mode, stream_id } = req.body || {};
   let segs: Array<{ start: number; text: string }>;
   if (typeof transcript_text === "string" && transcript_text.trim()) {
     segs = packTranscriptText(transcript_text);
@@ -2494,7 +2506,7 @@ app.post("/api/content-studio/generate", async (req, res) => {
       { clip, transcript_segments: segs, mode: episode ? "episode" : "shorts" },
       (event) => {
         if (event.partial) {
-          broadcastSSE("content-partial", event.partial);
+          broadcastSSE("content-partial", { stream_id: stream_id || null, partial: event.partial });
           return;
         }
         broadcastSSE("job-update", {

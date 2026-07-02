@@ -58,9 +58,13 @@ export default function ContentStudio() {
     setMsg(null);
     setResult(null);
     setStage("Starting generation...");
+    const streamId = Math.random().toString(36).slice(2);
     const es = new EventSource("/api/events");
     es.addEventListener("content-partial", (e) => {
-      try { setResult(JSON.parse((e as MessageEvent).data)); } catch {}
+      try {
+        const d = JSON.parse((e as MessageEvent).data);
+        if (d.stream_id === streamId && d.partial) setResult(d.partial);
+      } catch {}
     });
     es.addEventListener("job-update", (e) => {
       try {
@@ -71,7 +75,7 @@ export default function ContentStudio() {
     try {
       const r = await api<ContentResult>("/content-studio/generate", {
         method: "POST",
-        body: JSON.stringify({ title: title || undefined, transcript_text: transcript, mode }),
+        body: JSON.stringify({ title: title || undefined, transcript_text: transcript, mode, stream_id: streamId }),
       });
       if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing. Is claude or codex installed?");
       setResult(r);

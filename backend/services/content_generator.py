@@ -8,7 +8,7 @@ import json
 import os
 import subprocess
 import tempfile
-import time
+import threading
 from typing import Optional, Callable
 
 from config.paths import paths
@@ -41,6 +41,15 @@ def load_kb_context(files: Optional[list[tuple[str, int]]] = None) -> str:
             except Exception:
                 pass
     return kb_context
+
+
+def _sample_lines(lines: list[str], max_lines: int = 30) -> list[str]:
+    """Pick evenly spaced lines so long episodes are represented end to end."""
+    if len(lines) <= max_lines:
+        return lines
+    last = len(lines) - 1
+    picked = sorted({round(i * last / (max_lines - 1)) for i in range(max_lines)})
+    return [lines[i] for i in picked]
 
 
 def _parse_content(raw_text: str) -> dict:
@@ -102,33 +111,39 @@ def _stream_claude_content(
     output line completes. Returns the full response text, or None when
     streaming is unavailable so the caller can fall back to the blocking runner.
     """
-    cmd = (
-        f'cat "{prompt_file}" | "{cli_path}" --print --verbose '
-        f"--output-format stream-json --include-partial-messages -p -"
-    )
+    args = [
+        cli_path, "--print", "--verbose",
+        "--output-format", "stream-json", "--include-partial-messages",
+        "-p", "-",
+    ]
+    try:
+        prompt_fh = open(prompt_file, encoding="utf-8")
+    except Exception:
+        return None
     try:
         proc = subprocess.Popen(
-            cmd,
+            args,
+            stdin=prompt_fh,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
             errors="replace",
             cwd=project_dir,
-            shell=True,
         )
     except Exception:
+        prompt_fh.close()
         return None
 
-    deadline = time.monotonic() + timeout
+    # readline blocks between deltas, so the timeout is enforced by a watchdog
+    # kill rather than an in-loop deadline check.
+    watchdog = threading.Timer(timeout, proc.kill)
+    watchdog.start()
     text = ""
     final_text = None
     emitted = None
     try:
         for line in proc.stdout:
-            if time.monotonic() > deadline:
-                proc.kill()
-                return None
             line = line.strip()
             if not line.startswith("{"):
                 continue
@@ -150,13 +165,17 @@ def _stream_claude_content(
                             on_partial(parsed)
             elif etype == "result":
                 final_text = event.get("result") or None
-        rc = proc.wait(timeout=max(1, int(deadline - time.monotonic())))
+        rc = proc.wait()
     except Exception:
         try:
             proc.kill()
+            proc.wait()
         except Exception:
             pass
         return None
+    finally:
+        watchdog.cancel()
+        prompt_fh.close()
 
     out = (final_text or text).strip()
     if rc != 0 or not out:
@@ -213,7 +232,7 @@ KNOWLEDGE BASE:
 EPISODE: "{clip.get('title', '')}"
 
 TRANSCRIPT EXCERPT:
-{chr(10).join(clip_transcript[:30])}
+{chr(10).join(_sample_lines(clip_transcript))}
 
 Generate exactly this (no other text):
 
