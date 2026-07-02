@@ -16,15 +16,6 @@ case "$os" in
   Linux) goos=linux; home_dir="${XDG_DATA_HOME:-$HOME/.local/share}/podcli" ;;
   *) err "unsupported OS: $os (on Windows use install.ps1)" ;;
 esac
-case "$arch" in
-  x86_64|amd64) goarch=amd64 ;;
-  arm64|aarch64) goarch=arm64 ;;
-  *) err "unsupported architecture: $arch" ;;
-esac
-target="${goos}-${goarch}"
-if [ "$target" = "darwin-amd64" ]; then
-  err "Intel Macs aren't supported yet (coming in v2.0.1). Apple Silicon, Linux, and Windows are available."
-fi
 bin_dir="$home_dir/bin"
 
 if [ "${1:-}" = "--uninstall" ]; then
@@ -54,6 +45,15 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
+case "$arch" in
+  x86_64|amd64) goarch=amd64 ;;
+  arm64|aarch64) goarch=arm64 ;;
+  *) err "unsupported architecture: $arch" ;;
+esac
+target="${goos}-${goarch}"
+if [ "$target" = "darwin-amd64" ]; then
+  err "Intel Macs aren't supported yet (coming in v2.0.1). Apple Silicon, Linux, and Windows are available."
+fi
 mkdir -p "$bin_dir"
 
 version="${PODCLI_VERSION:-}"

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"podcli/internal/backend"
@@ -337,7 +336,7 @@ func uninstall(args []string) int {
 
 	home := paths.Home()
 	self, _ := os.Executable()
-	managed := filepath.Join(paths.BinDir(), "podcli"+exeSuffix())
+	managed := filepath.Join(paths.BinDir(), "podcli"+paths.ExeSuffix())
 	targets := uninstallTargets(home, purge)
 	links := podcliLinks(managed, self)
 
@@ -369,15 +368,19 @@ func uninstall(args []string) int {
 			fmt.Fprintf(os.Stderr, "  warning: could not remove %s: %v\n", p, err)
 		}
 	}
+	runningInUse := false
 	for _, p := range targets {
-		if pathContains(p, self) {
-			fmt.Fprintf(os.Stderr, "  warning: skipping %s because it contains the running podcli binary\n", p)
-			fmt.Fprintln(os.Stderr, "           Delete it after this command exits, or run the installer script with --uninstall.")
-			continue
-		}
 		if err := os.RemoveAll(p); err != nil {
-			fmt.Fprintf(os.Stderr, "  warning: could not remove %s: %v\n", p, err)
+			if pathContains(p, self) {
+				runningInUse = true
+			} else {
+				fmt.Fprintf(os.Stderr, "  warning: could not remove %s: %v\n", p, err)
+			}
 		}
+	}
+	if runningInUse {
+		fmt.Fprintf(os.Stderr, "  note: the running binary is still in use and was left in place: %s\n", self)
+		fmt.Fprintln(os.Stderr, "        Delete it after this command exits, or run the installer script with --uninstall.")
 	}
 	fmt.Println("Done — podcli app files were removed.")
 	if !purge {
@@ -396,10 +399,10 @@ func uninstallTargets(home string, purge bool) []string {
 func podcliLinks(managed, self string) []string {
 	var out []string
 	for _, d := range []string{"/usr/local/bin", filepath.Join(os.Getenv("HOME"), ".local", "bin")} {
-		if d == "/usr/local/bin" && runtime.GOOS == "windows" {
+		if d == "/usr/local/bin" && paths.ExeSuffix() == ".exe" {
 			continue
 		}
-		p := filepath.Join(d, "podcli"+exeSuffix())
+		p := filepath.Join(d, "podcli"+paths.ExeSuffix())
 		if linkPointsTo(p, managed) || linkPointsTo(p, self) {
 			out = append(out, p)
 		}
@@ -428,27 +431,12 @@ func confirm(prompt string) bool {
 	return s == "y" || s == "yes"
 }
 
-func pathContains(parent, child string) bool {
-	parentAbs, err := filepath.Abs(parent)
-	if err != nil {
-		return false
-	}
-	childAbs, err := filepath.Abs(child)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(parentAbs, childAbs)
+func pathContains(dir, file string) bool {
+	rel, err := filepath.Rel(dir, file)
 	if err != nil {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
-}
-
-func exeSuffix() string {
-	if runtime.GOOS == "windows" {
-		return ".exe"
-	}
-	return ""
 }
 
 func printUninstallHelp() {
