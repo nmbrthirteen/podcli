@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"podcli/internal/paths"
 )
 
 func TestLinkPointsToAbsoluteAndRelativeSymlinks(t *testing.T) {
@@ -60,5 +62,33 @@ func TestPathContainsDetectsRunningBinaryUnderTarget(t *testing.T) {
 	}
 	if pathContains(filepath.Join(dir, "models"), self) {
 		t.Fatalf("sibling target should not contain running binary")
+	}
+}
+
+func TestPodcliLinksPreservesSelfOutsideManagedBin(t *testing.T) {
+	home := t.TempDir()
+	managedHome := filepath.Join(t.TempDir(), "managed")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("PODCLI_HOME", managedHome)
+
+	linkDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(linkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	self := filepath.Join(t.TempDir(), "custom", "podcli"+paths.ExeSuffix())
+	if err := os.MkdirAll(filepath.Dir(self), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(self, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(self, filepath.Join(linkDir, "podcli"+paths.ExeSuffix())); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	managed := filepath.Join(paths.BinDir(), "podcli"+paths.ExeSuffix())
+	if got := podcliLinks(managed, self); len(got) != 0 {
+		t.Fatalf("podcliLinks should preserve self outside managed bin: %v", got)
 	}
 }

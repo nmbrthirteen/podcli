@@ -337,6 +337,9 @@ func uninstall(args []string) int {
 	home := paths.Home()
 	self, _ := os.Executable()
 	managed := filepath.Join(paths.BinDir(), "podcli"+paths.ExeSuffix())
+	if !pathContains(paths.BinDir(), self) {
+		self = ""
+	}
 	targets := uninstallTargets(home, purge)
 	links := podcliLinks(managed, self)
 
@@ -373,9 +376,8 @@ func uninstall(args []string) int {
 		if err := os.RemoveAll(p); err != nil {
 			if pathContains(p, self) {
 				runningInUse = true
-			} else {
-				fmt.Fprintf(os.Stderr, "  warning: could not remove %s: %v\n", p, err)
 			}
+			fmt.Fprintf(os.Stderr, "  warning: could not remove %s: %v\n", p, err)
 		}
 	}
 	if runningInUse {
@@ -403,11 +405,19 @@ func podcliLinks(managed, self string) []string {
 			continue
 		}
 		p := filepath.Join(d, "podcli"+paths.ExeSuffix())
-		if linkPointsTo(p, managed) || linkPointsTo(p, self) {
+		if linkPointsTo(p, managed) || (self != "" && linkPointsTo(p, self)) {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+func pathContains(dir, file string) bool {
+	if file == "" {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(file))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func linkPointsTo(link, target string) bool {
@@ -429,14 +439,6 @@ func confirm(prompt string) bool {
 	}
 	s = strings.ToLower(strings.TrimSpace(s))
 	return s == "y" || s == "yes"
-}
-
-func pathContains(dir, file string) bool {
-	rel, err := filepath.Rel(dir, file)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func printUninstallHelp() {
