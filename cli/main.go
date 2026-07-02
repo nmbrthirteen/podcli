@@ -399,6 +399,11 @@ func uninstallTargets(home string, purge bool) []string {
 }
 
 func podcliLinks(managed, self string) []string {
+	// A binary running from outside the managed bin dir is user-installed;
+	// links pointing at it must survive the uninstall.
+	if !pathContains(paths.BinDir(), self) {
+		self = ""
+	}
 	var out []string
 	for _, d := range []string{"/usr/local/bin", filepath.Join(os.Getenv("HOME"), ".local", "bin")} {
 		if d == "/usr/local/bin" && paths.ExeSuffix() == ".exe" {
