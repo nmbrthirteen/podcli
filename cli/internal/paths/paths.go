@@ -43,3 +43,10 @@ func RuntimeDir() string { return filepath.Join(Home(), "runtime") }
 func ModelsDir() string  { return filepath.Join(Home(), "models") }
 func BinDir() string     { return filepath.Join(Home(), "bin") }
 func ConfigPath() string { return filepath.Join(Home(), "config.json") }
+
+func ExeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}

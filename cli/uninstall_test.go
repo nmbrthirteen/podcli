@@ -41,3 +41,24 @@ func TestUninstallTargetsPreserveUserDataUnlessPurged(t *testing.T) {
 		t.Fatalf("purge targets = %v, want only %s", purged, home)
 	}
 }
+
+func TestPathContainsDetectsRunningBinaryUnderTarget(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	self := filepath.Join(bin, "podcli")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(self, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !pathContains(bin, self) {
+		t.Fatalf("bin target should contain running binary")
+	}
+	if !pathContains(dir, self) {
+		t.Fatalf("home target should contain running binary")
+	}
+	if pathContains(filepath.Join(dir, "models"), self) {
+		t.Fatalf("sibling target should not contain running binary")
+	}
+}
