@@ -14,17 +14,20 @@ from config.paths import paths
 from services.claude_suggest import _engine_label, _find_ai_cli_candidates, _run_ai_command
 
 
-def _load_kb_context() -> str:
-    """Load PodStack knowledge base files for content generation."""
+CONTENT_KB_FILES = [
+    ("05-title-formulas.md", 3000),
+    ("06-descriptions-template.md", 2000),
+    ("02-voice-and-tone.md", 2000),
+    ("01-brand-identity.md", 1000),
+    ("12-quick-reference.md", 1500),
+]
+
+
+def load_kb_context(files: Optional[list[tuple[str, int]]] = None) -> str:
+    """Load PodStack knowledge base files as inline prompt context."""
     kb_dir = paths["knowledge"]
     kb_context = ""
-    for fname, max_chars in [
-        ("05-title-formulas.md", 3000),
-        ("06-descriptions-template.md", 2000),
-        ("02-voice-and-tone.md", 2000),
-        ("01-brand-identity.md", 1000),
-        ("12-quick-reference.md", 1500),
-    ]:
+    for fname, max_chars in files if files is not None else CONTENT_KB_FILES:
         fpath = os.path.join(kb_dir, fname)
         if os.path.exists(fpath):
             try:
@@ -43,6 +46,7 @@ def generate_clip_content(
     clip: dict,
     transcript_segments: list[dict],
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    mode: str = "shorts",
 ) -> Optional[dict]:
     """
     Generate titles, description, tags, and hashtags for a single clip.
@@ -51,6 +55,7 @@ def generate_clip_content(
         clip: dict with title, start_second, end_second, content_type
         transcript_segments: full transcript segments list
         progress_callback: optional (percent, message) callback
+        mode: "shorts" (per-clip package) or "episode" (long-form episode package)
 
     Returns:
         dict with raw_text, titles, description, tags, hashtags, or None if AI unavailable
@@ -63,7 +68,7 @@ def generate_clip_content(
     if progress_callback:
         progress_callback(0, f"Generating content via {label}...")
 
-    kb_context = _load_kb_context()
+    kb_context = load_kb_context()
 
     # Extract transcript text for this clip's time range
     clip_start = clip.get("start_second", 0)
@@ -76,7 +81,42 @@ def generate_clip_content(
             sp_label = f"[{sp}] " if sp else ""
             clip_transcript.append(f"{sp_label}{seg.get('text', '').strip()}")
 
-    prompt = f"""Generate a YouTube Shorts content package for this clip. Return ONLY the content below, no preamble.
+    if mode == "episode":
+        prompt = f"""Generate a YouTube content package for this full podcast episode. Return ONLY the content below, no preamble.
+
+KNOWLEDGE BASE:
+{kb_context}
+
+EPISODE: "{clip.get('title', '')}"
+
+TRANSCRIPT EXCERPT:
+{chr(10).join(clip_transcript[:30])}
+
+Generate exactly this (no other text):
+
+TITLES (8 options, 50-70 chars, keyword-first, follow title spec):
+1. [title]
+2. [title]
+3. [title]
+4. [title]
+5. [title]
+6. [title]
+7. [title]
+8. [title]
+TOP PICK: [number] — [why]
+
+DESCRIPTION:
+[hook line under 100 chars]
+[2-3 short paragraphs: what the episode covers and why it matters]
+[guest attribution line]
+
+TAGS:
+[comma-separated, 10-15 tags for YouTube]
+
+HASHTAGS:
+[3-5 hashtags for description]"""
+    else:
+        prompt = f"""Generate a YouTube Shorts content package for this clip. Return ONLY the content below, no preamble.
 
 KNOWLEDGE BASE:
 {kb_context}
@@ -161,6 +201,9 @@ HASHTAGS:
             for line in lines:
                 stripped = line.strip()
                 if not stripped:
+                    # Keep paragraph breaks in multi-paragraph episode descriptions.
+                    if section == "description" and result["description"]:
+                        result["description"] += "\n"
                     continue
                 upper = stripped.upper()
                 if upper.startswith("TITLES"):

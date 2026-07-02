@@ -1,11 +1,12 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./Layout";
 import StudioHome from "./StudioHome";
 import ClipDetail from "./ClipDetail";
 import EpisodeWorkspace from "./EpisodeWorkspace";
-import ThumbnailTemplate from "./ThumbnailTemplate";
+import ThumbnailStudio from "./ThumbnailStudio";
+import ContentStudio from "./ContentStudio";
 import AnalyticsPage from "./AnalyticsPage";
 import KnowledgePage from "./KnowledgePage";
 import ConfigPage from "./ConfigPage";
@@ -19,7 +20,9 @@ createRoot(document.getElementById("root")!).render(
         <Route element={<Layout />}>
           <Route path="/" element={<StudioHome />} />
           <Route path="/episode" element={<EpisodeWorkspace />} />
-          <Route path="/thumbnail" element={<ThumbnailTemplate />} />
+          <Route path="/content" element={<ContentStudio />} />
+          <Route path="/thumbnails" element={<ThumbnailStudio />} />
+          <Route path="/thumbnail" element={<Navigate to="/thumbnails" replace />} />
           <Route path="/clip/:id" element={<ClipDetail />} />
           <Route path="/knowledge" element={<KnowledgePage />} />
           <Route path="/config" element={<ConfigPage />} />
