@@ -461,7 +461,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
             <div className="mcp-hints-subtitle">
               {collapsed ? `${hints.length} prompts` : 'Click to copy'}
             </div>
-            <span style={{ fontSize: 10, color: 'var(--text3)', transition: 'transform 0.2s', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0)', marginLeft: 4 }}>{'\u25BC'}</span>
+            <span className="hint-xs" style={{ transition: 'transform 0.2s', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0)', marginLeft: 4 }}>{'\u25BC'}</span>
           </div>
           {!collapsed && (
             <div className="mcp-hint-list">
@@ -1155,7 +1155,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                   <br/>
                   <span style={{ color: 'var(--text3)' }}>1.</span> <a href="https://huggingface.co/pyannote/speaker-diarization-3.1" target="_blank" rel="noopener" style={{ color: '#facc15', textDecoration: 'none' }}>Accept model terms</a>
                   {' → '}
-                  <span style={{ color: 'var(--text3)' }}>2.</span> <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener" style={{ color: '#facc15', textDecoration: 'none' }}>Get free token</a> <span style={{ fontSize: 10, color: 'var(--text3)' }}>(Read permission)</span>
+                  <span style={{ color: 'var(--text3)' }}>2.</span> <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener" style={{ color: '#facc15', textDecoration: 'none' }}>Get free token</a> <span className="hint-xs">(Read permission)</span>
                   {' → '}
                   <span style={{ color: 'var(--text3)' }}>3.</span> Add <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11, padding: '1px 5px', background: 'rgba(250,204,21,0.1)', borderRadius: 4, color: '#facc15' }}>HF_TOKEN=hf_...</code> to your <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>.env</code>
                 </div>
@@ -1233,7 +1233,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                       <span style={{ fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>Time offset</span>
                       <input type="number" step="0.5" value={timeAdjust} onChange={e => setTimeAdjust(parseFloat(e.target.value) || 0)}
                         style={{ width: 72 }} disabled={isProcessing} />
-                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>sec</span>
+                      <span className="hint">sec</span>
                     </div>
                   </div>
                 )}
@@ -1440,12 +1440,12 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                   <span style={{ fontSize: 10, transition: 'transform 0.15s', transform: correctionsOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-block' }}>▶</span>
                   Word Corrections
                   {Object.keys(corrections).length > 0 && (
-                    <span style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 400 }}>({Object.keys(corrections).length})</span>
+                    <span className="hint-xs" style={{ fontWeight: 400 }}>({Object.keys(corrections).length})</span>
                   )}
                 </div>
                 {correctionsOpen && (
                   <div className="fade-in" style={{ marginTop: 8 }}>
-                    <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8, lineHeight: 1.4 }}>
+                    <div className="hint" style={{ marginBottom: 8, lineHeight: 1.4 }}>
                       Fix Whisper misheard words. Applied automatically to all transcripts.
                     </div>
                     <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
@@ -1716,7 +1716,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                   <div className="section-label" style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                     onClick={() => setHistoryOpen(!historyOpen)}>
                     <span>History ({clipHistory.length})</span>
-                    <span style={{ fontSize: 10, color: 'var(--text3)', transition: 'transform 0.2s', transform: historyOpen ? 'rotate(180deg)' : 'rotate(0)' }}>{'\u25BC'}</span>
+                    <span className="hint-xs" style={{ transition: 'transform 0.2s', transform: historyOpen ? 'rotate(180deg)' : 'rotate(0)' }}>{'\u25BC'}</span>
                   </div>
                   {historyOpen && (
                     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto', marginTop: 8 }}>
@@ -1731,7 +1731,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                             <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--green)', flexShrink: 0 }} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || fname}</div>
-                              <div style={{ color: 'var(--text3)', fontSize: 11, marginTop: 2 }}>
+                              <div className="hint" style={{ marginTop: 2 }}>
                                 {c.duration}s {'\u00B7'} {c.file_size_mb?.toFixed(1)}MB {'\u00B7'} {c.caption_style} {'\u00B7'} {timeStr}
                               </div>
                             </div>
@@ -1851,16 +1851,16 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     <div>
                       <input type="number" step="0.5" value={editForm.start} onChange={e => setEditForm(f => ({ ...f, start: parseFloat(e.target.value) || 0 }))}
                         style={{ textAlign: 'center' }} />
-                      <div style={{ fontSize: 10, color: 'var(--text3)', textAlign: 'center', marginTop: 2 }}>{fmt(editForm.start)}</div>
+                      <div className="hint-xs" style={{ textAlign: 'center', marginTop: 2 }}>{fmt(editForm.start)}</div>
                     </div>
                     <div className="arrow">{'\u2192'}</div>
                     <div>
                       <input type="number" step="0.5" value={editForm.end} onChange={e => setEditForm(f => ({ ...f, end: parseFloat(e.target.value) || 0 }))}
                         style={{ textAlign: 'center' }} />
-                      <div style={{ fontSize: 10, color: 'var(--text3)', textAlign: 'center', marginTop: 2 }}>{fmt(editForm.end)}</div>
+                      <div className="hint-xs" style={{ textAlign: 'center', marginTop: 2 }}>{fmt(editForm.end)}</div>
                     </div>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6, textAlign: 'center' }}>
+                  <div className="hint" style={{ marginTop: 6, textAlign: 'center' }}>
                     Duration: {Math.round(editForm.end - editForm.start)}s
                   </div>
                 </div>

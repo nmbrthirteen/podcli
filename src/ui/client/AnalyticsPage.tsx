@@ -201,7 +201,7 @@ export default function AnalyticsPage() {
               <Link key={c.id} to={`/clip/${c.id}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: "1px solid var(--border)", textDecoration: "none", color: "inherit" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</div>
-                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{fmt(c.duration)} · {c.caption_style}{c.content_type ? ` · ${c.content_type}` : ""}</div>
+                  <div className="hint" style={{ marginTop: 2 }}>{fmt(c.duration)} · {c.caption_style}{c.content_type ? ` · ${c.content_type}` : ""}</div>
                 </div>
                 <div style={{ display: "flex", gap: 16, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
                   <span title="Views (reach)">{fmtViews(c.metrics?.views || 0)} views</span>

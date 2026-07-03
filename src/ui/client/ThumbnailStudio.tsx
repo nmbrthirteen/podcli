@@ -186,7 +186,7 @@ export default function ThumbnailStudio() {
               ) : selFrame ? (
                 <img src={img(selFrame.path, bust)} alt="selected frame" />
               ) : (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: 11, textAlign: "center", padding: 12 }}>
+                <div className="hint" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center", padding: 12 }}>
                   Pick a source and get options, or upload an image
                 </div>
               )}
@@ -208,13 +208,13 @@ export default function ThumbnailStudio() {
                 </a>
               )}
             </div>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>Leave line 1 and line 2 empty to auto-write the text.</div>
+            <div className="hint" style={{ marginTop: 8 }}>Leave line 1 and line 2 empty to auto-write the text.</div>
           </div>
         </div>
 
         {textOpts.length > 0 && (
           <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Text options · click to use</div>
+            <div className="hint" style={{ marginBottom: 6 }}>Text options · click to use</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {textOpts.map(([l1, l2], i) => (
                 <button key={i} className={`title-option stream-in ${line1 === l1 && line2 === l2 ? "selected" : ""}`} style={{ animationDelay: `${i * 40}ms` }} onClick={() => { setLine1(l1); setLine2(l2); }}>
@@ -227,7 +227,7 @@ export default function ThumbnailStudio() {
 
         {frameOpts.length > 0 && (
           <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Frame options · click to select</div>
+            <div className="hint" style={{ marginBottom: 6 }}>Frame options · click to select</div>
             <div className="thumb-variations">
               {frameOpts.map((f, i) => (
                 <button key={i} className={`thumb-variation stream-in ${selFrame?.path === f.path ? "selected" : ""}`} style={{ animationDelay: `${i * 40}ms` }} onClick={() => setSelFrame({ path: f.path, info: f })} disabled={busy !== null}>

@@ -237,7 +237,7 @@ export default function ClipDetail() {
             {clip.content_type && <span>{clip.content_type}</span>}
             {clip.file_size_mb != null && <span>{clip.file_size_mb.toFixed(1)}MB</span>}
           </div>
-          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>{basename(clip.source_video)}</div>
+          <div className="hint" style={{ marginTop: 8 }}>{basename(clip.source_video)}</div>
         </div>
 
         <div className="clip-detail-editor">
@@ -276,7 +276,7 @@ export default function ClipDetail() {
                   ) : selFrame ? (
                     <img src={img(selFrame.path, bust)} alt="selected frame" />
                   ) : (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: 11, textAlign: "center", padding: 12 }}>
+                    <div className="hint" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center", padding: 12 }}>
                       Get options, pick a frame, then generate
                     </div>
                   )}
@@ -297,13 +297,13 @@ export default function ClipDetail() {
                   </button>
                   <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,.webp" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && uploadFrame(e.target.files[0])} />
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>Leave line 1 and line 2 empty to auto-write the text.</div>
+                <div className="hint" style={{ marginTop: 8 }}>Leave line 1 and line 2 empty to auto-write the text.</div>
               </div>
             </div>
 
             {textOpts.length > 0 && (
               <div style={{ marginTop: 16 }}>
-                <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Text options · click to use</div>
+                <div className="hint" style={{ marginBottom: 6 }}>Text options · click to use</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                   {textOpts.map(([l1, l2], i) => (
                     <button key={i} className={`title-option ${line1 === l1 && line2 === l2 ? "selected" : ""}`} onClick={() => { setLine1(l1); setLine2(l2); }}>
@@ -316,7 +316,7 @@ export default function ClipDetail() {
 
             {frameOpts.length > 0 && (
               <div style={{ marginTop: 16 }}>
-                <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Frame options · click to select</div>
+                <div className="hint" style={{ marginBottom: 6 }}>Frame options · click to select</div>
                 <div className="thumb-variations">
                   {frameOpts.map((f, i) => (
                     <button key={i} className={`thumb-variation ${selFrame?.path === f.path ? "selected" : ""}`} onClick={() => setSelFrame({ path: f.path, info: f })} disabled={busy !== null}>
@@ -341,7 +341,7 @@ export default function ClipDetail() {
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 {clip.generated_titles?.length ? (
                   <div>
-                    <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Title options · click to use</div>
+                    <div className="hint" style={{ marginBottom: 6 }}>Title options · click to use</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                       {clip.generated_titles.map((t, i) => {
                         const clean = t.replace(/^\d+\.\s*/, "");
@@ -357,7 +357,7 @@ export default function ClipDetail() {
                 {clip.description ? (
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, color: "var(--text3)" }}>Description</span>
+                      <span className="hint">Description</span>
                       <CopyButton text={clip.description} />
                     </div>
                     <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{clip.description}</div>
@@ -366,7 +366,7 @@ export default function ClipDetail() {
                 {clip.tags ? (
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, color: "var(--text3)" }}>Tags</span>
+                      <span className="hint">Tags</span>
                       <CopyButton text={clip.tags} />
                     </div>
                     <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>{clip.tags}</div>
@@ -375,7 +375,7 @@ export default function ClipDetail() {
                 {clip.hashtags ? (
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, color: "var(--text3)" }}>Hashtags</span>
+                      <span className="hint">Hashtags</span>
                       <CopyButton text={clip.hashtags} />
                     </div>
                     <div style={{ fontSize: 12, color: "var(--accent)", lineHeight: 1.6 }}>{clip.hashtags}</div>

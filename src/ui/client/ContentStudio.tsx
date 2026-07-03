@@ -131,7 +131,7 @@ export default function ContentStudio() {
                 {busy ? <><div className="spinner sm" /> Generating…</> : "Generate"}
               </button>
             </div>
-            {busy && stage && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 10 }}>{stage}</div>}
+            {busy && stage && <div className="hint" style={{ marginTop: 10 }}>{stage}</div>}
             {msg && <div className="set-note ok" style={{ marginTop: 10, wordBreak: "break-word" }}>{msg}</div>}
           </div>
         </div>
@@ -145,7 +145,7 @@ export default function ContentStudio() {
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {result.titles?.length ? (
                 <div className="section">
-                  <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Title options · click to copy</div>
+                  <div className="hint" style={{ marginBottom: 6 }}>Title options · click to copy</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     {result.titles.map((t, i) => {
                       const clean = t.replace(/^\d+\.\s*/, "");
@@ -163,7 +163,7 @@ export default function ContentStudio() {
               {result.description ? (
                 <div className="section stream-in">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: "var(--text3)" }}>Description</span>
+                    <span className="hint">Description</span>
                     <CopyButton text={result.description} />
                   </div>
                   <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{result.description}</div>
@@ -173,7 +173,7 @@ export default function ContentStudio() {
               {result.tags ? (
                 <div className="section stream-in">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: "var(--text3)" }}>Tags</span>
+                    <span className="hint">Tags</span>
                     <CopyButton text={result.tags} />
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>{result.tags}</div>
@@ -183,7 +183,7 @@ export default function ContentStudio() {
               {result.hashtags ? (
                 <div className="section stream-in">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: "var(--text3)" }}>Hashtags</span>
+                    <span className="hint">Hashtags</span>
                     <CopyButton text={result.hashtags} />
                   </div>
                   <div style={{ fontSize: 12, color: "var(--accent)", lineHeight: 1.6 }}>{result.hashtags}</div>
