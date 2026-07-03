@@ -7,6 +7,7 @@ import {
   staticFile,
 } from "remotion";
 import type { Word, CaptionStyle } from "../types";
+import { captionScale } from "../types";
 
 interface Props {
   words: Word[];
@@ -84,6 +85,8 @@ const WordWithPill: React.FC<{
   frame: number;
   fps: number;
 }> = ({ word, isActive, frame, fps }) => {
+  const { height } = useVideoConfig();
+  const s = captionScale(height);
   const wordEntryFrame = Math.round(word.start * fps);
 
   const pillOpacity = isActive
@@ -100,12 +103,12 @@ const WordWithPill: React.FC<{
       <span
         style={{
           position: "absolute",
-          top: -4,
-          left: -16,
-          right: -16,
-          bottom: -4,
+          top: -4 * s,
+          left: -16 * s,
+          right: -16 * s,
+          bottom: -4 * s,
           backgroundColor: "rgba(0, 0, 0, 0.85)",
-          borderRadius: 18,
+          borderRadius: 18 * s,
           boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
           opacity: pillOpacity,
           pointerEvents: "none",
@@ -165,7 +168,9 @@ export const BrandedCaptions: React.FC<Props> = ({
 }) => {
   const frame = useCurrentFrame();
   const { fps, height } = useVideoConfig();
+  const s = captionScale(height);
   const currentTime = frame / fps;
+  const scaledStyle = { ...style, fontSize: style.fontSize * s };
 
   const chunks = buildChunks(words, style.wordsPerChunk);
   const activeChunk = chunks.find(
@@ -175,13 +180,14 @@ export const BrandedCaptions: React.FC<Props> = ({
   // Dynamic margin: if face is in the lower portion, push captions further down
   // faceY is normalized 0-1 (0=top, 1=bottom)
   // Default margin is style.marginBottom. If face center is below 0.55, reduce margin.
-  let dynamicMargin = style.marginBottom;
+  const baseMargin = style.marginBottom * s;
+  let dynamicMargin = baseMargin;
   if (faceY != null && faceY > 0.55) {
     // Face is low — push captions to the very bottom
-    dynamicMargin = Math.max(80, style.marginBottom - Math.round((faceY - 0.55) * height * 0.6));
+    dynamicMargin = Math.max(80 * s, baseMargin - Math.round((faceY - 0.55) * height * 0.6));
   } else if (faceY != null && faceY < 0.35) {
     // Face is high — can bring captions up a bit
-    dynamicMargin = style.marginBottom + 60;
+    dynamicMargin = baseMargin + 60 * s;
   }
 
   return (
@@ -191,10 +197,10 @@ export const BrandedCaptions: React.FC<Props> = ({
           src={logoSrc.startsWith("http") ? logoSrc : staticFile(logoSrc)}
           style={{
             position: "absolute",
-            top: 180,
-            left: 108,
-            width: 255,
-            height: 126,
+            top: 180 * s,
+            left: 108 * s,
+            width: 255 * s,
+            height: 126 * s,
             objectFit: "contain",
           }}
         />
@@ -208,12 +214,12 @@ export const BrandedCaptions: React.FC<Props> = ({
             style={{
               position: "absolute",
               bottom: dynamicMargin,
-              left: 60,
-              right: 60,
+              left: 60 * s,
+              right: 60 * s,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: 8,
+              gap: 8 * s,
             }}
           >
             <CaptionLine
@@ -221,7 +227,7 @@ export const BrandedCaptions: React.FC<Props> = ({
               currentTime={currentTime}
               frame={frame}
               fps={fps}
-              style={style}
+              style={scaledStyle}
             />
             {line2.length > 0 && (
               <CaptionLine
@@ -229,7 +235,7 @@ export const BrandedCaptions: React.FC<Props> = ({
                 currentTime={currentTime}
                 frame={frame}
                 fps={fps}
-                style={style}
+                style={scaledStyle}
               />
             )}
           </div>

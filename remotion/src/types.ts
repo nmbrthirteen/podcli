@@ -30,6 +30,13 @@ export interface CaptionProps {
 
 const FONT = "'DM Sans', sans-serif";
 
+// Caption geometry (font sizes, margins, insets) is authored for a 1920-tall
+// vertical canvas. Multiply pixel values by this factor so a shorter canvas
+// (16:9 = 1080 tall, 1:1 = 1080 tall) gets a proportional lower-third instead
+// of vertical-tuned captions floating mid-frame. Vertical → factor 1.0.
+export const REFERENCE_HEIGHT = 1920;
+export const captionScale = (height: number): number => height / REFERENCE_HEIGHT;
+
 export const STYLES: Record<string, CaptionStyle> = {
   hormozi: {
     name: "hormozi",

@@ -1,6 +1,7 @@
 import React from "react";
 import { useCurrentFrame, useVideoConfig } from "remotion";
 import type { Word, CaptionStyle } from "../types";
+import { captionScale } from "../types";
 
 interface Props {
   words: Word[];
@@ -87,7 +88,8 @@ const KaraokeLine: React.FC<{
 
 export const KaraokeCaptions: React.FC<Props> = ({ words, style }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, height } = useVideoConfig();
+  const s = captionScale(height);
   const currentTime = frame / fps;
 
   const chunks = buildChunks(words, style.wordsPerChunk);
@@ -98,23 +100,24 @@ export const KaraokeCaptions: React.FC<Props> = ({ words, style }) => {
   if (!activeChunk) return null;
 
   const [line1, line2] = splitIntoLines(activeChunk.words);
+  const scaledStyle = { ...style, fontSize: style.fontSize * s };
 
   return (
     <div
       style={{
         position: "absolute",
-        bottom: style.marginBottom,
-        left: 60,
-        right: 60,
+        bottom: style.marginBottom * s,
+        left: 60 * s,
+        right: 60 * s,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 4,
+        gap: 4 * s,
       }}
     >
-      <KaraokeLine words={line1} currentTime={currentTime} style={style} />
+      <KaraokeLine words={line1} currentTime={currentTime} style={scaledStyle} />
       {line2.length > 0 && (
-        <KaraokeLine words={line2} currentTime={currentTime} style={style} />
+        <KaraokeLine words={line2} currentTime={currentTime} style={scaledStyle} />
       )}
     </div>
   );

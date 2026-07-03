@@ -498,6 +498,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
       const [whisperModel, setWhisperModel] = useState('base');
       const [captionStyle, setCaptionStyle] = useState('branded');
       const [cropStrategy, setCropStrategy] = useState('face');
+      const [format, setFormat] = useState('vertical');
       const [showTikTokFrame, setShowTikTokFrame] = useState(false);
       const [logoPath, setLogoPath] = useState('');
       const logoRef = useRef();
@@ -585,6 +586,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
           const d = response.config || response;
           if (d.caption_style) setCaptionStyle(d.caption_style);
           if (d.crop_strategy) setCropStrategy(d.crop_strategy);
+          if (d.format) setFormat(d.format);
           if (d.logo_path !== undefined) setLogoPath(d.logo_path || '');
           if (d.outro_path !== undefined) setOutroPath(d.outro_path || '');
           if (d.video_path !== undefined) {
@@ -762,14 +764,14 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
           filePath: file?.file_path || '',
           suggestions,
           deselectedIndices: Array.from(deselected),
-          settings: { captionStyle, cropStrategy, logoPath, outroPath },
+          settings: { captionStyle, cropStrategy, format, logoPath, outroPath },
           phase,
         };
         const key = JSON.stringify(state);
         if (key === prevSyncRef.current) return;
         prevSyncRef.current = key;
         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => { });
-      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, logoPath, outroPath, phase]);
+      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, format, logoPath, outroPath, phase]);
 
       // Sync transcript separately (large payload)
       const prevTranscriptRef = useRef(null);
@@ -810,6 +812,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
           if (d.settings) {
             if (d.settings.captionStyle) setCaptionStyle(d.settings.captionStyle);
             if (d.settings.cropStrategy) setCropStrategy(d.settings.cropStrategy);
+            if (d.settings.format) setFormat(d.settings.format);
             if (d.settings.logoPath !== undefined) setLogoPath(d.settings.logoPath);
             if (d.settings.outroPath !== undefined) setOutroPath(d.settings.outroPath);
           }
@@ -871,6 +874,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
 
       const onCaptionChange = (v) => { setCaptionStyle(v); flashSetting('caption'); };
       const onCropChange = (v) => { setCropStrategy(v); flashSetting('crop'); };
+      const onFormatChange = (v) => { setFormat(v); flashSetting('format'); };
 
       // Click clip row → seek source video
       const onClipClick = (idx) => {
@@ -922,7 +926,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
         const data = await api('/batch-clips', {
           method: 'POST', body: JSON.stringify({
             video_path: vp,
-            clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy })),
+            clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy, format })),
             transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, clean_fillers: cleanFillers || undefined,
           })
         });
@@ -941,7 +945,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
         const data = await api('/create-clip', {
           method: 'POST', body: JSON.stringify({
             video_path: vp, start_second: c.start_second, end_second: c.end_second,
-            title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy,
+            title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy, format,
             transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, clean_fillers: cleanFillers || undefined,
           })
         });
@@ -1031,7 +1035,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
               _source: 'ui',
               videoPath: videoPath.trim(),
               rawTranscriptText: transcriptText.trim() || undefined,
-              settings: { captionStyle, cropStrategy, logoPath, outroPath },
+              settings: { captionStyle, cropStrategy, format, logoPath, outroPath },
             }),
           }).catch(() => { });
         }
@@ -1338,6 +1342,12 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     <label className="field-label">Crop</label>
                     <select value={cropStrategy} onChange={e => onCropChange(e.target.value)} disabled={isProcessing}>
                       <option value="speaker">Speaker aware</option><option value="face">Face detection</option><option value="center">Center</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label">Format</label>
+                    <select value={format} onChange={e => onFormatChange(e.target.value)} disabled={isProcessing}>
+                      <option value="vertical">Vertical 9:16</option><option value="horizontal">Horizontal 16:9</option><option value="square">Square 1:1</option>
                     </select>
                   </div>
                 </div>
