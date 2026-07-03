@@ -440,6 +440,8 @@ def cmd_process(args):
         config["caption_style"] = args.caption_style
     if args.crop:
         config["crop_strategy"] = args.crop
+    if getattr(args, "thumbnails", None) is not None:
+        config["generate_thumbnails"] = args.thumbnails
     if args.top:
         config["top_clips"] = args.top
     if getattr(args, "review_each", False):
@@ -3269,6 +3271,8 @@ def main():
     proc.add_argument("-p", "--preset", help="Load a saved preset")
     proc.add_argument("--engine", choices=["whisper-py", "whispercpp"], help="Transcription engine (default: whisper-py; whispercpp is the native, PyTorch-free path)")
     proc.add_argument("--fast", action="store_true", help="Draft mode: tiny Whisper, heuristic selection, center crop, low quality")
+    proc.add_argument("--thumbnails", dest="thumbnails", action="store_true", default=None, help="Force thumbnail generation on")
+    proc.add_argument("--no-thumbnails", dest="thumbnails", action="store_false", help="Skip thumbnail generation")
     proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
     proc.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
     proc.add_argument("--logo", help="Logo image (asset name or path)")
