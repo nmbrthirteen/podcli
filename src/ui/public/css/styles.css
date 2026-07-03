@@ -1,37 +1,37 @@
 /* ─── podcli — Shared Styles ─── */
 
 :root {
-  --bg: #141210;
-  --bg2: #191613;
-  --surface: #1e1b17;
-  --surface2: #26221d;
-  --surface3: #2f2a24;
-  --border: #2b2620;
-  --border-hover: #3d362d;
-  --border-h: #3d362d;
-  --text: #e8e6df;
-  --text2: #9a9388;
-  --text3: #8b8579;
-  --accent: #db8b48;
-  --accent-hover: #ec9d5b;
-  --accent-2: #f1b369;
-  --accent-edge: #9c5a28;
-  --accent-subtle: rgba(219, 139, 72, 0.12);
-  --accent-dim: rgba(219, 139, 72, 0.12);
-  --accent-glow: rgba(219, 139, 72, 0.32);
+  --bg: #0f0e0d;
+  --bg2: #16150f;
+  --surface: #1b1a17;
+  --surface2: #24221d;
+  --surface3: #302d27;
+  --border: #2c2822;
+  --border-hover: #403a31;
+  --border-h: #403a31;
+  --text: #f4f2ee;
+  --text2: #ada79c;
+  --text3: #7d766a;
+  --accent: #f2894a;
+  --accent-hover: #ff9f61;
+  --accent-2: #ffb37c;
+  --accent-edge: #b3612a;
+  --accent-subtle: rgba(242, 137, 74, 0.14);
+  --accent-dim: rgba(242, 137, 74, 0.10);
+  --accent-glow: rgba(242, 137, 74, 0.30);
   --green: #4ade80;
-  --green-subtle: rgba(74, 222, 128, 0.07);
-  --green-border: rgba(74, 222, 128, 0.18);
+  --green-subtle: rgba(74, 222, 128, 0.09);
+  --green-border: rgba(74, 222, 128, 0.22);
   --red: #f87171;
-  --red-subtle: rgba(248, 113, 113, 0.07);
-  --red-border: rgba(248, 113, 113, 0.18);
+  --red-subtle: rgba(248, 113, 113, 0.09);
+  --red-border: rgba(248, 113, 113, 0.22);
   --blue: #60a5fa;
-  --blue-subtle: rgba(96, 165, 250, 0.08);
-  --blue-border: rgba(96, 165, 250, 0.18);
+  --blue-subtle: rgba(96, 165, 250, 0.10);
+  --blue-border: rgba(96, 165, 250, 0.22);
   --yellow: #facc15;
-  --glass-bg: rgba(26, 23, 20, 0.55);
-  --glass-border: rgba(255, 255, 255, 0.055);
-  --glass-hi: rgba(255, 255, 255, 0.05);
+  --glass-bg: rgba(22, 21, 15, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-hi: rgba(255, 255, 255, 0.06);
   --radius: 12px;
   --radius-sm: 8px;
   --radius-lg: 16px;
@@ -450,7 +450,7 @@ select {
 .btn-primary:disabled { opacity: 0.25; cursor: not-allowed; }
 .btn-ghost {
   background: var(--surface3); color: var(--text);
-  box-shadow: 0 5px #1a1a1f, 0 11px 18px -5px #000000d9,
+  box-shadow: 0 4px #1a1a1f, 0 11px 18px -5px #000000d9,
     0 0 0 1px #ffffff14, inset 0 1px #ffffff24;
 }
 .btn-ghost:hover:not(:disabled) { background: var(--surface3); }
@@ -458,7 +458,7 @@ select {
 .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-danger {
   background: var(--surface3); color: var(--text2);
-  box-shadow: 0 5px #1a1a1f, 0 11px 18px -5px #000000d9,
+  box-shadow: 0 4px #1a1a1f, 0 11px 18px -5px #000000d9,
     0 0 0 1px #ffffff14, inset 0 1px #ffffff24;
 }
 .btn-danger:hover:not(:disabled) { color: var(--red); box-shadow: 0 5px #1a1a1f, 0 11px 18px -5px #000000d9, 0 0 0 1px var(--red-border), inset 0 1px #ffffff24; }

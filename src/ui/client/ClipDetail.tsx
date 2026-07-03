@@ -53,6 +53,7 @@ export default function ClipDetail() {
   const [line2, setLine2] = useState("");
   const [textOpts, setTextOpts] = useState<[string, string][]>([]);
   const [frameOpts, setFrameOpts] = useState<any[]>([]);
+  const [frameIdx, setFrameIdx] = useState(0);
   const [selFrame, setSelFrame] = useState<{ path: string; info?: any } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -134,6 +135,34 @@ export default function ClipDetail() {
       setBust(Date.now()); load();
       setMsg("Thumbnail generated");
     } catch (e: any) { setMsg(`Generate failed: ${e.message}`); } finally { setBusy(null); }
+  };
+
+  // Pull a different frame from the clip (cycles the ranked candidates) and
+  // re-render — same one-click flow as Regenerate, but swaps the background frame.
+  const newFrame = async () => {
+    setBusy("newframe"); setMsg(null);
+    try {
+      let frames = frameOpts;
+      if (!frames.length) {
+        const r = await api(`/clips/${clip.id}/thumbnail/options?texts=6&frames=8`);
+        if (r.error) throw new Error(r.error);
+        frames = r.frames || [];
+        setFrameOpts(frames);
+        if ((r.texts || []).length) setTextOpts(r.texts);
+      }
+      if (!frames.length) { setMsg("No frames found in this clip"); return; }
+      const next = (frameIdx + 1) % frames.length;
+      setFrameIdx(next);
+      const frame = frames[next];
+      setSelFrame({ path: frame.path, info: frame });
+      const r = await api(`/clips/${clip.id}/thumbnail/render`, {
+        method: "POST",
+        body: JSON.stringify({ line1: line1 || undefined, line2: line2 || undefined, frame_path: frame.path, frame_info: frame }),
+      });
+      if (r.error) throw new Error(r.error);
+      setBust(Date.now()); load();
+      setMsg(`New frame from clip (${next + 1}/${frames.length})`);
+    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); } finally { setBusy(null); }
   };
 
   const reopen = async () => {
@@ -259,6 +288,9 @@ export default function ClipDetail() {
                 <div className="set-actions" style={{ marginTop: 10 }}>
                   <button className="btn btn-primary btn-sm" onClick={renderThumb} disabled={busy !== null || !selFrame}>
                     {busy === "render" ? <div className="spinner sm" /> : (tc.preview_path ? "Regenerate" : "Generate")}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={newFrame} disabled={busy !== null} title="Pull a different frame from the clip">
+                    {busy === "newframe" ? <div className="spinner sm" /> : "New frame"}
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} disabled={busy !== null}>
                     {busy === "upload" ? <div className="spinner sm" /> : "Upload frame"}

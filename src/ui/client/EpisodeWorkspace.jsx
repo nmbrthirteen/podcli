@@ -1557,7 +1557,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     </div>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       {phase === 'review' && videoPath && (
-                        <button className="energy-btn" onClick={analyzeEnergy} disabled={analyzingEnergy || suggestions.length === 0} title="Analyze audio energy levels">
+                        <button className="btn btn-ghost btn-sm" onClick={analyzeEnergy} disabled={analyzingEnergy || suggestions.length === 0} title="Analyze audio energy levels">
                           {analyzingEnergy ? <><div className="spinner sm" /> Analyzing…</> : '⚡ Energy'}
                         </button>
                       )}
@@ -1568,7 +1568,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                       )}
                       {transcript && (phase === 'review' || phase === 'done') && (
                         <div style={{ position: 'relative' }}>
-                          <button className="btn btn-ghost btn-sm overflow-menu-btn" onClick={e => { const m = e.currentTarget.nextElementSibling; m.style.display = m.style.display === 'block' ? 'none' : 'block'; }} style={{ padding: '4px 8px', fontSize: 14, color: 'var(--text3)', lineHeight: 1 }}>
+                          <button className="btn btn-ghost btn-sm overflow-menu-btn" onClick={e => { const m = e.currentTarget.nextElementSibling; m.style.display = m.style.display === 'block' ? 'none' : 'block'; }} style={{ padding: '6px 10px', fontSize: 14, color: 'var(--text3)', lineHeight: 1 }}>
                             {'\u22EF'}
                           </button>
                           <div className="overflow-menu" style={{ display: 'none' }}>
