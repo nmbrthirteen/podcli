@@ -176,7 +176,7 @@ export default function ContentStudio() {
                     <span className="hint">Tags</span>
                     <CopyButton text={result.tags} />
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>{result.tags}</div>
+                  <div className="meta" style={{ lineHeight: 1.6 }}>{result.tags}</div>
                 </div>
               ) : null}
 

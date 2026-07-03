@@ -405,6 +405,7 @@ h1 { font-size: 28px; font-weight: 700; letter-spacing: 0; line-height: 1.15; }
 /* Muted helper / caption text. Reused instead of per-element inline font-size + color. */
 .hint { font-size: 11px; color: var(--text3); line-height: 1.5; }
 .hint-xs { font-size: 10px; color: var(--text3); line-height: 1.5; }
+.meta { font-size: 12px; color: var(--text2); line-height: 1.5; }
 
 /* ─── Form Elements ─── */
 input[type="text"], input[type="number"], input[type="password"], input:not([type]), select, textarea {

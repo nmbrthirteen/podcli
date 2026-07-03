@@ -158,7 +158,7 @@ export default function ThumbnailStudio() {
             style={{ display: "none" }}
             onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])}
           />
-          {video && <span style={{ fontSize: 12, color: "var(--text2)" }}>{video.name}</span>}
+          {video && <span className="meta">{video.name}</span>}
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
           <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title to write headlines from" style={{ flex: "1 1 280px" }} />

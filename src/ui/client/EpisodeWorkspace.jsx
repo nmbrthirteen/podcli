@@ -1150,7 +1150,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
             <div className="fade-in" style={{ margin: '0 0 16px', padding: '14px 16px', background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.15)', borderRadius: 'var(--radius)', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Set up speaker detection</div>
-                <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>
+                <div className="meta">
                   Identify who's talking in your podcast. Free, takes 2 minutes.
                   <br/>
                   <span style={{ color: 'var(--text3)' }}>1.</span> <a href="https://huggingface.co/pyannote/speaker-diarization-3.1" target="_blank" rel="noopener" style={{ color: '#facc15', textDecoration: 'none' }}>Accept model terms</a>
@@ -1230,7 +1230,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                       disabled={isProcessing} style={{ minHeight: transcriptText ? 80 : 120 }}
                       onDragOver={e => { preventDef(e); setTranscriptDragOver(true); }} onDrop={handleTranscriptDrop} />
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
-                      <span style={{ fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>Time offset</span>
+                      <span className="meta" style={{ whiteSpace: 'nowrap' }}>Time offset</span>
                       <input type="number" step="0.5" value={timeAdjust} onChange={e => setTimeAdjust(parseFloat(e.target.value) || 0)}
                         style={{ width: 72 }} disabled={isProcessing} />
                       <span className="hint">sec</span>
@@ -1687,7 +1687,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                         <div style={{ width: 20, height: 20, borderRadius: 6, background: 'rgba(74,222,128,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'var(--green)' }}>P</div>
                         <span style={{ fontSize: 13, fontWeight: 700 }}>PodStack: next steps</span>
                       </div>
-                      <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 12 }}>
+                      <p className="meta" style={{ lineHeight: 1.6, marginBottom: 12 }}>
                         Clips are rendered. Now generate titles, descriptions, and thumbnails in Claude Code:
                       </p>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

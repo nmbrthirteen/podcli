@@ -369,7 +369,7 @@ export default function ClipDetail() {
                       <span className="hint">Tags</span>
                       <CopyButton text={clip.tags} />
                     </div>
-                    <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>{clip.tags}</div>
+                    <div className="meta" style={{ lineHeight: 1.6 }}>{clip.tags}</div>
                   </div>
                 ) : null}
                 {clip.hashtags ? (

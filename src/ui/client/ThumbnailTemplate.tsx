@@ -111,7 +111,7 @@ export default function ThumbnailTemplate({ onBack }: { onBack?: () => void }) {
   const field = (f: Field) => {
     const v = cfg[f.k];
     if (f.t === "bool") return (
-      <label key={f.k} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text2)", paddingTop: 18 }}>
+      <label key={f.k} className="meta" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 18 }}>
         <input type="checkbox" checked={v !== false && v !== undefined ? !!v : false} onChange={(e) => set(f.k, e.target.checked)} /> {titleCase(f.k)}
       </label>
     );

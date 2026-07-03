@@ -162,7 +162,7 @@ export default function ConfigPage() {
               {importing ? "Importing…" : "Import"}
             </button>
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12, color: "var(--text2)" }}>
+          <label className="meta" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
             <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} />
             Use imported profile
           </label>
