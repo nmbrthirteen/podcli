@@ -15,6 +15,7 @@ export default function ThumbnailStudio() {
   const [line2, setLine2] = useState("");
   const [textOpts, setTextOpts] = useState<[string, string][]>([]);
   const [frameOpts, setFrameOpts] = useState<any[]>([]);
+  const [frameIdx, setFrameIdx] = useState(0);
   const [selFrame, setSelFrame] = useState<{ path: string; info?: any } | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -95,6 +96,43 @@ export default function ThumbnailStudio() {
     } catch (e: any) { setMsg(`Generate failed: ${e.message}`); } finally { setBusy(null); }
   };
 
+  // Pull a different frame from the source (cycles the ranked candidates) and
+  // re-render — same one-click flow as Regenerate, but swaps the background frame.
+  const newFrame = async () => {
+    setBusy("newframe"); setMsg(null);
+    try {
+      let frames = frameOpts;
+      if (!frames.length) {
+        if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); return; }
+        const r = await api("/thumbnail-studio/options", {
+          method: "POST",
+          body: JSON.stringify({
+            title,
+            video_path: video?.path,
+            start: startS !== "" ? Number(startS) : undefined,
+            end: endS !== "" ? Number(endS) : undefined,
+          }),
+        });
+        frames = r.frames || [];
+        setFrameOpts(frames);
+        if ((r.texts || []).length) setTextOpts(r.texts);
+      }
+      if (!frames.length) { setMsg("No frames found. Pick a video source first."); return; }
+      const next = (frameIdx + 1) % frames.length;
+      setFrameIdx(next);
+      const frame = frames[next];
+      setSelFrame({ path: frame.path, info: frame });
+      const r = await api("/thumbnail-studio/render", {
+        method: "POST",
+        body: JSON.stringify({ title, line1: line1 || undefined, line2: line2 || undefined, frame_path: frame.path, frame_info: frame }),
+      });
+      if (!r.path) throw new Error("no thumbnail produced");
+      setPreview(r.path);
+      setBust(Date.now());
+      setMsg(`New frame from source (${next + 1}/${frames.length})`);
+    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); } finally { setBusy(null); }
+  };
+
   return (
     <div className="app">
       <div className="header">
@@ -160,6 +198,9 @@ export default function ThumbnailStudio() {
             <div className="set-actions" style={{ marginTop: 10 }}>
               <button className="btn btn-primary btn-sm" onClick={render} disabled={busy !== null || !selFrame}>
                 {busy === "render" ? <div className="spinner sm" /> : (preview ? "Regenerate" : "Generate")}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={newFrame} disabled={busy !== null} title="Pull a different frame from the source">
+                {busy === "newframe" ? <div className="spinner sm" /> : "New frame"}
               </button>
               {preview && (
                 <a className="btn btn-ghost btn-sm" href={img(preview, bust)} download="thumbnail.png" style={{ textDecoration: "none" }}>
