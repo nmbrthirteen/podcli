@@ -614,12 +614,19 @@ func pythonHealthy(bin string) bool {
 	if !have(bin) {
 		return false
 	}
-	root := filepath.Join(paths.RuntimeDir(), "python")
+	root := pythonRoot(bin)
 	if runtime.GOOS == "windows" {
 		return have(filepath.Join(root, "Lib", "encodings", "__init__.py"))
 	}
 	matches, err := filepath.Glob(filepath.Join(root, "lib", "python*", "encodings", "__init__.py"))
 	return err == nil && len(matches) > 0
+}
+
+func pythonRoot(bin string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Dir(bin)
+	}
+	return filepath.Dir(filepath.Dir(bin))
 }
 
 // pythonAssetURL resolves a python-build-standalone install_only tarball for
@@ -676,8 +683,9 @@ func pythonAssetURL() (url, name, sumsURL string, err error) {
 func EnsurePython(requirements string) (string, error) {
 	bin := PythonBin()
 	if !pythonHealthy(bin) {
-		if err := os.RemoveAll(filepath.Join(paths.RuntimeDir(), "python")); err != nil {
-			return "", err
+		root := pythonRoot(bin)
+		if err := os.RemoveAll(root); err != nil {
+			return "", fmt.Errorf("remove corrupted Python runtime %s: %w (close any running podcli or Python subprocesses)", root, err)
 		}
 		url, name, sumsURL, err := pythonAssetURL()
 		if err != nil {

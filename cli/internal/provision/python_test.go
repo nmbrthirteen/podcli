@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
-
-	"podcli/internal/paths"
 )
 
 func TestPythonHealthyRequiresStdlibEncodings(t *testing.T) {
@@ -23,9 +21,9 @@ func TestPythonHealthyRequiresStdlibEncodings(t *testing.T) {
 		t.Fatal("python without encodings should be unhealthy")
 	}
 
-	encodings := filepath.Join(paths.RuntimeDir(), "python", "lib", "python3.12", "encodings", "__init__.py")
+	encodings := filepath.Join(pythonRoot(bin), "lib", "python3.12", "encodings", "__init__.py")
 	if runtime.GOOS == "windows" {
-		encodings = filepath.Join(paths.RuntimeDir(), "python", "Lib", "encodings", "__init__.py")
+		encodings = filepath.Join(pythonRoot(bin), "Lib", "encodings", "__init__.py")
 	}
 	if err := os.MkdirAll(filepath.Dir(encodings), 0o755); err != nil {
 		t.Fatal(err)
