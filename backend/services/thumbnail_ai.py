@@ -469,6 +469,19 @@ def _ask_ai_for_json(prompt: str, timeout: int = 30):
     return None
 
 
+def _thumbnail_kb_context() -> str:
+    from services.content_generator import load_kb_context
+
+    kb = load_kb_context([
+        ("07-thumbnail-guide.md", 2500),
+        ("02-voice-and-tone.md", 1500),
+        ("01-brand-identity.md", 800),
+    ])
+    if not kb:
+        return ""
+    return f"\nBRAND KNOWLEDGE BASE (follow its thumbnail text rules, voice, and banned words):\n{kb}\n"
+
+
 def ask_claude_for_layout(
     title: str,
     frame_path: str,
@@ -496,7 +509,7 @@ def ask_claude_for_layout(
     prompt = f"""You are a thumbnail layout engine. Given a title and face position, return CSS values for a YouTube Shorts thumbnail (1080x1920).
 
 TITLE: "{title}"
-
+{_thumbnail_kb_context()}
 PHOTO INFO:
 {face_ctx}
 
@@ -537,7 +550,7 @@ def generate_headline_variations(title: str, n: int, config: Optional[dict] = No
     prompt = f"""You are a thumbnail copywriter. Write {n} DISTINCT headline options for a YouTube Shorts thumbnail.
 
 TITLE: "{title}"
-
+{_thumbnail_kb_context()}
 Return ONLY a JSON array of exactly {n} objects, each with "line1" and "line2":
 [{{"line1": "FIRST LINE", "line2": "SECOND LINE"}}, ...]
 

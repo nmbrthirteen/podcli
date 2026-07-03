@@ -1513,10 +1513,8 @@ app.post("/api/clips/:id/thumbnail/render", async (req, res) => {
   if (!frame_path) { res.status(400).json({ error: "select a frame first" }); return; }
   // Only allow frames podcli itself produced (candidate frames) or the user uploaded —
   // never an arbitrary server path passed through to the renderer.
-  const resolvedFrame = resolve(String(frame_path));
-  const frameRoots = [resolve(join(paths.output, "thumbnails", String(clip.id))), resolve(uploadDir)];
-  const inAllowedRoot = frameRoots.some((root) => resolvedFrame === root || resolvedFrame.startsWith(root + path.sep));
-  if (!inAllowedRoot || !existsSync(resolvedFrame)) { res.status(400).json({ error: "invalid frame" }); return; }
+  const resolvedFrame = resolveFrameInRoots(frame_path, [join(paths.output, "thumbnails", String(clip.id)), uploadDir]);
+  if (!resolvedFrame) { res.status(400).json({ error: "invalid frame" }); return; }
   const outDir = join(paths.output, "thumbnails", String(clip.id));
   await mkdir(outDir, { recursive: true });
   const out = join(outDir, `thumb_${uuidv4().slice(0, 8)}.png`);
@@ -1538,6 +1536,73 @@ app.post("/api/clips/:id/thumbnail/render", async (req, res) => {
   const edit = await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
   if (edit.code !== 0) { res.status(500).json({ error: stripAnsi(edit.stderr || edit.stdout) || "thumbnail metadata update failed" }); return; }
   res.json({ ok: true, preview_path: outPath });
+});
+
+// --- Thumbnail studio (standalone thumbnails, no clip required) ---
+
+const thumbStudioDir = join(paths.output, "thumbnails", "studio");
+
+// realpath both sides so a symlink planted inside an allowed root can't point
+// the renderer at a file outside it.
+function resolveFrameInRoots(framePath: unknown, roots: string[]): string | null {
+  let real: string;
+  try {
+    real = realpathSync(path.resolve(String(framePath)));
+  } catch {
+    return null;
+  }
+  const realRoot = (p: string) => {
+    try { return realpathSync(p); } catch { return resolve(p); }
+  };
+  const ok = roots.map(realRoot).some((root) => real === root || real.startsWith(root + path.sep));
+  return ok ? real : null;
+}
+
+app.post("/api/thumbnail-studio/options", async (req, res) => {
+  const { title, video_path, start, end, texts, frames } = req.body || {};
+  if (!title || !String(title).trim()) { res.status(400).json({ error: "title is required" }); return; }
+  const clamp = (v: any, d: number) => Math.min(Math.max(parseInt(String(v)) || d, 1), 8);
+  const args = [
+    "thumbnail-options", String(title),
+    "--output", join(thumbStudioDir, "frames"),
+    "--texts", String(clamp(texts, 6)),
+    "--frames", String(clamp(frames, 6)),
+  ];
+  if (video_path) {
+    // Frames come only from files the user explicitly uploaded/selected this
+    // session — never an arbitrary server path passed to the extractor.
+    let video: string;
+    try { video = realpathSync(path.resolve(String(video_path))); } catch { res.status(400).json({ error: "video not found" }); return; }
+    if (!allowedSourcePaths.has(video)) { res.status(400).json({ error: "unknown video, upload or select it first" }); return; }
+    args.push("--video", video);
+    if (start != null && start !== "") args.push("--start", String(Math.max(0, Number(start) || 0)));
+    if (end != null && end !== "") args.push("--end", String(Math.max(0, Number(end) || 0)));
+  }
+  const r = await runCli(args);
+  if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "options failed" }); return; }
+  const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
+  try { res.json(JSON.parse(jsonLine || "{}")); } catch { res.status(500).json({ error: "bad options output" }); }
+});
+
+app.post("/api/thumbnail-studio/render", async (req, res) => {
+  const { title, line1, line2, frame_path, frame_info } = req.body || {};
+  if (!title || !String(title).trim()) { res.status(400).json({ error: "title is required" }); return; }
+  if (!frame_path) { res.status(400).json({ error: "select a frame first" }); return; }
+  const resolvedFrame = resolveFrameInRoots(frame_path, [thumbStudioDir, uploadDir]);
+  if (!resolvedFrame) { res.status(400).json({ error: "invalid frame" }); return; }
+  await mkdir(thumbStudioDir, { recursive: true });
+  const out = join(thumbStudioDir, `thumb_${uuidv4().slice(0, 8)}.png`);
+  const args = ["thumbnail-render", String(title), "--frame", resolvedFrame, "--output", out];
+  if (line1) args.push("--line1", String(line1));
+  if (line2) args.push("--line2", String(line2));
+  if (frame_info) args.push("--frame-info", JSON.stringify(frame_info));
+  const r = await runCli(args);
+  if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "render failed" }); return; }
+  const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
+  let outPath = "";
+  try { outPath = JSON.parse(jsonLine || "{}").path || ""; } catch { /* no path */ }
+  if (!outPath || !existsSync(outPath)) { res.status(500).json({ error: "no thumbnail produced" }); return; }
+  res.json({ ok: true, path: outPath });
 });
 
 // --- Secrets/settings stored in the global .env (e.g. HF_TOKEN) ---
@@ -2351,11 +2416,16 @@ app.post("/api/generate-content", async (req, res) => {
     const result = await executor.execute(
       "generate_content",
       { clip, transcript_segments: segs },
-      (event) =>
+      (event) => {
+        if (event.partial) {
+          broadcastSSE("content-partial", { stream_id: clip?.id ? String(clip.id) : null, partial: event.partial });
+          return;
+        }
         broadcastSSE("job-update", {
           progress: event.percent,
           message: event.message,
-        }),
+        });
+      },
     );
 
     const data: any = result.data || {};
@@ -2372,6 +2442,80 @@ app.post("/api/generate-content", async (req, res) => {
     }
 
     res.json(data);
+  } catch (err: any) {
+    res.status(500).json({
+      error: `Content generation failed: ${err.message?.substring(0, 200)}`,
+    });
+  }
+});
+
+// --- Content studio (transcript-first generation, no clip required) ---
+
+const CONTENT_MAX_SEGMENTS = 30;
+
+// Long transcripts get sampled evenly so titles reflect the whole episode,
+// not just the opening minutes (the generator reads at most 30 segments).
+function packTranscriptText(text: string): Array<{ start: number; text: string }> {
+  const clean = text.replace(/\r/g, "").trim();
+  const segChars = 1000;
+  const stride = Math.max(segChars, Math.floor(clean.length / CONTENT_MAX_SEGMENTS));
+  const segs: Array<{ start: number; text: string }> = [];
+  for (let off = 0; off < clean.length && segs.length < CONTENT_MAX_SEGMENTS; off += stride) {
+    const chunk = clean.slice(off, off + segChars).trim();
+    if (chunk) segs.push({ start: segs.length, text: chunk });
+  }
+  return segs;
+}
+
+function condenseSegments(segments: Array<{ start?: number; text?: string }>): Array<{ start: number; text: string }> {
+  const clean = segments
+    .map((s) => ({ start: Number(s.start) || 0, text: String(s.text || "").trim() }))
+    .filter((s) => s.text);
+  if (clean.length <= CONTENT_MAX_SEGMENTS) return clean;
+  const per = Math.ceil(clean.length / CONTENT_MAX_SEGMENTS);
+  const out: Array<{ start: number; text: string }> = [];
+  for (let i = 0; i < clean.length; i += per) {
+    const group = clean.slice(i, i + per);
+    out.push({ start: group[0].start, text: group.map((s) => s.text).join(" ").slice(0, 1200) });
+  }
+  return out;
+}
+
+app.post("/api/content-studio/generate", async (req, res) => {
+  const { title, transcript_text, mode, stream_id } = req.body || {};
+  let segs: Array<{ start: number; text: string }>;
+  if (typeof transcript_text === "string" && transcript_text.trim()) {
+    segs = packTranscriptText(transcript_text);
+  } else if (uiState.transcript?.segments?.length) {
+    segs = condenseSegments(uiState.transcript.segments);
+  } else {
+    res.status(400).json({ error: "paste a transcript or load an episode first" });
+    return;
+  }
+  const episode = mode === "episode";
+  const lastStart = segs.length ? segs[segs.length - 1].start : 0;
+  const clip = {
+    title: String(title || "").trim() || "Untitled episode",
+    start_second: 0,
+    end_second: lastStart + 60,
+    content_type: episode ? "full episode" : "highlight",
+  };
+  try {
+    const result = await executor.execute(
+      "generate_content",
+      { clip, transcript_segments: segs, mode: episode ? "episode" : "shorts" },
+      (event) => {
+        if (event.partial) {
+          broadcastSSE("content-partial", { stream_id: stream_id || null, partial: event.partial });
+          return;
+        }
+        broadcastSSE("job-update", {
+          progress: event.percent,
+          message: event.message,
+        });
+      },
+    );
+    res.json(result.data || {});
   } catch (err: any) {
     res.status(500).json({
       error: `Content generation failed: ${err.message?.substring(0, 200)}`,
