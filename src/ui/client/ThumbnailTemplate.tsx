@@ -122,14 +122,14 @@ export default function ThumbnailTemplate({ onBack }: { onBack?: () => void }) {
           <div className="thumb-swatch-row">
             {isHex(v) && <input type="color" value={v} onChange={(e) => set(f.k, e.target.value)} />}
             {!isHex(v) && <span style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid var(--border)", background: v || "transparent", flexShrink: 0 }} />}
-            <input type="text" value={v ?? ""} onChange={(e) => set(f.k, e.target.value)} style={{ fontSize: 12, padding: "7px 10px", flex: 1, minWidth: 0, fontFamily: "var(--font-mono, monospace)" }} />
+            <input type="text" value={v ?? ""} onChange={(e) => set(f.k, e.target.value)} style={{ flex: 1, minWidth: 0 }} />
           </div>
         ) : f.t === "select" ? (
           <select value={v ?? ""} onChange={(e) => set(f.k, e.target.value)}>{f.opts!.map((o) => <option key={o} value={o}>{o}</option>)}</select>
         ) : (
           <input type={f.t === "num" ? "number" : "text"} value={v ?? ""} step="any"
             onChange={(e) => set(f.k, f.t === "num" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)}
-            style={{ width: "100%", fontSize: 13, padding: "8px 11px" }} />
+            style={{ width: "100%" }} />
         )}
       </div>
     );

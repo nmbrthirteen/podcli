@@ -1198,7 +1198,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                 <input type="text" placeholder="Or paste a local path: /Users/you/episode.mp4"
                   value={videoPath} onChange={e => setVideoPath(e.target.value)}
                   disabled={isProcessing || browsing}
-                  style={{ marginTop: 8, fontSize: 12, padding: '9px 13px', background: 'var(--bg)', borderColor: videoPath ? 'var(--green-border)' : 'var(--border)' }} />
+                  style={{ marginTop: 8, borderColor: videoPath ? 'var(--green-border)' : 'var(--border)' }} />
               </div>
 
               {/* Transcript */}
@@ -1232,7 +1232,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
                       <span style={{ fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>Time offset</span>
                       <input type="number" step="0.5" value={timeAdjust} onChange={e => setTimeAdjust(parseFloat(e.target.value) || 0)}
-                        style={{ width: 72, padding: '7px 10px', fontSize: 12 }} disabled={isProcessing} />
+                        style={{ width: 72 }} disabled={isProcessing} />
                       <span style={{ fontSize: 11, color: 'var(--text3)' }}>sec</span>
                     </div>
                   </div>
@@ -1303,7 +1303,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                 {/* Presets */}
                 {presets.length > 0 && (
                   <div className="preset-bar">
-                    <select value={activePreset} onChange={e => loadPreset(e.target.value)} disabled={isProcessing} style={{ fontSize: 12 }}>
+                    <select value={activePreset} onChange={e => loadPreset(e.target.value)} disabled={isProcessing}>
                       <option value="">Load preset…</option>
                       {presets.map(p => <option key={p.name || p} value={p.name || p}>{p.name || p}</option>)}
                     </select>
@@ -1396,7 +1396,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     <div className="advanced-grid fade-in">
                       <div className="field">
                         <label className="field-label">Quality</label>
-                        <select value={quality} onChange={e => setQuality(e.target.value)} disabled={isProcessing} style={{ fontSize: 12, padding: '8px 12px' }}>
+                        <select value={quality} onChange={e => setQuality(e.target.value)} disabled={isProcessing}>
                           <option value="max">Max</option><option value="high">High</option><option value="fast">Fast</option>
                         </select>
                       </div>
@@ -1450,10 +1450,10 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     </div>
                     <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
                       <input value={correctionWord} onChange={e => setCorrectionWord(e.target.value)}
-                        placeholder="Wrong (e.g. Boxel)" style={{ flex: 1, fontSize: 12, padding: '8px 12px', background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }} />
+                        placeholder="Wrong (e.g. Boxel)" style={{ flex: 1 }} />
                       <span style={{ color: 'var(--text3)', fontSize: 12, flexShrink: 0 }}>{'\u2192'}</span>
                       <input value={correctionFix} onChange={e => setCorrectionFix(e.target.value)}
-                        placeholder="Correct (e.g. Voxel)" style={{ flex: 1, fontSize: 12, padding: '8px 12px', background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}
+                        placeholder="Correct (e.g. Voxel)" style={{ flex: 1 }}
                         onKeyDown={e => { if (e.key === 'Enter' && correctionWord.trim() && correctionFix.trim()) {
                           api('/corrections/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wrong: correctionWord.trim(), correct: correctionFix.trim() }) })
                             .then(d => { if (d.corrections) { setCorrections(d.corrections); setCorrectionWord(''); setCorrectionFix(''); } });
@@ -1516,7 +1516,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     value={momentText}
                     onChange={(e) => { setMomentText(e.target.value); setMomentNotice(null); }}
                     disabled={findingMoment}
-                    style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
+                    style={{ width: '100%', resize: 'vertical' }}
                   />
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
                     <button className="btn btn-primary btn-sm" onClick={findMoment} disabled={!momentText.trim() || findingMoment}>

@@ -161,9 +161,9 @@ export default function ThumbnailStudio() {
           {video && <span style={{ fontSize: 12, color: "var(--text2)" }}>{video.name}</span>}
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title to write headlines from" style={{ flex: "1 1 280px", fontSize: 14, padding: "10px 13px" }} />
-          <input type="number" min={0} value={startS} onChange={(e) => setStartS(e.target.value)} placeholder="Start (s)" style={{ width: 90, fontSize: 13, padding: "9px 10px" }} />
-          <input type="number" min={0} value={endS} onChange={(e) => setEndS(e.target.value)} placeholder="End (s)" style={{ width: 90, fontSize: 13, padding: "9px 10px" }} />
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title to write headlines from" style={{ flex: "1 1 280px" }} />
+          <input type="number" min={0} value={startS} onChange={(e) => setStartS(e.target.value)} placeholder="Start (s)" style={{ width: 90 }} />
+          <input type="number" min={0} value={endS} onChange={(e) => setEndS(e.target.value)} placeholder="End (s)" style={{ width: 90 }} />
           <button className="btn btn-primary btn-sm" onClick={loadOptions} disabled={busy !== null}>
             {busy === "options" ? <><div className="spinner sm" /> Finding options…</> : (textOpts.length || frameOpts.length ? "Refresh options" : "Get options")}
           </button>
@@ -193,8 +193,8 @@ export default function ThumbnailStudio() {
             </div>
           </div>
           <div className="thumb-edit-controls">
-            <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%", fontSize: 14, padding: "9px 12px" }} />
-            <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", fontSize: 14, padding: "9px 12px", marginTop: 8 }} />
+            <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%" }} />
+            <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", marginTop: 8 }} />
             <div className="set-actions" style={{ marginTop: 10 }}>
               <button className="btn btn-primary btn-sm" onClick={render} disabled={busy !== null || !selFrame}>
                 {busy === "render" ? <div className="spinner sm" /> : (preview ? "Regenerate" : "Generate")}

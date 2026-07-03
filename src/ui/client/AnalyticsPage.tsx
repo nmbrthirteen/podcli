@@ -142,11 +142,11 @@ export default function AnalyticsPage() {
           <div className="thumb-fields">
             <div>
               <label style={labelStyle}>OAuth client ID</label>
-              <input type="text" value={clientId} onChange={(e) => setClientId(e.target.value)} style={{ width: "100%", fontSize: 13, padding: "8px 11px" }} />
+              <input type="text" value={clientId} onChange={(e) => setClientId(e.target.value)} style={{ width: "100%" }} />
             </div>
             <div>
               <label style={labelStyle}>OAuth client secret {hasSecret ? "(saved)" : ""}</label>
-              <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={hasSecret ? "••••••••" : ""} style={{ width: "100%", fontSize: 13, padding: "8px 11px" }} />
+              <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={hasSecret ? "••••••••" : ""} style={{ width: "100%" }} />
             </div>
           </div>
           <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center" }}>

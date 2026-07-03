@@ -124,7 +124,7 @@ export default function ConfigPage() {
                   placeholder={s.set ? "Replace token" : "hf_..."}
                   value={secretInputs[s.key] ?? ""}
                   onChange={(e) => setSecretInputs((p) => ({ ...p, [s.key]: e.target.value }))}
-                  style={{ fontSize: 13, flex: 1 }}
+                  style={{ flex: 1 }}
                 />
                 <button
                   type="button"

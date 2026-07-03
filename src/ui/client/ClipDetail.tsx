@@ -245,7 +245,7 @@ export default function ClipDetail() {
 
           <div className="section">
             <label style={labelStyle}>Title & captions</label>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%", fontSize: 14, padding: "10px 13px" }} />
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%" }} />
             <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
               <select value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value)} style={{ flex: 1 }}>
                 {CAPTION_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -283,8 +283,8 @@ export default function ClipDetail() {
                 </div>
               </div>
               <div className="thumb-edit-controls">
-                <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%", fontSize: 14, padding: "9px 12px" }} />
-                <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", fontSize: 14, padding: "9px 12px", marginTop: 8 }} />
+                <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%" }} />
+                <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", marginTop: 8 }} />
                 <div className="set-actions" style={{ marginTop: 10 }}>
                   <button className="btn btn-primary btn-sm" onClick={renderThumb} disabled={busy !== null || !selFrame}>
                     {busy === "render" ? <div className="spinner sm" /> : (tc.preview_path ? "Regenerate" : "Generate")}

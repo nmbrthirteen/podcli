@@ -104,7 +104,7 @@ export default function ContentStudio() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Working title or topic"
-              style={{ width: "100%", fontSize: 14, padding: "10px 13px" }}
+              style={{ width: "100%" }}
             />
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "18px 0 0" }}>
@@ -119,7 +119,7 @@ export default function ContentStudio() {
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
               placeholder="Paste the transcript here"
-              style={{ width: "100%", minHeight: 260, fontSize: 13, lineHeight: 1.6, padding: "10px 13px", marginTop: 8, resize: "vertical" }}
+              style={{ width: "100%", minHeight: 260, lineHeight: 1.6, marginTop: 8, resize: "vertical" }}
             />
 
             <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
