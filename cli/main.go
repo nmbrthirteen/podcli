@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"podcli/internal/backend"
@@ -373,10 +374,14 @@ func uninstall(args []string) int {
 	}
 	runningInUse := false
 	for _, p := range targets {
-		if err := os.RemoveAll(p); err != nil {
-			if pathContains(p, self) {
-				runningInUse = true
+		if runtime.GOOS == "windows" && pathContains(p, self) {
+			runningInUse = true
+			if err := removeAllExcept(p, self); err != nil {
+				fmt.Fprintf(os.Stderr, "  warning: could not remove %s: %v\n", p, err)
 			}
+			continue
+		}
+		if err := os.RemoveAll(p); err != nil {
 			fmt.Fprintf(os.Stderr, "  warning: could not remove %s: %v\n", p, err)
 		}
 	}
@@ -423,6 +428,29 @@ func pathContains(dir, file string) bool {
 	}
 	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(file))
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func removeAllExcept(root, keep string) error {
+	var paths []string
+	if err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		paths = append(paths, p)
+		return nil
+	}); err != nil {
+		return err
+	}
+	for i := len(paths) - 1; i >= 0; i-- {
+		p := paths[i]
+		if pathContains(p, keep) {
+			continue
+		}
+		if err := os.RemoveAll(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func linkPointsTo(link, target string) bool {

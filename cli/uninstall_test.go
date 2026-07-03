@@ -92,3 +92,34 @@ func TestPodcliLinksPreservesSelfOutsideManagedBin(t *testing.T) {
 		t.Fatalf("podcliLinks should preserve self outside managed bin: %v", got)
 	}
 }
+
+func TestRemoveAllExceptKeepsRunningBinaryOnly(t *testing.T) {
+	root := t.TempDir()
+	keep := filepath.Join(root, "bin", "podcli"+paths.ExeSuffix())
+	sibling := filepath.Join(root, "bin", "helper.exe")
+	otherDir := filepath.Join(root, "runtime")
+	if err := os.MkdirAll(filepath.Dir(keep), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{keep, sibling, filepath.Join(otherDir, "x")} {
+		if err := os.WriteFile(p, []byte("x"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := removeAllExcept(root, keep); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("kept binary missing: %v", err)
+	}
+	if _, err := os.Stat(sibling); !os.IsNotExist(err) {
+		t.Fatalf("sibling should be removed, got %v", err)
+	}
+	if _, err := os.Stat(otherDir); !os.IsNotExist(err) {
+		t.Fatalf("other dir should be removed, got %v", err)
+	}
+}

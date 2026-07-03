@@ -610,6 +610,25 @@ func PythonBin() string {
 	return filepath.Join(paths.RuntimeDir(), "python", "bin", "python3")
 }
 
+func pythonHealthy(bin string) bool {
+	if !have(bin) {
+		return false
+	}
+	root := pythonRoot(bin)
+	if runtime.GOOS == "windows" {
+		return have(filepath.Join(root, "Lib", "encodings", "__init__.py"))
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "lib", "python*", "encodings", "__init__.py"))
+	return err == nil && len(matches) > 0
+}
+
+func pythonRoot(bin string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Dir(bin)
+	}
+	return filepath.Dir(filepath.Dir(bin))
+}
+
 // pythonAssetURL resolves a python-build-standalone install_only tarball for
 // this platform via the GitHub latest-release API, so it tracks upstream
 // without a hardcoded version that rots.
@@ -663,7 +682,11 @@ func pythonAssetURL() (url, name, sumsURL string, err error) {
 
 func EnsurePython(requirements string) (string, error) {
 	bin := PythonBin()
-	if !have(bin) {
+	if !pythonHealthy(bin) {
+		root := pythonRoot(bin)
+		if err := os.RemoveAll(root); err != nil {
+			return "", fmt.Errorf("remove corrupted Python runtime %s: %w (close any running podcli or Python subprocesses)", root, err)
+		}
 		url, name, sumsURL, err := pythonAssetURL()
 		if err != nil {
 			return "", err
@@ -683,8 +706,8 @@ func EnsurePython(requirements string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if !have(bin) {
-			return "", fmt.Errorf("python missing after extraction")
+		if !pythonHealthy(bin) {
+			return "", fmt.Errorf("python runtime missing stdlib encodings after extraction")
 		}
 	}
 	if requirements != "" {
