@@ -66,6 +66,12 @@ export const createClipToolDef = {
         description:
           "How to crop to vertical. Auto-loaded from session settings if omitted.",
       },
+      format: {
+        type: "string",
+        enum: ["vertical", "horizontal", "square"],
+        description:
+          "Output aspect ratio. vertical=9:16 shorts, horizontal=16:9, square=1:1. Auto-loaded from session settings if omitted. Default: vertical.",
+      },
       transcript_words: {
         type: "array",
         description:
@@ -148,6 +154,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     settings.captionStyle ||
     "hormozi";
   const cropStrategy = input.crop_strategy || settings.cropStrategy || "speaker";
+  const format = input.format || settings.format || "vertical";
   const logoPath = input.logo_path || settings.logoPath || null;
   const outroPath = input.outro_path || settings.outroPath || null;
   const transcriptWords = input.transcript_words ?? transcript?.words ?? [];
@@ -171,6 +178,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     end_second: endSecond,
     caption_style: captionStyle,
     crop_strategy: cropStrategy,
+    format,
     transcript_words: transcriptWords,
     title,
     output_dir: paths.output,

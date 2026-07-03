@@ -110,6 +110,7 @@ interface UIState {
   settings: {
     captionStyle: string;
     cropStrategy: string;
+    format: string;
     logoPath: string;
     outroPath: string;
   };
@@ -140,6 +141,7 @@ function loadPersistedState(): UIState {
         settings: {
           captionStyle: saved.settings?.captionStyle || "branded",
           cropStrategy: saved.settings?.cropStrategy || "speaker",
+          format: saved.settings?.format || "vertical",
           logoPath: saved.settings?.logoPath || "",
           outroPath: saved.settings?.outroPath || "",
         },
@@ -166,6 +168,7 @@ function loadPersistedState(): UIState {
     settings: {
       captionStyle: "branded",
       cropStrategy: "speaker",
+      format: "vertical",
       logoPath: "",
       outroPath: "",
     },
@@ -263,6 +266,7 @@ function createBatchHistoryRecorder({
   transcriptWords,
   defaultCaptionStyle,
   defaultCropStrategy,
+  defaultFormat,
   label,
 }: {
   jobId: string;
@@ -270,6 +274,7 @@ function createBatchHistoryRecorder({
   transcriptWords: WordTimestamp[];
   defaultCaptionStyle?: string;
   defaultCropStrategy?: string;
+  defaultFormat?: string;
   label: string;
 }) {
   const recordedClipIndexes = new Set<number>();
@@ -281,6 +286,7 @@ function createBatchHistoryRecorder({
       transcriptWords,
       defaultCaptionStyle,
       defaultCropStrategy,
+      defaultFormat,
       contentTypeFor: (s, e) => findContentType(uiState.suggestions, s, e),
     });
     for (const row of rows) {
@@ -635,6 +641,7 @@ app.post("/api/create-clip", async (req, res) => {
     end_second,
     caption_style = "hormozi",
     crop_strategy = "speaker",
+    format = "vertical",
     transcript_words = [],
     title = "clip",
     logo_path = null,
@@ -663,9 +670,10 @@ app.post("/api/create-clip", async (req, res) => {
     return;
   }
   const duration = end_second - start_second;
-  if (duration > 180) {
+  const maxDur = format === "horizontal" ? 300 : 180;
+  if (duration > maxDur) {
     res.status(400).json({
-      error: `Clip too long (${Math.round(duration)}s). Max 180 seconds.`,
+      error: `Clip too long (${Math.round(duration)}s). Max ${maxDur} seconds.`,
     });
     return;
   }
@@ -689,6 +697,13 @@ app.post("/api/create-clip", async (req, res) => {
     res
       .status(400)
       .json({ error: `Invalid crop strategy. Use: ${validCrops.join(", ")}` });
+    return;
+  }
+  const validFormats = ["vertical", "horizontal", "square"];
+  if (!validFormats.includes(format)) {
+    res
+      .status(400)
+      .json({ error: `Invalid format. Use: ${validFormats.join(", ")}` });
     return;
   }
 
@@ -716,6 +731,7 @@ app.post("/api/create-clip", async (req, res) => {
         end_second,
         caption_style,
         crop_strategy,
+        format,
         transcript_words,
         title,
         output_dir: paths.output,
@@ -743,6 +759,7 @@ app.post("/api/create-clip", async (req, res) => {
           end_second,
           caption_style,
           crop_strategy,
+          format,
           logo_path: logo_path || undefined,
           outro_path: outro_path || undefined,
           title,
@@ -755,7 +772,7 @@ app.post("/api/create-clip", async (req, res) => {
         const clipWords = sliceWords(transcript_words, start_second, end_second);
         await clipsHistory.saveWords(rec.id, clipWords);
         await clipsHistory.saveRecipe(rec.id, {
-          caption_style, crop_strategy, logo_path: logo_path || null, outro_path: outro_path || null,
+          caption_style, crop_strategy, format, logo_path: logo_path || null, outro_path: outro_path || null,
           clean_fillers, transcript_words: clipWords,
         });
         broadcastHistoryUpdated(jobId, [rec]);
@@ -805,9 +822,10 @@ app.post("/api/batch-clips", async (req, res) => {
       res.status(400).json({ error: `Clip ${i + 1}: end must be after start` });
       return;
     }
-    if (dur > 180) {
+    const maxDur = c.format === "horizontal" ? 300 : 180;
+    if (dur > maxDur) {
       res.status(400).json({
-        error: `Clip ${i + 1}: too long (${Math.round(dur)}s). Max 180s.`,
+        error: `Clip ${i + 1}: too long (${Math.round(dur)}s). Max ${maxDur}s.`,
       });
       return;
     }
@@ -2605,6 +2623,8 @@ app.post("/api/ui-state", (req, res) => {
       uiState.settings.captionStyle = body.settings.captionStyle;
     if (body.settings.cropStrategy !== undefined)
       uiState.settings.cropStrategy = body.settings.cropStrategy;
+    if (body.settings.format !== undefined)
+      uiState.settings.format = body.settings.format;
     if (body.settings.logoPath !== undefined)
       uiState.settings.logoPath = body.settings.logoPath;
     if (body.settings.outroPath !== undefined)
@@ -2654,6 +2674,8 @@ app.post("/api/mcp/export", async (req, res) => {
     req.body.caption_style || uiState.settings.captionStyle || "branded";
   const cropStrategy =
     req.body.crop_strategy || uiState.settings.cropStrategy || "speaker";
+  const format =
+    req.body.format || uiState.settings.format || "vertical";
   const allowAssFallback = req.body.allow_ass_fallback === true;
 
   if (!videoPath || !existsSync(videoPath)) {
@@ -2674,6 +2696,7 @@ app.post("/api/mcp/export", async (req, res) => {
     title: (c.title || "clip").slice(0, 40),
     caption_style: c.caption_style || captionStyle,
     crop_strategy: c.crop_strategy || cropStrategy,
+    format: c.format || format,
     allow_ass_fallback: c.allow_ass_fallback === true || allowAssFallback,
     // Preserve multi-cut segments from suggestions
     ...(Array.isArray(c.segments) &&
@@ -2697,6 +2720,7 @@ app.post("/api/mcp/export", async (req, res) => {
     transcriptWords,
     defaultCaptionStyle: captionStyle,
     defaultCropStrategy: cropStrategy,
+    defaultFormat: format,
     label: "MCP export",
   });
 

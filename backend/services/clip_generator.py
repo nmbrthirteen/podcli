@@ -23,12 +23,13 @@ from services.video_processor import (
     cut_segment,
     cut_multi_segment,
     crop_to_vertical,
+    fit_to_frame,
     burn_captions,
     normalize_audio,
     concat_outro,
 )
 from config.caption_styles import get_style
-from presets import MAX_CLIP_DURATION
+from services.formats import get_format
 
 _FILLER_WORDS = frozenset([
     "um", "uh", "uhh", "uhm", "umm", "hmm", "hm", "mhm",
@@ -574,6 +575,7 @@ def generate_clip(
     end_second: float,
     caption_style: str = "hormozi",
     crop_strategy: str = "face",
+    format: str = "vertical",
     crop_keyframes: list[dict] = None,
     transcript_words: list[dict] = None,
     title: str = "clip",
@@ -598,6 +600,7 @@ def generate_clip(
         end_second: Clip end time
         caption_style: "hormozi", "karaoke", "subtle", or "branded"
         crop_strategy: "center", "face", "speaker", or "speaker-hardcut"
+        format: "vertical", "horizontal", or "square"
         transcript_words: Word-level timestamps from transcription
         title: Clip title (used in filename)
         output_dir: Where to save the final clip (defaults to temp)
@@ -626,6 +629,8 @@ def generate_clip(
 
     if end_second <= start_second:
         raise ValueError("end_second must be greater than start_second")
+
+    spec = get_format(format)
 
     if trim_opening is None:
         trim_opening = not (keep_segments and len(keep_segments) > 0)
@@ -708,8 +713,8 @@ def generate_clip(
         keep_segments = None
         duration = end_second - start_second
 
-    if duration > MAX_CLIP_DURATION:
-        raise ValueError(f"Clip too long ({duration:.0f}s). Max {MAX_CLIP_DURATION} seconds for shorts.")
+    if duration > spec.dur_max:
+        raise ValueError(f"Clip too long ({duration:.0f}s). Max {spec.dur_max} seconds for {spec.name}.")
 
     # Load style config for branded-specific settings
     style_config = get_style(caption_style)
@@ -770,17 +775,21 @@ def generate_clip(
 
         # Step 2: Crop to vertical 9:16
         if progress_callback:
-            progress_callback(30, f"Resizing for vertical format (2/{total_steps})")
+            progress_callback(30, f"Resizing for {spec.name} format (2/{total_steps})")
 
         cropped_path = os.path.join(work_dir, "cropped.mp4")
-        crop_to_vertical(
-            segment_path, cropped_path,
-            strategy=crop_strategy,
-            transcript_words=crop_words,
-            clip_start=crop_clip_start,
-            face_map=face_map,
-            crop_keyframes=crop_keyframes,
-        )
+        if spec.reframe:
+            crop_to_vertical(
+                segment_path, cropped_path,
+                strategy=crop_strategy,
+                transcript_words=crop_words,
+                clip_start=crop_clip_start,
+                face_map=face_map,
+                crop_keyframes=crop_keyframes,
+                target_dims=spec.dims,
+            )
+        else:
+            fit_to_frame(segment_path, cropped_path, target_dims=spec.dims)
 
         # Step 3: Render captions (Remotion-first; ASS fallback optional)
         if transcript_words:
@@ -914,6 +923,7 @@ def generate_clip(
             "end_second": end_second,
             "caption_style": caption_style,
             "crop_strategy": crop_strategy,
+            "format": spec.name,
         }
         if keep_caption_overlay and caption_overlay_path and os.path.exists(caption_overlay_path):
             out["caption_overlay_path"] = caption_overlay_path

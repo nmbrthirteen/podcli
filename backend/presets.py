@@ -13,19 +13,23 @@ import json
 from typing import Optional
 
 from config.paths import paths
+from services.formats import FORMATS
 
 PRESETS_DIR = os.path.join(paths["home"], "presets")
 
-# ── Clip duration constants (single source of truth) ──
-# These are for clip CONTENT only — outro is appended separately.
-MIN_CLIP_DURATION = 20
-MAX_CLIP_DURATION = 45   # hard limit with buffer (outro not included)
-TARGET_CLIP_DURATION_MIN = 20
-TARGET_CLIP_DURATION_MAX = 35  # Claude targets this range
+# Back-compat aliases for the vertical format's durations. Source of truth is
+# FORMATS["vertical"]; kept as module-level names because cli.py,
+# clip_generator.py and claude_suggest.py import them directly.
+_VERTICAL = FORMATS["vertical"]
+MIN_CLIP_DURATION = _VERTICAL.dur_min
+MAX_CLIP_DURATION = _VERTICAL.dur_max
+TARGET_CLIP_DURATION_MIN = _VERTICAL.target_min
+TARGET_CLIP_DURATION_MAX = _VERTICAL.target_max
 
 DEFAULT_PRESET = {
     "caption_style": "branded",
     "crop_strategy": "face",
+    "format": "vertical",
     "time_adjust": -1.0,
     "logo_path": "",
     "outro_path": "",

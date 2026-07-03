@@ -13,6 +13,7 @@ interface BatchRecordContext {
   transcriptWords?: WordTimestamp[] | null;
   defaultCaptionStyle?: string;
   defaultCropStrategy?: string;
+  defaultFormat?: string;
   contentTypeFor?: (start: number, end: number) => string | undefined;
 }
 
@@ -98,6 +99,7 @@ export class ClipsHistory {
           end_second: end,
           caption_style: r.caption_style || ctx.defaultCaptionStyle || "hormozi",
           crop_strategy: r.crop_strategy || ctx.defaultCropStrategy || "speaker",
+          format: r.format || ctx.defaultFormat || "vertical",
           title: r.title || "clip",
           output_path: r.output_path,
           file_size_mb: r.file_size_mb || 0,
@@ -119,7 +121,8 @@ export class ClipsHistory {
     startSecond: number,
     endSecond: number,
     captionStyle: string,
-    cropStrategy: string
+    cropStrategy: string,
+    format: string = "vertical"
   ): Promise<ClipHistoryEntry | null> {
     const entries = await this.load();
     const srcName = basename(sourceVideo);
@@ -129,6 +132,7 @@ export class ClipsHistory {
         if (basename(e.source_video) !== srcName) return false;
         if (e.caption_style !== captionStyle) return false;
         if (e.crop_strategy !== cropStrategy) return false;
+        if ((e.format || "vertical") !== format) return false;
         if (Math.abs(e.start_second - startSecond) > 2) return false;
         if (Math.abs(e.end_second - endSecond) > 2) return false;
         // Check output still exists

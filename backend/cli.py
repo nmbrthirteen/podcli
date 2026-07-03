@@ -82,6 +82,7 @@ def _selection_signature(config: dict) -> str:
         bool(config.get("ai_select", True)),
         config.get("min_clip_duration", MIN_CLIP_DURATION),
         config.get("max_clip_duration", MAX_CLIP_DURATION),
+        config.get("format", "vertical"),
     ))
 
 
@@ -440,6 +441,8 @@ def cmd_process(args):
         config["caption_style"] = args.caption_style
     if args.crop:
         config["crop_strategy"] = args.crop
+    if getattr(args, "format", None):
+        config["format"] = args.format
     if args.top:
         config["top_clips"] = args.top
     if getattr(args, "review_each", False):
@@ -796,6 +799,7 @@ def cmd_process(args):
                         end_second=clip["end_second"],
                         caption_style=config.get("caption_style", "branded"),
                         crop_strategy=config.get("crop_strategy", "face"),
+                        format=config.get("format", "vertical"),
                         transcript_words=words,
                         title=clip.get("title", f"clip_{i+1}"),
                         output_dir=output_dir,
@@ -1008,6 +1012,7 @@ def cmd_process(args):
                                 end_second=clip["end_second"],
                                 caption_style=config.get("caption_style", "branded"),
                                 crop_strategy=config.get("crop_strategy", "face"),
+                                format=config.get("format", "vertical"),
                                 transcript_words=words,
                                 title=clip.get("title", f"clip_{i+1}"),
                                 output_dir=output_dir,
@@ -1331,6 +1336,7 @@ def _post_render_loop(
                     end_second=clip["end_second"],
                     caption_style=config.get("caption_style", "branded"),
                     crop_strategy=config.get("crop_strategy", "face"),
+                    format=config.get("format", "vertical"),
                     transcript_words=words,
                     title=clip.get("title", "clip"),
                     output_dir=output_dir,
@@ -1515,6 +1521,7 @@ def _post_render_loop(
                                         end_second=f_clip["end_second"],
                                         caption_style=config.get("caption_style", "branded"),
                                         crop_strategy=config.get("crop_strategy", "face"),
+                                        format=config.get("format", "vertical"),
                                         transcript_words=words,
                                         title=f_clip.get("title", "clip"),
                                         output_dir=output_dir,
@@ -1569,6 +1576,7 @@ def _post_render_loop(
                                         end_second=nc["end_second"],
                                         caption_style=config.get("caption_style", "branded"),
                                         crop_strategy=config.get("crop_strategy", "face"),
+                                        format=config.get("format", "vertical"),
                                         transcript_words=words,
                                         title=nc.get("title", "clip"),
                                         output_dir=output_dir,
@@ -3271,6 +3279,7 @@ def main():
     proc.add_argument("--fast", action="store_true", help="Draft mode: tiny Whisper, heuristic selection, center crop, low quality")
     proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
     proc.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
+    proc.add_argument("--format", choices=["vertical", "horizontal", "square"], help="Output aspect ratio (default: vertical)")
     proc.add_argument("--logo", help="Logo image (asset name or path)")
     proc.add_argument("--outro", help="Outro video (asset name or path)")
     proc.add_argument("--time-adjust", type=float, help="Timestamp offset in seconds")
