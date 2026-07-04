@@ -28,6 +28,34 @@ class EnvSettingsTests(unittest.TestCase):
             os.environ["PODCLI_ENV_FILE"] = self._saved
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def test_list_includes_ai_cli_paths(self):
+        keys = [s["key"] for s in env_settings.run_env_action("list")["settings"]]
+        self.assertIn("HF_TOKEN", keys)
+        self.assertIn("PODCLI_CLAUDE_PATH", keys)
+        self.assertIn("PODCLI_CODEX_PATH", keys)
+
+    def test_set_claude_path_persists(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            cli = tmp.name
+        try:
+            env_settings.set_setting("PODCLI_CLAUDE_PATH", cli)
+            s = next(x for x in env_settings.list_settings() if x["key"] == "PODCLI_CLAUDE_PATH")
+            self.assertTrue(s["set"])
+            self.assertEqual(s["preview"], cli)
+            self.assertIn(f"PODCLI_CLAUDE_PATH={cli}", open(self.env).read())
+        finally:
+            os.remove(cli)
+
+    def test_set_claude_path_rejects_missing_file(self):
+        with self.assertRaises(ValueError):
+            env_settings.set_setting("PODCLI_CLAUDE_PATH", "/no/such/claude")
+
+    def test_list_includes_ai_cli_status(self):
+        data = env_settings.run_env_action("list")
+        self.assertIn("ai_cli", data)
+        self.assertIn("available", data["ai_cli"])
+
     def test_list_unset(self):
         s = env_settings.run_env_action("list")["settings"]
         self.assertEqual(s[0]["key"], "HF_TOKEN")

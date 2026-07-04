@@ -2874,17 +2874,24 @@ def cmd_youtube(args):
 
 def cmd_env(args):
     """Manage secrets/settings in the global .env."""
+    from services.claude_suggest import get_ai_cli_status
     from services.env_settings import run_env_action
 
     accent = "\033[38;2;212;135;74m"
     green = "\033[38;2;74;222;128m"
     gray = "\033[38;5;245m"
+    yellow = "\033[38;2;250;204;21m"
     reset = "\033[0m"
     action = getattr(args, "env_action", None) or "list"
     try:
         if action == "set":
             run_env_action("set", args.key, args.value)
             print(f"  {green}✓{reset} {args.key} set")
+            if args.key in ("PODCLI_CLAUDE_PATH", "PODCLI_CODEX_PATH"):
+                status = get_ai_cli_status()
+                if status.get("available"):
+                    for c in status.get("candidates", []):
+                        print(f"  {gray}→{reset} {c['engine']}: {c['path']}")
         elif action == "unset":
             run_env_action("unset", args.key)
             print(f"  {green}✓{reset} {args.key} removed")
@@ -2892,11 +2899,22 @@ def cmd_env(args):
             data = run_env_action("list")
             print(f"\n  {gray}Settings ({data['path']}){reset}\n")
             for s in data["settings"]:
-                mark = f"{green}set{reset}" if s["set"] else f"{gray}not set{reset}"
+                mark = f"{green}set{reset}" if s["set"] else f"{gray}auto{reset}" if not s["secret"] else f"{gray}not set{reset}"
                 val = f" {gray}{s['preview']}{reset}" if s["set"] else ""
                 print(f"  {accent}{s['key']}{reset} — {s['label']}  [{mark}]{val}")
                 print(f"    {gray}{s['help']}{reset}")
-                print(f"    {gray}{s['url']}{reset}\n")
+                if s.get("url"):
+                    print(f"    {gray}{s['url']}{reset}")
+                print()
+            ai = data.get("ai_cli") or {}
+            if ai.get("available"):
+                print(f"  {green}AI CLI detected{reset}")
+                for c in ai.get("candidates", []):
+                    print(f"    {accent}{c['engine']}{reset}  {c['path']}")
+            else:
+                print(f"  {yellow}AI CLI not detected{reset}")
+                print(f"    {gray}Set a path:{reset} {accent}podcli env set PODCLI_CLAUDE_PATH ~/.local/bin/claude{reset}")
+            print()
     except ValueError as e:
         print(f"  ✗ {e}", file=sys.stderr)
         sys.exit(1)
@@ -3008,15 +3026,18 @@ def cmd_cache(args):
 def cmd_info(args):
     """Show system info."""
     from services.encoder import get_encoder_info
-    from services.claude_suggest import _find_ai_cli
+    from services.claude_suggest import get_ai_cli_status
 
     green = "\033[38;2;74;222;128m"
     yellow = "\033[38;2;250;204;21m"
     gray = "\033[38;5;245m"
+    accent = "\033[38;2;212;135;74m"
     reset = "\033[0m"
 
     info = get_encoder_info()
-    ai_path, ai_engine = _find_ai_cli()
+    ai = get_ai_cli_status()
+    candidates = ai.get("candidates") or []
+    configured = ai.get("configured") or {}
 
     # Check HF_TOKEN
     hf_token = os.environ.get("HF_TOKEN", "")
@@ -3048,7 +3069,18 @@ def cmd_info(args):
     else:
         speakers_status = f"{yellow}✗ set a token — run: podcli env set HF_TOKEN <token>"
 
-    print(f"    AI CLI:       {green}{('Claude' if ai_engine == 'claude' else 'Codex') + ' (' + ai_path + ')' if ai_path else f'{yellow}not found — install Claude Code or Codex'}{reset}")
+    if candidates:
+        c0 = candidates[0]
+        ai_line = f"{green}{('Claude' if c0['engine'] == 'claude' else 'Codex')} ({c0['path']}){reset}"
+    else:
+        ai_line = f"{yellow}not found{reset}"
+    print(f"    AI CLI:       {ai_line}")
+    for engine in ("claude", "codex"):
+        manual = configured.get(engine)
+        if manual:
+            print(f"    {engine} override: {accent}{manual}{reset}")
+    if not candidates:
+        print(f"    {gray}Override:{reset} {accent}podcli env set PODCLI_CLAUDE_PATH ~/.local/bin/claude{reset}")
     print(f"    Speakers:     {speakers_status}{reset}")
     print()
 
@@ -3496,11 +3528,11 @@ def main():
     cfg_use.add_argument("home", help="Path to the config root to activate")
 
     # ── env (secrets / settings) ──
-    env_p = sub.add_parser("env", help="Manage secrets/settings stored in .env (e.g. HF_TOKEN)")
+    env_p = sub.add_parser("env", help="Manage .env settings (HF_TOKEN, PODCLI_CLAUDE_PATH, PODCLI_CODEX_PATH)")
     env_sub = env_p.add_subparsers(dest="env_action")
     env_sub.add_parser("list", help="Show known settings and whether they're set")
     env_set = env_sub.add_parser("set", help="Set a setting")
-    env_set.add_argument("key", help="Setting key, e.g. HF_TOKEN")
+    env_set.add_argument("key", help="Setting key, e.g. HF_TOKEN or PODCLI_CLAUDE_PATH")
     env_set.add_argument("value", help="Value")
     env_unset = env_sub.add_parser("unset", help="Remove a setting")
     env_unset.add_argument("key", help="Setting key, e.g. HF_TOKEN")

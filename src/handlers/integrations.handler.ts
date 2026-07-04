@@ -112,6 +112,72 @@ export async function handleManageConfig(input: {
   return JSON.stringify(result.data, null, 2);
 }
 
+interface EnvSettingRow {
+  key: string;
+  label: string;
+  help?: string;
+  url?: string;
+  placeholder?: string;
+  secret: boolean;
+  set: boolean;
+  preview?: string;
+}
+
+interface AiCliStatus {
+  available?: boolean;
+  configured?: Record<string, string | null>;
+  candidates?: Array<{ engine: string; path: string }>;
+}
+
+export const manageEnvToolDef = {
+  name: "manage_env",
+  description:
+    "List, set, or unset global podcli settings stored in .env.\n\n" +
+    "Keys:\n" +
+    "  • HF_TOKEN — HuggingFace token for speaker detection\n" +
+    "  • PODCLI_CLAUDE_PATH — manual path to Claude Code CLI when auto-discovery fails\n" +
+    "  • PODCLI_CODEX_PATH — manual path to Codex CLI when auto-discovery fails\n\n" +
+    "Actions:\n" +
+    "  • list  — show all settings, configured values, and AI CLI detection (default)\n" +
+    "  • set   — set a key (path must exist for PODCLI_*_PATH keys)\n" +
+    "  • unset — remove a key (falls back to auto-discovery)",
+};
+
+export async function handleManageEnv(input: {
+  action?: "list" | "set" | "unset";
+  key?: string;
+  value?: string;
+}): Promise<string> {
+  const action = input.action ?? "list";
+  const result = await executor.execute<{
+    settings?: EnvSettingRow[];
+    path?: string;
+    ai_cli?: AiCliStatus;
+    ok?: boolean;
+    key?: string;
+  }>("manage_env", {
+    action,
+    key: input.key ?? "",
+    value: input.value ?? "",
+  });
+  if (!result.data) throw new Error(`manage_env returned no data (action=${action})`);
+  return JSON.stringify(result.data, null, 2);
+}
+
+export const aiCliStatusToolDef = {
+  name: "ai_cli_status",
+  description:
+    "Show whether Claude Code / Codex CLIs are available for AI-powered clip suggestion and content generation.\n\n" +
+    "Returns configured manual paths (PODCLI_CLAUDE_PATH / PODCLI_CODEX_PATH) and auto-discovered binaries. " +
+    "Use manage_env(action=set, key=PODCLI_CLAUDE_PATH, value=...) to override when detection fails.",
+};
+
+export async function handleAiCliStatus(): Promise<string> {
+  const result = await executor.execute<AiCliStatus>("ai_cli_status", {});
+  if (!result.data) throw new Error("ai_cli_status returned no data");
+  return JSON.stringify(result.data, null, 2);
+}
+
 function mcpText(text: string, isError = false) {
   return {
     content: [{ type: "text" as const, text }],
@@ -186,6 +252,47 @@ export function registerIntegrationMcpTools(server: McpServer): void {
     async (params) => {
       try {
         const text = await handleManageConfig(params);
+        return mcpText(text);
+      } catch (err) {
+        return mcpText(err instanceof Error ? err.message : String(err), true);
+      }
+    }
+  );
+
+  server.tool(
+    manageEnvToolDef.name,
+    manageEnvToolDef.description,
+    {
+      action: z.enum(["list", "set", "unset"]).optional().default("list"),
+      key: z.string().optional().describe("HF_TOKEN | PODCLI_CLAUDE_PATH | PODCLI_CODEX_PATH"),
+      value: z.string().optional().describe("Value to set (required for set)"),
+    },
+    async ({ action, key, value }) => {
+      try {
+        if (action === "set" && !key?.trim()) {
+          return mcpText("`key` is required when action is set.", true);
+        }
+        if (action === "set" && !value?.trim()) {
+          return mcpText("`value` is required when action is set.", true);
+        }
+        if (action === "unset" && !key?.trim()) {
+          return mcpText("`key` is required when action is unset.", true);
+        }
+        const text = await handleManageEnv({ action, key, value });
+        return mcpText(text);
+      } catch (err) {
+        return mcpText(err instanceof Error ? err.message : String(err), true);
+      }
+    }
+  );
+
+  server.tool(
+    aiCliStatusToolDef.name,
+    aiCliStatusToolDef.description,
+    {},
+    async () => {
+      try {
+        const text = await handleAiCliStatus();
         return mcpText(text);
       } catch (err) {
         return mcpText(err instanceof Error ? err.message : String(err), true);
