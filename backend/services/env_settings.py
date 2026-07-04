@@ -18,6 +18,22 @@ SETTINGS = [
         "url": "https://huggingface.co/settings/tokens",
         "secret": True,
     },
+    {
+        "key": "PODCLI_CLAUDE_PATH",
+        "label": "Claude Code CLI path",
+        "help": "Full path to the claude binary when auto-discovery fails. "
+        "Usually ~/.local/bin/claude on macOS/Linux or "
+        "%USERPROFILE%\\.local\\bin\\claude.exe on Windows.",
+        "secret": False,
+        "placeholder": "/home/you/.local/bin/claude",
+    },
+    {
+        "key": "PODCLI_CODEX_PATH",
+        "label": "Codex CLI path",
+        "help": "Full path to the codex binary when auto-discovery fails.",
+        "secret": False,
+        "placeholder": "/home/you/.local/bin/codex",
+    },
 ]
 
 _KEYS = {s["key"] for s in SETTINGS}
@@ -59,7 +75,8 @@ def list_settings() -> list[dict[str, Any]]:
             "key": s["key"],
             "label": s["label"],
             "help": s["help"],
-            "url": s["url"],
+            "url": s.get("url"),
+            "placeholder": s.get("placeholder"),
             "secret": s["secret"],
             "set": bool(raw),
             "preview": _mask(raw) if s["secret"] else raw,
@@ -117,6 +134,12 @@ def set_setting(key: str, value: str) -> None:
     value = (value or "").strip()
     if not value:
         raise ValueError("value is empty")
+    if key in ("PODCLI_CLAUDE_PATH", "PODCLI_CODEX_PATH"):
+        from services.claude_suggest import _resolve_cli_path
+        resolved = _resolve_cli_path(value) or (value if os.path.isfile(value) else None)
+        if not resolved:
+            raise ValueError(f"path does not exist: {value}")
+        value = resolved
     _write_pairs({key: value})
 
 
@@ -129,7 +152,12 @@ def unset_setting(key: str) -> None:
 def run_env_action(action: str, key: Optional[str] = None, value: Optional[str] = None) -> dict[str, Any]:
     act = (action or "list").strip().lower()
     if act == "list":
-        return {"settings": list_settings(), "path": os.path.abspath(_env_path())}
+        from services.claude_suggest import get_ai_cli_status
+        return {
+            "settings": list_settings(),
+            "path": os.path.abspath(_env_path()),
+            "ai_cli": get_ai_cli_status(),
+        }
     if act == "set":
         if not key:
             raise ValueError("key is required")

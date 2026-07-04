@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -320,6 +321,139 @@ Some wrapper text
         self.assertEqual(layout["line1"], "POWER DEMAND")
         self.assertEqual(layout["line2"], "IS EXPLODING")
         self.assertEqual(layout["box_y"], "78%")
+
+
+class AICliDiscoveryTests(unittest.TestCase):
+    def test_find_cli_resolves_windows_cmd_shim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shim = os.path.join(tmp, "claude.cmd")
+            with open(shim, "w", encoding="utf-8") as fh:
+                fh.write("@echo off\n")
+            with mock.patch.object(cs.sys, "platform", "win32"):
+                found = cs._find_cli("claude", [os.path.join(tmp, "claude")])
+            self.assertEqual(found, shim)
+
+    def test_find_cli_uses_home_bin(self):
+        with tempfile.TemporaryDirectory() as home:
+            bin_dir = os.path.join(home, "bin")
+            os.makedirs(bin_dir)
+            cli = os.path.join(bin_dir, "claude")
+            with open(cli, "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n")
+            with mock.patch.dict(os.environ, {"HOME": home, "PATH": ""}, clear=False):
+                with mock.patch("os.path.expanduser", side_effect=lambda p: p.replace("~", home)):
+                    found = cs._find_cli("claude", [])
+            self.assertEqual(found, cli)
+
+    def test_npmrc_prefix_is_searched(self):
+        with tempfile.TemporaryDirectory() as home:
+            prefix = os.path.join(home, "npm-prefix")
+            bin_dir = os.path.join(prefix, "bin")
+            os.makedirs(bin_dir)
+            cli = os.path.join(bin_dir, "claude")
+            with open(cli, "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n")
+            with open(os.path.join(home, ".npmrc"), "w", encoding="utf-8") as fh:
+                fh.write(f"prefix={prefix}\n")
+            with mock.patch.dict(os.environ, {"HOME": home, "PATH": ""}, clear=False):
+                with mock.patch("os.path.expanduser", side_effect=lambda p: p.replace("~", home)):
+                    with mock.patch.object(cs, "_package_manager_bin_dirs", return_value=[]):
+                        with mock.patch.object(cs, "_shell_lookup", return_value=None):
+                            found = cs._find_cli("claude", [])
+            self.assertEqual(found, cli)
+
+    def test_parse_shell_lookup_line_handles_type_a(self):
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            path = tmp.name
+        try:
+            self.assertEqual(cs._parse_shell_lookup_line(f"claude is {path}"), path)
+        finally:
+            os.remove(path)
+
+    def test_find_cli_uses_legacy_claude_local_path(self):
+        with tempfile.TemporaryDirectory() as home:
+            legacy_bin = os.path.join(home, ".claude", "local", "bin")
+            os.makedirs(legacy_bin)
+            cli = os.path.join(legacy_bin, "claude")
+            with open(cli, "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n")
+            with mock.patch.dict(os.environ, {"HOME": home, "PATH": ""}, clear=False):
+                with mock.patch("os.path.expanduser", side_effect=lambda p: p.replace("~", home)):
+                    found = cs._find_cli("claude", cs._ai_cli_search_paths("claude"))
+            self.assertEqual(found, cli)
+
+    def test_env_override_prefers_podcli_claude_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = os.path.join(tmp, "my-claude")
+            with open(cli, "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n")
+            with mock.patch.dict(os.environ, {"PODCLI_CLAUDE_PATH": cli, "PATH": ""}, clear=False):
+                with mock.patch.object(cs, "_find_cli", return_value=None) as find_mock:
+                    candidates = cs._find_ai_cli_candidates()
+            find_mock.assert_called_once()
+            self.assertEqual(find_mock.call_args.args[0], "codex")
+            self.assertEqual(candidates[0], (cli, "claude"))
+
+    def test_configured_path_reads_from_env_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = os.path.join(tmp, ".env")
+            cli = os.path.join(tmp, "custom-claude")
+            with open(cli, "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n")
+            with open(env_file, "w", encoding="utf-8") as fh:
+                fh.write(f"PODCLI_CLAUDE_PATH={cli}\n")
+            with mock.patch.dict(os.environ, {"PODCLI_ENV_FILE": env_file, "PATH": ""}, clear=False):
+                os.environ.pop("PODCLI_CLAUDE_PATH", None)
+                found = cs._configured_cli_path("claude")
+            self.assertEqual(found, cli)
+
+    def test_find_cli_falls_back_to_shell_lookup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = os.path.join(tmp, "claude")
+            with open(cli, "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n")
+            with mock.patch.object(cs, "_shell_lookup", return_value=cli):
+                with mock.patch("shutil.which", return_value=None):
+                    found = cs._find_cli("claude", [])
+            self.assertEqual(found, cli)
+
+    def test_get_ai_cli_status_reports_candidates(self):
+        with mock.patch.object(
+            cs,
+            "_find_ai_cli_candidates",
+            return_value=[("/tmp/claude", "claude")],
+        ), mock.patch.object(cs, "_configured_cli_path", return_value=None):
+            status = cs.get_ai_cli_status()
+        self.assertTrue(status["available"])
+        self.assertEqual(status["candidates"][0]["engine"], "claude")
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt_file = os.path.join(tmp, "prompt.txt")
+            with open(prompt_file, "w", encoding="utf-8") as fh:
+                fh.write("find clips")
+            cli = os.path.join(tmp, "claude")
+            with open(cli, "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\n")
+
+            with mock.patch("services.claude_suggest.subprocess.run") as run_mock:
+                run_mock.return_value = subprocess.CompletedProcess(
+                    args=[cli, "--print", "-p", "-"],
+                    returncode=0,
+                    stdout="{}",
+                    stderr="",
+                )
+                cs._run_ai_command(
+                    cli_path=cli,
+                    engine="claude",
+                    prompt="find clips",
+                    prompt_file=prompt_file,
+                    project_dir=tmp,
+                    timeout=30,
+                )
+
+            args, kwargs = run_mock.call_args
+            self.assertEqual(args[0], [cli, "--print", "-p", "-"])
+            self.assertIn("stdin", kwargs)
+            self.assertFalse(kwargs.get("shell"))
 
 
 if __name__ == "__main__":

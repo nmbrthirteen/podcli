@@ -1632,6 +1632,19 @@ app.post("/api/settings", async (req, res) => {
   }
 });
 
+app.get("/api/ai-cli-status", async (_req, res) => {
+  try {
+    const result = await executor.execute<{
+      configured?: Record<string, string | null>;
+      candidates?: Array<{ engine: string; path: string }>;
+      available?: boolean;
+    }>("ai_cli_status", {});
+    res.json(result.data ?? { available: false, candidates: [], configured: {} });
+  } catch (err: unknown) {
+    res.status(500).json({ error: errMsg(err) });
+  }
+});
+
 app.get("/api/youtube/config", (_req, res) => {
   try {
     const all = JSON.parse(readFileSync(paths.integrations, "utf-8"));

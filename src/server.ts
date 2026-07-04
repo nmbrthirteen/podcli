@@ -2347,6 +2347,7 @@ export function createServer(): McpServer {
               "## Optional: DaVinci Resolve",
               "manage_integrations(action=enable, name=davinci_resolve) then export_to_davinci_resolve with source + caption overlay paths.",
               "Use manage_config(action=migrate) once after upgrading if transcription cache seems empty.",
+              "If clip suggestion fails with 'No AI CLI available', call ai_cli_status then manage_env(action=set, key=PODCLI_CLAUDE_PATH, value=/path/to/claude).",
               "",
               "## Available caption styles:",
               "- branded: Professional look with dark highlight box, gradient, optional logo",
