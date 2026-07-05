@@ -11,6 +11,27 @@ $target = 'windows-amd64'
 $homeDir = Join-Path $env:LOCALAPPDATA 'podcli'
 $binDir = Join-Path $homeDir 'bin'
 
+function Get-UserPathEntry {
+  $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+  if (-not $key) { return $null }
+  $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+  try { $kind = $key.GetValueKind('Path') } catch {}
+  [pscustomobject]@{
+    Key = $key
+    Kind = $kind
+    Value = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+  }
+}
+
+function Test-PathEntryEquals {
+  param([string]$Entry, [string]$Target)
+  try {
+    return [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($Entry)).TrimEnd('\') -ieq [IO.Path]::GetFullPath($Target).TrimEnd('\')
+  } catch {
+    return $Entry.TrimEnd('\') -ieq $Target.TrimEnd('\')
+  }
+}
+
 if ($Uninstall) {
   Write-Host "Uninstalling podcli..."
   if ($Purge) {
@@ -28,11 +49,14 @@ if ($Uninstall) {
       }
     }
   }
-  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-  if ($userPath -like "*$binDir*") {
-    $parts = $userPath -split ';' | Where-Object { $_ -and ($_ -ne $binDir) }
-    [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')
-    Write-Host "  removed from user PATH (restart your terminal)"
+  $pathEntry = Get-UserPathEntry
+  if ($pathEntry) {
+    $parts = @($pathEntry.Value -split ';' | Where-Object { $_ })
+    $kept = @($parts | Where-Object { -not (Test-PathEntryEquals $_ $binDir) })
+    if ($kept.Count -ne $parts.Count) {
+      $pathEntry.Key.SetValue('Path', ($kept -join ';'), $pathEntry.Kind)
+      Write-Host "  removed from user PATH (restart your terminal)"
+    }
   }
   if ($Purge) {
     Write-Host "  removed managed data."
@@ -77,10 +101,13 @@ try {
   Write-Host "  checksum verification skipped: $($_.Exception.Message)"
 }
 
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($userPath -notlike "*$binDir*") {
-  [Environment]::SetEnvironmentVariable('Path', ($binDir + ';' + $userPath), 'User')
-  Write-Host "  added to PATH (restart your terminal)"
+$pathEntry = Get-UserPathEntry
+if ($pathEntry) {
+  $parts = @($pathEntry.Value -split ';' | Where-Object { $_ })
+  if (-not ($parts | Where-Object { Test-PathEntryEquals $_ $binDir })) {
+    $pathEntry.Key.SetValue('Path', ($binDir + ';' + $pathEntry.Value), $pathEntry.Kind)
+    Write-Host "  added to PATH (restart your terminal)"
+  }
 }
 Write-Host ""
 Write-Host "Done - run:  podcli"

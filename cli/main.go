@@ -424,13 +424,16 @@ func podcliLinks(managed, self string) []string {
 
 func removeFromWindowsUserPath(remove string) (bool, error) {
 	ps := `$remove = [IO.Path]::GetFullPath($env:PODCLI_REMOVE_PATH).TrimEnd('\')
-$path = [Environment]::GetEnvironmentVariable('Path', 'User')
+$key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+if (-not $key) { exit 2 }
+try { $kind = $key.GetValueKind('Path') } catch { $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString }
+$path = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
 $parts = @($path -split ';' | Where-Object { $_ })
 $kept = @($parts | Where-Object {
-  try { [IO.Path]::GetFullPath($_).TrimEnd('\') -ine $remove } catch { $_.TrimEnd('\') -ine $env:PODCLI_REMOVE_PATH.TrimEnd('\') }
+  try { [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($_)).TrimEnd('\') -ine $remove } catch { $_.TrimEnd('\') -ine $env:PODCLI_REMOVE_PATH.TrimEnd('\') }
 })
 if ($kept.Count -eq $parts.Count) { exit 2 }
-[Environment]::SetEnvironmentVariable('Path', ($kept -join ';'), 'User')`
+$key.SetValue('Path', ($kept -join ';'), $kind)`
 	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps)
 	cmd.Env = append(os.Environ(), "PODCLI_REMOVE_PATH="+remove)
 	if err := cmd.Run(); err != nil {
