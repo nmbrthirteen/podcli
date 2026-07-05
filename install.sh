@@ -1,5 +1,5 @@
 #!/bin/sh
-# podcli installer — downloads the prebuilt native binary (no Go, Node, Python,
+# podcli installer - downloads the prebuilt native binary (no Go, Node, Python,
 # or ffmpeg needed; the binary provisions those itself on first run).
 # Usage: curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh
 # Uninstall: curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh -s -- --uninstall
@@ -19,7 +19,7 @@ esac
 bin_dir="$home_dir/bin"
 
 if [ "${1:-}" = "--uninstall" ]; then
-  echo "Uninstalling podcli…"
+  echo "Uninstalling podcli..."
   for d in /usr/local/bin "$HOME/.local/bin"; do
     link="$d/podcli"
     if [ -L "$link" ] && [ "$(readlink "$link")" = "$bin_dir/podcli" ]; then
@@ -65,7 +65,7 @@ fi
 
 asset="podcli-${target}"
 base="https://github.com/$REPO/releases/download/v${version}"
-echo "Installing podcli v${version} (${target})…"
+echo "Installing podcli v${version} (${target})..."
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -82,10 +82,10 @@ if curl -fsSL "$base/checksums.txt" -o "$tmp/sums" 2>/dev/null; then
     [ "$got" = "$want" ] || err "checksum mismatch (got $got want $want)"
     echo "  checksum verified"
   else
-    echo "  no checksum entry for $asset — skipped verification" >&2
+    echo "  no checksum entry for $asset - skipped verification" >&2
   fi
 else
-  echo "  no checksums.txt in release — skipped verification" >&2
+  echo "  no checksums.txt in release - skipped verification" >&2
 fi
 
 cp "$tmp/$asset" "$bin_dir/podcli"

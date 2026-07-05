@@ -1,4 +1,4 @@
-// podcli — native launcher. Reserved verbs are handled here; everything else
+// podcli - native launcher. Reserved verbs are handled here; everything else
 // routes to the Python engine.
 package main
 
@@ -52,7 +52,7 @@ func main() {
 		if len(args) >= 2 && (args[1] == "get" || args[1] == "set") {
 			os.Exit(configCmd(args[1:]))
 		}
-		os.Exit(runEngine(args)) // status/export/import/use → Python
+		os.Exit(runEngine(args)) // status/export/import/use to Python
 	case "help", "--help", "-h":
 		printHelp()
 	default:
@@ -82,7 +82,7 @@ func ensureRuntime() {
 	if _, ok := engine.BackendRoot(); ok {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "First run — setting up podcli (one-time download)…")
+	fmt.Fprintln(os.Stderr, "First run - setting up podcli (one-time download)...")
 	setup(nil)
 }
 
@@ -204,13 +204,13 @@ func setup(args []string) int {
 		fmt.Printf("  vad:    %s\n", vp)
 	}
 	if fp, err := provision.EnsureFFmpeg(); err != nil {
-		fmt.Fprintf(os.Stderr, "  ffmpeg: skipped (%v) — backend will use PATH ffmpeg\n", err)
+		fmt.Fprintf(os.Stderr, "  ffmpeg: skipped (%v) - backend will use PATH ffmpeg\n", err)
 	} else {
 		fmt.Printf("  ffmpeg: %s\n", fp)
 	}
 	backendDir := filepath.Join(paths.RuntimeDir(), "backend")
 	if err := backend.Extract(backendDir); err != nil {
-		fmt.Fprintf(os.Stderr, "  backend: skipped (%v) — falling back to repo/PODCLI_BACKEND\n", err)
+		fmt.Fprintf(os.Stderr, "  backend: skipped (%v) - falling back to repo/PODCLI_BACKEND\n", err)
 		backendDir, _ = engine.BackendRoot()
 	} else {
 		fmt.Printf("  backend: %s\n", backendDir)
@@ -218,7 +218,7 @@ func setup(args []string) int {
 	if backendDir != "" {
 		reqs := filepath.Join(backendDir, "requirements-runtime.txt")
 		if pb, err := provision.EnsurePython(reqs); err != nil {
-			fmt.Fprintf(os.Stderr, "  python: skipped (%v) — using dev venv / system python\n", err)
+			fmt.Fprintf(os.Stderr, "  python: skipped (%v) - using dev venv / system python\n", err)
 		} else {
 			fmt.Printf("  python: %s\n", pb)
 		}
@@ -231,22 +231,22 @@ func setup(args []string) int {
 		fmt.Printf("  speakers: pyannote.audio installed (set HF_TOKEN to use)\n")
 	}
 	if wc, err := provision.EnsureWhisperCpp(); err != nil {
-		fmt.Fprintf(os.Stderr, "  whisper: skipped (%v) — backend will use PATH whisper-cli\n", err)
+		fmt.Fprintf(os.Stderr, "  whisper: skipped (%v) - backend will use PATH whisper-cli\n", err)
 	} else {
 		fmt.Printf("  whisper: %s\n", wc)
 	}
 	if nb, err := provision.EnsureNode(); err != nil {
-		fmt.Fprintf(os.Stderr, "  node:    skipped (%v) — Web UI will use system Node if present\n", err)
+		fmt.Fprintf(os.Stderr, "  node:    skipped (%v) - Web UI will use system Node if present\n", err)
 	} else {
 		fmt.Printf("  node:    %s\n", nb)
 	}
 	if sd, err := provision.EnsureStudio(); err != nil {
-		fmt.Fprintf(os.Stderr, "  studio:  skipped (%v) — Web UI needs a published release\n", err)
+		fmt.Fprintf(os.Stderr, "  studio:  skipped (%v) - Web UI needs a published release\n", err)
 	} else {
 		fmt.Printf("  studio:  %s\n", sd)
 	}
 	if rd, err := provision.EnsureRemotion(); err != nil {
-		fmt.Fprintf(os.Stderr, "  remotion: skipped (%v) — captions/thumbnails need a published release\n", err)
+		fmt.Fprintf(os.Stderr, "  remotion: skipped (%v) - captions/thumbnails need a published release\n", err)
 	} else {
 		fmt.Printf("  remotion: %s\n", rd)
 		if err := provision.PrewarmRemotion(); err != nil {
@@ -263,8 +263,10 @@ func setup(args []string) int {
 	if engine.MCPServer() != "" {
 		if mcpRegisteredToSelf() {
 			fmt.Printf("  mcp:     already registered\n")
+		} else if _, err := exec.LookPath("claude"); err != nil {
+			// Claude MCP registration is optional; Codex users do not need this.
 		} else if err := registerMCPServer(); err != nil {
-			fmt.Fprintf(os.Stderr, "  mcp:     not registered (%v) — run `podcli mcp install`\n", err)
+			fmt.Fprintf(os.Stderr, "  mcp:     not registered (%v) - run `podcli mcp install`\n", err)
 		} else {
 			fmt.Printf("  mcp:     registered with Claude Code\n")
 		}
@@ -509,7 +511,7 @@ func doctor() {
 	fmt.Printf("  home:     %s\n", paths.Home())
 	fmt.Printf("  runtime:  %s\n", paths.RuntimeDir())
 	fmt.Printf("  models:   %s\n", paths.ModelsDir())
-	fmt.Printf("  presets/knowledge/assets/history/cache: %s  (global — follow you everywhere)\n", paths.Home())
+	fmt.Printf("  presets/knowledge/assets/history/cache: %s  (global - follow you everywhere)\n", paths.Home())
 	if cwd, err := os.Getwd(); err == nil {
 		fmt.Printf("  clips:    %s  (rendered into your working directory)\n", filepath.Join(cwd, "podcli-clips"))
 	}
@@ -562,7 +564,7 @@ func presence(p string) string {
 	if fi, err := os.Stat(p); err == nil && fi.Size() > 0 {
 		return fmt.Sprintf("%s (%s)", p, humanBytes(fi.Size()))
 	}
-	return "not provisioned — run `podcli setup`"
+	return "not provisioned - run `podcli setup`"
 }
 
 func fileExists(p string) bool {
@@ -582,7 +584,7 @@ func humanBytes(n int64) string {
 }
 
 func printHelp() {
-	fmt.Printf(`podcli %s — AI podcast clip generator
+	fmt.Printf(`podcli %s - AI podcast clip generator
 
 Usage:
   podcli <command> [args]

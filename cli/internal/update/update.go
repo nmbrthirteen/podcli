@@ -143,7 +143,7 @@ func NotifyIfOutdated(current string) {
 		return
 	}
 	if newer(tag, current) {
-		fmt.Fprintf(os.Stderr, "  ↑ podcli %s available (you have %s) — run `podcli update`\n", tag, current)
+		fmt.Fprintf(os.Stderr, "  podcli %s available (you have %s) - run `podcli update`\n", tag, current)
 	}
 }
 
@@ -157,7 +157,7 @@ func Run(current string) int {
 		fmt.Printf("podcli %s is up to date.\n", current)
 		return 0
 	}
-	fmt.Printf("Updating podcli %s → %s ...\n", current, tag)
+	fmt.Printf("Updating podcli %s -> %s ...\n", current, tag)
 	if err := apply(tag); err != nil {
 		printSelfUpdateFailure(os.Stderr, err)
 		return 1
@@ -222,7 +222,7 @@ func verifyStaged(tag, staged string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		fmt.Fprintln(os.Stderr, "  (no checksums.txt in release — skipped verification)")
+		fmt.Fprintln(os.Stderr, "  (no checksums.txt in release - skipped verification)")
 		return nil
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -234,7 +234,7 @@ func verifyStaged(tag, staged string) error {
 	}
 	want, ok := provision.ParseChecksums(data)[assetName()]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s — skipped verification)\n", assetName())
+		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s - skipped verification)\n", assetName())
 		return nil
 	}
 	got, err := provision.Sha256File(staged)

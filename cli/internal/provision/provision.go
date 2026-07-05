@@ -100,7 +100,7 @@ func fetch(url, dest, label string) error {
 			break
 		}
 		lastErr = err
-		fmt.Fprintf(os.Stderr, "\n  %s interrupted (attempt %d/%d): %v — resuming\n", label, attempt, maxAttempts, err)
+		fmt.Fprintf(os.Stderr, "\n  %s interrupted (attempt %d/%d): %v - resuming\n", label, attempt, maxAttempts, err)
 		time.Sleep(time.Duration(attempt) * time.Second)
 	}
 	if lastErr != nil {
@@ -115,7 +115,7 @@ func download(url, dest, wantSHA, label string) error {
 		return err
 	}
 	if wantSHA == "" {
-		fmt.Fprintf(os.Stderr, "  (no pinned checksum for %s — skipped verification)\n", label)
+		fmt.Fprintf(os.Stderr, "  (no pinned checksum for %s - skipped verification)\n", label)
 		return nil
 	}
 	got, err := sha256file(dest)
@@ -136,12 +136,12 @@ func download(url, dest, wantSHA, label string) error {
 func verifyDownload(archive, sumsURL, name string) error {
 	resp, err := downloadHTTPClient().Get(sumsURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  (could not fetch checksums for %s — skipped verification)\n", name)
+		fmt.Fprintf(os.Stderr, "  (could not fetch checksums for %s - skipped verification)\n", name)
 		return nil
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "  (no checksums for %s — skipped verification)\n", name)
+		fmt.Fprintf(os.Stderr, "  (no checksums for %s - skipped verification)\n", name)
 		return nil
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -150,7 +150,7 @@ func verifyDownload(archive, sumsURL, name string) error {
 	}
 	want := ParseChecksums(data)[name]
 	if want == "" {
-		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s — skipped verification)\n", name)
+		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s - skipped verification)\n", name)
 		return nil
 	}
 	got, err := sha256file(archive)
@@ -408,17 +408,17 @@ func httpGetBytes(url string) ([]byte, error) {
 func verifyReleaseAsset(assets map[string]string, assetName, path string) error {
 	sumsURL, ok := assets["checksums.txt"]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "  (no checksums.txt in release — skipped verification of %s)\n", assetName)
+		fmt.Fprintf(os.Stderr, "  (no checksums.txt in release - skipped verification of %s)\n", assetName)
 		return nil
 	}
 	data, err := httpGetBytes(sumsURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  (could not fetch checksums.txt: %v — skipped verification of %s)\n", err, assetName)
+		fmt.Fprintf(os.Stderr, "  (could not fetch checksums.txt: %v - skipped verification of %s)\n", err, assetName)
 		return nil
 	}
 	want, ok := ParseChecksums(data)[assetName]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s — skipped verification)\n", assetName)
+		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s - skipped verification)\n", assetName)
 		return nil
 	}
 	got, err := sha256file(path)
@@ -719,7 +719,7 @@ func EnsurePython(requirements string) (string, error) {
 }
 
 func pipInstall(pybin, requirements string) error {
-	fmt.Fprintf(os.Stderr, "  installing python deps (%s) — pulls ~80MB, first run takes a minute\n", filepath.Base(requirements))
+	fmt.Fprintf(os.Stderr, "  installing python deps (%s) - pulls ~80MB, first run takes a minute\n", filepath.Base(requirements))
 	cmd := exec.Command(pybin, "-m", "pip", "install", "--disable-pip-version-check", "--progress-bar=on", "-r", requirements)
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
@@ -732,9 +732,9 @@ func pipInstall(pybin, requirements string) error {
 func EnsureSpeakerDeps() error {
 	bin := PythonBin()
 	if !have(bin) {
-		return fmt.Errorf("python not provisioned — run `podcli setup` first")
+		return fmt.Errorf("python not provisioned - run `podcli setup` first")
 	}
-	fmt.Fprintln(os.Stderr, "  installing speaker deps (pyannote.audio + torch) — large download (~2GB), several minutes")
+	fmt.Fprintln(os.Stderr, "  installing speaker deps (pyannote.audio + torch) - large download (~2GB), several minutes")
 	cmd := exec.Command(bin, "-m", "pip", "install", "--disable-pip-version-check", "--progress-bar=on", "pyannote.audio>=3.1.0", "speechbrain")
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")

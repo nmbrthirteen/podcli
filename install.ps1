@@ -60,6 +60,9 @@ Invoke-WebRequest "$base/$asset" -OutFile $dest -UseBasicParsing
 
 try {
   $sums = (Invoke-WebRequest "$base/checksums.txt" -UseBasicParsing).Content
+  if ($sums -is [byte[]]) {
+    $sums = [System.Text.Encoding]::UTF8.GetString($sums)
+  }
   $want = $sums -split "`n" |
     Where-Object { $_ -match ([regex]::Escape($asset) + '\s*$') } |
     ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1
