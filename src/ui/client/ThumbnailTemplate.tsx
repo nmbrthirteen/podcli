@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, labelStyle } from "./lib";
+import { BackIcon } from "./icons";
 
 type Cfg = Record<string, any>;
 type FieldType = "color" | "num" | "text" | "bool" | "select";
@@ -111,7 +112,7 @@ export default function ThumbnailTemplate({ onBack }: { onBack?: () => void }) {
   const field = (f: Field) => {
     const v = cfg[f.k];
     if (f.t === "bool") return (
-      <label key={f.k} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text2)", paddingTop: 18 }}>
+      <label key={f.k} className="meta" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 18 }}>
         <input type="checkbox" checked={v !== false && v !== undefined ? !!v : false} onChange={(e) => set(f.k, e.target.checked)} /> {titleCase(f.k)}
       </label>
     );
@@ -122,14 +123,14 @@ export default function ThumbnailTemplate({ onBack }: { onBack?: () => void }) {
           <div className="thumb-swatch-row">
             {isHex(v) && <input type="color" value={v} onChange={(e) => set(f.k, e.target.value)} />}
             {!isHex(v) && <span style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid var(--border)", background: v || "transparent", flexShrink: 0 }} />}
-            <input type="text" value={v ?? ""} onChange={(e) => set(f.k, e.target.value)} style={{ fontSize: 12, padding: "7px 10px", flex: 1, minWidth: 0, fontFamily: "var(--font-mono, monospace)" }} />
+            <input type="text" value={v ?? ""} onChange={(e) => set(f.k, e.target.value)} style={{ flex: 1, minWidth: 0 }} />
           </div>
         ) : f.t === "select" ? (
           <select value={v ?? ""} onChange={(e) => set(f.k, e.target.value)}>{f.opts!.map((o) => <option key={o} value={o}>{o}</option>)}</select>
         ) : (
           <input type={f.t === "num" ? "number" : "text"} value={v ?? ""} step="any"
             onChange={(e) => set(f.k, f.t === "num" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)}
-            style={{ width: "100%", fontSize: 13, padding: "8px 11px" }} />
+            style={{ width: "100%" }} />
         )}
       </div>
     );
@@ -148,7 +149,7 @@ export default function ThumbnailTemplate({ onBack }: { onBack?: () => void }) {
       <div className="header">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
           <h1 style={{ margin: 0 }}>Edit template</h1>
-          {onBack && <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to generator</button>}
+          {onBack && <button className="btn btn-ghost btn-sm" onClick={onBack}><BackIcon /> Back to generator</button>}
         </div>
       </div>
 

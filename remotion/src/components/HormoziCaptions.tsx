@@ -6,6 +6,7 @@ import {
   spring,
 } from "remotion";
 import type { Word, CaptionStyle } from "../types";
+import { captionScale } from "../types";
 
 interface Props {
   words: Word[];
@@ -37,7 +38,8 @@ function buildChunks(words: Word[], perChunk: number): Chunk[] {
 
 export const HormoziCaptions: React.FC<Props> = ({ words, style }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, height } = useVideoConfig();
+  const s = captionScale(height);
   const currentTime = frame / fps;
 
   const chunks = buildChunks(words, style.wordsPerChunk);
@@ -66,7 +68,7 @@ export const HormoziCaptions: React.FC<Props> = ({ words, style }) => {
     <div
       style={{
         position: "absolute",
-        bottom: style.marginBottom,
+        bottom: style.marginBottom * s,
         left: 0,
         right: 0,
         display: "flex",
@@ -78,11 +80,11 @@ export const HormoziCaptions: React.FC<Props> = ({ words, style }) => {
       <div
         style={{
           backgroundColor: "rgba(0, 0, 0, 0.8)",
-          borderRadius: 16,
-          padding: "14px 32px",
+          borderRadius: 16 * s,
+          padding: `${14 * s}px ${32 * s}px`,
           textAlign: "center",
           fontFamily: style.fontFamily,
-          fontSize: style.fontSize,
+          fontSize: style.fontSize * s,
           fontWeight: 800,
           lineHeight: 1.2,
           textShadow: "0 0 20px rgba(0, 0, 0, 0.5)",

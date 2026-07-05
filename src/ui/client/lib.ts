@@ -6,13 +6,15 @@ export const fmt = (s: number) =>
 export const fmtMs = (s: number) =>
   `${fmt(s)}.${String(Math.floor((s % 1) * 1000)).padStart(3, "0")}`;
 
+// Kept in sync with the .section-label CSS class so section headers look
+// identical whether set via this object or the class.
 export const labelStyle: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  letterSpacing: "0.5px",
+  letterSpacing: "0.8px",
   textTransform: "uppercase",
   color: "var(--text2)",
-  marginBottom: 8,
+  marginBottom: 10,
   display: "block",
 };
 

@@ -461,6 +461,11 @@ export function createServer(): McpServer {
         .optional()
         .default("speaker")
         .describe("Cropping strategy"),
+      format: z
+        .enum(["vertical", "horizontal", "square"])
+        .optional()
+        .default("vertical")
+        .describe("Output aspect ratio (vertical=9:16, horizontal=16:9, square=1:1)"),
       allow_ass_fallback: z
         .boolean()
         .optional()
@@ -565,6 +570,7 @@ export function createServer(): McpServer {
           params.end_second as number,
           (params.caption_style || "hormozi") as string,
           (params.crop_strategy || "speaker") as string,
+          (params.format || "vertical") as string,
         );
         if (dup) {
           return {
@@ -593,6 +599,7 @@ export function createServer(): McpServer {
                   title: (params.title || "clip") as string,
                   caption_style: params.caption_style || "hormozi",
                   crop_strategy: params.crop_strategy || "speaker",
+                  format: params.format || "vertical",
                   allow_ass_fallback: params.allow_ass_fallback === true,
                   keep_caption_overlay: params.keep_caption_overlay === true,
                   ...(keepSegments && { segments: keepSegments }),
@@ -655,6 +662,7 @@ export function createServer(): McpServer {
             end_second: params.end_second as number,
             caption_style: (params.caption_style || "hormozi") as string,
             crop_strategy: (params.crop_strategy || "speaker") as string,
+            format: (params.format || "vertical") as string,
             logo_path: params.logo_path as string | undefined,
             title: (params.title || "clip") as string,
             output_path: parsed.output_path,
@@ -705,6 +713,7 @@ export function createServer(): McpServer {
               .enum(["hormozi", "karaoke", "subtle", "branded"])
               .optional(),
             crop_strategy: z.enum(["center", "face", "speaker"]).optional(),
+            format: z.enum(["vertical", "horizontal", "square"]).optional(),
             allow_ass_fallback: z.boolean().optional(),
             keep_caption_overlay: z.boolean().optional(),
           }),
@@ -783,6 +792,7 @@ export function createServer(): McpServer {
                   settings.captionStyle ||
                   "hormozi",
                 crop_strategy: settings.cropStrategy || "speaker",
+                format: settings.format || "vertical",
                 allow_ass_fallback: false,
                 ...(s.segments &&
                   s.segments.length > 0 && { keep_segments: s.segments }),
@@ -801,6 +811,7 @@ export function createServer(): McpServer {
                     settings.captionStyle ||
                     "hormozi",
                   crop_strategy: settings.cropStrategy || "speaker",
+                  format: settings.format || "vertical",
                   allow_ass_fallback: false,
                   ...(s.segments &&
                     s.segments.length > 0 && { keep_segments: s.segments }),

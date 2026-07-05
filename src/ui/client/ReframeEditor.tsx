@@ -156,7 +156,7 @@ export default function ReframeEditor({
           <div className="rf-playhead" style={{ left: `${pos(tAbs)}%` }} />
         </div>
 
-        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>
+        <div className="hint" style={{ marginTop: 6 }}>
           {detectingCuts ? "Detecting camera switches…" : cuts.length ? `${cuts.length} camera switch${cuts.length > 1 ? "es" : ""} detected. A keyframe near one snaps to it.` : "No camera switches detected"}
         </div>
 

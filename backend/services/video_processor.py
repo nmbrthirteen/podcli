@@ -83,6 +83,7 @@ def crop_to_vertical(
     clip_start: float = 0,
     face_map: dict = None,
     crop_keyframes: list = None,
+    target_dims: tuple = (1080, 1920),
 ) -> str:
     """
     Crop/scale video to 1080x1920 (9:16 vertical).
@@ -100,8 +101,8 @@ def crop_to_vertical(
     clip_start: The start time of this clip in the original video (for timestamp alignment).
     """
     width, height = get_dimensions(input_path)
-    target_w, target_h = 1080, 1920
-    target_ratio = target_w / target_h  # 0.5625
+    target_w, target_h = target_dims
+    target_ratio = target_w / target_h  # 0.5625 for the vertical default
 
     source_ratio = width / height
 
@@ -311,6 +312,35 @@ def crop_to_vertical(
         ],
         output_path=output_path,
         label="crop",
+    )
+
+
+def fit_to_frame(
+    input_path: str,
+    output_path: str,
+    target_dims: tuple = (1920, 1080),
+) -> str:
+    """Scale to fit target_dims and letterbox with black bars, preserving the
+    whole frame. Used for non-reframe formats (e.g. 16:9) where cropping to a
+    subject is undesirable; collapses to a plain scale when the source already
+    matches the target aspect ratio.
+    """
+    target_w, target_h = target_dims
+    log_event("crop", "chose=fit-letterbox", target=f"{target_w}x{target_h}")
+    vf = (
+        f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+        f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
+    )
+    return _run_ffmpeg_with_fallback(
+        cmd_parts_before_enc=["ffmpeg", "-y", "-i", input_path, "-vf", vf],
+        cmd_parts_after_enc=[
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-ar", "44100",
+            "-movflags", "+faststart",
+        ],
+        output_path=output_path,
+        label="fit_frame",
     )
 
 

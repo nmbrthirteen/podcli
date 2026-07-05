@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { api, upload, fmt, basename, labelStyle } from "./lib";
 import ClipPlayer from "./ClipPlayer";
+import { BackIcon } from "./icons";
 import ReframeEditor from "./ReframeEditor";
 import CopyButton from "./CopyButton";
 
@@ -53,6 +54,7 @@ export default function ClipDetail() {
   const [line2, setLine2] = useState("");
   const [textOpts, setTextOpts] = useState<[string, string][]>([]);
   const [frameOpts, setFrameOpts] = useState<any[]>([]);
+  const [frameIdx, setFrameIdx] = useState(0);
   const [selFrame, setSelFrame] = useState<{ path: string; info?: any } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -83,7 +85,7 @@ export default function ClipDetail() {
   }, []);
 
   if (loading) return <div className="app"><div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text2)", padding: 40 }}><div className="spinner sm" /> Loading…</div></div>;
-  if (!clip) return <div className="app"><div className="header"><h1>Clip not found</h1></div><Link to="/" style={{ color: "var(--accent)" }}>← Library</Link></div>;
+  if (!clip) return <div className="app"><div className="header"><h1>Clip not found</h1></div><Link to="/" style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}><BackIcon /> Library</Link></div>;
 
   const tc = clip.thumbnail_config || {};
   const dirty = title !== clip.title || captionStyle !== clip.caption_style;
@@ -136,6 +138,35 @@ export default function ClipDetail() {
     } catch (e: any) { setMsg(`Generate failed: ${e.message}`); } finally { setBusy(null); }
   };
 
+  // Pull a different frame from the clip (cycles the ranked candidates) and
+  // re-render — same one-click flow as Regenerate, but swaps the background frame.
+  const newFrame = async () => {
+    setBusy("newframe"); setMsg(null);
+    try {
+      let frames = frameOpts;
+      if (!frames.length) {
+        const r = await api(`/clips/${clip.id}/thumbnail/options?texts=6&frames=8`);
+        if (r.error) throw new Error(r.error);
+        frames = r.frames || [];
+        setFrameOpts(frames);
+        if ((r.texts || []).length) setTextOpts(r.texts);
+      }
+      if (!frames.length) { setMsg("No frames found in this clip"); return; }
+      const curIdx = frames.findIndex((f: any) => f.path === selFrame?.path);
+      const next = ((curIdx < 0 ? frameIdx : curIdx) + 1) % frames.length;
+      setFrameIdx(next);
+      const frame = frames[next];
+      setSelFrame({ path: frame.path, info: frame });
+      const r = await api(`/clips/${clip.id}/thumbnail/render`, {
+        method: "POST",
+        body: JSON.stringify({ line1: line1 || undefined, line2: line2 || undefined, frame_path: frame.path, frame_info: frame }),
+      });
+      if (r.error) throw new Error(r.error);
+      setBust(Date.now()); load();
+      setMsg(`New frame from clip (${next + 1}/${frames.length})`);
+    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); } finally { setBusy(null); }
+  };
+
   const reopen = async () => {
     setBusy("reopen"); setMsg(null);
     try {
@@ -186,7 +217,7 @@ export default function ClipDetail() {
   return (
     <div className="app">
       <div className="header">
-        <Link to="/" style={{ fontSize: 12, color: "var(--text3)", textDecoration: "none" }}>← Library</Link>
+        <Link to="/" style={{ fontSize: 12, color: "var(--text3)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}><BackIcon size={12} /> Library</Link>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
           <h1 style={{ margin: 0 }}>{clip.title}</h1>
           <div className="set-actions">
@@ -208,7 +239,7 @@ export default function ClipDetail() {
             {clip.content_type && <span>{clip.content_type}</span>}
             {clip.file_size_mb != null && <span>{clip.file_size_mb.toFixed(1)}MB</span>}
           </div>
-          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>{basename(clip.source_video)}</div>
+          <div className="hint" style={{ marginTop: 8 }}>{basename(clip.source_video)}</div>
         </div>
 
         <div className="clip-detail-editor">
@@ -216,7 +247,7 @@ export default function ClipDetail() {
 
           <div className="section">
             <label style={labelStyle}>Title & captions</label>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%", fontSize: 14, padding: "10px 13px" }} />
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%" }} />
             <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
               <select value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value)} style={{ flex: 1 }}>
                 {CAPTION_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -247,31 +278,34 @@ export default function ClipDetail() {
                   ) : selFrame ? (
                     <img src={img(selFrame.path, bust)} alt="selected frame" />
                   ) : (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: 11, textAlign: "center", padding: 12 }}>
+                    <div className="hint" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center", padding: 12 }}>
                       Get options, pick a frame, then generate
                     </div>
                   )}
                 </div>
               </div>
               <div className="thumb-edit-controls">
-                <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%", fontSize: 14, padding: "9px 12px" }} />
-                <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", fontSize: 14, padding: "9px 12px", marginTop: 8 }} />
+                <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%" }} />
+                <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", marginTop: 8 }} />
                 <div className="set-actions" style={{ marginTop: 10 }}>
                   <button className="btn btn-primary btn-sm" onClick={renderThumb} disabled={busy !== null || !selFrame}>
                     {busy === "render" ? <div className="spinner sm" /> : (tc.preview_path ? "Regenerate" : "Generate")}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={newFrame} disabled={busy !== null} title="Pull a different frame from the clip">
+                    {busy === "newframe" ? <div className="spinner sm" /> : "New frame"}
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} disabled={busy !== null}>
                     {busy === "upload" ? <div className="spinner sm" /> : "Upload frame"}
                   </button>
                   <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,.webp" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && uploadFrame(e.target.files[0])} />
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>Leave line 1 and line 2 empty to auto-write the text.</div>
+                <div className="hint" style={{ marginTop: 8 }}>Leave line 1 and line 2 empty to auto-write the text.</div>
               </div>
             </div>
 
             {textOpts.length > 0 && (
               <div style={{ marginTop: 16 }}>
-                <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Text options · click to use</div>
+                <div className="hint" style={{ marginBottom: 6 }}>Text options · click to use</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                   {textOpts.map(([l1, l2], i) => (
                     <button key={i} className={`title-option ${line1 === l1 && line2 === l2 ? "selected" : ""}`} onClick={() => { setLine1(l1); setLine2(l2); }}>
@@ -284,7 +318,7 @@ export default function ClipDetail() {
 
             {frameOpts.length > 0 && (
               <div style={{ marginTop: 16 }}>
-                <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Frame options · click to select</div>
+                <div className="hint" style={{ marginBottom: 6 }}>Frame options · click to select</div>
                 <div className="thumb-variations">
                   {frameOpts.map((f, i) => (
                     <button key={i} className={`thumb-variation ${selFrame?.path === f.path ? "selected" : ""}`} onClick={() => setSelFrame({ path: f.path, info: f })} disabled={busy !== null}>
@@ -309,7 +343,7 @@ export default function ClipDetail() {
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 {clip.generated_titles?.length ? (
                   <div>
-                    <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Title options · click to use</div>
+                    <div className="hint" style={{ marginBottom: 6 }}>Title options · click to use</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                       {clip.generated_titles.map((t, i) => {
                         const clean = t.replace(/^\d+\.\s*/, "");
@@ -325,7 +359,7 @@ export default function ClipDetail() {
                 {clip.description ? (
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, color: "var(--text3)" }}>Description</span>
+                      <span className="hint">Description</span>
                       <CopyButton text={clip.description} />
                     </div>
                     <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{clip.description}</div>
@@ -334,16 +368,16 @@ export default function ClipDetail() {
                 {clip.tags ? (
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, color: "var(--text3)" }}>Tags</span>
+                      <span className="hint">Tags</span>
                       <CopyButton text={clip.tags} />
                     </div>
-                    <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>{clip.tags}</div>
+                    <div className="meta" style={{ lineHeight: 1.6 }}>{clip.tags}</div>
                   </div>
                 ) : null}
                 {clip.hashtags ? (
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, color: "var(--text3)" }}>Hashtags</span>
+                      <span className="hint">Hashtags</span>
                       <CopyButton text={clip.hashtags} />
                     </div>
                     <div style={{ fontSize: 12, color: "var(--accent)", lineHeight: 1.6 }}>{clip.hashtags}</div>

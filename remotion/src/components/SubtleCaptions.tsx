@@ -1,6 +1,7 @@
 import React from "react";
 import { useCurrentFrame, useVideoConfig, interpolate } from "remotion";
 import type { Word, CaptionStyle } from "../types";
+import { captionScale } from "../types";
 
 interface Props {
   words: Word[];
@@ -38,7 +39,8 @@ function splitIntoLines(words: Word[]): [Word[], Word[]] {
 
 export const SubtleCaptions: React.FC<Props> = ({ words, style }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, height } = useVideoConfig();
+  const s = captionScale(height);
   const currentTime = frame / fps;
 
   const chunks = buildChunks(words, style.wordsPerChunk);
@@ -60,7 +62,7 @@ export const SubtleCaptions: React.FC<Props> = ({ words, style }) => {
   const translateY = interpolate(
     frame - entryFrame,
     [0, 6],
-    [8, 0],
+    [8 * s, 0],
     { extrapolateRight: "clamp" }
   );
 
@@ -72,13 +74,13 @@ export const SubtleCaptions: React.FC<Props> = ({ words, style }) => {
     <div
       style={{
         position: "absolute",
-        bottom: style.marginBottom,
-        left: 60,
-        right: 60,
+        bottom: style.marginBottom * s,
+        left: 60 * s,
+        right: 60 * s,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 2,
+        gap: 2 * s,
         opacity,
         transform: `translateY(${translateY}px)`,
       }}
@@ -86,7 +88,7 @@ export const SubtleCaptions: React.FC<Props> = ({ words, style }) => {
       <span
         style={{
           fontFamily: style.fontFamily,
-          fontSize: style.fontSize,
+          fontSize: style.fontSize * s,
           fontWeight: 400,
           color: style.color,
           textShadow:

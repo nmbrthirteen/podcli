@@ -142,11 +142,11 @@ export default function AnalyticsPage() {
           <div className="thumb-fields">
             <div>
               <label style={labelStyle}>OAuth client ID</label>
-              <input type="text" value={clientId} onChange={(e) => setClientId(e.target.value)} style={{ width: "100%", fontSize: 13, padding: "8px 11px" }} />
+              <input type="text" value={clientId} onChange={(e) => setClientId(e.target.value)} style={{ width: "100%" }} />
             </div>
             <div>
               <label style={labelStyle}>OAuth client secret {hasSecret ? "(saved)" : ""}</label>
-              <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={hasSecret ? "••••••••" : ""} style={{ width: "100%", fontSize: 13, padding: "8px 11px" }} />
+              <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={hasSecret ? "••••••••" : ""} style={{ width: "100%" }} />
             </div>
           </div>
           <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center" }}>
@@ -201,7 +201,7 @@ export default function AnalyticsPage() {
               <Link key={c.id} to={`/clip/${c.id}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: "1px solid var(--border)", textDecoration: "none", color: "inherit" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</div>
-                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{fmt(c.duration)} · {c.caption_style}{c.content_type ? ` · ${c.content_type}` : ""}</div>
+                  <div className="hint" style={{ marginTop: 2 }}>{fmt(c.duration)} · {c.caption_style}{c.content_type ? ` · ${c.content_type}` : ""}</div>
                 </div>
                 <div style={{ display: "flex", gap: 16, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
                   <span title="Views (reach)">{fmtViews(c.metrics?.views || 0)} views</span>

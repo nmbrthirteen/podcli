@@ -15,6 +15,7 @@ export default function ThumbnailStudio() {
   const [line2, setLine2] = useState("");
   const [textOpts, setTextOpts] = useState<[string, string][]>([]);
   const [frameOpts, setFrameOpts] = useState<any[]>([]);
+  const [frameIdx, setFrameIdx] = useState(0);
   const [selFrame, setSelFrame] = useState<{ path: string; info?: any } | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -95,6 +96,44 @@ export default function ThumbnailStudio() {
     } catch (e: any) { setMsg(`Generate failed: ${e.message}`); } finally { setBusy(null); }
   };
 
+  // Pull a different frame from the source (cycles the ranked candidates) and
+  // re-render — same one-click flow as Regenerate, but swaps the background frame.
+  const newFrame = async () => {
+    setBusy("newframe"); setMsg(null);
+    try {
+      let frames = frameOpts;
+      if (!frames.length) {
+        if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); return; }
+        const r = await api("/thumbnail-studio/options", {
+          method: "POST",
+          body: JSON.stringify({
+            title,
+            video_path: video?.path,
+            start: startS !== "" ? Number(startS) : undefined,
+            end: endS !== "" ? Number(endS) : undefined,
+          }),
+        });
+        frames = r.frames || [];
+        setFrameOpts(frames);
+        if ((r.texts || []).length) setTextOpts(r.texts);
+      }
+      if (!frames.length) { setMsg("No frames found. Pick a video source first."); return; }
+      const curIdx = frames.findIndex((f: any) => f.path === selFrame?.path);
+      const next = ((curIdx < 0 ? frameIdx : curIdx) + 1) % frames.length;
+      setFrameIdx(next);
+      const frame = frames[next];
+      setSelFrame({ path: frame.path, info: frame });
+      const r = await api("/thumbnail-studio/render", {
+        method: "POST",
+        body: JSON.stringify({ title, line1: line1 || undefined, line2: line2 || undefined, frame_path: frame.path, frame_info: frame }),
+      });
+      if (!r.path) throw new Error("no thumbnail produced");
+      setPreview(r.path);
+      setBust(Date.now());
+      setMsg(`New frame from source (${next + 1}/${frames.length})`);
+    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); } finally { setBusy(null); }
+  };
+
   return (
     <div className="app">
       <div className="header">
@@ -120,12 +159,12 @@ export default function ThumbnailStudio() {
             style={{ display: "none" }}
             onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])}
           />
-          {video && <span style={{ fontSize: 12, color: "var(--text2)" }}>{video.name}</span>}
+          {video && <span className="meta">{video.name}</span>}
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title to write headlines from" style={{ flex: "1 1 280px", fontSize: 14, padding: "10px 13px" }} />
-          <input type="number" min={0} value={startS} onChange={(e) => setStartS(e.target.value)} placeholder="Start (s)" style={{ width: 90, fontSize: 13, padding: "9px 10px" }} />
-          <input type="number" min={0} value={endS} onChange={(e) => setEndS(e.target.value)} placeholder="End (s)" style={{ width: 90, fontSize: 13, padding: "9px 10px" }} />
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title to write headlines from" style={{ flex: "1 1 280px" }} />
+          <input type="number" min={0} value={startS} onChange={(e) => setStartS(e.target.value)} placeholder="Start (s)" style={{ width: 90 }} />
+          <input type="number" min={0} value={endS} onChange={(e) => setEndS(e.target.value)} placeholder="End (s)" style={{ width: 90 }} />
           <button className="btn btn-primary btn-sm" onClick={loadOptions} disabled={busy !== null}>
             {busy === "options" ? <><div className="spinner sm" /> Finding options…</> : (textOpts.length || frameOpts.length ? "Refresh options" : "Get options")}
           </button>
@@ -148,18 +187,21 @@ export default function ThumbnailStudio() {
               ) : selFrame ? (
                 <img src={img(selFrame.path, bust)} alt="selected frame" />
               ) : (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: 11, textAlign: "center", padding: 12 }}>
+                <div className="hint" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center", padding: 12 }}>
                   Pick a source and get options, or upload an image
                 </div>
               )}
             </div>
           </div>
           <div className="thumb-edit-controls">
-            <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%", fontSize: 14, padding: "9px 12px" }} />
-            <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", fontSize: 14, padding: "9px 12px", marginTop: 8 }} />
+            <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%" }} />
+            <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", marginTop: 8 }} />
             <div className="set-actions" style={{ marginTop: 10 }}>
               <button className="btn btn-primary btn-sm" onClick={render} disabled={busy !== null || !selFrame}>
                 {busy === "render" ? <div className="spinner sm" /> : (preview ? "Regenerate" : "Generate")}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={newFrame} disabled={busy !== null} title="Pull a different frame from the source">
+                {busy === "newframe" ? <div className="spinner sm" /> : "New frame"}
               </button>
               {preview && (
                 <a className="btn btn-ghost btn-sm" href={img(preview, bust)} download="thumbnail.png" style={{ textDecoration: "none" }}>
@@ -167,13 +209,13 @@ export default function ThumbnailStudio() {
                 </a>
               )}
             </div>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>Leave line 1 and line 2 empty to auto-write the text.</div>
+            <div className="hint" style={{ marginTop: 8 }}>Leave line 1 and line 2 empty to auto-write the text.</div>
           </div>
         </div>
 
         {textOpts.length > 0 && (
           <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Text options · click to use</div>
+            <div className="hint" style={{ marginBottom: 6 }}>Text options · click to use</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {textOpts.map(([l1, l2], i) => (
                 <button key={i} className={`title-option stream-in ${line1 === l1 && line2 === l2 ? "selected" : ""}`} style={{ animationDelay: `${i * 40}ms` }} onClick={() => { setLine1(l1); setLine2(l2); }}>
@@ -186,7 +228,7 @@ export default function ThumbnailStudio() {
 
         {frameOpts.length > 0 && (
           <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Frame options · click to select</div>
+            <div className="hint" style={{ marginBottom: 6 }}>Frame options · click to select</div>
             <div className="thumb-variations">
               {frameOpts.map((f, i) => (
                 <button key={i} className={`thumb-variation stream-in ${selFrame?.path === f.path ? "selected" : ""}`} style={{ animationDelay: `${i * 40}ms` }} onClick={() => setSelFrame({ path: f.path, info: f })} disabled={busy !== null}>

@@ -24,6 +24,12 @@ export default function ContentStudio() {
   const [sessionText, setSessionText] = useState("");
   const [sessionName, setSessionName] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const [customReq, setCustomReq] = useState("");
+  const [customBusy, setCustomBusy] = useState(false);
+  const [customOut, setCustomOut] = useState<string | null>(null);
+  const [regenField, setRegenField] = useState<string | null>(null);
+  const [regenNote, setRegenNote] = useState("");
+  const [regenBusy, setRegenBusy] = useState(false);
 
   useEffect(() => {
     try {
@@ -41,6 +47,12 @@ export default function ContentStudio() {
       })
       .catch(() => {});
   }, []);
+
+  const persist = (r: ContentResult) => {
+    try {
+      localStorage.setItem(STORE, JSON.stringify({ title, mode, result: r }));
+    } catch {}
+  };
 
   const copy = (text: string) => {
     navigator.clipboard?.writeText(text).then(() => {
@@ -79,7 +91,7 @@ export default function ContentStudio() {
       });
       if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing. Is claude or codex installed?");
       setResult(r);
-      try { localStorage.setItem(STORE, JSON.stringify({ title, mode, result: r })); } catch {}
+      persist(r);
     } catch (e: any) {
       setMsg(`Generation failed: ${e.message}`);
     } finally {
@@ -88,6 +100,100 @@ export default function ContentStudio() {
       setStage(null);
     }
   };
+
+  const runCustom = async (instruction: string): Promise<string | null> => {
+    const r = await api<{ text?: string; error?: string }>("/content-studio/custom", {
+      method: "POST",
+      body: JSON.stringify({ instruction, transcript_text: transcript || undefined, mode }),
+    });
+    if (r.error) throw new Error(r.error);
+    return r.text?.trim() || null;
+  };
+
+  const askCustom = async () => {
+    if (!customReq.trim() || customBusy) return;
+    setCustomBusy(true);
+    setCustomOut(null);
+    setMsg(null);
+    try {
+      setCustomOut((await runCustom(customReq.trim())) || "No output.");
+    } catch (e: any) {
+      setMsg(`Custom request failed: ${e.message}`);
+    } finally {
+      setCustomBusy(false);
+    }
+  };
+
+  const REGEN: Record<string, string> = {
+    titles: "Give me 8 fresh YouTube title options for this content, one per line, numbered 1-8. Return only the titles.",
+    description: "Rewrite the YouTube description for this content. Return only the description text, no labels.",
+    tags: "Give a comma-separated list of 10-15 YouTube tags for this content. Return only the tags.",
+    hashtags: "Give 5 relevant hashtags for this content. Return only the hashtags, space-separated.",
+  };
+
+  const regenerate = async (field: string) => {
+    if (regenBusy) return;
+    setRegenBusy(true);
+    setMsg(null);
+    try {
+      const instruction = `${REGEN[field]}${regenNote.trim() ? ` Extra guidance: ${regenNote.trim()}` : ""}`;
+      const text = await runCustom(instruction);
+      if (!text) throw new Error("empty response");
+      const next = { ...(result || {}) } as ContentResult;
+      if (field === "titles") {
+        next.titles = text
+          .split(/\r?\n/)
+          .map((l) => l.replace(/^\s*\d+[.)]\s*/, "").trim())
+          .filter(Boolean)
+          .slice(0, 8);
+      } else if (field === "description") next.description = text;
+      else if (field === "tags") next.tags = text;
+      else if (field === "hashtags") next.hashtags = text;
+      setResult(next);
+      persist(next);
+      setRegenField(null);
+      setRegenNote("");
+    } catch (e: any) {
+      setMsg(`Regenerate failed: ${e.message}`);
+    } finally {
+      setRegenBusy(false);
+    }
+  };
+
+  const regenBtn = (field: string) => (
+    <button
+      className="btn btn-ghost btn-sm"
+      style={{ padding: "3px 9px", fontSize: 11 }}
+      onClick={() => { setRegenField(regenField === field ? null : field); setRegenNote(""); }}
+      disabled={regenBusy}
+    >
+      Regenerate
+    </button>
+  );
+
+  const regenInput = (field: string) =>
+    regenField === field ? (
+      <div style={{ display: "flex", gap: 6, margin: "0 0 10px" }}>
+        <input
+          value={regenNote}
+          onChange={(e) => setRegenNote(e.target.value)}
+          placeholder="optional: how to change it"
+          style={{ flex: 1, fontSize: 12 }}
+          onKeyDown={(e) => { if (e.key === "Enter") regenerate(field); }}
+          autoFocus
+        />
+        <button className="btn btn-primary btn-sm" onClick={() => regenerate(field)} disabled={regenBusy}>
+          {regenBusy ? <div className="spinner sm" /> : "Go"}
+        </button>
+      </div>
+    ) : null;
+
+  const hasTitle = !!(result?.titles?.length || title.trim());
+  const previewTitle =
+    result?.titles?.[0]?.replace(/^\d+\.\s*/, "").replace(/^["']|["']$/g, "") ||
+    title.trim() ||
+    "Your title appears here";
+  const vertical = mode === "shorts";
 
   return (
     <div className="app">
@@ -104,7 +210,7 @@ export default function ContentStudio() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Working title or topic"
-              style={{ width: "100%", fontSize: 14, padding: "10px 13px" }}
+              style={{ width: "100%" }}
             />
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "18px 0 0" }}>
@@ -119,7 +225,7 @@ export default function ContentStudio() {
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
               placeholder="Paste the transcript here"
-              style={{ width: "100%", minHeight: 260, fontSize: 13, lineHeight: 1.6, padding: "10px 13px", marginTop: 8, resize: "vertical" }}
+              style={{ width: "100%", minHeight: 260, lineHeight: 1.6, marginTop: 8, resize: "vertical" }}
             />
 
             <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
@@ -131,8 +237,42 @@ export default function ContentStudio() {
                 {busy ? <><div className="spinner sm" /> Generating…</> : "Generate"}
               </button>
             </div>
-            {busy && stage && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 10 }}>{stage}</div>}
+            {busy && stage && <div className="hint" style={{ marginTop: 10 }}>{stage}</div>}
             {msg && <div className="set-note ok" style={{ marginTop: 10, wordBreak: "break-word" }}>{msg}</div>}
+          </div>
+
+          <div className="yt-card">
+            <div className="hint" style={{ marginBottom: -2 }}>Thumbnail preview</div>
+            <div className={`yt-thumb${vertical ? " vertical" : ""}`}>
+              <div className={`yt-thumb-title${hasTitle ? "" : " placeholder"}`}>{previewTitle}</div>
+            </div>
+          </div>
+
+          <div className="section" style={{ marginTop: 18 }}>
+            <label style={labelStyle}>Ask for anything else</label>
+            <textarea
+              value={customReq}
+              onChange={(e) => setCustomReq(e.target.value)}
+              placeholder="e.g. Write a LinkedIn post, a Twitter thread, 10 punchier hooks…"
+              style={{ width: "100%", minHeight: 78, marginTop: 8, resize: "vertical" }}
+            />
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ marginTop: 10 }}
+              onClick={askCustom}
+              disabled={customBusy || !customReq.trim()}
+            >
+              {customBusy ? <><div className="spinner sm" /> Generating…</> : "Generate"}
+            </button>
+            {customOut && (
+              <div className="stream-in" style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <span className="hint">Result</span>
+                  <CopyButton text={customOut} />
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{customOut}</div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -145,7 +285,11 @@ export default function ContentStudio() {
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {result.titles?.length ? (
                 <div className="section">
-                  <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6 }}>Title options · click to copy</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span className="hint">Title options · click to copy</span>
+                    {regenBtn("titles")}
+                  </div>
+                  {regenInput("titles")}
                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     {result.titles.map((t, i) => {
                       const clean = t.replace(/^\d+\.\s*/, "");
@@ -163,9 +307,10 @@ export default function ContentStudio() {
               {result.description ? (
                 <div className="section stream-in">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: "var(--text3)" }}>Description</span>
-                    <CopyButton text={result.description} />
+                    <span className="hint">Description</span>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>{regenBtn("description")}<CopyButton text={result.description} /></div>
                   </div>
+                  {regenInput("description")}
                   <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{result.description}</div>
                 </div>
               ) : null}
@@ -173,19 +318,21 @@ export default function ContentStudio() {
               {result.tags ? (
                 <div className="section stream-in">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: "var(--text3)" }}>Tags</span>
-                    <CopyButton text={result.tags} />
+                    <span className="hint">Tags</span>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>{regenBtn("tags")}<CopyButton text={result.tags} /></div>
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>{result.tags}</div>
+                  {regenInput("tags")}
+                  <div className="meta" style={{ lineHeight: 1.6 }}>{result.tags}</div>
                 </div>
               ) : null}
 
               {result.hashtags ? (
                 <div className="section stream-in">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: "var(--text3)" }}>Hashtags</span>
-                    <CopyButton text={result.hashtags} />
+                    <span className="hint">Hashtags</span>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>{regenBtn("hashtags")}<CopyButton text={result.hashtags} /></div>
                   </div>
+                  {regenInput("hashtags")}
                   <div style={{ fontSize: 12, color: "var(--accent)", lineHeight: 1.6 }}>{result.hashtags}</div>
                 </div>
               ) : null}

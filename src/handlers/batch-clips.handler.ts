@@ -70,6 +70,10 @@ export const batchClipsToolDef = {
               type: "string",
               enum: ["center", "face", "speaker"],
             },
+            format: {
+              type: "string",
+              enum: ["vertical", "horizontal", "square"],
+            },
             allow_ass_fallback: {
               type: "boolean",
             },
@@ -149,6 +153,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     title: s.title || `clip_${num}`,
     caption_style: s.suggested_caption_style || settings.captionStyle || "hormozi",
     crop_strategy: settings.cropStrategy || "speaker",
+    format: input.format || settings.format || "vertical",
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
     logo_path: settings.logoPath || null,
