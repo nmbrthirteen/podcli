@@ -108,7 +108,7 @@ done
 
 echo
 if [ -n "$linked" ]; then
-  echo "Done — run:  podcli"
+echo "Done - run:  podcli"
 else
   echo "Done. Add podcli to your PATH:"
   echo "  export PATH=\"$bin_dir:\$PATH\""
