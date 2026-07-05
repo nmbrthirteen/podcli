@@ -191,13 +191,14 @@ def _window_for_peak(
     min_dur: float,
     max_dur: float,
     segments: Optional[list[dict]] = None,
+    reaction_threshold: float = 0.06,
 ) -> tuple[float, float, bool]:
     """Clip window for a peak. A reaction peak expands backwards from the reaction onset.
 
     With a transcript, boundaries snap to whole sentences so each clip is a complete
     thought; without one (party footage) they snap to audio lulls instead.
     """
-    is_reaction = reaction_level >= 0.15
+    is_reaction = reaction_level >= reaction_threshold
     back = profile.reaction_lookback_sec if is_reaction else min_dur / 2.0
     fwd = profile.reaction_payoff_sec if is_reaction else min_dur / 2.0
 
@@ -227,6 +228,7 @@ def detect_highlights(
     height_z: float = 1.0,
     segments: Optional[list[dict]] = None,
     words: Optional[list[dict]] = None,
+    reaction_threshold: float = 0.06,
     progress_callback: Optional[Callable] = None,
 ) -> list[dict]:
     """
@@ -235,6 +237,8 @@ def detect_highlights(
     If a transcript is provided, clip boundaries snap to whole sentences so each clip
     is a complete thought; `words` (with punctuation) gives true sentence edges and is
     preferred over `segments`. Without any transcript, boundaries snap to audio lulls.
+    `reaction_threshold` is the laughter/cheer level that counts as a reaction — low
+    (~0.06) for conversational chuckles, higher for loud belly-laughs/crowds.
     Returns clip dicts compatible with the render pipeline:
     {title, start_second, end_second, duration, score, reasons, preview}.
     """
@@ -276,7 +280,7 @@ def detect_highlights(
     # worth a clip regardless of loudness, so they aren't made to out-compete energy in
     # the blended curve. Energy peaks then fill the rest, minus any that collide with a
     # reaction. Reaction score is offset above energy so reactions rank first.
-    reaction_peaks = pick_peaks(reaction_curve, 0.15, min_gap_bins)
+    reaction_peaks = pick_peaks(reaction_curve, reaction_threshold, min_gap_bins)
     energy_peaks = pick_peaks(fused, height_z, min_gap_bins)
 
     candidates = [(i, float(reaction_curve[i]), True) for i in reaction_peaks]
@@ -297,7 +301,8 @@ def detect_highlights(
         peak_sec = i / GRID_HZ
         reaction_level = float(reaction_curve[i]) if want_reaction else 0.0
         start, end, is_reaction = _window_for_peak(
-            peak_sec, reaction_level, profile, duration, energy_curve, min_dur, max_dur, snap_units
+            peak_sec, reaction_level, profile, duration, energy_curve, min_dur, max_dur,
+            snap_units, reaction_threshold,
         )
         if end - start < min_dur * 0.75:
             continue
