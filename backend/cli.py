@@ -470,7 +470,9 @@ def cmd_process(args):
         else:
             print(f"  Warning: Logo '{args.logo}' not found (checked assets and filesystem)", file=sys.stderr)
             config["logo_path"] = args.logo  # pass through anyway
-    if args.outro:
+    if getattr(args, "no_outro", False):
+        config["outro_path"] = ""
+    elif args.outro:
         from services.asset_store import resolve as resolve_asset_outro
         resolved = resolve_asset_outro(args.outro)
         if resolved:
@@ -479,10 +481,14 @@ def cmd_process(args):
             print(f"  Warning: Outro '{args.outro}' not found (checked assets and filesystem)", file=sys.stderr)
             config["outro_path"] = args.outro
     elif not config.get("outro_path"):
-        from services.asset_store import default_outro
-        auto_outro = default_outro()
-        if auto_outro:
-            config["outro_path"] = auto_outro
+        # Highlight profiles (party/action) are raw moments, not branded shorts, so they
+        # skip the auto-outro; the podcast flow keeps it.
+        from services.profiles import get_profile as _get_profile
+        if _get_profile(config.get("profile")).candidate_source != "saliency":
+            from services.asset_store import default_outro
+            auto_outro = default_outro()
+            if auto_outro:
+                config["outro_path"] = auto_outro
     if args.time_adjust is not None:
         config["time_adjust"] = args.time_adjust
     if args.no_energy:
@@ -742,6 +748,7 @@ def cmd_process(args):
             min_dur=15.0,
             max_dur=min(60.0, float(spec.dur_max)),
             segments=segments or None,
+            words=words or None,
             progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
         )
         if clips:
@@ -3398,6 +3405,7 @@ def main():
     proc.add_argument("--profile", choices=["podcast", "party", "action"], help="Detection profile: podcast (transcript-first, default), party/action (laughter/energy highlights)")
     proc.add_argument("--logo", help="Logo image (asset name or path)")
     proc.add_argument("--outro", help="Outro video (asset name or path)")
+    proc.add_argument("--no-outro", action="store_true", help="Do not append an outro (default for highlight profiles)")
     proc.add_argument("--time-adjust", type=float, help="Timestamp offset in seconds")
     proc.add_argument("--no-energy", action="store_true", help="Skip audio energy analysis")
     proc.add_argument("--no-speakers", action="store_true", help="Skip speaker detection (faster, uses face detection only)")
