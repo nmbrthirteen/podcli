@@ -20,6 +20,7 @@ questionary>=2.0.0
 
 # Utilities
 python-dotenv>=1.2.2
+yt-dlp>=2025.6.30
 
 # YouTube analytics (optional — only needed for live OAuth sync; CSV import works without these)
 google-api-python-client>=2.0.1
