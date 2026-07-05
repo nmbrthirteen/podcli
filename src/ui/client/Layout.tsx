@@ -41,6 +41,7 @@ export default function Layout() {
         <NavLink to="/" end className="sidebar-link"><Icon name="library" /> Library</NavLink>
         <NavLink to="/episode" className="sidebar-link"><Icon name="episode" /> New episode</NavLink>
         <NavLink to="/content" className="sidebar-link"><Icon name="content" /> Content</NavLink>
+        <NavLink to="/reel" className="sidebar-link"><Icon name="content" /> Reel</NavLink>
         <NavLink to="/thumbnails" className="sidebar-link"><Icon name="thumbnail" /> Thumbnails</NavLink>
 
         <div className="sidebar-section">Workspace</div>
