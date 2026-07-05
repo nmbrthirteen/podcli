@@ -1,9 +1,10 @@
 import React from "react";
-import { Play, Pause, ChevronLeft, ChevronRight, SkipBack, SkipForward, X, Trash2 } from "lucide-react";
+import { Play, Pause, ChevronLeft, ChevronRight, SkipBack, SkipForward, X, Trash2, ArrowLeft } from "lucide-react";
 
 const block = { display: "block" } as const;
 
-export const PlayIcon = () => <Play size={15} style={block} fill="currentColor" strokeWidth={0} />;
+export const PlayIcon = ({ size = 15 }: { size?: number }) => <Play size={size} style={block} fill="currentColor" strokeWidth={0} />;
+export const BackIcon = ({ size = 14 }: { size?: number }) => <ArrowLeft size={size} style={block} />;
 export const PauseIcon = () => <Pause size={15} style={block} />;
 export const FrameBackIcon = () => <ChevronLeft size={15} style={block} />;
 export const FrameForwardIcon = () => <ChevronRight size={15} style={block} />;

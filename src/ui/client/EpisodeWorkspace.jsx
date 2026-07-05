@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Check,
   Heart as HeartGlyph,
@@ -11,6 +12,15 @@ import {
   Home as HomeGlyph,
   Users as UsersGlyph,
   Inbox,
+  X,
+  Plus,
+  Play,
+  Pencil,
+  Download,
+  Activity,
+  ChevronRight,
+  ChevronDown,
+  ArrowRight,
 } from 'lucide-react';
 import CopyButton from './CopyButton';
 
@@ -348,7 +358,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
               className={previewSrc ? '' : ''} />
           ) : (
             <div className="phone-empty">
-              <div style={{ fontSize: 22, opacity: 0.4 }}>{'▶'}</div>
+              <div style={{ opacity: 0.4, display: 'flex' }}><Play size={22} /></div>
               <div>Drop a video to see live caption preview</div>
             </div>
           )}
@@ -461,7 +471,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
             <div className="mcp-hints-subtitle">
               {collapsed ? `${hints.length} prompts` : 'Click to copy'}
             </div>
-            <span className="hint-xs" style={{ transition: 'transform 0.2s', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0)', marginLeft: 4 }}>{'\u25BC'}</span>
+            <span className="hint-xs" style={{ transition: 'transform 0.2s', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0)', marginLeft: 4 }}><ChevronDown size={12} /></span>
           </div>
           {!collapsed && (
             <div className="mcp-hint-list">
@@ -1133,12 +1143,12 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                   <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'rgba(250,204,21,0.08)', color: '#facc15', border: '1px solid rgba(250,204,21,0.2)', cursor: 'pointer' }}
                     title="Speaker detection not configured. Click to learn more"
                     onClick={() => window.open('https://huggingface.co/pyannote/speaker-diarization-3.1', '_blank')}>
-                    Speakers ✗
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>Speakers <X size={11} /></span>
                   </span>
                 )}
                 {speakerStatus && speakerStatus.configured && (
                   <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'var(--green-subtle)', color: 'var(--green)', border: '1px solid var(--green-border)' }}>
-                    Speakers ✓
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>Speakers <Check size={11} /></span>
                   </span>
                 )}
               </div>
@@ -1162,7 +1172,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
               </div>
               <button onClick={() => { sessionStorage.setItem('dismiss-speaker', '1'); setSpeakerStatus({...speakerStatus, _dismissed: true}); }}
                 style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 16, padding: 4, lineHeight: 1 }}
-                title="Dismiss">✕</button>
+                title="Dismiss"><X size={12} /></button>
             </div>
           )}
 
@@ -1171,7 +1181,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
             <div className="main-col">
 
               {/* Video */}
-              <div className="section">
+              <div className="section card">
                 <div className="section-label">Video</div>
                 {!videoPath && (
                   <div className="drop-zone" style={{ cursor: 'pointer' }} onClick={browsing || isProcessing ? undefined : doBrowse}
@@ -1202,7 +1212,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
               </div>
 
               {/* Transcript */}
-              <div className="section">
+              <div className="section card">
                 <div className="section-label">Transcript</div>
                 <div className="tabs">
                   <div className={`tab ${transcriptMode === 'import' ? 'active' : ''}`} onClick={() => setTranscriptMode('import')}>Paste transcript</div>
@@ -1297,7 +1307,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
               </div>
 
               {/* Settings */}
-              <div className="section">
+              <div className="section card">
                 <div className="section-label">Settings</div>
 
                 {/* Presets */}
@@ -1308,7 +1318,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                       {presets.map(p => <option key={p.name || p} value={p.name || p}>{p.name || p}</option>)}
                     </select>
                     {activePreset && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => deletePreset(activePreset)} title="Delete preset" style={{ padding: '6px 8px', color: 'var(--red)' }}>{'\u00D7'}</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => deletePreset(activePreset)} title="Delete preset" style={{ padding: '6px 8px', color: 'var(--red)' }}><X size={14} /></button>
                     )}
                   </div>
                 )}
@@ -1325,7 +1335,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                 ) : (
                   <div style={{ marginBottom: 14 }}>
                     <button className="asset-add" onClick={() => setShowPresetSave(true)} disabled={isProcessing}>
-                      + Save as preset
+                      <Plus size={12} /> Save as preset
                     </button>
                   </div>
                 )}
@@ -1360,23 +1370,23 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                             style={{ width: 16, height: 16, objectFit: 'contain', borderRadius: 3 }} onError={e => { e.target.style.display = 'none' }} />
                         </span>
                         <span className="asset-pill-name">{logoPath.split('/').pop()}</span>
-                        <button className="asset-pill-x" onClick={() => setLogoPath('')} disabled={isProcessing}>{'\u00D7'}</button>
+                        <button className="asset-pill-x" onClick={() => setLogoPath('')} disabled={isProcessing}><X size={12} /></button>
                       </div>
                     ) : (
                       <button className="asset-add fade-in" onClick={() => logoRef.current?.click()} disabled={isProcessing || logoUploading}>
-                        {logoUploading ? <div className="spinner sm" /> : '+'} Logo
+                        {logoUploading ? <div className="spinner sm" /> : <Plus size={12} />} Logo
                       </button>
                     )
                   )}
                   {outroPath ? (
                     <div className="asset-pill">
-                      <span className="asset-pill-icon" style={{ fontSize: 11 }}>{'▶'}</span>
+                      <span className="asset-pill-icon" style={{ display: 'inline-flex' }}><Play size={11} /></span>
                       <span className="asset-pill-name">{outroPath.split('/').pop()}</span>
-                      <button className="asset-pill-x" onClick={() => setOutroPath('')} disabled={isProcessing}>{'\u00D7'}</button>
+                      <button className="asset-pill-x" onClick={() => setOutroPath('')} disabled={isProcessing}><X size={12} /></button>
                     </div>
                   ) : (
                     <button className="asset-add" onClick={() => outroRef.current?.click()} disabled={isProcessing || outroUploading}>
-                      {outroUploading ? <div className="spinner sm" /> : '+'} Outro
+                      {outroUploading ? <div className="spinner sm" /> : <Plus size={12} />} Outro
                     </button>
                   )}
                   <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg,.svg" style={{ display: 'none' }}
@@ -1389,7 +1399,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                 <div style={{ marginTop: 14 }}>
                   <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: '0.8px', color: 'var(--text2)', textTransform: 'uppercase' }}
                     onClick={() => setAdvancedOpen(!advancedOpen)}>
-                    <span style={{ fontSize: 10, transition: 'transform 0.15s', transform: advancedOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-block' }}>▶</span>
+                    <span style={{ transition: 'transform 0.15s', transform: advancedOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-flex' }}><ChevronRight size={12} /></span>
                     Advanced
                   </div>
                   {advancedOpen && (
@@ -1437,7 +1447,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
               {/* Word Corrections */}
               <div className="section">
                 <div className="section-label" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setCorrectionsOpen(!correctionsOpen)}>
-                  <span style={{ fontSize: 10, transition: 'transform 0.15s', transform: correctionsOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-block' }}>▶</span>
+                  <span style={{ transition: 'transform 0.15s', transform: correctionsOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-flex' }}><ChevronRight size={12} /></span>
                   Word Corrections
                   {Object.keys(corrections).length > 0 && (
                     <span className="hint-xs" style={{ fontWeight: 400 }}>({Object.keys(corrections).length})</span>
@@ -1451,7 +1461,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
                       <input value={correctionWord} onChange={e => setCorrectionWord(e.target.value)}
                         placeholder="Wrong (e.g. Boxel)" style={{ flex: 1 }} />
-                      <span style={{ color: 'var(--text3)', fontSize: 12, flexShrink: 0 }}>{'\u2192'}</span>
+                      <span style={{ color: 'var(--text3)', display: 'inline-flex', flexShrink: 0 }}><ArrowRight size={12} /></span>
                       <input value={correctionFix} onChange={e => setCorrectionFix(e.target.value)}
                         placeholder="Correct (e.g. Voxel)" style={{ flex: 1 }}
                         onKeyDown={e => { if (e.key === 'Enter' && correctionWord.trim() && correctionFix.trim()) {
@@ -1468,12 +1478,12 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                         {Object.entries(corrections).map(([wrong, correct]) => (
                           <div key={wrong} className="asset-pill" style={{ fontSize: 11 }}>
                             <span style={{ color: 'var(--text3)', textDecoration: 'line-through' }}>{wrong}</span>
-                            <span style={{ color: 'var(--text3)', margin: '0 2px' }}>→</span>
+                            <span style={{ color: 'var(--text3)', margin: '0 2px', display: 'inline-flex' }}><ArrowRight size={12} /></span>
                             <span style={{ color: 'var(--green)' }}>{correct}</span>
                             <button className="asset-pill-x" onClick={() => {
                               fetch(`/api/corrections/${encodeURIComponent(wrong)}`, { method: 'DELETE' })
                                 .then(r => r.json()).then(d => { if (d.corrections) setCorrections(d.corrections); });
-                            }}>{'\u00D7'}</button>
+                            }}><X size={12} /></button>
                           </div>
                         ))}
                       </div>
@@ -1558,7 +1568,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       {phase === 'review' && videoPath && (
                         <button className="btn btn-ghost btn-sm" onClick={analyzeEnergy} disabled={analyzingEnergy || suggestions.length === 0} title="Analyze audio energy levels">
-                          {analyzingEnergy ? <><div className="spinner sm" /> Analyzing…</> : '⚡ Energy'}
+                          {analyzingEnergy ? <><div className="spinner sm" /> Analyzing…</> : <><Activity size={14} /> Energy</>}
                         </button>
                       )}
                       {phase === 'review' && (
@@ -1610,7 +1620,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                         )}
 
                         {phase === 'done' && !off && r && (
-                          <div className={`status-dot ${failed ? 'fail' : 'ok'}`}>{failed ? '\u00D7' : '\u2713'}</div>
+                          <div className={`status-dot ${failed ? 'fail' : 'ok'}`}>{failed ? <X size={11} /> : <Check size={11} />}</div>
                         )}
 
                         <div className="clip-info">
@@ -1619,7 +1629,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                             {fmt(clip.start_second)} {'\u2192'} {fmt(clip.end_second)} {'\u00B7'} {clip.duration}s
                             {energyData[i] && (
                               <span className={`energy-badge ${energyData[i].level}`} title={`Energy: ${energyData[i].score}/10`}>
-                                {energyData[i].level === 'high' ? '⚡' : energyData[i].level === 'medium' ? '~' : '○'} {energyData[i].score.toFixed(1)}
+                                {energyData[i].level === 'high' ? <Activity size={10} /> : energyData[i].level === 'medium' ? '~' : '○'} {energyData[i].score.toFixed(1)}
                               </span>
                             )}
                             {r && !failed && <span> {'\u00B7'} {r.file_size_mb}MB</span>}
@@ -1629,13 +1639,13 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                         </div>
 
                         {phase === 'review' && (
-                          <button className="btn btn-ghost btn-sm clip-edit-btn" onClick={(e) => openClipEdit(i, e)} title="Edit clip">✎</button>
+                          <button className="btn btn-ghost btn-sm clip-edit-btn" onClick={(e) => openClipEdit(i, e)} title="Edit clip"><Pencil size={13} /></button>
                         )}
 
                         {phase === 'done' && !off && r && !failed && outputFile && (
                           <div className="clip-actions" onClick={e => e.stopPropagation()}>
-                            <button className="btn btn-ghost btn-sm" onClick={() => onPlayRendered(outputFile)} title="Preview">{'\u25B6'}</button>
-                            <a href={`/api/download/${outputFile}`} className="btn btn-primary btn-sm" download title="Download">{'\u2193'}</a>
+                            <button className="btn btn-ghost btn-sm" onClick={() => onPlayRendered(outputFile)} title="Preview"><Play size={13} /></button>
+                            <a href={`/api/download/${outputFile}`} className="btn btn-primary btn-sm" download title="Download"><Download size={14} /></a>
                             <button className="btn btn-ghost btn-sm" disabled={isRetryingThis} onClick={() => retryClip(resultIdx)} title="Retry">{'\u21BB'}</button>
                           </div>
                         )}
@@ -1716,7 +1726,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                   <div className="section-label" style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                     onClick={() => setHistoryOpen(!historyOpen)}>
                     <span>History ({clipHistory.length})</span>
-                    <span className="hint-xs" style={{ transition: 'transform 0.2s', transform: historyOpen ? 'rotate(180deg)' : 'rotate(0)' }}>{'\u25BC'}</span>
+                    <span className="hint-xs" style={{ transition: 'transform 0.2s', transform: historyOpen ? 'rotate(180deg)' : 'rotate(0)' }}><ChevronDown size={12} /></span>
                   </div>
                   {historyOpen && (
                     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto', marginTop: 8 }}>
@@ -1836,7 +1846,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
           </div>
 
           {/* Clip Edit Modal */}
-          {editingClip !== null && suggestions[editingClip] && (
+          {editingClip !== null && suggestions[editingClip] && createPortal(
             <div className="clip-edit-overlay" onClick={() => setEditingClip(null)}>
               <div className="clip-edit-panel" onClick={e => e.stopPropagation()}>
                 <h3>Edit clip #{editingClip + 1}</h3>
@@ -1853,7 +1863,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                         style={{ textAlign: 'center' }} />
                       <div className="hint-xs" style={{ textAlign: 'center', marginTop: 2 }}>{fmt(editForm.start)}</div>
                     </div>
-                    <div className="arrow">{'\u2192'}</div>
+                    <div className="arrow"><ArrowRight size={14} /></div>
                     <div>
                       <input type="number" step="0.5" value={editForm.end} onChange={e => setEditForm(f => ({ ...f, end: parseFloat(e.target.value) || 0 }))}
                         style={{ textAlign: 'center' }} />
@@ -1871,10 +1881,10 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                 </div>
               </div>
             </div>
-          )}
+          , document.body)}
 
           {/* Modal (mobile fallback) */}
-          {previewFile && (
+          {previewFile && createPortal(
             <div className="modal-overlay" onClick={() => setPreviewFile(null)}>
               <div className="modal-body" onClick={e => e.stopPropagation()}>
                 <video src={`/api/preview/${previewFile}`} controls autoPlay />
@@ -1883,7 +1893,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                 </div>
               </div>
             </div>
-          )}
+          , document.body)}
         </div>
       );
     }

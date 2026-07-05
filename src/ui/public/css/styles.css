@@ -3,12 +3,12 @@
 :root {
   --bg: #0f0e0d;
   --bg2: #16150f;
-  --surface: #181712;
-  --surface2: #201e19;
-  --surface3: #2b2822;
-  --border: #2c2822;
-  --border-hover: #403a31;
-  --border-h: #403a31;
+  --surface: #141210;
+  --surface2: #191612;
+  --surface3: #241f18;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-hover: rgba(255, 255, 255, 0.12);
+  --border-h: rgba(255, 255, 255, 0.12);
   --text: #f4f2ee;
   --text2: #ada79c;
   --text3: #8a8377;
@@ -85,7 +85,7 @@ body {
 h1 { font-size: 28px; font-weight: 700; letter-spacing: 0; line-height: 1.15; }
 .layout { display: grid; grid-template-columns: 1fr 340px; gap: 40px; align-items: start; }
 .main-col { min-width: 0; }
-.preview-col { position: relative; }
+.preview-col { position: relative; align-self: stretch; }
 
 /* ─── Preview Panel ─── */
 .preview-panel { position: sticky; top: 32px; }
@@ -401,6 +401,11 @@ h1 { font-size: 28px; font-weight: 700; letter-spacing: 0; line-height: 1.15; }
 
 /* ─── Sections ─── */
 .section { margin-bottom: 24px; }
+.section.card {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 18px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 16px 40px -28px rgba(0, 0, 0, 0.9);
+}
 .section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.8px; color: var(--text2); margin-bottom: 10px; text-transform: uppercase; }
 /* Muted helper / caption text. Reused instead of per-element inline font-size + color. */
 .hint { font-size: 11px; color: var(--text3); line-height: 1.5; }
@@ -595,7 +600,7 @@ select {
 /* ─── Clip List ─── */
 .clip-item {
   display: flex; align-items: center; gap: 12px;
-  padding: 12px 14px; margin-bottom: 4px;
+  padding: 9px 14px; margin-bottom: 4px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius);
   transition: border-color 0.15s var(--ease), background 0.15s var(--ease), opacity 0.15s var(--ease);
@@ -1036,7 +1041,7 @@ pre .punct { color: var(--text2); }
 input[type="range"] {
   -webkit-appearance: none; appearance: none;
   width: 100%; height: 4px; border-radius: 2px;
-  background: var(--surface2); outline: none;
+  background: rgba(255, 255, 255, 0.13); outline: none;
   cursor: pointer;
 }
 input[type="range"]:focus-visible {

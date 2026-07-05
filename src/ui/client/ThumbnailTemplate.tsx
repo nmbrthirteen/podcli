@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, labelStyle } from "./lib";
+import { BackIcon } from "./icons";
 
 type Cfg = Record<string, any>;
 type FieldType = "color" | "num" | "text" | "bool" | "select";
@@ -148,7 +149,7 @@ export default function ThumbnailTemplate({ onBack }: { onBack?: () => void }) {
       <div className="header">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
           <h1 style={{ margin: 0 }}>Edit template</h1>
-          {onBack && <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to generator</button>}
+          {onBack && <button className="btn btn-ghost btn-sm" onClick={onBack}><BackIcon /> Back to generator</button>}
         </div>
       </div>
 

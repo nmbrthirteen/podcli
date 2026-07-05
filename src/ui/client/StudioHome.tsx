@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmt, timeAgo, basename } from "./lib";
-import { TrashIcon } from "./icons";
+import { TrashIcon, PlayIcon } from "./icons";
 
 interface Clip {
   id: string;
@@ -131,7 +131,7 @@ export default function StudioHome() {
                       ) : file ? (
                         <video className="clip-card-media" src={`/api/clips/${c.id}/preview#t=0.1`} muted preload="metadata" playsInline />
                       ) : (
-                        <div className="clip-card-media empty">▶</div>
+                        <div className="clip-card-media empty"><PlayIcon size={20} /></div>
                       )}
                       <div className="clip-card-body">
                         <div className="clip-card-title">{c.title}</div>
