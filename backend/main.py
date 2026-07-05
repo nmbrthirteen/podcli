@@ -328,6 +328,26 @@ def handle_analyze_energy(task_id: str, params: dict):
     emit_result(task_id, "success", data=result)
 
 
+def handle_detect_highlights(task_id: str, params: dict):
+    """Detect highlight clips from a video's fused signal curve (party/action profiles)."""
+    from services.saliency import detect_highlights
+
+    video_path = params.get("video_path", "")
+    if not video_path:
+        emit_result(task_id, "error", error="video_path is required")
+        return
+
+    clips = detect_highlights(
+        video_path=video_path,
+        profile_name=params.get("profile", "party"),
+        top_n=int(params.get("top_n", 8)),
+        min_dur=float(params.get("min_dur", 8.0)),
+        max_dur=float(params.get("max_dur", 60.0)),
+        progress_callback=lambda pct, msg: emit_progress(task_id, "detecting", pct, msg),
+    )
+    emit_result(task_id, "success", data={"clips": clips, "count": len(clips)})
+
+
 def handle_detect_encoder(task_id: str, params: dict):
     """Detect available hardware encoders."""
     from services.encoder import get_encoder_info
@@ -621,6 +641,7 @@ TASK_HANDLERS = {
     "create_clip": handle_create_clip,
     "batch_clips": handle_batch_clips,
     "analyze_energy": handle_analyze_energy,
+    "detect_highlights": handle_detect_highlights,
     "pack_transcript": handle_pack_transcript,
     "detect_encoder": handle_detect_encoder,
     "presets": handle_presets,
