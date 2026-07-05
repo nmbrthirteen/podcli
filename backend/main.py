@@ -87,11 +87,19 @@ def handle_transcribe(task_id: str, params: dict):
         except Exception:
             pass  # energy is a nice-to-have
 
+        events_data = None
+        try:
+            from services.audio_events import extract_audio_events
+            events_data = extract_audio_events(file_path)
+        except Exception:
+            pass  # reactions are a nice-to-have
+
         packed_path, packed_md = write_packed(
             result,
             cache_hash,
             source_label=os.path.basename(file_path),
             energy_data=energy_data,
+            events_data=events_data,
         )
         result["packed_path"] = packed_path
         result["packed_size_bytes"] = len(packed_md.encode("utf-8"))
@@ -253,18 +261,27 @@ def handle_pack_transcript(task_id: str, params: dict):
         return
 
     energy_data = params.get("energy_data")
-    if energy_data is None and params.get("file_path"):
-        try:
-            from services.audio_analyzer import extract_audio_energy
-            energy_data = extract_audio_energy(params["file_path"])
-        except Exception:
-            pass
+    events_data = params.get("events_data")
+    if params.get("file_path"):
+        if energy_data is None:
+            try:
+                from services.audio_analyzer import extract_audio_energy
+                energy_data = extract_audio_energy(params["file_path"])
+            except Exception:
+                pass
+        if events_data is None:
+            try:
+                from services.audio_events import extract_audio_events
+                events_data = extract_audio_events(params["file_path"])
+            except Exception:
+                pass
 
     path, md = write_packed(
         transcript,
         cache_hash,
         source_label=params.get("source_label"),
         energy_data=energy_data,
+        events_data=events_data,
     )
     emit_result(task_id, "success", data={
         "packed_path": path,

@@ -12,6 +12,9 @@ openai-whisper>=20231117
 opencv-python-headless>=4.8.1.78
 numpy>=1.24.0
 
+# Audio-event detection (laughter/reaction channel via YAMNet ONNX — no torch/TF)
+onnxruntime>=1.16.0
+
 # Thumbnails
 Pillow>=10.0.0
 
