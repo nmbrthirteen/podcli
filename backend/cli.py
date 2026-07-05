@@ -569,7 +569,17 @@ def cmd_process(args):
     )
 
     if skip_transcript:
-        print(f"  [1/4] Skipping transcription ({content_profile.name} profile uses audio/visual signals)")
+        # Reuse an existing transcript so highlight boundaries snap to whole sentences;
+        # only skip transcription outright when there is none (true no-dialogue footage).
+        cached = load_cached_transcript_for_video(video_path)
+        if cached and not config.get("no_cache", False):
+            words = cached["words"]
+            segments = cached["segments"]
+            result = cached
+            skip_transcript = False
+            print(f"  [1/4] Reusing cached transcript ({len(segments)} segments) for sentence-clean cuts")
+        else:
+            print(f"  [1/4] Skipping transcription ({content_profile.name} profile uses audio/visual signals)")
 
     if args.transcript:
         print("  [1/4] Loading transcript...")
@@ -729,8 +739,9 @@ def cmd_process(args):
             video_path,
             profile_name=content_profile.name,
             top_n=top_n,
-            min_dur=min(8.0, float(spec.dur_min)),
-            max_dur=float(spec.dur_max),
+            min_dur=15.0,
+            max_dur=min(60.0, float(spec.dur_max)),
+            segments=segments or None,
             progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
         )
         if clips:
