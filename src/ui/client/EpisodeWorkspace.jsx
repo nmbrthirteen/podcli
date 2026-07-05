@@ -11,10 +11,12 @@ import {
   Home as HomeGlyph,
   Users as UsersGlyph,
   Inbox,
+  Download as DownloadGlyph,
 } from 'lucide-react';
 import CopyButton from './CopyButton';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
     const api = async (path, opts = {}) => {
       const res = await fetch(`/api${path}`, { headers: { 'Content-Type': 'application/json', ...opts.headers }, ...opts });
       let body = null;
@@ -528,6 +530,9 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
 
       const [logoUploading, setLogoUploading] = useState(false);
       const [browsing, setBrowsing] = useState(false);
+      const [downloadingVideo, setDownloadingVideo] = useState(false);
+      const [downloadJobId, setDownloadJobId] = useState(null);
+      const downloadStream = useJob(downloadJobId);
       const [clipHistory, setClipHistory] = useState([]);
       const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -737,7 +742,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
       const autoTranscribeRef = useRef('');
       useEffect(() => {
         const vp = videoPath.trim();
-        if (transcriptMode === 'whisper' && vp && !transcript && !transcribing && vp !== autoTranscribeRef.current) {
+        if (transcriptMode === 'whisper' && vp && !isHttpUrl(vp) && !transcript && !transcribing && vp !== autoTranscribeRef.current) {
           autoTranscribeRef.current = vp;
           autoTranscribe(vp);
         }
@@ -846,7 +851,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
       // Video source URL
       const videoUrl = previewSrc
         ? `/api/preview/${previewSrc}`
-        : videoPath
+        : videoPath && !isHttpUrl(videoPath)
           ? `/api/stream-source?path=${encodeURIComponent(videoPath)}`
           : null;
 
@@ -893,6 +898,49 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
         } catch (e) { setError('Browse failed: ' + e.message); }
         finally { setBrowsing(false); }
       }, []);
+
+      const downloadVideo = async () => {
+        const url = videoPath.trim();
+        if (!url || downloadingVideo) return;
+        setDownloadingVideo(true); setError(null);
+        try {
+          const d = await api('/download-video', { method: 'POST', body: JSON.stringify({ url }) });
+          if (d.error) { setError(d.error); setDownloadingVideo(false); return; }
+          if (d.job_id) { setDownloadJobId(d.job_id); return; }
+          setError('Download failed: missing job id');
+          setDownloadingVideo(false);
+        } catch (e) { setError('Download failed: ' + e.message); setDownloadingVideo(false); }
+      };
+
+      useEffect(() => {
+        if (!downloadStream) return;
+        if (downloadStream.status === 'done') {
+          const d = downloadStream.result;
+          if (!d?.file_path) {
+            setError('Download finished without a video file.');
+            setDownloadingVideo(false);
+            setDownloadJobId(null);
+            return;
+          }
+          setFile(d);
+          setVideoPath(d.file_path);
+          setTranscript(null);
+          setCachedTranscript(false);
+          setTranscriptText('');
+          setTranscriptFileName('');
+          setSuggestions([]);
+          setDeselected(new Set());
+          setResults([]);
+          setEnergyData({});
+          autoTranscribeRef.current = '';
+          setDownloadingVideo(false);
+          setDownloadJobId(null);
+        } else if (downloadStream.status === 'error') {
+          setError('Download failed: ' + (downloadStream.error || 'Unknown error'));
+          setDownloadingVideo(false);
+          setDownloadJobId(null);
+        }
+      }, [downloadStream?.status]);
 
       const findMoment = async () => {
         const text = momentText.trim();
@@ -981,7 +1029,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
           parts.push('Then call suggest_clips with your suggestions.');
         }
         const settings = [];
-        if (videoPath) settings.push(`Video: ${videoPath.split('/').pop()}`);
+        if (videoPath) settings.push(`Video: ${videoPath.split(/[\\/]/).pop()}`);
         settings.push(`Style: ${captionStyle}`);
         settings.push(`Crop: ${cropStrategy}`);
         if (logoPath) settings.push(`Logo: set`);
@@ -991,6 +1039,11 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
       };
 
       const copyGeneratePrompt = async () => {
+        if (isProcessing) return;
+        if (sourceIsUrl) {
+          setError('Download the video first, then find best moments.');
+          return;
+        }
         // If user has pasted a transcript but it hasn't been parsed yet, parse it first
         if (transcriptMode === 'import' && transcriptText.trim() && !transcript) {
           setError(null);
@@ -1090,7 +1143,8 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
         }
       };
 
-      const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || transcribing;
+      const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || transcribing || downloadingVideo;
+      const sourceIsUrl = isHttpUrl(videoPath);
       const selectedClips = suggestions.filter((_, i) => !deselected.has(i));
 
       const getExportStatus = (resultIdx) => {
@@ -1184,17 +1238,28 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                     )}
                   </div>
                 )}
-                {videoPath && (
+                {videoPath && !sourceIsUrl && (
                   <div className="file-badge fade-in">
                     <div className="dot" />
-                    <div className="name">{videoPath.split('/').pop()}</div>
+                    <div className="name">{videoPath.split(/[\\/]/).pop()}</div>
                     <button className="btn btn-ghost btn-sm" onClick={() => setVideoPath('')} style={{ padding: '4px 10px', fontSize: 11 }}>Clear</button>
                   </div>
                 )}
-                <input type="text" placeholder="Or paste a local path: /Users/you/episode.mp4"
-                  value={videoPath} onChange={e => setVideoPath(e.target.value)}
-                  disabled={isProcessing || browsing}
-                  style={{ marginTop: 8, fontSize: 12, padding: '9px 13px', background: 'var(--bg)', borderColor: videoPath ? 'var(--green-border)' : 'var(--border)' }} />
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <input type="text" placeholder="Paste a local path or YouTube/video URL"
+                    value={videoPath} onChange={e => setVideoPath(e.target.value)}
+                    disabled={isProcessing || browsing}
+                    onKeyDown={e => { if (e.key === 'Enter' && sourceIsUrl) downloadVideo(); }}
+                    style={{ flex: 1, fontSize: 12, padding: '9px 13px', background: 'var(--bg)', borderColor: videoPath ? 'var(--green-border)' : 'var(--border)' }} />
+                  <button className="btn btn-ghost btn-sm" onClick={downloadVideo} disabled={!sourceIsUrl || isProcessing || browsing}>
+                    {downloadingVideo ? <div className="spinner sm" /> : <><DownloadGlyph size={14} /> Download</>}
+                  </button>
+                </div>
+                {downloadingVideo && (
+                  <div className="progress-track" style={{ marginTop: 6 }}>
+                    <div className="progress-fill" style={{ width: `${downloadStream?.progress || 5}%` }} />
+                  </div>
+                )}
               </div>
 
               {/* Transcript */}
@@ -1483,8 +1548,13 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
               {/* Generate */}
               {phase === 'idle' && (
                 <div>
+                  {sourceIsUrl && (
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>
+                      Download the video first, then find best moments.
+                    </div>
+                  )}
                   <button className="btn btn-go"
-                    disabled={!videoPath.trim() || (transcriptMode === 'import' && !transcriptText.trim()) || (transcriptMode === 'whisper' && !transcript) || browsing || transcribing}
+                    disabled={isProcessing || sourceIsUrl || !videoPath.trim() || (transcriptMode === 'import' && !transcriptText.trim()) || (transcriptMode === 'whisper' && !transcript) || browsing || transcribing}
                     onClick={copyGeneratePrompt}
                     style={generateCopied ? { background: 'var(--green)', transition: 'background 0.2s' } : {}}>
                     {phase === 'suggesting' ? 'Claude is analyzing...' : generateCopied ? 'Copied. Paste in Claude' : 'Find best moments'}
