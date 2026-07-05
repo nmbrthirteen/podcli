@@ -2056,6 +2056,82 @@ export function createServer(): McpServer {
   );
 
   // =============================================
+  // Tool: manage_reel
+  // =============================================
+  server.tool(
+    "manage_reel",
+    "Create and iterate on a highlights reel. Detection runs once with action 'new'; after that, edit individual moments fast (longer/shorter/earlier/later/shift/drop/toggle) and rebuild without re-detecting. Actions: 'new' (video_path, profile, top_n), 'show' (session_id), 'edit' (session_id, index, op, seconds), 'build' (session_id).",
+    {
+      action: z
+        .enum(["new", "show", "edit", "build"])
+        .describe("What to do with the reel"),
+      video_path: z
+        .string()
+        .optional()
+        .describe("For 'new': path to the source video"),
+      session_id: z
+        .string()
+        .optional()
+        .describe("For show/edit/build: the reel session id returned by 'new'"),
+      profile: z
+        .enum(["party", "action"])
+        .optional()
+        .describe("For 'new': detection profile (default party)"),
+      top_n: z.number().optional().describe("For 'new': number of moments"),
+      index: z
+        .number()
+        .optional()
+        .describe("For 'edit': 1-based moment number to adjust"),
+      op: z
+        .enum(["longer", "shorter", "earlier", "later", "shift", "drop", "toggle"])
+        .optional()
+        .describe("For 'edit': how to change the moment"),
+      seconds: z
+        .number()
+        .optional()
+        .describe("For 'edit': seconds for longer/shorter/earlier/later/shift"),
+    },
+    async (params) => {
+      try {
+        const res = await fetch("http://localhost:3847/api/reel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as ApiError & Record<string, unknown>;
+        if (data.error) {
+          return {
+            content: [{ type: "text" as const, text: `Error: ${data.error}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(data, null, 2) },
+          ],
+        };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Web UI is not running. Start with: npm run ui",
+              },
+            ],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // =============================================
   // Tool: set_video
   // =============================================
   server.tool(
