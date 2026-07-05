@@ -390,6 +390,53 @@ def cmd_studio(args):
     sys.exit(rc)
 
 
+def cmd_reel(args):
+    """Create and iterate on a highlights reel — detect once, then edit moments fast."""
+    from services.reel import ReelSession, seed_session, edit_moment, build_reel
+    from services.transcript_packer import compute_cache_hash, load_cached_transcript_for_video
+
+    def _mmss(s):
+        return f"{int(s // 60)}:{int(s % 60):02d}"
+
+    def _show(session):
+        for i, m in enumerate(session.moments, 1):
+            flag = "" if m.enabled else "  (disabled)"
+            print(f"  [{i}] {_mmss(m.start)}-{_mmss(m.end)} ({m.duration:.0f}s, {m.why}){flag}")
+            if m.text:
+                print("      " + (m.text[:150] + "…" if len(m.text) > 150 else m.text))
+
+    action = getattr(args, "reel_action", None)
+    if action == "new":
+        video = _clean_path(args.video)
+        sid = compute_cache_hash(video)
+        out_dir = args.output or os.path.join(os.getcwd(), f"reel_{sid[:8]}")
+        cached = load_cached_transcript_for_video(video)
+        words = cached.get("words") if cached else None
+        print("  Detecting moments (one-time)...")
+        session = seed_session(
+            sid, video, out_dir, profile=args.profile or "party", top_n=args.top or 10,
+            words=words, progress_callback=lambda p, m: print(f"    {m}") if m else None,
+        )
+        _show(session)
+        print("  Building reel...")
+        reel = build_reel(session)
+        print(f"  ✓ {reel}")
+        print(f"  session: {sid}")
+        print(f"  edit with: podcli reel edit {sid} <N> <longer|shorter|earlier|later|shift|drop|toggle> [secs]")
+    elif action == "show":
+        _show(ReelSession.load(args.session))
+    elif action == "edit":
+        session = edit_moment(ReelSession.load(args.session), args.index, args.op, args.seconds)
+        reel = build_reel(session)
+        print(f"  ✓ rebuilt {reel}")
+        _show(session)
+    elif action == "build":
+        reel = build_reel(ReelSession.load(args.session))
+        print(f"  ✓ {reel}")
+    else:
+        print("  Usage: podcli reel new <video> | show <session> | edit <session> N <op> [secs] | build <session>")
+
+
 def cmd_process(args):
     """Full auto pipeline: transcribe → suggest → export."""
     from services.clip_generator import generate_clip
@@ -3406,6 +3453,24 @@ def main():
     proc.add_argument("--review-each", action="store_true", help="Review each rendered clip interactively")
     proc.add_argument("--post-review", action="store_true", help="Open the post-render review loop after export")
 
+    # ── reel (highlights, detect once then iterate fast) ──
+    reel_p = sub.add_parser("reel", help="Create and iterate on a highlights reel")
+    reel_sub = reel_p.add_subparsers(dest="reel_action")
+    rn = reel_sub.add_parser("new", help="Detect moments and build a reel")
+    rn.add_argument("video", help="Path to the source video")
+    rn.add_argument("--profile", choices=["party", "action"], default="party")
+    rn.add_argument("-n", "--top", type=int, help="Number of moments (default 10)")
+    rn.add_argument("-o", "--output", help="Output directory")
+    rsh = reel_sub.add_parser("show", help="List the moments in a reel session")
+    rsh.add_argument("session", help="Session id (printed by 'reel new')")
+    red = reel_sub.add_parser("edit", help="Adjust one moment and rebuild")
+    red.add_argument("session")
+    red.add_argument("index", type=int, help="1-based moment number")
+    red.add_argument("op", choices=["longer", "shorter", "earlier", "later", "shift", "drop", "toggle"])
+    red.add_argument("seconds", type=float, nargs="?", default=0.0)
+    rbd = reel_sub.add_parser("build", help="Rebuild the reel (re-cuts only changed moments)")
+    rbd.add_argument("session")
+
     # ── studio ──
     studio = sub.add_parser("studio", help="Cut a fragment + add Remotion intro/outro (follow-us) bookends")
     studio.add_argument("video", nargs="?", default=None, help="Path to the source video (omit only with --save-brand)")
@@ -3661,6 +3726,8 @@ def main():
         cmd_process(args)
     elif args.command == "studio":
         cmd_studio(args)
+    elif args.command == "reel":
+        cmd_reel(args)
     elif args.command == "thumbnails":
         cmd_thumbnails(args)
     elif args.command == "thumbnail-config":
