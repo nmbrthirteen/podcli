@@ -183,6 +183,72 @@ def _stream_claude_content(
     return out
 
 
+def generate_custom_content(
+    instruction: str,
+    transcript_segments: list[dict],
+    mode: str = "shorts",
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> Optional[dict]:
+    """Run a free-form content request against the AI CLI with KB + transcript context.
+
+    Returns {"text", "engine"} with the raw model output, or None if no AI CLI.
+    """
+    candidates = _find_ai_cli_candidates()
+    if not candidates:
+        return None
+
+    kb_context = load_kb_context()
+    lines = []
+    for seg in transcript_segments:
+        sp = seg.get("speaker", "")
+        sp_label = f"[{sp}] " if sp else ""
+        lines.append(f"{sp_label}{seg.get('text', '').strip()}")
+    excerpt = chr(10).join(_sample_lines(lines, max_lines=40))
+
+    # REQUEST first so codex prompt truncation never drops the ask.
+    prompt = f"""You are helping create YouTube content for a podcast. Follow the knowledge base voice and rules. Return ONLY the requested output, no preamble.
+
+REQUEST ({'full episode' if mode == 'episode' else 'short clip'}):
+{instruction.strip()}
+
+KNOWLEDGE BASE:
+{kb_context}
+
+TRANSCRIPT EXCERPT:
+{excerpt}"""
+
+    project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    from utils.prompt_files import write_prompt_file
+    prompt_file = write_prompt_file(prompt)
+    try:
+        for idx, (cli_path, engine) in enumerate(candidates):
+            label = _engine_label(engine)
+            if progress_callback:
+                progress_callback(30, f"Asking {label}..." if idx == 0 else f"Retrying with {label}...")
+            try:
+                cr = _run_ai_command(
+                    cli_path=cli_path,
+                    engine=engine,
+                    prompt=prompt[:4000] if engine == "codex" else prompt,
+                    prompt_file=prompt_file,
+                    project_dir=project_dir,
+                    timeout=120,
+                )
+            except Exception:
+                continue
+            if cr.returncode != 0 or not cr.stdout.strip():
+                continue
+            if progress_callback:
+                progress_callback(100, "Done")
+            return {"text": cr.stdout.strip(), "engine": engine}
+        return None
+    finally:
+        try:
+            os.unlink(prompt_file)
+        except Exception:
+            pass
+
+
 def generate_clip_content(
     clip: dict,
     transcript_segments: list[dict],

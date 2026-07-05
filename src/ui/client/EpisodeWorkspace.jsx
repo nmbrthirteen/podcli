@@ -803,6 +803,16 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
         }
       }, [transcriptText]);
 
+      // Sync export results + energy analysis so they survive navigation
+      const prevDerivedRef = useRef('');
+      useEffect(() => {
+        if (!initializedRef.current) return;
+        const key = JSON.stringify({ results, energyData });
+        if (key === prevDerivedRef.current) return;
+        prevDerivedRef.current = key;
+        fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', results, energyData }) }).catch(() => { });
+      }, [results, energyData]);
+
       // React to SSE events from MCP
       const lastHandledTsRef = useRef(0);
       useEffect(() => {
@@ -811,10 +821,14 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
 
         if (sseEvent.type === 'state-sync' || sseEvent.type === 'state') {
           const d = sseEvent.data;
-          if (d.suggestions) { setSuggestions(d.suggestions); setEnergyData({}); }
+          if (d.suggestions) {
+            setSuggestions(d.suggestions);
+            setEnergyData(sseEvent.type === 'state' && d.energyData ? d.energyData : {});
+          }
           if (d.deselectedIndices !== undefined) setDeselected(new Set(d.deselectedIndices));
           else if (d.suggestions && !d.deselectedIndices) setDeselected(new Set());
           if (d.phase) setPhase(d.phase);
+          if (sseEvent.type === 'state' && Array.isArray(d.results)) setResults(d.results);
           if (d.activeExportJobId) setBatchJobId(d.activeExportJobId);
           if (d.videoPath !== undefined) setVideoPath(d.videoPath);
           if (d.transcript) { setTranscript(d.transcript); if (d.videoPath) autoTranscribeRef.current = d.videoPath; }

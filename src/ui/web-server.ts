@@ -115,6 +115,8 @@ interface UIState {
     outroPath: string;
   };
   phase: string;
+  results: unknown[];
+  energyData: Record<string, unknown>;
   lastUpdated: number;
 }
 
@@ -149,6 +151,10 @@ function loadPersistedState(): UIState {
         phase: ["exporting", "parsing", "suggesting"].includes(saved.phase)
           ? "idle"
           : saved.phase || "idle",
+        results: ["exporting", "parsing", "suggesting"].includes(saved.phase)
+          ? []
+          : saved.results || [],
+        energyData: saved.energyData || {},
         lastUpdated: saved.lastUpdated || 0,
       };
     }
@@ -173,6 +179,8 @@ function loadPersistedState(): UIState {
       outroPath: "",
     },
     phase: "idle",
+    results: [],
+    energyData: {},
     lastUpdated: 0,
   };
 }
@@ -2541,6 +2549,44 @@ app.post("/api/content-studio/generate", async (req, res) => {
   }
 });
 
+/**
+ * POST /api/content-studio/custom — free-form or per-section content request.
+ */
+app.post("/api/content-studio/custom", async (req, res) => {
+  const { instruction, transcript_text, mode } = req.body || {};
+  if (!instruction || !String(instruction).trim()) {
+    res.status(400).json({ error: "instruction is required" });
+    return;
+  }
+  let segs: Array<{ start: number; text: string }>;
+  if (typeof transcript_text === "string" && transcript_text.trim()) {
+    segs = packTranscriptText(transcript_text);
+  } else if (uiState.transcript?.segments?.length) {
+    segs = condenseSegments(uiState.transcript.segments);
+  } else {
+    res.status(400).json({ error: "paste a transcript or load an episode first" });
+    return;
+  }
+  try {
+    const result = await executor.execute(
+      "generate_custom",
+      {
+        instruction: String(instruction),
+        transcript_segments: segs,
+        mode: mode === "episode" ? "episode" : "shorts",
+      },
+      (event) => {
+        broadcastSSE("job-update", { progress: event.percent, message: event.message });
+      },
+    );
+    res.json(result.data || {});
+  } catch (err: any) {
+    res.status(500).json({
+      error: `Custom generation failed: ${err.message?.substring(0, 200)}`,
+    });
+  }
+});
+
 // --- MCP ↔ UI Bridge Endpoints ---
 
 /**
@@ -2618,6 +2664,8 @@ app.post("/api/ui-state", (req, res) => {
   if (body.deselectedIndices !== undefined)
     uiState.deselectedIndices = body.deselectedIndices;
   if (body.phase !== undefined) uiState.phase = body.phase;
+  if (body.results !== undefined) uiState.results = body.results;
+  if (body.energyData !== undefined) uiState.energyData = body.energyData;
   if (body.settings) {
     if (body.settings.captionStyle !== undefined)
       uiState.settings.captionStyle = body.settings.captionStyle;

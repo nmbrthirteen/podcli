@@ -87,6 +87,27 @@ h1 { font-size: 28px; font-weight: 700; letter-spacing: 0; line-height: 1.15; }
 .main-col { min-width: 0; }
 .preview-col { position: relative; align-self: stretch; }
 
+/* ─── Content preview (YouTube-style card) ─── */
+.yt-card { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; max-width: 400px; }
+.yt-thumb {
+  aspect-ratio: 16 / 9; border-radius: var(--radius); overflow: hidden; position: relative;
+  background: radial-gradient(125% 125% at 22% 12%, #4a3421, #221a12 58%, #120f0c);
+  box-shadow: inset 0 0 0 1px var(--glass-border);
+  display: flex; align-items: flex-end; padding: 15px;
+}
+.yt-thumb.vertical { aspect-ratio: 9 / 16; max-width: 216px; }
+.yt-thumb::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent 55%);
+}
+.yt-thumb-title {
+  position: relative; z-index: 1; font-weight: 800; font-size: 21px; line-height: 1.12;
+  letter-spacing: -0.01em; color: #fff; text-shadow: 0 2px 16px rgba(0, 0, 0, 0.5); text-wrap: balance;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.yt-thumb.vertical .yt-thumb-title { font-size: 18px; -webkit-line-clamp: 5; }
+.yt-thumb-title.placeholder { color: rgba(255, 255, 255, 0.4); font-weight: 600; }
+
 /* ─── Preview Panel ─── */
 .preview-panel { position: sticky; top: 32px; }
 .preview-player {
@@ -485,6 +506,9 @@ select {
 .btn-go:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-go:active:not(:disabled) { transform: translateY(5px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18); }
 .btn-go:disabled { opacity: 0.25; cursor: not-allowed; }
+/* A button that's mid-request keeps its fill (not the disabled fade) so the label stays readable */
+.btn:has(.spinner) { opacity: 1; cursor: progress; }
+.btn-primary .spinner, .btn-go .spinner { border-color: rgba(36, 24, 3, 0.28); border-top-color: #241803; }
 .title-option {
   text-align: left; width: 100%; padding: 9px 12px; cursor: pointer;
   background: var(--surface); border: 1px solid var(--border);

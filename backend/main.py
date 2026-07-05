@@ -445,6 +445,29 @@ def handle_generate_content(task_id: str, params: dict):
     emit_result(task_id, "success", data=result)
 
 
+def handle_generate_custom(task_id: str, params: dict):
+    """Run a free-form content request against the AI CLI with KB + transcript context."""
+    from services.content_generator import generate_custom_content
+
+    instruction = str(params.get("instruction", "")).strip()
+    if not instruction:
+        emit_result(task_id, "error", error="instruction is required")
+        return
+
+    result = generate_custom_content(
+        instruction=instruction,
+        transcript_segments=params.get("transcript_segments", []),
+        mode=params.get("mode", "shorts"),
+        progress_callback=lambda pct, msg: emit_progress(task_id, "generating", pct, msg),
+    )
+
+    if result is None:
+        emit_result(task_id, "error", error="No AI CLI available (install Claude Code or Codex)")
+        return
+
+    emit_result(task_id, "success", data=result)
+
+
 def handle_manage_integrations(task_id: str, params: dict):
     from services.integrations import IntegrationsManager
 
@@ -532,6 +555,7 @@ TASK_HANDLERS = {
     "find_moment": handle_find_moment,
     "manage_env": handle_manage_env,
     "generate_content": handle_generate_content,
+    "generate_custom": handle_generate_custom,
     "manage_integrations": handle_manage_integrations,
     "run_integration_tool": handle_run_integration_tool,
     "manage_config": handle_manage_config,
