@@ -339,6 +339,58 @@ def handle_detect_highlights(task_id: str, params: dict):
     emit_result(task_id, "success", data={"clips": clips, "count": len(clips)})
 
 
+def handle_manage_reel(task_id: str, params: dict):
+    """Create and iterate on a highlights reel — the MCP surface over the reel service.
+
+    Actions: new (detect + build), show, edit (adjust one moment + rebuild), build.
+    """
+    from dataclasses import asdict
+    from services.reel import ReelSession, seed_session, edit_moment, build_reel
+
+    action = params.get("action", "show")
+
+    def payload(session, reel=None):
+        return {
+            "session_id": session.session_id,
+            "out_dir": session.out_dir,
+            "reel_path": reel,
+            "moments": [asdict(m) for m in session.moments],
+        }
+
+    try:
+        if action == "new":
+            from services.transcript_packer import compute_cache_hash, load_cached_transcript_for_video
+            video = params["video_path"]
+            sid = compute_cache_hash(video)
+            out_dir = params.get("out_dir") or os.path.join(os.getcwd(), f"reel_{sid[:8]}")
+            cached = load_cached_transcript_for_video(video)
+            words = cached.get("words") if cached else None
+            session = seed_session(
+                sid, video, out_dir, profile=params.get("profile", "party"),
+                top_n=int(params.get("top_n", 10)), words=words,
+                progress_callback=lambda p, m: emit_progress(task_id, "detecting", p, m),
+            )
+            reel = build_reel(session, progress_callback=lambda p, m: emit_progress(task_id, "building", p, m))
+            emit_result(task_id, "success", data=payload(session, reel))
+        elif action == "show":
+            emit_result(task_id, "success", data=payload(ReelSession.load(params["session_id"])))
+        elif action == "edit":
+            session = edit_moment(
+                ReelSession.load(params["session_id"]),
+                int(params["index"]), params["op"], float(params.get("seconds", 0.0)),
+            )
+            reel = build_reel(session, progress_callback=lambda p, m: emit_progress(task_id, "building", p, m))
+            emit_result(task_id, "success", data=payload(session, reel))
+        elif action == "build":
+            session = ReelSession.load(params["session_id"])
+            reel = build_reel(session, progress_callback=lambda p, m: emit_progress(task_id, "building", p, m))
+            emit_result(task_id, "success", data=payload(session, reel))
+        else:
+            emit_result(task_id, "error", error=f"unknown reel action {action!r}")
+    except (KeyError, IndexError, ValueError, FileNotFoundError) as e:
+        emit_result(task_id, "error", error=str(e))
+
+
 def handle_detect_encoder(task_id: str, params: dict):
     """Detect available hardware encoders."""
     from services.encoder import get_encoder_info
@@ -633,6 +685,7 @@ TASK_HANDLERS = {
     "batch_clips": handle_batch_clips,
     "analyze_energy": handle_analyze_energy,
     "detect_highlights": handle_detect_highlights,
+    "manage_reel": handle_manage_reel,
     "pack_transcript": handle_pack_transcript,
     "detect_encoder": handle_detect_encoder,
     "presets": handle_presets,
