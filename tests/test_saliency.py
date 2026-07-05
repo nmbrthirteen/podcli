@@ -110,5 +110,38 @@ class WindowForPeakTests(unittest.TestCase):
         self.assertGreaterEqual(start, 0.0)
 
 
+class PooledTests(unittest.TestCase):
+    def test_pools_across_files_reaction_first_with_source(self):
+        fake = {
+            "a.mp4": [
+                {"start_second": 10, "end_second": 18, "score": 30.0, "reasons": ["energy_peak"]},
+            ],
+            "b.mp4": [
+                {"start_second": 5, "end_second": 15, "score": 12.0, "reasons": ["reaction"]},
+            ],
+        }
+        orig = sal.detect_highlights
+        sal.detect_highlights = lambda path, **kw: [dict(c) for c in fake[path]]
+        try:
+            pooled = sal.detect_highlights_pooled(["a.mp4", "b.mp4"], top_n=5)
+        finally:
+            sal.detect_highlights = orig
+        self.assertEqual(len(pooled), 2)
+        # reaction outranks the higher-scored energy peak across files
+        self.assertEqual(pooled[0]["reasons"], ["reaction"])
+        self.assertEqual(pooled[0]["source_file"], "b.mp4")
+        self.assertTrue(all("source_file" in c for c in pooled))
+
+    def test_top_n_caps_pool(self):
+        fake = [{"start_second": i, "end_second": i + 8, "score": float(i), "reasons": ["energy_peak"]} for i in range(10)]
+        orig = sal.detect_highlights
+        sal.detect_highlights = lambda path, **kw: [dict(c) for c in fake]
+        try:
+            pooled = sal.detect_highlights_pooled(["a.mp4"], top_n=3)
+        finally:
+            sal.detect_highlights = orig
+        self.assertEqual(len(pooled), 3)
+
+
 if __name__ == "__main__":
     unittest.main()
