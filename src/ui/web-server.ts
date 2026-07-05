@@ -1561,6 +1561,16 @@ app.post("/api/analyze-energy", async (req, res) => {
   }
 });
 
+// --- Highlight reel: detect once, then iterate on moments ---
+app.post("/api/reel", async (req, res) => {
+  try {
+    const result = await executor.execute("manage_reel", req.body || {});
+    res.json(result.data || {});
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Encoder info ---
 app.get("/api/encoder-info", async (_req, res) => {
   try {
