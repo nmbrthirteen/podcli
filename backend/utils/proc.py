@@ -78,15 +78,16 @@ def run(
 
     duration = time.monotonic() - t0
     if result.returncode != 0:
-        log.warning(
-            "proc.fail tool=%s rc=%d duration=%.2fs stderr=%s",
-            tool,
-            result.returncode,
-            duration,
-            (result.stderr or "")[-400:].strip(),
-        )
         if check:
+            log.warning(
+                "proc.fail tool=%s rc=%d duration=%.2fs stderr=%s",
+                tool,
+                result.returncode,
+                duration,
+                (result.stderr or "")[-400:].strip(),
+            )
             raise ProcError(cmd, result.returncode, result.stderr or "", duration)
+        log.debug("proc.nonzero tool=%s rc=%d duration=%.2fs", tool, result.returncode, duration)
     else:
         log.debug("proc.ok tool=%s duration=%.2fs", tool, duration)
     return result

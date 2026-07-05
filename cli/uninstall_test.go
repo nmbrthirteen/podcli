@@ -30,17 +30,11 @@ func TestLinkPointsToAbsoluteAndRelativeSymlinks(t *testing.T) {
 	}
 }
 
-func TestUninstallTargetsPreserveUserDataUnlessPurged(t *testing.T) {
+func TestUninstallTargetsRemoveAllByDefault(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "podcli")
-	got := uninstallTargets(home, false)
-	for _, p := range got {
-		if p == home {
-			t.Fatalf("non-purge uninstall should not remove the whole home: %v", got)
-		}
-	}
-	purged := uninstallTargets(home, true)
-	if len(purged) != 1 || purged[0] != home {
-		t.Fatalf("purge targets = %v, want only %s", purged, home)
+	got := uninstallTargets(home)
+	if len(got) != 1 || got[0] != home {
+		t.Fatalf("uninstall targets = %v, want only %s", got, home)
 	}
 }
 
