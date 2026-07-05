@@ -1225,7 +1225,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                         <button className="btn btn-ghost btn-sm" onClick={() => { setTranscriptText(''); setTranscriptFileName(''); }} style={{ padding: '4px 10px', fontSize: 11 }}>Clear</button>
                       </div>
                     )}
-                    <textarea placeholder={'Speaker (00:00)\nText of what they said...\n\nSpeaker2 (00:15)\nMore text...\n\nOr paste JSON / drag a .txt file above.'}
+                    <textarea className="code-input" placeholder={'Speaker (00:00)\nText of what they said...\n\nSpeaker2 (00:15)\nMore text...\n\nOr paste JSON / drag a .txt file above.'}
                       value={transcriptText} onChange={e => { setTranscriptText(e.target.value); setTranscriptFileName(''); }}
                       disabled={isProcessing} style={{ minHeight: transcriptText ? 80 : 120 }}
                       onDragOver={e => { preventDef(e); setTranscriptDragOver(true); }} onDrop={handleTranscriptDrop} />
@@ -1550,7 +1550,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                 <div>
                   <div className="spacer" />
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                    <div className="section-label" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div className="section-label" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontVariantNumeric: 'tabular-nums' }}>
                       {phase === 'suggesting' && <div className="spinner sm" />}
                       {phase === 'suggesting' ? `Found ${suggestions.length} clip${suggestions.length !== 1 ? 's' : ''}`
                         : phase === 'review' ? `Clips \u00B7 ${selectedCount} selected` : 'Clips'}
@@ -1562,7 +1562,7 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
                         </button>
                       )}
                       {phase === 'review' && (
-                        <button className="btn btn-primary btn-sm" disabled={selectedCount === 0} onClick={startExport}>
+                        <button className="btn btn-primary btn-sm" disabled={selectedCount === 0} onClick={startExport} style={{ fontVariantNumeric: 'tabular-nums' }}>
                           Export {selectedCount} clip{selectedCount !== 1 ? 's' : ''}
                         </button>
                       )}

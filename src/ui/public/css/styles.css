@@ -3,15 +3,15 @@
 :root {
   --bg: #0f0e0d;
   --bg2: #16150f;
-  --surface: #1b1a17;
-  --surface2: #24221d;
-  --surface3: #302d27;
+  --surface: #181712;
+  --surface2: #201e19;
+  --surface3: #2b2822;
   --border: #2c2822;
   --border-hover: #403a31;
   --border-h: #403a31;
   --text: #f4f2ee;
   --text2: #ada79c;
-  --text3: #7d766a;
+  --text3: #8a8377;
   --accent: #f2894a;
   --accent-hover: #ff9f61;
   --accent-2: #ffb37c;
@@ -426,8 +426,10 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 textarea {
-  font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
   font-size: 12px; resize: vertical; min-height: 120px; line-height: 1.7;
+}
+textarea.code-input {
+  font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
 }
 select {
   appearance: none; cursor: pointer; padding-right: 34px;
@@ -517,7 +519,7 @@ select {
 }
 .file-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
 .file-badge .name { font-size: 13px; color: var(--green); font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-badge .meta { font-size: 11px; color: var(--text2); flex-shrink: 0; }
+.file-badge .meta { font-size: 11px; color: var(--text2); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
 /* ─── Tabs ─── */
 .tabs { display: flex; gap: 2px; background: var(--surface); border-radius: var(--radius); padding: 3px; margin-bottom: 14px; }
@@ -529,7 +531,7 @@ select {
   user-select: none;
 }
 .tab:hover:not(.active) { color: var(--text); }
-.tab.active { background: var(--accent); color: #fff; }
+.tab.active { background: var(--accent); color: #241803; }
 
 /* ─── Settings ─── */
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
