@@ -117,6 +117,31 @@ def _snap_to_quiet(target_sec: float, energy_curve: np.ndarray, window_sec: floa
     return (lo + int(np.argmin(local))) / GRID_HZ
 
 
+def sentences_from_words(words: list[dict]) -> list[dict]:
+    """Group word-level timestamps into sentences on terminal punctuation.
+
+    Whisper *segments* often straddle a sentence boundary ("...was. But then..."), so
+    snapping to them still starts a clip mid-thought. Splitting on .?! gives real
+    sentence edges to snap to.
+    """
+    sents: list[dict] = []
+    start = None
+    end = None
+    for w in words:
+        text = str(w.get("word", "")).strip()
+        if not text:
+            continue
+        if start is None:
+            start = w.get("start", 0.0)
+        end = w.get("end", start)
+        if text.endswith((".", "?", "!")):
+            sents.append({"start": start, "end": end})
+            start = None
+    if start is not None:
+        sents.append({"start": start, "end": end})
+    return sents
+
+
 def _seg_index_at(t: float, segments: list[dict]) -> int:
     """Index of the segment covering t, else the nearest segment start."""
     for i, s in enumerate(segments):
@@ -201,17 +226,20 @@ def detect_highlights(
     max_dur: float = 60.0,
     height_z: float = 1.0,
     segments: Optional[list[dict]] = None,
+    words: Optional[list[dict]] = None,
     progress_callback: Optional[Callable] = None,
 ) -> list[dict]:
     """
     Generate highlight clips from a video's fused signal curve.
 
-    If `segments` (a transcript) is provided, clip boundaries snap to whole sentences
-    so each clip is a complete thought; without it, boundaries snap to audio lulls.
+    If a transcript is provided, clip boundaries snap to whole sentences so each clip
+    is a complete thought; `words` (with punctuation) gives true sentence edges and is
+    preferred over `segments`. Without any transcript, boundaries snap to audio lulls.
     Returns clip dicts compatible with the render pipeline:
     {title, start_second, end_second, duration, score, reasons, preview}.
     """
     profile = get_profile(profile_name)
+    snap_units = sentences_from_words(words) if words else segments
 
     if progress_callback:
         progress_callback(10, "Analyzing audio energy...")
@@ -269,7 +297,7 @@ def detect_highlights(
         peak_sec = i / GRID_HZ
         reaction_level = float(reaction_curve[i]) if want_reaction else 0.0
         start, end, is_reaction = _window_for_peak(
-            peak_sec, reaction_level, profile, duration, energy_curve, min_dur, max_dur, segments
+            peak_sec, reaction_level, profile, duration, energy_curve, min_dur, max_dur, snap_units
         )
         if end - start < min_dur * 0.75:
             continue
