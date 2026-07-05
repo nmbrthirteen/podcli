@@ -556,10 +556,20 @@ def cmd_process(args):
     segments = []
     result = {}
 
+    # Saliency profiles (party/action) select on audio/visual signals, not dialogue,
+    # so transcribing a long video would be wasted work — skip it entirely.
+    from services.profiles import get_profile
+
+    content_profile = get_profile(config.get("profile"))
+    skip_transcript = content_profile.candidate_source == "saliency" and not args.transcript
+
     from services.transcript_packer import (
         load_cached_transcript_for_video,
         save_cached_transcript_for_video,
     )
+
+    if skip_transcript:
+        print(f"  [1/4] Skipping transcription ({content_profile.name} profile uses audio/visual signals)")
 
     if args.transcript:
         print("  [1/4] Loading transcript...")
@@ -586,7 +596,7 @@ def cmd_process(args):
             words = parsed["words"]
             segments = parsed["segments"]
             print(f"         Parsed: {len(segments)} segments, {len(words)} words")
-    else:
+    elif not skip_transcript:
         # Check cache first
         cached = load_cached_transcript_for_video(video_path)
         if cached and not config.get("no_cache", False):
@@ -665,7 +675,7 @@ def cmd_process(args):
     else:
         print(f"         No speaker data (center crop fallback)")
 
-    if not segments:
+    if not segments and not skip_transcript:
         print("  Error: No transcript segments found.", file=sys.stderr)
         sys.exit(1)
 
@@ -709,9 +719,6 @@ def cmd_process(args):
 
     # Saliency profiles (party/action) pick moments from the fused laughter/energy
     # curve rather than the transcript, so they work on footage with no dialogue.
-    from services.profiles import get_profile
-
-    content_profile = get_profile(config.get("profile"))
     if content_profile.candidate_source == "saliency" and not clips:
         from services.saliency import detect_highlights
         from services.formats import get_format
@@ -736,7 +743,9 @@ def cmd_process(args):
     from services.claude_suggest import suggest_initial_with_claude, _engine_label, _find_ai_cli
 
     ai_path, ai_engine = _find_ai_cli()
-    if not clips and ai_path and config.get("ai_select", True):
+    if clips:
+        pass  # already selected (resumed cache or saliency profile)
+    elif ai_path and config.get("ai_select", True):
         ai_label = _engine_label(ai_engine)
         print(f"  [3/4] Selecting moments with {ai_label} (PodStack)...")
         clips = suggest_initial_with_claude(
