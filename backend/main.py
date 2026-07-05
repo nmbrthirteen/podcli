@@ -329,22 +329,33 @@ def handle_analyze_energy(task_id: str, params: dict):
 
 
 def handle_detect_highlights(task_id: str, params: dict):
-    """Detect highlight clips from a video's fused signal curve (party/action profiles)."""
-    from services.saliency import detect_highlights
+    """Detect highlight clips from a video's fused signal curve (party/action profiles).
 
+    Accepts a single `video_path`, or a list of `video_paths` to pool and rank
+    highlights across a whole folder of clips.
+    """
+    from services.saliency import detect_highlights, detect_highlights_pooled
+
+    video_paths = params.get("video_paths")
     video_path = params.get("video_path", "")
-    if not video_path:
-        emit_result(task_id, "error", error="video_path is required")
+    if not video_paths and not video_path:
+        emit_result(task_id, "error", error="video_path or video_paths is required")
         return
 
-    clips = detect_highlights(
-        video_path=video_path,
+    common = dict(
         profile_name=params.get("profile", "party"),
-        top_n=int(params.get("top_n", 8)),
         min_dur=float(params.get("min_dur", 8.0)),
         max_dur=float(params.get("max_dur", 60.0)),
         progress_callback=lambda pct, msg: emit_progress(task_id, "detecting", pct, msg),
     )
+    if video_paths:
+        clips = detect_highlights_pooled(
+            video_paths=video_paths, top_n=int(params.get("top_n", 15)), **common
+        )
+    else:
+        clips = detect_highlights(
+            video_path=video_path, top_n=int(params.get("top_n", 8)), **common
+        )
     emit_result(task_id, "success", data={"clips": clips, "count": len(clips)})
 
 
