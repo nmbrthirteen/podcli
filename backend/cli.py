@@ -452,6 +452,8 @@ def cmd_process(args):
         config["crop_strategy"] = args.crop
     if getattr(args, "format", None):
         config["format"] = args.format
+    if getattr(args, "profile", None):
+        config["profile"] = args.profile
     if getattr(args, "thumbnails", None) is not None:
         config["generate_thumbnails"] = args.thumbnails
     if args.top:
@@ -704,6 +706,31 @@ def cmd_process(args):
             print(f"  [3/4] Resumed {len(resumed)} cached suggestions (use --no-resume to regenerate)")
             clips = resumed
             resumed_from_session = True
+
+    # Saliency profiles (party/action) pick moments from the fused laughter/energy
+    # curve rather than the transcript, so they work on footage with no dialogue.
+    from services.profiles import get_profile
+
+    content_profile = get_profile(config.get("profile"))
+    if content_profile.candidate_source == "saliency" and not clips:
+        from services.saliency import detect_highlights
+        from services.formats import get_format
+
+        spec = get_format(config.get("format", "vertical"))
+        print(f"  [3/4] Detecting {content_profile.name} highlights (laughter + energy)...")
+        clips = detect_highlights(
+            video_path,
+            profile_name=content_profile.name,
+            top_n=top_n,
+            min_dur=min(8.0, float(spec.dur_min)),
+            max_dur=float(spec.dur_max),
+            progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
+        )
+        if clips:
+            print(f"         ✓ {len(clips)} highlights found")
+            _save_suggestions_session(cache_hash, top_n, "saliency", clips, selection_sig)
+        else:
+            print("         ⚠ No highlights found, falling back to transcript selection")
 
     # Try an AI CLI first (uses PodStack knowledge base for intelligent selection)
     from services.claude_suggest import suggest_initial_with_claude, _engine_label, _find_ai_cli
@@ -3348,6 +3375,7 @@ def main():
     proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
     proc.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
     proc.add_argument("--format", choices=["vertical", "horizontal", "square"], help="Output aspect ratio (default: vertical)")
+    proc.add_argument("--profile", choices=["podcast", "party", "action"], help="Detection profile: podcast (transcript-first, default), party/action (laughter/energy highlights)")
     proc.add_argument("--logo", help="Logo image (asset name or path)")
     proc.add_argument("--outro", help="Outro video (asset name or path)")
     proc.add_argument("--time-adjust", type=float, help="Timestamp offset in seconds")
