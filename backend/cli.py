@@ -395,6 +395,7 @@ def cmd_process(args):
     from services.clip_generator import generate_clip
     from services.transcript_parser import parse_speaker_transcript
     from services.audio_analyzer import get_energy_profile
+    from services.audio_events import get_event_profile, is_available as audio_events_available
     from services.encoder import get_encoder_info
     from presets import get_preset, DEFAULT_PRESET, MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 
@@ -657,6 +658,7 @@ def cmd_process(args):
 
     # ── Step 2: Analyze audio energy ──
     energy_scores = None
+    reaction_scores = None
     if config.get("energy_boost", True):
         print("  [2/4] Analyzing audio energy...")
         try:
@@ -665,6 +667,15 @@ def cmd_process(args):
             print(f"         {len(profile['peak_times'])} peak moments found")
         except Exception as e:
             print(f"         Skipped (error: {e})")
+        if audio_events_available():
+            try:
+                reactions = get_event_profile(video_path, segments)
+                reaction_scores = reactions["segment_scores"]
+                n = len(reactions["reaction_times"])
+                if n:
+                    print(f"         {n} laughter/reaction moments found")
+            except Exception as e:
+                print(f"         Reactions skipped (error: {e})")
     else:
         print("  [2/4] Audio analysis skipped (--no-energy)")
 
@@ -712,6 +723,7 @@ def cmd_process(args):
         clips = _suggest_clips(
             segments=segments,
             energy_scores=energy_scores,
+            reaction_scores=reaction_scores,
             top_n=top_n,
             min_dur=config.get("min_clip_duration", MIN_CLIP_DURATION),
             max_dur=config.get("max_clip_duration", MAX_CLIP_DURATION),
@@ -1607,6 +1619,7 @@ def _post_render_loop(
 def _suggest_clips(
     segments: list,
     energy_scores: list | None = None,
+    reaction_scores: list | None = None,
     top_n: int = 5,
     min_dur: float = MIN_CLIP_DURATION,
     max_dur: float = MAX_CLIP_DURATION,
@@ -1803,6 +1816,15 @@ def _suggest_clips(
                     score += min(energy_score, 6)
                     if max_e > 7:
                         reasons.append("high_energy")
+
+            # ── 6b. Laughter / reactions (0-6 pts) ──
+            if reaction_scores:
+                seg_reactions = reaction_scores[snap_start : snap_end + 1]
+                if seg_reactions:
+                    max_r = max(seg_reactions)
+                    score += min(max_r, 6)
+                    if max_r > 3:
+                        reasons.append("laughter")
 
             # ── 7. Density check — penalize sparse/rambling segments ──
             words_per_sec = len(text.split()) / max(dur, 1)

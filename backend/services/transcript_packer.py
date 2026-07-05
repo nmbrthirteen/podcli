@@ -38,6 +38,8 @@ SILENCE_GAP_REPORT_SEC = 0.6 # list gaps >= this in the silence section
 PHRASE_MAX_SEC = 12.0
 PHRASE_MAX_CHARS = 160
 ENERGY_PEAKS_TO_REPORT = 20
+REACTIONS_TO_REPORT = 20
+REACTION_REPORT_THRESHOLD = 0.15
 
 
 def compute_cache_hash(video_path: str) -> str:
@@ -272,6 +274,7 @@ def pack_transcript(
     transcript: dict,
     source_label: str,
     energy_data: Optional[list[dict]] = None,
+    events_data: Optional[list[dict]] = None,
 ) -> str:
     """Render a packed markdown view of a transcription JSON."""
     duration = float(transcript.get("duration", 0.0))
@@ -348,6 +351,31 @@ def pack_transcript(
             lines.append(f"[{_fmt_ts(t)}] {rms:.1f}dB{snippet}")
         lines.append("")
 
+    # Laughter & reactions (optional) — the moment BEFORE a laugh is usually the
+    # clippable one, so these timestamps flag where to look for the setup.
+    if events_data:
+        def level(e):
+            return max(e.get("laughter", 0), e.get("cheering", 0), e.get("screaming", 0))
+        reactions = [e for e in events_data if level(e) >= REACTION_REPORT_THRESHOLD]
+        reactions.sort(key=level, reverse=True)
+        reactions = reactions[:REACTIONS_TO_REPORT]
+        reactions.sort(key=lambda e: e.get("time", 0))
+        if reactions:
+            lines.append(f"## Laughter & reactions (top {len(reactions)})")
+            for e in reactions:
+                t = float(e.get("time", 0))
+                kind = max(
+                    ("laughter", "cheering", "screaming"),
+                    key=lambda k: e.get(k, 0),
+                )
+                near = _phrase_for_time(phrases, t)
+                snippet = ""
+                if near:
+                    txt = near["text"]
+                    snippet = f' near: "{txt[:70]}{"…" if len(txt) > 70 else ""}"'
+                lines.append(f"[{_fmt_ts(t)}] {kind} {e.get(kind, 0):.2f}{snippet}")
+            lines.append("")
+
     return "\n".join(lines)
 
 
@@ -372,10 +400,11 @@ def write_packed(
     cache_hash: str,
     source_label: Optional[str] = None,
     energy_data: Optional[list[dict]] = None,
+    events_data: Optional[list[dict]] = None,
 ) -> tuple[str, str]:
     """Pack a transcript dict and write to .podcli/packed/<hash>.md."""
     label = source_label or cache_hash
-    md = pack_transcript(transcript, label, energy_data=energy_data)
+    md = pack_transcript(transcript, label, energy_data=energy_data, events_data=events_data)
     os.makedirs(_packed_dir(), exist_ok=True)
     out_path = packed_path_for(cache_hash)
     with open(out_path, "w", encoding="utf-8") as f:
