@@ -1047,6 +1047,10 @@ app.post("/api/batch-clips", async (req, res) => {
       res.status(400).json({ error: `Clip ${i + 1}: end must be after start` });
       return;
     }
+    if (c.format && !["vertical", "horizontal", "square"].includes(c.format)) {
+      res.status(400).json({ error: `Clip ${i + 1}: invalid format "${c.format}". Use: vertical, horizontal, square` });
+      return;
+    }
     const maxDur = c.format === "horizontal" ? 300 : 180;
     if (dur > maxDur) {
       res.status(400).json({

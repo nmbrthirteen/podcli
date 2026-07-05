@@ -118,7 +118,8 @@ export default function ThumbnailStudio() {
         if ((r.texts || []).length) setTextOpts(r.texts);
       }
       if (!frames.length) { setMsg("No frames found. Pick a video source first."); return; }
-      const next = (frameIdx + 1) % frames.length;
+      const curIdx = frames.findIndex((f: any) => f.path === selFrame?.path);
+      const next = ((curIdx < 0 ? frameIdx : curIdx) + 1) % frames.length;
       setFrameIdx(next);
       const frame = frames[next];
       setSelFrame({ path: frame.path, info: frame });

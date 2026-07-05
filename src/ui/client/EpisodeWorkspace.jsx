@@ -640,7 +640,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         try {
           await api('/presets', { method: 'POST', body: JSON.stringify({
             action: 'save', name: presetName.trim(),
-            config: { caption_style: captionStyle, crop_strategy: cropStrategy, logo_path: logoPath, outro_path: outroPath, video_path: videoPath.trim(), whisper_model: whisperModel, time_adjust: timeAdjust, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
+            config: { caption_style: captionStyle, crop_strategy: cropStrategy, format, logo_path: logoPath, outro_path: outroPath, video_path: videoPath.trim(), whisper_model: whisperModel, time_adjust: timeAdjust, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
           })});
           setActivePreset(presetName.trim());
           setPresetName(''); setShowPresetSave(false);
@@ -781,12 +781,14 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           deselectedIndices: Array.from(deselected),
           settings: { captionStyle, cropStrategy, format, logoPath, outroPath },
           phase,
+          results,
+          energyData,
         };
         const key = JSON.stringify(state);
         if (key === prevSyncRef.current) return;
         prevSyncRef.current = key;
         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => { });
-      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, format, logoPath, outroPath, phase]);
+      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, format, logoPath, outroPath, phase, results, energyData]);
 
       // Sync transcript separately (large payload)
       const prevTranscriptRef = useRef(null);
@@ -807,16 +809,6 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', rawTranscriptText: transcriptText }) }).catch(() => { });
         }
       }, [transcriptText]);
-
-      // Sync export results + energy analysis so they survive navigation
-      const prevDerivedRef = useRef('');
-      useEffect(() => {
-        if (!initializedRef.current) return;
-        const key = JSON.stringify({ results, energyData });
-        if (key === prevDerivedRef.current) return;
-        prevDerivedRef.current = key;
-        fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', results, energyData }) }).catch(() => { });
-      }, [results, energyData]);
 
       // React to SSE events from MCP
       const lastHandledTsRef = useRef(0);

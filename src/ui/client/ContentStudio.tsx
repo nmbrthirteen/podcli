@@ -48,6 +48,12 @@ export default function ContentStudio() {
       .catch(() => {});
   }, []);
 
+  const persist = (r: ContentResult) => {
+    try {
+      localStorage.setItem(STORE, JSON.stringify({ title, mode, result: r }));
+    } catch {}
+  };
+
   const copy = (text: string) => {
     navigator.clipboard?.writeText(text).then(() => {
       setCopied(text);
@@ -85,7 +91,7 @@ export default function ContentStudio() {
       });
       if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing. Is claude or codex installed?");
       setResult(r);
-      try { localStorage.setItem(STORE, JSON.stringify({ title, mode, result: r })); } catch {}
+      persist(r);
     } catch (e: any) {
       setMsg(`Generation failed: ${e.message}`);
     } finally {
@@ -133,19 +139,18 @@ export default function ContentStudio() {
       const instruction = `${REGEN[field]}${regenNote.trim() ? ` Extra guidance: ${regenNote.trim()}` : ""}`;
       const text = await runCustom(instruction);
       if (!text) throw new Error("empty response");
-      setResult((prev) => {
-        const next = { ...(prev || {}) } as ContentResult;
-        if (field === "titles") {
-          next.titles = text
-            .split(/\r?\n/)
-            .map((l) => l.replace(/^\s*\d+[.)]\s*/, "").trim())
-            .filter(Boolean)
-            .slice(0, 8);
-        } else if (field === "description") next.description = text;
-        else if (field === "tags") next.tags = text;
-        else if (field === "hashtags") next.hashtags = text;
-        return next;
-      });
+      const next = { ...(result || {}) } as ContentResult;
+      if (field === "titles") {
+        next.titles = text
+          .split(/\r?\n/)
+          .map((l) => l.replace(/^\s*\d+[.)]\s*/, "").trim())
+          .filter(Boolean)
+          .slice(0, 8);
+      } else if (field === "description") next.description = text;
+      else if (field === "tags") next.tags = text;
+      else if (field === "hashtags") next.hashtags = text;
+      setResult(next);
+      persist(next);
       setRegenField(null);
       setRegenNote("");
     } catch (e: any) {

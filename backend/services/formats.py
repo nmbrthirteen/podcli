@@ -5,6 +5,7 @@ which scoring profile applies) derives from a FormatSpec so the render pipeline
 is parameterized on format instead of hardcoding 1080x1920 per call site.
 """
 
+import sys
 from dataclasses import dataclass
 
 
@@ -64,4 +65,8 @@ DEFAULT_FORMAT = "vertical"
 
 
 def get_format(name: str | None) -> FormatSpec:
+    if name is not None and name not in FORMATS:
+        # Raw MCP/API callers bypass the CLI's choices= guard; warn so a typo'd
+        # format doesn't silently render as vertical.
+        print(f"[formats] unknown format {name!r}; using {DEFAULT_FORMAT}", file=sys.stderr)
     return FORMATS.get(name or DEFAULT_FORMAT, FORMATS[DEFAULT_FORMAT])

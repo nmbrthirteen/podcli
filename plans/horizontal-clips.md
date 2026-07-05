@@ -4,7 +4,7 @@
 
 ## North star
 
-```
+```text
 one detected moment
   ├─ 9:16 short   → Shorts / Reels / TikTok   (hook-first, 20-45s)   ← today
   └─ 16:9 clip    → YouTube in-feed / X / LinkedIn (arc-first, 60-300s) ← this plan
