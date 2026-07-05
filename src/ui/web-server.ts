@@ -24,6 +24,8 @@ import { mkdir, readdir, unlink } from "fs/promises";
 import path from "path";
 import { join, dirname, basename, extname, resolve } from "path";
 import { execSync, spawn } from "child_process";
+import { lookup } from "dns/promises";
+import { isIP } from "net";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
@@ -81,7 +83,7 @@ function safePath(base: string, filename: string): string | null {
 // Track active jobs so the UI can poll progress
 interface JobState {
   id: string;
-  type: "transcribe" | "create_clip" | "batch_clips";
+  type: "transcribe" | "create_clip" | "batch_clips" | "download_video";
   status: "pending" | "running" | "done" | "error";
   progress: number;
   message: string;
@@ -374,6 +376,70 @@ const upload = multer({
   },
 });
 
+function isPublicIp(address: string): boolean {
+  const family = isIP(address);
+  const mapped = address.toLowerCase().startsWith("::ffff:") ? address.slice(7) : "";
+  if (mapped) {
+    if (isIP(mapped) === 4) return isPublicIp(mapped);
+    const parts = mapped.split(":").map((part) => Number.parseInt(part, 16));
+    if (parts.length === 2 && parts.every((part) => Number.isFinite(part))) {
+      return isPublicIp([
+        parts[0] >> 8,
+        parts[0] & 255,
+        parts[1] >> 8,
+        parts[1] & 255,
+      ].join("."));
+    }
+  }
+  if (family === 4) {
+    const parts = address.split(".").map((part) => Number(part));
+    const [a, b] = parts;
+    return !(
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      a >= 224
+    );
+  }
+  if (family === 6) {
+    const normalized = address.toLowerCase();
+    return !(
+      normalized === "::1" ||
+      normalized === "::" ||
+      normalized.startsWith("fc") ||
+      normalized.startsWith("fd") ||
+      normalized.startsWith("fe80:")
+    );
+  }
+  return false;
+}
+
+async function validateDownloadUrl(rawUrl: unknown): Promise<string> {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) {
+    throw new Error("url is required");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch {
+    throw new Error(`Invalid URL: ${rawUrl}`);
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(`Unsupported URL protocol: ${parsed.protocol}. Use http or https.`);
+  }
+  // Best-effort SSRF preflight: yt-dlp still resolves redirects itself at download time.
+  const addresses = await lookup(parsed.hostname, { all: true, verbatim: false });
+  if (addresses.length === 0 || addresses.some((entry) => !isPublicIp(entry.address))) {
+    throw new Error(`Download URL host is not allowed: ${parsed.hostname}. Use a public video URL.`);
+  }
+  return parsed.toString();
+}
+
 // --- API Routes ---
 
 /**
@@ -390,6 +456,157 @@ app.post("/api/upload", upload.single("file"), (req, res) => {
     filename: req.file.originalname,
     size_mb: Math.round((req.file.size / (1024 * 1024)) * 100) / 100,
   });
+});
+
+/**
+ * POST /api/download-video — Download a video URL with yt-dlp into uploads.
+ */
+app.post("/api/download-video", async (req, res) => {
+  let url: string;
+  try {
+    url = await validateDownloadUrl(req.body?.url);
+  } catch (err) {
+    res.status(400).json({ error: errMsg(err) });
+    return;
+  }
+
+  try {
+    await mkdir(uploadDir, { recursive: true });
+  } catch (err) {
+    res.status(500).json({ error: `Failed to create upload directory: ${errMsg(err)}` });
+    return;
+  }
+
+  const jobId = uuidv4();
+  const job: JobState = {
+    id: jobId,
+    type: "download_video",
+    status: "running",
+    progress: 0,
+    message: "Downloading video",
+    createdAt: Date.now(),
+  };
+  jobs.set(jobId, job);
+
+  const args = [
+    "-m",
+    "yt_dlp",
+    // Node is enabled only as a local JS runtime; remote EJS components stay disabled.
+    "--js-runtimes",
+    `node:${process.execPath}`,
+    "--no-playlist",
+    "--format",
+    "b[ext=mp4]/b",
+    "--restrict-filenames",
+    "--windows-filenames",
+    "--paths",
+    uploadDir,
+    "--output",
+    "%(title).200B [%(id)s].%(ext)s",
+    "--newline",
+    "--progress",
+    "--progress-template",
+    "download:podcli-progress:%(progress._percent_str)s",
+    "--print",
+    "after_move:podcli-filepath:%(filepath)s",
+    url,
+  ];
+  const proc = spawn(paths.pythonPath, args, {
+    env: { ...process.env, PYTHONUNBUFFERED: "1" },
+  });
+
+  let stdout = "";
+  let stderr = "";
+  let outputFilePath = "";
+  let settled = false;
+  let responded = false;
+  const timer = setTimeout(() => proc.kill("SIGTERM"), 3600_000);
+  const finish = (action: () => void): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    action();
+  };
+
+  const readYtDlpOutput = (raw: string): void => {
+    for (const line of raw.split(/\r?\n/)) {
+      const progress = line.match(/podcli-progress:\s*(\d+(?:\.\d+)?)%/);
+      if (progress) {
+        job.progress = Number(progress[1]);
+        job.message = "Downloading video";
+        broadcastSSE("job-update", { jobId, progress: job.progress, message: job.message });
+        continue;
+      }
+      const trimmed = line.trim();
+      if (trimmed.startsWith("podcli-filepath:")) {
+        outputFilePath = trimmed.slice("podcli-filepath:".length);
+      }
+    }
+  };
+
+  proc.stdout.on("data", (chunk: Buffer) => {
+    const raw = chunk.toString();
+    stdout += raw;
+    readYtDlpOutput(raw);
+  });
+  proc.stderr.on("data", (chunk: Buffer) => {
+    const raw = chunk.toString();
+    stderr += raw;
+    readYtDlpOutput(raw);
+    if (stderr && job.progress === 0) {
+      job.message = "Downloading video";
+    }
+  });
+  proc.on("error", (err) => {
+    finish(() => {
+      job.status = "error";
+      job.error = `Failed to start yt-dlp with ${paths.pythonPath}: ${err.message}`;
+      job.message = job.error;
+      broadcastSSE("job-error", { jobId, error: job.error });
+    });
+  });
+  proc.on("close", (code) => {
+    finish(() => {
+      if (code !== 0) {
+        job.status = "error";
+        job.error = `yt-dlp failed for ${url} with exit code ${code}. stderr: ${stderr.slice(-1200)}`;
+        job.message = job.error;
+        broadcastSSE("job-error", { jobId, error: job.error });
+        return;
+      }
+
+      const filePath = outputFilePath;
+      if (!filePath || !existsSync(filePath)) {
+        job.status = "error";
+        job.error = `yt-dlp finished but did not report an output file. stdout: ${stdout.slice(-1200)} stderr: ${stderr.slice(-1200)}`;
+        job.message = job.error;
+        broadcastSSE("job-error", { jobId, error: job.error });
+        return;
+      }
+
+      const stat = statSync(filePath);
+      registerSourcePath(filePath);
+      uiState.videoPath = filePath;
+      uiState.filePath = filePath;
+      uiState.lastUpdated = Date.now();
+      persistState();
+      broadcastSSE("state-sync", uiState);
+      job.status = "done";
+      job.progress = 100;
+      job.message = "Download complete";
+      job.result = {
+        file_path: filePath,
+        filename: basename(filePath),
+        size_mb: Math.round((stat.size / (1024 * 1024)) * 100) / 100,
+      };
+      broadcastSSE("job-complete", { jobId, result: job.result });
+    });
+  });
+  req.on("close", () => {
+    if (!responded && !settled) proc.kill("SIGTERM");
+  });
+  responded = true;
+  res.json({ job_id: jobId, status: "running" });
 });
 
 /**
@@ -1653,6 +1870,19 @@ app.post("/api/settings", async (req, res) => {
     const action = value.trim() ? "set" : "unset";
     const result = await executor.execute("manage_env", { action, key, value });
     res.json(result.data ?? { ok: true });
+  } catch (err: unknown) {
+    res.status(500).json({ error: errMsg(err) });
+  }
+});
+
+app.get("/api/ai-cli-status", async (_req, res) => {
+  try {
+    const result = await executor.execute<{
+      configured?: Record<string, string | null>;
+      candidates?: Array<{ engine: string; path: string }>;
+      available?: boolean;
+    }>("ai_cli_status", {});
+    res.json(result.data ?? { available: false, candidates: [], configured: {} });
   } catch (err: unknown) {
     res.status(500).json({ error: errMsg(err) });
   }

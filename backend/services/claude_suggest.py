@@ -21,45 +21,342 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 
 
-def _find_cli(name: str, extra_paths: list[str] = None) -> Optional[str]:
-    """Find a CLI binary by name. Checks extra_paths first, then PATH.
-    Uses shutil.which (pure Python) to avoid the ~50-100ms cost of spawning
-    a `which` subprocess — banner renders twice (claude + codex) on startup.
-    """
-    import shutil
-    # On Windows the binary is claude.exe / claude.cmd (npm shim), so an
-    # extensionless path never matches on disk — try the usual suffixes.
-    exts = ["", ".cmd", ".exe", ".bat"] if sys.platform == "win32" else [""]
-    for path in (extra_paths or []):
-        for ext in exts:
-            if os.path.isfile(path + ext):
-                return path + ext
-    return shutil.which(name)
+def _cli_name_exts() -> list[str]:
+    if sys.platform == "win32":
+        return ["", ".cmd", ".exe", ".bat"]
+    return [""]
 
 
-def _ai_cli_search_paths(name: str) -> list[str]:
-    """Common install locations for an AI CLI, in addition to PATH."""
-    paths_out = [
-        os.path.expanduser(f"~/.local/bin/{name}"),
-        f"/usr/local/bin/{name}",
-        f"/opt/homebrew/bin/{name}",
+def _resolve_cli_path(path: str) -> Optional[str]:
+    for ext in _cli_name_exts():
+        candidate = path + ext
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _dedupe_dirs(dirs: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for directory in dirs:
+        if not directory:
+            continue
+        directory = os.path.expanduser(directory)
+        if directory in seen:
+            continue
+        seen.add(directory)
+        if os.path.isdir(directory):
+            ordered.append(directory)
+    return ordered
+
+
+def _npmrc_prefix_dirs() -> list[str]:
+    dirs: list[str] = []
+    npmrc_paths = [os.path.join(os.path.expanduser("~"), ".npmrc")]
+    try:
+        from services.env_settings import _env_path
+        npmrc_paths.append(os.path.join(os.path.dirname(_env_path()), ".npmrc"))
+    except Exception:
+        pass
+    for npmrc in npmrc_paths:
+        if not os.path.isfile(npmrc):
+            continue
+        try:
+            with open(npmrc, encoding="utf-8") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#") or stripped.startswith(";"):
+                        continue
+                    if stripped.startswith("prefix="):
+                        prefix = stripped.split("=", 1)[1].strip()
+                        if prefix:
+                            dirs.append(prefix if sys.platform == "win32" else os.path.join(prefix, "bin"))
+        except Exception:
+            pass
+    return dirs
+
+
+def _package_manager_bin_dirs() -> list[str]:
+    dirs: list[str] = []
+    npm_cmds = [
+        (["npm", "config", "get", "prefix"], "prefix"),
+        (["npm", "root", "-g"], "root"),
+    ]
+    for args, kind in npm_cmds:
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=2)
+        except Exception:
+            continue
+        if result.returncode != 0:
+            continue
+        raw = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
+        if not raw:
+            continue
+        if kind == "prefix":
+            dirs.append(raw if sys.platform == "win32" else os.path.join(raw, "bin"))
+        elif kind == "root":
+            dirs.append(os.path.join(raw, ".bin"))
+        else:
+            dirs.append(raw)
+
+    for args, kind in (
+        (["pnpm", "config", "get", "global-bin-dir"], "bin"),
+        (["pnpm", "bin", "-g"], "bin"),
+        (["yarn", "global", "bin"], "bin"),
+    ):
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=2)
+        except Exception:
+            continue
+        if result.returncode != 0:
+            continue
+        raw = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
+        if raw:
+            dirs.append(raw)
+
+    return dirs
+
+
+def _version_manager_bin_dirs() -> list[str]:
+    home = os.path.expanduser("~")
+    dirs = [
+        os.path.join(home, "bin"),
+        os.path.join(home, ".asdf", "shims"),
+        os.path.join(home, ".local", "share", "mise", "shims"),
+        os.path.join(home, ".local", "share", "rtx", "shims"),
+        os.path.join(home, ".bun", "bin"),
+        os.path.join(home, ".cargo", "bin"),
+        os.path.join(home, "go", "bin"),
+        os.path.join(home, ".local", "share", "pnpm"),
+        os.path.join(home, ".claude", "bin"),
+    ]
+
+    nvm_dir = os.environ.get("NVM_DIR") or os.path.join(home, ".nvm")
+    try:
+        import glob
+        dirs.extend(sorted(glob.glob(os.path.join(nvm_dir, "versions", "node", "*", "bin")), reverse=True))
+        dirs.extend(glob.glob(os.path.join(home, ".fnm", "node-versions", "*", "installation", "bin")))
+        dirs.extend(glob.glob(os.path.join(home, ".local", "share", "fnm", "node-versions", "*", "installation", "bin")))
+    except Exception:
+        pass
+
+    fnm_bin = os.path.join(home, ".local", "share", "fnm", "current", "bin")
+    dirs.append(fnm_bin)
+    dirs.append(os.path.join(home, ".volta", "bin"))
+
+    if sys.platform == "win32":
+        for env_key in ("APPDATA", "LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+            base = os.environ.get(env_key)
+            if not base:
+                continue
+            dirs.extend([
+                os.path.join(base, "npm"),
+                os.path.join(base, "Programs", "nodejs"),
+                os.path.join(base, "Microsoft", "WinGet", "Links"),
+            ])
+        dirs.append(os.path.join(home, "scoop", "shims"))
+        dirs.append(os.path.join(os.environ.get("ProgramData", ""), "npm"))
+    else:
+        dirs.extend([
+            "/usr/bin",
+            "/bin",
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/snap/bin",
+            "/var/lib/snapd/snap/bin",
+        ])
+
+    npm_prefix = (
+        os.environ.get("NPM_CONFIG_PREFIX")
+        or os.environ.get("npm_config_prefix")
+        or ""
+    ).strip()
+    if npm_prefix:
+        dirs.append(os.path.join(os.path.expanduser(npm_prefix), "bin"))
+
+    return dirs
+
+
+def _static_lookup_dirs() -> list[str]:
+    home = os.path.expanduser("~")
+    dirs = [
+        os.path.join(home, ".local", "bin"),
+        os.path.join(home, ".claude", "local", "bin"),
+        os.path.join(home, ".claude", "local", "node_modules", ".bin"),
+        os.path.join(home, ".npm-global", "bin"),
     ]
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         if appdata:
-            paths_out.append(os.path.join(appdata, "npm", name))
+            dirs.append(os.path.join(appdata, "npm"))
+        dirs.append(os.path.join(home, ".local", "bin"))
+    return dirs
+
+
+def _all_lookup_dirs() -> list[str]:
+    return _dedupe_dirs(
+        _static_lookup_dirs()
+        + _version_manager_bin_dirs()
+        + _npmrc_prefix_dirs()
+        + _package_manager_bin_dirs()
+    )
+
+
+def _path_lookup_dirs() -> list[str]:
+    return _all_lookup_dirs()
+
+
+def _npm_global_bin_dirs() -> list[str]:
+    return _package_manager_bin_dirs()
+
+
+def _parse_shell_lookup_line(line: str) -> Optional[str]:
+    candidate = line.strip().strip('"')
+    if not candidate:
+        return None
+    if " is " in candidate:
+        candidate = candidate.split(" is ", 1)[1].strip()
+    if candidate.startswith("(") and candidate.endswith(")"):
+        candidate = candidate[1:-1].strip()
+    return _resolve_cli_path(candidate) or (candidate if os.path.isfile(candidate) else None)
+
+
+def _shell_lookup(name: str) -> Optional[str]:
+    if sys.platform == "win32":
+        commands = [
+            ["where", name],
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"(Get-Command {name} -All -ErrorAction SilentlyContinue | "
+                f"Select-Object -ExpandProperty Source)",
+            ],
+        ]
+    else:
+        commands = [
+            ["sh", "-lc", f"command -v {name}"],
+            ["bash", "-lc", f"type -a {name} 2>/dev/null"],
+            ["zsh", "-lc", f"whence -p {name} 2>/dev/null; command -v {name} 2>/dev/null"],
+            ["fish", "-lc", f"type -a {name} 2>/dev/null"],
+        ]
+
+    for cmd in commands:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        except Exception:
+            continue
+        if result.returncode != 0 or not result.stdout.strip():
+            continue
+        for line in result.stdout.strip().splitlines():
+            resolved = _parse_shell_lookup_line(line)
+            if resolved:
+                return resolved
+    return None
+
+
+def _glob_cli_paths(name: str) -> list[str]:
+    import glob
+    home = os.path.expanduser("~")
+    patterns = [
+        os.path.join(home, ".claude", "bin", name),
+        os.path.join(home, ".claude", "*", "bin", name),
+        os.path.join(home, ".local", "share", "claude", "bin", name),
+        os.path.join(home, ".local", "share", "npm", "*", "bin", name),
+    ]
+    if sys.platform == "win32":
+        patterns.extend([
+            os.path.join(home, ".claude", "bin", f"{name}.exe"),
+            os.path.join(home, ".claude", "bin", f"{name}.cmd"),
+        ])
+    found: list[str] = []
+    for pattern in patterns:
+        try:
+            found.extend(glob.glob(pattern))
+        except Exception:
+            pass
+    return found
+
+
+def _configured_cli_path(engine: str) -> Optional[str]:
+    env_key = "PODCLI_CLAUDE_PATH" if engine == "claude" else "PODCLI_CODEX_PATH"
+    raw = (os.environ.get(env_key) or "").strip()
+    if not raw:
+        try:
+            from services.env_settings import _read_pairs
+            raw = (_read_pairs().get(env_key) or "").strip()
+        except Exception:
+            pass
+    if not raw:
+        return None
+    return _resolve_cli_path(raw) or (raw if os.path.isfile(raw) else None)
+
+
+def _find_cli(name: str, extra_paths: list[str] = None) -> Optional[str]:
+    import shutil
+
+    for path in (extra_paths or []) + _glob_cli_paths(name):
+        resolved = _resolve_cli_path(path)
+        if resolved:
+            return resolved
+
+    lookup_dirs = _all_lookup_dirs()
+    lookup_path = os.pathsep.join(lookup_dirs + [os.environ.get("PATH", "")])
+    found = shutil.which(name, path=lookup_path)
+    if found:
+        return found
+
+    for directory in lookup_dirs:
+        resolved = _resolve_cli_path(os.path.join(directory, name))
+        if resolved:
+            return resolved
+
+    for directory in (os.environ.get("PATH", "") or "").split(os.pathsep):
+        if not directory:
+            continue
+        resolved = _resolve_cli_path(os.path.join(directory, name))
+        if resolved:
+            return resolved
+
+    return _shell_lookup(name)
+
+
+def _ai_cli_search_paths(name: str) -> list[str]:
+    paths_out = [os.path.join(directory, name) for directory in _all_lookup_dirs()]
+    paths_out.extend(_glob_cli_paths(name))
     return paths_out
 
 
+def _env_cli_path(engine: str) -> Optional[str]:
+    return _configured_cli_path(engine)
+
+
+def get_ai_cli_status() -> dict:
+    configured = {
+        "claude": _configured_cli_path("claude"),
+        "codex": _configured_cli_path("codex"),
+    }
+    candidates = [
+        {"engine": engine, "path": path}
+        for path, engine in _find_ai_cli_candidates()
+    ]
+    return {
+        "configured": configured,
+        "candidates": candidates,
+        "available": bool(candidates),
+        "searched_dirs": _all_lookup_dirs(),
+    }
+
+
 def _find_ai_cli_candidates() -> list[tuple[str, str]]:
-    """Find all available AI CLIs in preference order."""
     candidates = []
 
-    claude = _find_cli("claude", _ai_cli_search_paths("claude"))
+    claude = _env_cli_path("claude") or _find_cli("claude", _ai_cli_search_paths("claude"))
     if claude:
         candidates.append((claude, "claude"))
 
-    codex = _find_cli("codex", _ai_cli_search_paths("codex"))
+    codex = _env_cli_path("codex") or _find_cli("codex", _ai_cli_search_paths("codex"))
     if codex:
         candidates.append((codex, "codex"))
 
@@ -134,16 +431,20 @@ def _run_ai_command(
                 pass
         return result
 
-    return subprocess.run(
-        f'cat "{prompt_file}" | "{cli_path}" --print -p -',
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        cwd=project_dir,
-        timeout=timeout,
-        shell=True,
-    )
+    shell = sys.platform == "win32" and cli_path.lower().endswith((".cmd", ".bat"))
+    cmd = f'"{cli_path}" --print -p -' if shell else [cli_path, "--print", "-p", "-"]
+    with open(prompt_file, encoding="utf-8") as prompt_fh:
+        return subprocess.run(
+            cmd,
+            stdin=prompt_fh,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=project_dir,
+            timeout=timeout,
+            shell=shell,
+        )
 
 
 def _load_existing_shorts(episodes_path: str) -> list[str]:

@@ -357,13 +357,24 @@ def handle_corrections(task_id: str, params: dict):
 
 def handle_suggest_clips(task_id: str, params: dict):
     """AI-powered clip suggestion using Claude/Codex and PodStack knowledge base."""
-    from services.claude_suggest import suggest_with_claude
+    from services.claude_suggest import suggest_with_claude, _find_ai_cli_candidates
 
     segments = params.get("segments", [])
     top_n = params.get("top_n", 5)
 
     if not segments:
         emit_result(task_id, "error", error="segments is required")
+        return
+
+    if not _find_ai_cli_candidates():
+        emit_result(
+            task_id,
+            "error",
+            error=(
+                "No AI CLI available (install Claude Code or Codex). "
+                "If already installed, set the path in Config → AI CLI or PODCLI_CLAUDE_PATH."
+            ),
+        )
         return
 
     clips = suggest_with_claude(
@@ -373,7 +384,11 @@ def handle_suggest_clips(task_id: str, params: dict):
     )
 
     if clips is None:
-        emit_result(task_id, "error", error="No AI CLI available (install Claude Code or Codex)")
+        emit_result(
+            task_id,
+            "error",
+            error="AI CLI found but suggestion failed — check claude/codex login and try again",
+        )
         return
 
     emit_result(task_id, "success", data={"clips": clips})
@@ -389,6 +404,12 @@ def handle_manage_env(task_id: str, params: dict):
         emit_result(task_id, "error", error=str(e))
         return
     emit_result(task_id, "success", data=data)
+
+
+def handle_ai_cli_status(task_id: str, params: dict):
+    from services.claude_suggest import get_ai_cli_status
+
+    emit_result(task_id, "success", data=get_ai_cli_status())
 
 
 def handle_find_moment(task_id: str, params: dict):
@@ -420,12 +441,24 @@ def handle_find_moment(task_id: str, params: dict):
 def handle_generate_content(task_id: str, params: dict):
     """Generate titles, descriptions, tags for a clip using PodStack knowledge base."""
     from services.content_generator import generate_clip_content
+    from services.claude_suggest import _find_ai_cli_candidates
 
     clip = params.get("clip", {})
     transcript_segments = params.get("transcript_segments", [])
 
     if not clip:
         emit_result(task_id, "error", error="clip is required")
+        return
+
+    if not _find_ai_cli_candidates():
+        emit_result(
+            task_id,
+            "error",
+            error=(
+                "No AI CLI available (install Claude Code or Codex). "
+                "If already installed, set the path in Config → AI CLI or PODCLI_CLAUDE_PATH."
+            ),
+        )
         return
 
     result = generate_clip_content(
@@ -439,7 +472,11 @@ def handle_generate_content(task_id: str, params: dict):
     )
 
     if result is None:
-        emit_result(task_id, "error", error="No AI CLI available (install Claude Code or Codex)")
+        emit_result(
+            task_id,
+            "error",
+            error="AI CLI found but content generation failed — check claude/codex login and try again",
+        )
         return
 
     emit_result(task_id, "success", data=result)
@@ -554,6 +591,7 @@ TASK_HANDLERS = {
     "suggest_clips": handle_suggest_clips,
     "find_moment": handle_find_moment,
     "manage_env": handle_manage_env,
+    "ai_cli_status": handle_ai_cli_status,
     "generate_content": handle_generate_content,
     "generate_custom": handle_generate_custom,
     "manage_integrations": handle_manage_integrations,
