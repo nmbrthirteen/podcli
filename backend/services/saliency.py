@@ -117,6 +117,46 @@ def _snap_to_quiet(target_sec: float, energy_curve: np.ndarray, window_sec: floa
     return (lo + int(np.argmin(local))) / GRID_HZ
 
 
+def _seg_index_at(t: float, segments: list[dict]) -> int:
+    """Index of the segment covering t, else the nearest segment start."""
+    for i, s in enumerate(segments):
+        if s.get("start", 0) <= t <= s.get("end", 0):
+            return i
+    return min(range(len(segments)), key=lambda i: abs(segments[i].get("start", 0) - t))
+
+
+def _sentence_window(
+    peak_sec: float,
+    back_sec: float,
+    fwd_sec: float,
+    segments: list[dict],
+    min_dur: float,
+    max_dur: float,
+) -> tuple[float, float]:
+    """Build a clip out of whole segments (sentences) so it never cuts mid-thought.
+
+    Starts at a sentence boundary, extends back ~back_sec and forward ~fwd_sec (and
+    enough to clear min_dur), always snapping to segment edges and never exceeding
+    max_dur.
+    """
+    idx = _seg_index_at(peak_sec, segments)
+    start = segments[idx].get("start", peak_sec)
+    end = segments[idx].get("end", peak_sec)
+    i = idx
+    while i > 0 and (peak_sec - segments[i - 1]["start"]) <= back_sec and (end - segments[i - 1]["start"]) <= max_dur:
+        i -= 1
+        start = segments[i]["start"]
+    j = idx
+    while (
+        j < len(segments) - 1
+        and (segments[j + 1]["end"] - start) <= max_dur
+        and ((end - start) < min_dur or (segments[j]["end"] - peak_sec) < fwd_sec)
+    ):
+        j += 1
+        end = segments[j]["end"]
+    return start, end
+
+
 def _window_for_peak(
     peak_sec: float,
     reaction_level: float,
@@ -125,27 +165,31 @@ def _window_for_peak(
     energy_curve: np.ndarray,
     min_dur: float,
     max_dur: float,
+    segments: Optional[list[dict]] = None,
 ) -> tuple[float, float, bool]:
-    """Clip window for a peak. A reaction peak expands backwards from the reaction onset."""
+    """Clip window for a peak. A reaction peak expands backwards from the reaction onset.
+
+    With a transcript, boundaries snap to whole sentences so each clip is a complete
+    thought; without one (party footage) they snap to audio lulls instead.
+    """
     is_reaction = reaction_level >= 0.15
-    if is_reaction:
-        # The funny thing happens BEFORE the laugh, so keep the run-up: expand backwards
-        # from the reaction, snap only the end to a lull, and grow the start (not the
-        # end) if we're under the minimum so the payoff stays put.
-        start = max(0.0, peak_sec - profile.reaction_lookback_sec)
-        end = _snap_to_quiet(min(duration, peak_sec + profile.reaction_payoff_sec), energy_curve)
-        if end - start < min_dur:
-            start = max(0.0, end - min_dur)
-        elif end - start > max_dur:
-            start = end - max_dur
+    back = profile.reaction_lookback_sec if is_reaction else min_dur / 2.0
+    fwd = profile.reaction_payoff_sec if is_reaction else min_dur / 2.0
+
+    if segments:
+        start, end = _sentence_window(peak_sec, back, fwd, segments, min_dur, max_dur)
     else:
-        half = min_dur / 2.0
-        start = _snap_to_quiet(max(0.0, peak_sec - half), energy_curve)
-        end = _snap_to_quiet(min(duration, peak_sec + half), energy_curve)
+        start = _snap_to_quiet(max(0.0, peak_sec - back), energy_curve)
+        end = _snap_to_quiet(min(duration, peak_sec + fwd), energy_curve)
         if end - start < min_dur:
-            end = min(duration, start + min_dur)
+            if is_reaction:
+                start = max(0.0, end - min_dur)
+            else:
+                end = min(duration, start + min_dur)
         elif end - start > max_dur:
+            start = end - max_dur if is_reaction else start
             end = start + max_dur
+
     return round(max(0.0, start), 1), round(min(duration, end), 1), is_reaction
 
 
@@ -156,11 +200,14 @@ def detect_highlights(
     min_dur: float = 8.0,
     max_dur: float = 60.0,
     height_z: float = 1.0,
+    segments: Optional[list[dict]] = None,
     progress_callback: Optional[Callable] = None,
 ) -> list[dict]:
     """
-    Generate highlight clips from a video's fused signal curve (no transcript needed).
+    Generate highlight clips from a video's fused signal curve.
 
+    If `segments` (a transcript) is provided, clip boundaries snap to whole sentences
+    so each clip is a complete thought; without it, boundaries snap to audio lulls.
     Returns clip dicts compatible with the render pipeline:
     {title, start_second, end_second, duration, score, reasons, preview}.
     """
@@ -222,7 +269,7 @@ def detect_highlights(
         peak_sec = i / GRID_HZ
         reaction_level = float(reaction_curve[i]) if want_reaction else 0.0
         start, end, is_reaction = _window_for_peak(
-            peak_sec, reaction_level, profile, duration, energy_curve, min_dur, max_dur
+            peak_sec, reaction_level, profile, duration, energy_curve, min_dur, max_dur, segments
         )
         if end - start < min_dur * 0.75:
             continue
