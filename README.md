@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Open-source AI podcast clipper.</strong><br/>
-  Generate vertical clips with face tracking and burned-in captions. CLI, MCP server, and web app.
+  Generate short clips in 9:16, 16:9, or 1:1 with face tracking and burned-in captions. CLI, MCP server, and web app.
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="https://github.com/nmbrthirteen/podcli/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="license: AGPL-3.0" /></a>
-  <a href="https://github.com/nmbrthirteen/podcli/stargazers"><img src="https://img.shields.io/github/stars/nmbrthirteen/podcli?style=social&cacheSeconds=86400" alt="stars" /></a>
+  <a href="https://github.com/nmbrthirteen/podcli/stargazers"><img src="https://img.shields.io/github/stars/nmbrthirteen/podcli?style=social" alt="stars" /></a>
 </p>
 
 <p align="center">
@@ -45,7 +45,7 @@ Transcribe (Whisper, speaker detection)
     ↓
 Find viral moments (Claude AI + audio energy + knowledge base)
     ↓
-Render clips (9:16, captions, smart crop, normalized audio)
+Render clips (9:16, 16:9, or 1:1, captions, smart crop, normalized audio)
     ↓
 Generate content package (titles, descriptions, thumbnails, SEO)    ← PodStack
     ↓
@@ -120,6 +120,8 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 ### Video Processing
 
 - **AI clip suggestion** — Claude/Codex-powered moment detection with knowledge base context, multi-cut segments, 4-dimension scoring
+- **Multi-format output** — vertical 9:16, horizontal 16:9, or square 1:1 (`--format`, the studio selector, or the `create_clip` MCP tool); captions scale to each canvas. Defaults to vertical.
+- **Import from a URL** — paste a YouTube or direct video link in the studio to download and process it
 - **Face tracking** — YuNet face detection, exponential-smoothing camera, split-screen support, speaker-aware tracking with snap cooldown
 - **Burned-in captions** — 4 styles: branded, hormozi, karaoke, subtle
 - **Hardware-accelerated encoding** — VideoToolbox (Mac), NVENC (NVIDIA), VAAPI, CPU fallback
@@ -145,6 +147,7 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 - **Asset management** — register logos and videos for quick reuse
 - **Clip history** — tracks everything to avoid duplicates
 - **Preset system** — save named configurations per show
+- **Content studio** — generate titles, descriptions, tags, and hashtags in the web UI; regenerate any section with your own guidance, or ask for anything custom
 - **MCP server** — 17 tools for Claude Desktop / Claude Code integration
 - **Web UI** — single-page flow at `localhost:3847`
 - **CLI** — one-command processing: `podcli process episode.mp4`
@@ -179,13 +182,13 @@ podcli process episode.mp4   # transcribe + export clips
 Supported platforms: macOS (Apple Silicon), Linux (x64 / arm64), Windows (x64).
 Intel Macs are coming in a follow-up release.
 
-To uninstall the app files while keeping your config, knowledge, presets, assets, history, and cache:
+To uninstall, remove podcli and everything under its managed folder — runtime, models, cache, **and your config, knowledge, presets, assets, and history**:
 
 ```bash
 podcli uninstall
 ```
 
-Add `--purge` if you want to remove the entire managed podcli folder, including user data.
+This removes all managed data by default. Run `podcli uninstall --dry-run` first to see exactly what will be removed, and back up the folder if you want to keep any of it. (`--purge` is kept as a no-op alias.)
 
 **Optional**, for AI clip suggestion and the PodStack slash commands: install
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or
