@@ -119,13 +119,27 @@ def extract_audio_events(video_path: str) -> list[dict]:
         return []
 
     input_name = session.get_inputs()[0].name
-    scores = session.run(None, {input_name: waveform})[0]  # [frames, 521]
-    n_frames = scores.shape[0]
-    if n_frames == 0:
-        return []
 
-    duration = waveform.size / 16000.0
-    hop = duration / n_frames
+    # Windowed so one multi-hour session.run() can't block the worker unboundedly.
+    window = 16000 * 300
+    parts: list[np.ndarray] = []
+    times: list[float] = []
+    for offset in range(0, waveform.size, window):
+        chunk = waveform[offset:offset + window]
+        if chunk.size < 16000:
+            continue
+        chunk_scores = session.run(None, {input_name: chunk})[0]  # [frames, 521]
+        if chunk_scores.shape[0] == 0:
+            continue
+        hop = (chunk.size / 16000.0) / chunk_scores.shape[0]
+        base = offset / 16000.0
+        times.extend(base + f * hop for f in range(chunk_scores.shape[0]))
+        parts.append(chunk_scores)
+
+    if not parts:
+        return []
+    scores = np.concatenate(parts, axis=0)
+    n_frames = scores.shape[0]
 
     def channel_max(keys: list[int]) -> np.ndarray:
         return scores[:, keys].max(axis=1) if keys else np.zeros(n_frames)
@@ -137,7 +151,7 @@ def extract_audio_events(video_path: str) -> list[dict]:
 
     return [
         {
-            "time": round(i * hop, 2),
+            "time": round(times[i], 2),
             "laughter": round(float(laughter[i]), 3),
             "cheering": round(float(cheering[i]), 3),
             "screaming": round(float(screaming[i]), 3),
