@@ -148,8 +148,8 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 - **Clip history** — tracks everything to avoid duplicates
 - **Preset system** — save named configurations per show
 - **Content studio** — generate titles, descriptions, tags, and hashtags in the web UI; regenerate any section with your own guidance, or ask for anything custom
-- **MCP server** — 17 tools for Claude Desktop / Claude Code integration
-- **Web UI** — single-page flow at `localhost:3847`
+- **MCP server** — 22 tools for Claude Desktop / Claude Code integration
+- **Web UI** — multi-page studio at `localhost:3847`
 - **CLI** — one-command processing: `podcli process episode.mp4`
 
 ---
