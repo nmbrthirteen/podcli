@@ -90,6 +90,7 @@ export default function ClipDetail() {
   const tc = clip.thumbnail_config || {};
   const dirty = title !== clip.title || captionStyle !== clip.caption_style;
   const previewUrl = `/api/clips/${clip.id}/preview?t=${bust}`;
+  const posterUrl = tc.preview_path ? img(tc.preview_path, bust) : undefined;
 
   const patch = (body: any) => api(`/clips/${clip.id}`, { method: "PATCH", body: JSON.stringify(body) });
 
@@ -231,7 +232,7 @@ export default function ClipDetail() {
 
       <div className="clip-detail">
         <div className="clip-detail-player">
-          {clip.output_path ? <ClipPlayer key={previewUrl} src={previewUrl} onTime={(t) => (playerTime.current = t)} /> : <div className="phone-empty">No rendered output</div>}
+          {clip.output_path ? <ClipPlayer key={previewUrl} src={previewUrl} poster={posterUrl} onTime={(t) => (playerTime.current = t)} /> : <div className="phone-empty">No rendered output</div>}
           <button className="btn btn-ghost btn-sm" style={{ width: "100%", marginTop: 10 }} onClick={() => setReframing(true)}>Reframe (fix camera)</button>
           <div className="clip-meta">
             <span>{fmt(clip.start_second)}-{fmt(clip.end_second)} · {clip.duration}s</span>

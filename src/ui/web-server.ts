@@ -1614,6 +1614,7 @@ app.get("/api/encoder-info", async (_req, res) => {
 
 // --- Speaker Detection Status ---
 app.get("/api/speaker-status", (_req, res) => {
+  if (DEMO) { res.json({ configured: true, setup_url: "", token_url: "" }); return; }
   const envPath = join(process.cwd(), ".env");
   let token = process.env.HF_TOKEN || "";
   if (!token && existsSync(envPath)) {
