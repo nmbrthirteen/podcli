@@ -60,6 +60,14 @@ class EditTests(unittest.TestCase):
         self.assertEqual(len(self.s.moments), 1)
         self.assertEqual(self.s.moments[0].text, "two")
 
+    def test_drop_marks_shifted_moments_dirty(self):
+        for m in self.s.moments:
+            m.dirty = False
+        R.edit_moment(self.s, 1, "drop")
+        # The moment that slid into position 1 must re-cut, else it reuses the
+        # dropped moment's clip file.
+        self.assertTrue(self.s.moments[0].dirty)
+
     def test_toggle_disables_without_removing(self):
         R.edit_moment(self.s, 1, "toggle")
         self.assertFalse(self.s.moments[0].enabled)
@@ -88,6 +96,49 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(len(loaded.moments), 2)
         self.assertEqual(loaded.moments[1].why, "reaction")
         self.assertIsInstance(loaded.moments[0], R.Moment)
+
+    def test_format_defaults_to_horizontal(self):
+        s = _session(sid="roundtrip_reel")
+        s.save()
+        self.assertEqual(R.ReelSession.load("roundtrip_reel").format, "horizontal")
+
+
+class FormatTests(unittest.TestCase):
+    def test_horizontal_pads_to_1920x1080(self):
+        vf = R._scale_filter("horizontal")
+        self.assertIn("1920:1080", vf)
+        self.assertIn("pad=", vf)
+
+    def test_vertical_crops_to_fill(self):
+        vf = R._scale_filter("vertical")
+        self.assertIn("1080:1920", vf)
+        self.assertIn("crop=1080:1920", vf)
+
+    def test_square_crops_to_fill(self):
+        vf = R._scale_filter("square")
+        self.assertIn("crop=1080:1080", vf)
+
+
+class SessionRegistryTests(unittest.TestCase):
+    _ids = ("registry_a", "registry_b")
+
+    def tearDown(self):
+        for sid in self._ids:
+            p = R.session_path(sid)
+            if os.path.exists(p):
+                os.remove(p)
+
+    def test_list_and_delete(self):
+        for sid in self._ids:
+            _session(sid=sid).save()
+        listed = {s["session_id"] for s in R.list_sessions()}
+        self.assertTrue(set(self._ids) <= listed)
+        summary = next(s for s in R.list_sessions() if s["session_id"] == "registry_a")
+        self.assertEqual(summary["moment_count"], 2)
+        self.assertEqual(summary["enabled_count"], 2)
+        self.assertTrue(R.delete_session("registry_a"))
+        self.assertFalse(R.delete_session("registry_a"))
+        self.assertNotIn("registry_a", {s["session_id"] for s in R.list_sessions()})
 
 
 if __name__ == "__main__":
