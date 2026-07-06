@@ -621,6 +621,8 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
               setDeselected(new Set());
               setResults([]);
               setEnergyData({});
+              setPreviewSrc(null);
+              setActiveClipIdx(null);
               autoTranscribeRef.current = '';
               setPhase('idle');
             }
