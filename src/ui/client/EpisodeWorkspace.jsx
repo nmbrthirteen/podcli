@@ -634,6 +634,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           if (d.max_clip_duration) setMaxDuration(d.max_clip_duration);
           if (d.energy_boost !== undefined) setEnergyBoost(d.energy_boost);
           if (d.whisper_model) setWhisperModel(d.whisper_model);
+          if (d.transcription_engine) setTranscriptionEngine(d.transcription_engine);
           if (d.time_adjust !== undefined) setTimeAdjust(d.time_adjust);
           setActivePreset(name);
         } catch {}
@@ -645,7 +646,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         try {
           await api('/presets', { method: 'POST', body: JSON.stringify({
             action: 'save', name: presetName.trim(),
-            config: { caption_style: captionStyle, crop_strategy: cropStrategy, format, logo_path: logoPath, outro_path: outroPath, video_path: videoPath.trim(), whisper_model: whisperModel, time_adjust: timeAdjust, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
+            config: { caption_style: captionStyle, crop_strategy: cropStrategy, format, logo_path: logoPath, outro_path: outroPath, video_path: videoPath.trim(), whisper_model: whisperModel, transcription_engine: transcriptionEngine, time_adjust: timeAdjust, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
           })});
           setActivePreset(presetName.trim());
           setPresetName(''); setShowPresetSave(false);
