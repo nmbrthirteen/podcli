@@ -875,12 +875,28 @@ Transcript:
             pass
 
 
+def classify_cli_error(detail: str) -> str:
+    """Turn a raw AI CLI failure into an actionable hint. The generic
+    'check login' message hides whether it's auth, a plan limit, or a crash."""
+    low = (detail or "").lower()
+    if any(s in low for s in ("not logged in", "please run", "/login", "authenticate", "unauthorized", "invalid api key", "no credentials")):
+        return "not logged in. Run `claude` (or `codex`) once in a terminal to authenticate, then retry."
+    if any(s in low for s in ("usage limit", "rate limit", "quota", "too many requests", "429")):
+        return "usage or rate limit reached on your plan. Wait for the limit to reset, then retry."
+    if "timed out" in low or "timeout" in low:
+        return detail
+    if not detail:
+        return "the AI CLI returned no output. Run `claude` once in a terminal to confirm it responds."
+    return detail
+
+
 def suggest_with_claude(
     segments: list[dict],
     top_n: int = 5,
     exclude_clips: list[dict] | None = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
     timeout: int = 300,
+    error_sink: Optional[list[str]] = None,
 ) -> Optional[list[dict]]:
     """
     Use an AI CLI (Claude Code or Codex) to extract the best clip moments.
@@ -939,6 +955,7 @@ def suggest_with_claude(
             except ValueError:
                 return 0.0
 
+        last_detail: Optional[str] = None
         for idx, (cli_path, engine) in enumerate(candidates):
             label = _engine_label(engine)
             if idx > 0 and progress_callback:
@@ -955,17 +972,20 @@ def suggest_with_claude(
                     timeout=timeout,
                 )
             except subprocess.TimeoutExpired:
+                last_detail = f"{label} timed out ({_format_timeout_label(timeout)} limit)"
                 if progress_callback:
-                    progress_callback(0, f"{label} timed out ({_format_timeout_label(timeout)} limit)")
+                    progress_callback(0, last_detail)
                 continue
             except Exception as e:
+                last_detail = f"{label} error: {e}"
                 if progress_callback:
-                    progress_callback(0, f"{label} error: {e}")
+                    progress_callback(0, last_detail)
                 continue
 
             if result.returncode != 0 or not result.stdout.strip():
+                detail = (result.stderr or "no response").strip()[:200]
+                last_detail = f"{label}: {detail}"
                 if progress_callback:
-                    detail = (result.stderr or "no response").strip()[:200]
                     progress_callback(0, f"{label} returned error: {detail}")
                 continue
 
@@ -987,12 +1007,14 @@ def suggest_with_claude(
                 else:
                     data = json.loads(response)
             except json.JSONDecodeError as e:
+                last_detail = f"{label} returned output that wasn't valid JSON ({e})"
                 if progress_callback:
                     progress_callback(0, f"Could not parse {label}'s response as JSON: {e}")
                 continue
 
             clips = data.get("clips", [])
             if not clips:
+                last_detail = f"{label} ran but found no clips in the transcript"
                 if progress_callback:
                     progress_callback(0, f"{label} returned no clips")
                 continue
@@ -1047,9 +1069,12 @@ def suggest_with_claude(
                     progress_callback(100, f"{label} suggested {len(selected)} clips")
                 return selected
 
+            last_detail = f"{label} returned clips but none were usable (wrong length or format)"
             if progress_callback:
                 progress_callback(0, f"{label} returned no usable clips")
 
+        if error_sink is not None:
+            error_sink.append(classify_cli_error(last_detail or ""))
         return None
     finally:
         # Clean up temp file
