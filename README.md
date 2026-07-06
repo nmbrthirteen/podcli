@@ -9,6 +9,7 @@
 
 <p align="center">
   <a href="https://podcli.com"><strong>podcli.com</strong></a> ·
+  <a href="https://podcli.com/docs">Docs</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#mcp-server-claude-integration">MCP</a> ·
   <a href="#features">Features</a>
@@ -31,6 +32,8 @@ podcli process episode.mp4
 ```
 
 One command transcribes, picks the best moments, crops to the face, and burns captions in. Nothing leaves your machine.
+
+Full documentation lives at [podcli.com/docs](https://podcli.com/docs). The docs are open source, edit them at [nmbrthirteen/podcli-docs](https://github.com/nmbrthirteen/podcli-docs).
 
 ---
 
