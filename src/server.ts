@@ -2077,7 +2077,7 @@ export function createServer(): McpServer {
   // =============================================
   server.tool(
     "manage_reel",
-    "Create and iterate on a highlights reel. Detection runs once with action 'new'; after that, edit individual moments fast (longer/shorter/earlier/later/shift/drop/toggle) and rebuild without re-detecting. Actions: 'new' (video_path, profile, format, top_n, min_dur, max_dur), 'list', 'show' (session_id), 'edit' (session_id, index, op, seconds), 'build' (session_id), 'delete' (session_id).",
+    "Create and iterate on a highlights reel. Detection runs once with action 'new'; after that, edit individual moments fast (longer/shorter/earlier/later/shift/drop/toggle) and rebuild without re-detecting. Pass video_paths (a list) to pool many videos and rank the best moments across all of them. Actions: 'new' (video_path or video_paths, profile, format, top_n, min_dur, max_dur), 'list', 'show' (session_id), 'edit' (session_id, index, op, seconds), 'build' (session_id), 'delete' (session_id).",
     {
       action: z
         .enum(["new", "list", "show", "edit", "build", "delete"])
@@ -2086,6 +2086,10 @@ export function createServer(): McpServer {
         .string()
         .optional()
         .describe("For 'new': path to the source video"),
+      video_paths: z
+        .array(z.string())
+        .optional()
+        .describe("For 'new': many source videos to pool and rank the best moments across all of them"),
       session_id: z
         .string()
         .optional()

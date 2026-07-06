@@ -23,7 +23,7 @@ import {
 import { mkdir, readdir, unlink } from "fs/promises";
 import path from "path";
 import { join, dirname, basename, extname, resolve } from "path";
-import { execSync, spawn } from "child_process";
+import { execSync, execFileSync, spawn } from "child_process";
 import { lookup } from "dns/promises";
 import { isIP } from "net";
 import { tmpdir } from "os";
@@ -679,46 +679,56 @@ app.post("/api/select-file", (req, res) => {
 /**
  * GET /api/browse-file — Open native OS file dialog and return the selected path
  */
-app.get("/api/browse-file", (_req, res) => {
+app.get("/api/browse-file", (req, res) => {
+  const multiple = req.query.multiple === "1" || req.query.multiple === "true";
   try {
-    let filePath: string;
+    let raw: string;
     if (process.platform === "darwin") {
-      const script = `osascript -e 'POSIX path of (choose file of type {"mp4","mov","mkv","webm","mp3","wav","m4a"})'`;
-      filePath = execSync(script, {
-        encoding: "utf-8",
-        timeout: 120_000,
-      }).trim();
+      const mult = multiple ? " with multiple selections allowed" : "";
+      raw = execFileSync(
+        "osascript",
+        [
+          "-e", `set sel to choose file of type {"mp4","mov","mkv","webm","mp3","wav","m4a"}${mult}`,
+          "-e", 'if class of sel is not list then set sel to {sel}',
+          "-e", "set out to \"\"",
+          "-e", "repeat with f in sel",
+          "-e", "set out to out & POSIX path of f & linefeed",
+          "-e", "end repeat",
+          "-e", "return out",
+        ],
+        { encoding: "utf-8", timeout: 120_000 },
+      );
     } else if (process.platform === "win32") {
       // EncodedCommand (UTF-16LE base64) sidesteps cmd→PowerShell quoting; -STA is required by WinForms dialogs.
       const ps = [
         "Add-Type -AssemblyName System.Windows.Forms;",
         "$f = New-Object System.Windows.Forms.OpenFileDialog;",
         "$f.Filter = 'Media files|*.mp4;*.mov;*.mkv;*.webm;*.mp3;*.wav;*.m4a';",
-        "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.FileName }",
+        multiple ? "$f.Multiselect = $true;" : "",
+        "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $f.FileNames -join [Environment]::NewLine }",
       ].join(" ");
       const encoded = Buffer.from(ps, "utf16le").toString("base64");
-      filePath = execSync(`powershell -NoProfile -STA -EncodedCommand ${encoded}`, {
+      raw = execSync(`powershell -NoProfile -STA -EncodedCommand ${encoded}`, {
         encoding: "utf-8",
         timeout: 120_000,
-      }).trim();
+      });
     } else {
-      // Linux fallback
-      filePath = execSync(
-        `zenity --file-selection --file-filter="Media files|*.mp4 *.mov *.mkv *.webm *.mp3 *.wav *.m4a"`,
-        { encoding: "utf-8", timeout: 120_000 },
-      ).trim();
+      const args = ["--file-selection", "--file-filter=Media files|*.mp4 *.mov *.mkv *.webm *.mp3 *.wav *.m4a"];
+      if (multiple) args.push("--multiple", "--separator=\n");
+      raw = execFileSync("zenity", args, { encoding: "utf-8", timeout: 120_000 });
     }
 
-    if (!filePath || !existsSync(filePath)) {
+    const paths = raw.split("\n").map((p) => p.trim()).filter((p) => p && existsSync(p));
+    if (paths.length === 0) {
       res.json({ error: "cancelled" });
       return;
     }
-
-    const stat = statSync(filePath);
-    registerSourcePath(filePath);
+    for (const p of paths) registerSourcePath(p);
+    const stat = statSync(paths[0]);
     res.json({
-      file_path: filePath,
-      filename: basename(filePath),
+      file_path: paths[0],
+      file_paths: paths,
+      filename: basename(paths[0]),
       size_mb: Math.round((stat.size / (1024 * 1024)) * 100) / 100,
     });
   } catch {
@@ -1570,6 +1580,9 @@ app.post("/api/reel", async (req, res) => {
     const result = await executor.execute("manage_reel", req.body || {});
     const data = (result.data || {}) as any;
     if (typeof data.source === "string") registerSourcePath(data.source);
+    if (Array.isArray(data.sources)) {
+      for (const s of data.sources) if (typeof s === "string") registerSourcePath(s);
+    }
     if (typeof data.reel_path === "string") registerSourcePath(data.reel_path);
     if (Array.isArray(data.moments)) {
       for (const m of data.moments) {
