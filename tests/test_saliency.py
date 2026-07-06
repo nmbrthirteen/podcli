@@ -75,6 +75,22 @@ class FuseChannelsTests(unittest.TestCase):
         self.assertTrue(np.allclose(fused, 0.0))
 
 
+class ProfileTests(unittest.TestCase):
+    def test_auto_is_a_saliency_profile(self):
+        p = get_profile("auto")
+        self.assertEqual(p.name, "auto")
+        self.assertEqual(p.candidate_source, "saliency")
+
+    def test_auto_fuses_multiple_channels(self):
+        # auto blends audio_event, energy and motion, so any one can drive a peak
+        channels = {"motion": np.array([0.0, 0.0, 5.0]), "energy": np.array([1.0, 1.0, 1.0])}
+        fused = sal.fuse_channels(channels, get_profile("auto"))
+        self.assertEqual(int(np.argmax(fused)), 2)
+
+    def test_unknown_profile_falls_back(self):
+        self.assertEqual(get_profile("nonsense").name, "podcast")
+
+
 class WindowForPeakTests(unittest.TestCase):
     def setUp(self):
         self.energy_flat = np.zeros(200)
