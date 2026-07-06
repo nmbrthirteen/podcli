@@ -20,7 +20,7 @@ import {
   chmodSync,
   realpathSync,
 } from "fs";
-import { mkdir, readdir, rm, unlink } from "fs/promises";
+import { mkdir, readdir, unlink } from "fs/promises";
 import path from "path";
 import { join, dirname, basename, extname, resolve } from "path";
 import { execSync, spawn } from "child_process";
@@ -338,9 +338,6 @@ app.use(express.static(publicDir));
 
 // File upload config
 const uploadDir = join(paths.working, "uploads");
-const cachedMediaExtensions = new Set([".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a"]);
-const transcriptCacheExtensions = new Set([".json"]);
-const packedTranscriptExtensions = new Set([".md"]);
 const upload = multer({
   storage: multer.diskStorage({
     destination: async (_req, _file, cb) => {
@@ -379,19 +376,6 @@ const upload = multer({
     }
   },
 });
-
-async function clearCacheFiles(dir: string, extensions: Set<string>): Promise<number> {
-  if (!existsSync(dir)) return 0;
-  const entries = await readdir(dir, { withFileTypes: true });
-  let deleted = 0;
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    if (!extensions.has(extname(entry.name).toLowerCase())) continue;
-    await rm(join(dir, entry.name), { force: true });
-    deleted += 1;
-  }
-  return deleted;
-}
 
 function clearEpisodeSessionState(): void {
   sessionTranscripts.clear();
@@ -484,7 +468,7 @@ async function validateDownloadUrl(rawUrl: unknown): Promise<string> {
 // --- API Routes ---
 
 /**
- * POST /api/session-cache/clear - Clear per-session uploads and transcript caches.
+ * POST /api/session-cache/clear - Clear in-memory UI state.
  */
 app.post("/api/session-cache/clear", async (_req, res) => {
   try {
@@ -496,13 +480,10 @@ app.post("/api/session-cache/clear", async (_req, res) => {
       });
       return;
     }
-    const uploads = await clearCacheFiles(uploadDir, cachedMediaExtensions);
-    const transcripts = await clearCacheFiles(paths.transcripts, transcriptCacheExtensions);
-    const packed = await clearCacheFiles(paths.packed, packedTranscriptExtensions);
     clearEpisodeSessionState();
     persistState();
     broadcastSSE("state-sync", uiState);
-    res.json({ ok: true, uploads, transcripts, packed });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: `Failed to clear session cache: ${errMsg(err)}` });
   }
@@ -860,6 +841,12 @@ app.post("/api/transcribe", async (req, res) => {
   if (cached) {
     const jobId = uuidv4();
     sessionTranscripts.set(file_path, cached as unknown as ServerTranscript);
+    uiState.transcript = cached as unknown as typeof uiState.transcript;
+    uiState.videoPath = file_path;
+    uiState.filePath = file_path;
+    registerSourcePath(file_path);
+    uiState.lastUpdated = Date.now();
+    persistState();
     res.json({
       job_id: jobId,
       status: "done",

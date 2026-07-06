@@ -241,6 +241,10 @@ export function createServer(): McpServer {
         .optional()
         .default("base")
         .describe("Whisper model size"),
+      engine: z
+        .enum(["whisper-py", "whispercpp", "assemblyai"])
+        .optional()
+        .describe("Transcription engine"),
       language: z.string().optional().describe("ISO language code"),
       enable_diarization: z
         .boolean()
@@ -257,6 +261,7 @@ export function createServer(): McpServer {
     async ({
       file_path,
       model_size,
+      engine,
       language,
       enable_diarization,
       num_speakers,
@@ -265,6 +270,7 @@ export function createServer(): McpServer {
         const result = await handleTranscribe({
           file_path,
           model_size,
+          engine,
           language,
           enable_diarization,
           num_speakers,
@@ -274,7 +280,7 @@ export function createServer(): McpServer {
         // on-disk cache — NOT the trimmed MCP response. Without words in UI
         // state, downstream batch_create_clips can't burn captions.
         try {
-          const cached = await transcriptCache.get(file_path);
+          const cached = await transcriptCache.get(file_path, engine);
           if (cached) {
             await uiPing({
               videoPath: file_path,
@@ -314,6 +320,7 @@ export function createServer(): McpServer {
         .optional()
         .default("base"),
       language: z.string().optional(),
+      engine: z.enum(["whisper-py", "whispercpp", "assemblyai"]).optional(),
       enable_diarization: z.boolean().optional().default(true),
       num_speakers: z.number().optional(),
     },
@@ -1307,7 +1314,10 @@ export function createServer(): McpServer {
           // Auto-generated during transcription — see backend/services/transcript_packer.py.
           let packed: string | null = null;
           if (state.videoPath) {
-            packed = await transcriptCache.getPackedMarkdown(state.videoPath);
+            packed = await transcriptCache.getPackedMarkdown(
+              state.videoPath,
+              state.transcript?.engine,
+            );
           }
           if (!packed && state.rawTranscriptText) {
             packed = await transcriptCache.getPackedMarkdownFromText(

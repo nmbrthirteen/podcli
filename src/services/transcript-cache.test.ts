@@ -69,6 +69,15 @@ describe("TranscriptCache", () => {
     expect(hashA).toBe(hashB);
   });
 
+  it("reads packed markdown with the engine suffix", async () => {
+    const file = makeFakeVideo("assemblyai.mp4", "same media");
+    const hash = await cache.getFileHashForEngine(file, "assemblyai");
+    mkdirSync(join(tmp, "packed"), { recursive: true });
+    writeFileSync(join(tmp, "packed", `${hash}.md`), "# Packed AssemblyAI");
+    expect(await cache.getPackedMarkdown(file, "assemblyai")).toBe("# Packed AssemblyAI");
+    expect(await cache.getPackedMarkdown(file)).toBeNull();
+  });
+
   it("get returns null when the cache file is corrupt", async () => {
     const file = makeFakeVideo("corrupt-source.mp4", "any content");
     const hash = await cache.getFileHash(file);

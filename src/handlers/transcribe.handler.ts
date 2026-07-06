@@ -9,6 +9,7 @@ const cache = new TranscriptCache();
 export interface TranscribeInput {
   file_path: string;
   model_size?: "tiny" | "base" | "small" | "medium" | "large";
+  engine?: "whisper-py" | "whispercpp" | "assemblyai";
   language?: string;
   enable_diarization?: boolean;
   num_speakers?: number;
@@ -45,6 +46,11 @@ export const transcribeToolDef = {
         type: "string",
         description: "ISO language code (e.g. 'en'). Leave empty for auto-detect.",
       },
+      engine: {
+        type: "string",
+        enum: ["whisper-py", "whispercpp", "assemblyai"],
+        description: "Transcription engine. Default: whisper-py.",
+      },
       enable_diarization: {
         type: "boolean",
         description:
@@ -65,25 +71,27 @@ export const transcribeToolDef = {
 export async function handleTranscribe(input: TranscribeInput): Promise<string> {
   const filePath = input.file_path;
   const modelSize = input.model_size ?? "base";
+  const engine = input.engine;
   const language = input.language;
   const enableDiarization = input.enable_diarization !== false; // default true
   const numSpeakers = input.num_speakers;
 
   // Check cache first
-  const cached = await cache.get(filePath);
+  const cached = await cache.get(filePath, engine);
   if (cached) {
+    const packedEngine = cached.engine ?? engine;
     // Backfill packed view if this cache predates auto-packing.
-    let packed = await cache.getPackedMarkdown(filePath);
+    let packed = await cache.getPackedMarkdown(filePath, packedEngine);
     if (!packed) {
       try {
-        const cacheHash = await cache.getFileHash(filePath);
+        const cacheHash = await cache.getFileHashForEngine(filePath, packedEngine);
         await executor.execute("pack_transcript", {
           transcript: cached,
           cache_hash: cacheHash,
           source_label: basename(filePath),
           file_path: filePath,
         });
-        packed = await cache.getPackedMarkdown(filePath);
+        packed = await cache.getPackedMarkdown(filePath, packedEngine);
       } catch {
         // Non-fatal — caller still gets metadata
       }
@@ -95,6 +103,7 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const result = await executor.execute<TranscriptResult>("transcribe", {
     file_path: filePath,
     model_size: modelSize,
+    engine,
     language,
     enable_diarization: enableDiarization,
     num_speakers: numSpeakers,
@@ -106,8 +115,8 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const data = result.data;
 
   // Cache the raw result
-  await cache.set(filePath, data);
-  const packed = await cache.getPackedMarkdown(filePath);
+  await cache.set(filePath, data, engine);
+  const packed = await cache.getPackedMarkdown(filePath, data.engine ?? engine);
 
   return JSON.stringify({ cached: false, packed_ready: !!packed, ...formatResult(data) });
 }
@@ -153,6 +162,10 @@ export const transcribeStartToolDef = {
         default: "base",
       },
       language: { type: "string" },
+      engine: {
+        type: "string",
+        enum: ["whisper-py", "whispercpp", "assemblyai"],
+      },
       enable_diarization: { type: "boolean", default: true },
       num_speakers: { type: "number" },
     },
@@ -168,6 +181,7 @@ export async function handleTranscribeStart(input: TranscribeInput): Promise<str
       body: JSON.stringify({
         file_path: input.file_path,
         model_size: input.model_size ?? "base",
+        engine: input.engine,
         language: input.language,
         enable_diarization: input.enable_diarization !== false,
         num_speakers: input.num_speakers,

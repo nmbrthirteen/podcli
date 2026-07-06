@@ -64,6 +64,10 @@ export class TranscriptCache {
     });
   }
 
+  async getFileHashForEngine(filePath: string, engine?: string): Promise<string> {
+    return `${await this.getFileHash(filePath)}${this.engineSuffix(engine)}`;
+  }
+
   private engineSuffix(engine?: string): string {
     const value = (engine ?? "").trim().toLowerCase();
     if (["whispercpp", "whisper-cpp", "whisper.cpp", "cpp"].includes(value)) {
@@ -103,7 +107,7 @@ export class TranscriptCache {
    */
   async getPackedMarkdown(filePath: string, engine?: string): Promise<string | null> {
     try {
-      const hash = `${await this.getFileHash(filePath)}${this.engineSuffix(engine)}`;
+      const hash = await this.getFileHashForEngine(filePath, engine);
       return await this.readPackedByHash(hash);
     } catch {
       return null;
