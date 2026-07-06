@@ -78,6 +78,26 @@ func wantsRuntime(args []string) bool {
 	return false
 }
 
+func wantsStudio(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	switch args[0] {
+	case "studio", "ui", "webui":
+		return true
+	}
+	return false
+}
+
+func refreshStudioBundles() {
+	if _, err := provision.EnsureStudio(Version); err != nil {
+		fmt.Fprintf(os.Stderr, "  studio: not refreshed (%v)\n", err)
+	}
+	if _, err := provision.EnsureRemotion(Version); err != nil {
+		fmt.Fprintf(os.Stderr, "  remotion: not refreshed (%v)\n", err)
+	}
+}
+
 // ensureRuntime self-provisions on first run so `podcli` works without a separate
 // `podcli setup`. Not called on the mcp path, whose stdout is the JSON-RPC channel.
 func ensureRuntime() error {
@@ -113,6 +133,9 @@ func runEngine(args []string) int {
 			fmt.Fprintln(os.Stderr, "podcli:", err)
 			return 1
 		}
+	}
+	if wantsStudio(args) {
+		refreshStudioBundles()
 	}
 	if transcribeEngine(args) == "whispercpp" {
 		model, err := provision.EnsureModel(transcribeModel(args))
@@ -263,12 +286,12 @@ func setup(args []string) int {
 	} else {
 		fmt.Printf("  node:    %s\n", nb)
 	}
-	if sd, err := provision.EnsureStudio(); err != nil {
+	if sd, err := provision.EnsureStudio(Version); err != nil {
 		fmt.Fprintf(os.Stderr, "  studio:  skipped (%v) - Web UI needs a published release\n", err)
 	} else {
 		fmt.Printf("  studio:  %s\n", sd)
 	}
-	if rd, err := provision.EnsureRemotion(); err != nil {
+	if rd, err := provision.EnsureRemotion(Version); err != nil {
 		fmt.Fprintf(os.Stderr, "  remotion: skipped (%v) - captions/thumbnails need a published release\n", err)
 	} else {
 		fmt.Printf("  remotion: %s\n", rd)

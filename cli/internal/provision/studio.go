@@ -40,6 +40,17 @@ func NodeBin() string {
 func StudioDir() string    { return filepath.Join(paths.RuntimeDir(), "studio") }
 func StudioServer() string { return filepath.Join(StudioDir(), "web-server.mjs") }
 
+func bundleStamp(dir string) string { return filepath.Join(dir, ".podcli-version") }
+
+func bundleAt(dir, version string) bool {
+	b, err := os.ReadFile(bundleStamp(dir))
+	return err == nil && strings.TrimSpace(string(b)) == version
+}
+
+func writeBundleStamp(dir, version string) {
+	os.WriteFile(bundleStamp(dir), []byte(version), 0o644)
+}
+
 func EnsureNode() (string, error) {
 	bin := NodeBin()
 	if have(bin) {
@@ -91,8 +102,8 @@ func RemotionScript() string { return filepath.Join(RemotionDir(), "render.mjs")
 // a production node_modules with native bindings) and extracts it into the
 // runtime dir so remotion/ and node_modules/ sit beside backend/. Per-platform
 // because @rspack and the Remotion compositor ship native binaries.
-func EnsureRemotion() (string, error) {
-	if have(RemotionScript()) {
+func EnsureRemotion(version string) (string, error) {
+	if have(RemotionScript()) && bundleAt(RemotionDir(), version) {
 		return RemotionDir(), nil
 	}
 	name := fmt.Sprintf("remotion-bundle-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
@@ -124,6 +135,7 @@ func EnsureRemotion() (string, error) {
 	if !have(RemotionScript()) {
 		return "", fmt.Errorf("remotion render.mjs missing after extraction")
 	}
+	writeBundleStamp(RemotionDir(), version)
 	return RemotionDir(), nil
 }
 
@@ -158,9 +170,9 @@ func EnsureRemotionBrowser() error {
 
 // EnsureStudio fetches the prebuilt, platform-independent studio bundle (server +
 // SPA) from the latest release into StudioDir.
-func EnsureStudio() (string, error) {
+func EnsureStudio(version string) (string, error) {
 	server := StudioServer()
-	if have(server) {
+	if have(server) && bundleAt(StudioDir(), version) {
 		return StudioDir(), nil
 	}
 	assets, err := latestReleaseAssets()
@@ -191,6 +203,7 @@ func EnsureStudio() (string, error) {
 	if !have(server) {
 		return "", fmt.Errorf("studio server missing after extraction in %s", StudioDir())
 	}
+	writeBundleStamp(StudioDir(), version)
 	return StudioDir(), nil
 }
 
