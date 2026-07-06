@@ -65,6 +65,7 @@ export interface TranscriptResult {
   language: string;
   speakers: SpeakerSummary;
   speaker_segments: SpeakerSegment[];
+  engine?: string;
 }
 
 // === Clip Models ===

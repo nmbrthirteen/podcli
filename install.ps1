@@ -50,7 +50,11 @@ public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wP
 
 if ($Uninstall) {
   Write-Host "Uninstalling podcli..."
-  $targets = @($homeDir)
+  if ($Purge) {
+    $targets = @($homeDir)
+  } else {
+    $targets = @($binDir, (Join-Path $homeDir 'runtime'), (Join-Path $homeDir 'models'), (Join-Path $homeDir 'tools'))
+  }
   foreach ($p in $targets) {
     if (Test-Path $p) {
       try {
@@ -71,7 +75,11 @@ if ($Uninstall) {
       Write-Host "  removed from user PATH (restart your terminal)"
     }
   }
-  Write-Host "  removed managed data."
+  if ($Purge) {
+    Write-Host "  removed podcli and user data."
+  } else {
+    Write-Host "  removed podcli runtime files. User data preserved; pass -Purge to remove it."
+  }
   exit 0
 }
 
