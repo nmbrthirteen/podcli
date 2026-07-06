@@ -19,6 +19,14 @@ SETTINGS = [
         "secret": True,
     },
     {
+        "key": "ASSEMBLYAI_API_KEY",
+        "label": "AssemblyAI API key",
+        "help": "Enables AssemblyAI transcription in the Studio and CLI.",
+        "url": "https://www.assemblyai.com/dashboard/activation",
+        "secret": True,
+        "placeholder": "aai_...",
+    },
+    {
         "key": "PODCLI_CLAUDE_PATH",
         "label": "Claude Code CLI path",
         "help": "Full path to the claude binary when auto-discovery fails. "

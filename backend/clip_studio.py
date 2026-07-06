@@ -82,12 +82,14 @@ def _probe_duration(path: str) -> float:
         return 0.0
 
 
-def _transcribe(video: str, language: str | None):
+def _transcribe(video: str, language: str | None, engine: str | None):
     """Transcribe (cached) and return the word list."""
     from services.transcription import transcribe_file
-    print("  [transcribe] running Whisper...", flush=True)
+    selected = (engine or os.environ.get("PODCLI_ENGINE", "")).strip().lower()
+    label = "AssemblyAI" if selected in ("assemblyai", "assembly-ai", "aai") else "Whisper"
+    print(f"  [transcribe] running {label}...", flush=True)
     res = transcribe_file(
-        file_path=video, model_size="base", language=language,
+        file_path=video, model_size="base", engine=engine, language=language,
         enable_diarization=False,
         progress_callback=lambda p, m: print(f"    {p}% {m}", flush=True),
     )
@@ -199,6 +201,7 @@ def main():
     ap.add_argument("--end", type=float, help="Fragment end (seconds)")
     ap.add_argument("--paragraph", help="Find fragment by matching this text in the transcript")
     ap.add_argument("--language", default=None, help="Transcription language (e.g. es). Auto-detect if omitted.")
+    ap.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], default=None, help="Transcription engine")
     ap.add_argument("--caption-style", default="hormozi", choices=["hormozi", "karaoke", "subtle", "branded"])
     ap.add_argument("--crop", default="face", choices=["center", "face", "speaker", "speaker-hardcut"])
     ap.add_argument("--output", default=None, help="Final output path")
@@ -244,7 +247,7 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     # Need a transcript if cutting by paragraph or if rendering captions.
-    words = _transcribe(video, args.language)
+    words = _transcribe(video, args.language, args.engine)
 
     if args.paragraph:
         start, end = _find_paragraph(words, args.paragraph)

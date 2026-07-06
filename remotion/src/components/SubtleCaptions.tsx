@@ -103,7 +103,7 @@ export const SubtleCaptions: React.FC<Props> = ({ words, style }) => {
         <span
           style={{
             fontFamily: style.fontFamily,
-            fontSize: style.fontSize,
+            fontSize: style.fontSize * s,
             fontWeight: 400,
             color: style.color,
             textShadow:

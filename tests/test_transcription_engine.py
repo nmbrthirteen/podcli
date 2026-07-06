@@ -17,8 +17,10 @@ import services.transcription as tr
 class TranscriptionEngineTests(unittest.TestCase):
     def setUp(self):
         self._orig_wcpp = tr._transcribe_with_whispercpp
+        self._orig_aai = tr._transcribe_with_assemblyai
         self._orig_ready = tr._whispercpp_ready
         tr._transcribe_with_whispercpp = lambda *a, **k: {"engine": "whispercpp"}
+        tr._transcribe_with_assemblyai = lambda *a, **k: {"engine": "assemblyai"}
         tr._whispercpp_ready = lambda size: True
         # Make `import whisper` fail to simulate a native (hermetic) install.
         self._had_whisper = sys.modules.get("whisper", "__absent__")
@@ -30,6 +32,7 @@ class TranscriptionEngineTests(unittest.TestCase):
 
     def tearDown(self):
         tr._transcribe_with_whispercpp = self._orig_wcpp
+        tr._transcribe_with_assemblyai = self._orig_aai
         tr._whispercpp_ready = self._orig_ready
         if self._had_whisper == "__absent__":
             sys.modules.pop("whisper", None)
@@ -50,6 +53,11 @@ class TranscriptionEngineTests(unittest.TestCase):
         os.environ["PODCLI_ENGINE"] = "whispercpp"
         result = tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=False)
         self.assertEqual(result["engine"], "whispercpp")
+
+    def test_explicit_assemblyai_uses_it(self):
+        os.environ["PODCLI_ENGINE"] = "assemblyai"
+        result = tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=False)
+        self.assertEqual(result["engine"], "assemblyai")
 
     def test_whispercpp_skips_diarization_by_default(self):
         # Regression: the cpp path must not attempt torch-backed diarization even

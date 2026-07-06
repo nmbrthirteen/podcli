@@ -87,7 +87,13 @@ def run(
                 (result.stderr or "")[-400:].strip(),
             )
             raise ProcError(cmd, result.returncode, result.stderr or "", duration)
-        log.debug("proc.nonzero tool=%s rc=%d duration=%.2fs", tool, result.returncode, duration)
+        log.debug(
+            "proc.nonzero tool=%s rc=%d duration=%.2fs stderr=%s",
+            tool,
+            result.returncode,
+            duration,
+            (result.stderr or "")[-400:].strip(),
+        )
     else:
         log.debug("proc.ok tool=%s duration=%.2fs", tool, duration)
     return result

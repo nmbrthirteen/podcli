@@ -25,6 +25,8 @@ try:
 except ImportError:
     pass
 import traceback
+from version import VERSION
+
 
 def emit_progress(task_id: str, stage: str, percent: int, message: str, **extra):
     """Write a progress event to stderr (picked up by TypeScript executor)."""
@@ -53,25 +55,43 @@ def emit_result(task_id: str, status: str, data=None, error=None):
 
 def handle_ping(task_id: str, params: dict):
     """Simple health check."""
-    emit_result(task_id, "success", data={"message": "pong", "version": "1.0.0"})
+    emit_result(task_id, "success", data={"message": "pong", "version": VERSION})
 
 
 def handle_transcribe(task_id: str, params: dict):
     """Transcribe a podcast video/audio file with speaker detection."""
     from services.transcription import transcribe_file
     from services.corrections import apply_corrections
-    from services.transcript_packer import compute_cache_hash, write_packed
+    from services.transcript_packer import compute_cache_hash, engine_cache_suffix, write_packed
 
     emit_progress(task_id, "transcribing", 0, "Starting transcription...")
     file_path = params["file_path"]
-    result = transcribe_file(
-        file_path=file_path,
-        model_size=params.get("model_size", "base"),
-        language=params.get("language"),
-        enable_diarization=params.get("enable_diarization", True),
-        num_speakers=params.get("num_speakers"),
-        progress_callback=lambda pct, msg: emit_progress(task_id, "transcribing", pct, msg),
-    )
+    engine = params.get("engine")
+    previous_engine = os.environ.get("PODCLI_ENGINE")
+    previous_assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
+    if engine:
+        os.environ["PODCLI_ENGINE"] = engine
+    if params.get("assemblyai_api_key"):
+        os.environ["ASSEMBLYAI_API_KEY"] = params["assemblyai_api_key"]
+    try:
+        result = transcribe_file(
+            file_path=file_path,
+            model_size=params.get("model_size", "base"),
+            engine=engine,
+            language=params.get("language"),
+            enable_diarization=params.get("enable_diarization", True),
+            num_speakers=params.get("num_speakers"),
+            progress_callback=lambda pct, msg: emit_progress(task_id, "transcribing", pct, msg),
+        )
+    finally:
+        if previous_engine is None:
+            os.environ.pop("PODCLI_ENGINE", None)
+        else:
+            os.environ["PODCLI_ENGINE"] = previous_engine
+        if previous_assemblyai_key is None:
+            os.environ.pop("ASSEMBLYAI_API_KEY", None)
+        else:
+            os.environ["ASSEMBLYAI_API_KEY"] = previous_assemblyai_key
     # Apply word corrections (Whisper misheard proper nouns)
     apply_corrections(result.get("words", []), result.get("segments", []))
 
@@ -80,7 +100,7 @@ def handle_transcribe(task_id: str, params: dict):
     try:
         from services.audio_analyzer import extract_audio_energy
 
-        cache_hash = compute_cache_hash(file_path)
+        cache_hash = compute_cache_hash(file_path) + engine_cache_suffix(result.get("engine") or engine)
         energy_data = None
         try:
             energy_data = extract_audio_energy(file_path)

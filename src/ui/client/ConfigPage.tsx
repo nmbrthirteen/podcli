@@ -246,7 +246,7 @@ export default function ConfigPage() {
               <div className="set-file">
                 <input
                   type="password"
-                  placeholder={s.set ? "Replace token" : "hf_..."}
+                  placeholder={s.set ? "Replace token" : (s.placeholder || "token")}
                   value={secretInputs[s.key] ?? ""}
                   onChange={(e) => setSecretInputs((p) => ({ ...p, [s.key]: e.target.value }))}
                   style={{ flex: 1 }}
