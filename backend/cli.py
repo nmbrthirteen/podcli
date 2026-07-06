@@ -593,7 +593,8 @@ def cmd_process(args):
             result = cached
             print(f"         {len(segments)} segments, {len(words)} words")
         else:
-            engine_label = "AssemblyAI" if os.environ.get("PODCLI_ENGINE", "").strip().lower() in ("assemblyai", "assembly-ai", "aai") else "Whisper"
+            from services.engines import is_assemblyai_engine
+            engine_label = "AssemblyAI" if is_assemblyai_engine(os.environ.get("PODCLI_ENGINE", "")) else "Whisper"
             print(f"  [1/4] Transcribing with {engine_label}...")
             _ensure_ssl_certs()
             import warnings

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -437,9 +438,14 @@ if ($kept.Count -eq $parts.Count) { exit 2 }
 $key.SetValue('Path', ($kept -join ';'), $kind)`
 	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps)
 	cmd.Env = append(os.Environ(), "PODCLI_REMOVE_PATH="+remove)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 2 {
 			return false, nil
+		}
+		if detail := strings.TrimSpace(stderr.String()); detail != "" {
+			return false, fmt.Errorf("%w: %s", err, detail)
 		}
 		return false, err
 	}

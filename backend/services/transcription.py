@@ -19,6 +19,8 @@ import urllib.parse
 import urllib.request
 from typing import Optional, Callable
 
+from services.engines import is_assemblyai_engine, normalize_engine
+
 
 def _managed_home() -> str:
     h = os.environ.get("PODCLI_HOME")
@@ -463,10 +465,10 @@ def transcribe_file(
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    requested = (engine if engine is not None else os.environ.get("PODCLI_ENGINE", "")).strip().lower()
-    engine = requested or "whisper-py"
-    use_cpp = engine in ("whispercpp", "whisper-cpp", "whisper.cpp", "cpp")
-    use_assemblyai = engine in ("assemblyai", "assembly-ai", "aai")
+    requested = engine if engine is not None else os.environ.get("PODCLI_ENGINE", "")
+    engine = normalize_engine(requested)
+    use_cpp = engine == "whispercpp"
+    use_assemblyai = is_assemblyai_engine(engine)
 
     if use_assemblyai:
         base = _transcribe_with_assemblyai(

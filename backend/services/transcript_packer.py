@@ -19,6 +19,7 @@ import sys
 from typing import Any, Optional
 
 from config.paths import paths
+from services.engines import normalize_engine
 
 def _transcripts_cache_dir() -> str:
     return paths["transcripts"]
@@ -70,10 +71,10 @@ def _engine_cache_suffix() -> str:
 
 
 def engine_cache_suffix(engine: str | None) -> str:
-    engine = (engine or "whisper-py").strip().lower()
-    if engine in ("whispercpp", "whisper-cpp", "whisper.cpp", "cpp"):
+    engine = normalize_engine(engine)
+    if engine == "whispercpp":
         return "-whispercpp"
-    if engine in ("assemblyai", "assembly-ai", "aai"):
+    if engine == "assemblyai":
         return "-assemblyai"
     return ""
 

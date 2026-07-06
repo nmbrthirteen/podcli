@@ -84,9 +84,9 @@ def _probe_duration(path: str) -> float:
 
 def _transcribe(video: str, language: str | None, engine: str | None):
     """Transcribe (cached) and return the word list."""
+    from services.engines import is_assemblyai_engine
     from services.transcription import transcribe_file
-    selected = (engine or os.environ.get("PODCLI_ENGINE", "")).strip().lower()
-    label = "AssemblyAI" if selected in ("assemblyai", "assembly-ai", "aai") else "Whisper"
+    label = "AssemblyAI" if is_assemblyai_engine(engine or os.environ.get("PODCLI_ENGINE", "")) else "Whisper"
     print(f"  [transcribe] running {label}...", flush=True)
     res = transcribe_file(
         file_path=video, model_size="base", engine=engine, language=language,
