@@ -51,6 +51,7 @@ class ReelSession:
     profile: str
     out_dir: str
     format: str = "horizontal"
+    logo: str = ""
     moments: list[Moment] = field(default_factory=list)
 
     def save(self) -> str:
@@ -86,6 +87,7 @@ def seed_session(
     min_dur: float = 15.0,
     max_dur: float = 60.0,
     words: Optional[list[dict]] = None,
+    logo: str = "",
     progress_callback: Optional[Callable] = None,
 ) -> ReelSession:
     """Run detection once and persist the moments as an editable session."""
@@ -105,7 +107,7 @@ def seed_session(
         for c in clips
     ]
     session = ReelSession(
-        session_id, source, profile, out_dir, format=get_format(format).name, moments=moments
+        session_id, source, profile, out_dir, format=get_format(format).name, logo=logo, moments=moments
     )
     session.save()
     return session
@@ -120,6 +122,7 @@ def seed_session_pooled(
     top_n: int = 10,
     min_dur: float = 15.0,
     max_dur: float = 60.0,
+    logo: str = "",
     progress_callback: Optional[Callable] = None,
 ) -> ReelSession:
     """Detect across many videos, rank globally, and persist one editable session."""
@@ -139,7 +142,7 @@ def seed_session_pooled(
         for c in clips
     ]
     session = ReelSession(
-        session_id, sources[0], profile, out_dir, format=get_format(format).name, moments=moments
+        session_id, sources[0], profile, out_dir, format=get_format(format).name, logo=logo, moments=moments
     )
     session.save()
     return session
@@ -202,16 +205,30 @@ def _scale_filter(format: str) -> str:
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2")
 
 
-def _cut(source: str, out_dir: str, idx: int, m: Moment, format: str) -> str:
+def _encode_flags() -> list[str]:
+    from services.encoder import get_video_encode_flags
+    return [*get_video_encode_flags(), "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart"]
+
+
+def _cut(source: str, out_dir: str, idx: int, m: Moment, format: str, logo: str = "") -> str:
     clips_dir = os.path.join(out_dir, "clips")
     os.makedirs(clips_dir, exist_ok=True)
     out = os.path.join(clips_dir, f"clip_{idx:02d}.mp4")
-    proc_run([
-        "ffmpeg", "-y", "-ss", str(m.start), "-i", source, "-t", str(m.duration),
-        "-vf", _scale_filter(format),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-c:a", "aac", "-b:a", "192k", out, "-loglevel", "error",
-    ], timeout=120, check=True)
+    cmd = ["ffmpeg", "-y", "-ss", str(m.start), "-i", source, "-t", str(m.duration)]
+    if logo and os.path.exists(logo):
+        spec = get_format(format)
+        logo_h = max(1, round(spec.height * 0.08))
+        margin = max(1, round(spec.height * 0.04))
+        cmd += [
+            "-i", logo, "-filter_complex",
+            f"[0:v]{_scale_filter(format)}[base];[1:v]scale=-1:{logo_h}[lg];"
+            f"[base][lg]overlay=W-w-{margin}:{margin}[v]",
+            "-map", "[v]", "-map", "0:a?",
+        ]
+    else:
+        cmd += ["-vf", _scale_filter(format)]
+    cmd += [*_encode_flags(), out, "-loglevel", "error"]
+    proc_run(cmd, timeout=300, check=True)
     return out
 
 
@@ -225,7 +242,7 @@ def build_reel(session: ReelSession, progress_callback: Optional[Callable] = Non
         if m.dirty or not os.path.exists(clip):
             if progress_callback:
                 progress_callback(int(n / len(active) * 90), f"cutting moment {i}")
-            clip = _cut(m.source or session.source, session.out_dir, i, m, session.format)
+            clip = _cut(m.source or session.source, session.out_dir, i, m, session.format, session.logo)
             m.dirty = False
         files.append(clip)
     session.save()
@@ -238,8 +255,8 @@ def build_reel(session: ReelSession, progress_callback: Optional[Callable] = Non
                   "-c", "copy", reel, "-loglevel", "error"], timeout=300, check=False)
     if r.returncode != 0:
         proc_run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lst,
-                  "-c:v", "libx264", "-c:a", "aac", reel, "-loglevel", "error"],
-                 timeout=600, check=True)
+                  *_encode_flags(), reel, "-loglevel", "error"],
+                 timeout=900, check=True)
     if progress_callback:
         progress_callback(100, f"built reel with {len(files)} moments")
     return reel
