@@ -7,6 +7,7 @@ Single source of truth used by CLI, Web UI, and MCP.
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 from typing import Optional, Callable
@@ -234,7 +235,8 @@ TRANSCRIPT EXCERPT:
                     project_dir=project_dir,
                     timeout=120,
                 )
-            except Exception:
+            except Exception as exc:
+                print(f"Warning: {label} content generation failed: {exc}", file=sys.stderr)
                 continue
             if cr.returncode != 0 or not cr.stdout.strip():
                 continue
@@ -245,8 +247,8 @@ TRANSCRIPT EXCERPT:
     finally:
         try:
             os.unlink(prompt_file)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"Warning: could not remove prompt file {prompt_file}: {exc}", file=sys.stderr)
 
 
 def generate_clip_content(

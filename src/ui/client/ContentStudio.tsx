@@ -30,6 +30,7 @@ export default function ContentStudio() {
   const [regenField, setRegenField] = useState<string | null>(null);
   const [regenNote, setRegenNote] = useState("");
   const [regenBusy, setRegenBusy] = useState(false);
+  const isBusy = busy || customBusy || regenBusy;
 
   useEffect(() => {
     try {
@@ -62,6 +63,7 @@ export default function ContentStudio() {
   };
 
   const generate = async () => {
+    if (isBusy) return;
     if (!transcript.trim()) {
       setMsg("Paste a transcript first");
       return;
@@ -111,7 +113,7 @@ export default function ContentStudio() {
   };
 
   const askCustom = async () => {
-    if (!customReq.trim() || customBusy) return;
+    if (!customReq.trim() || isBusy) return;
     setCustomBusy(true);
     setCustomOut(null);
     setMsg(null);
@@ -132,7 +134,7 @@ export default function ContentStudio() {
   };
 
   const regenerate = async (field: string) => {
-    if (regenBusy) return;
+    if (isBusy) return;
     setRegenBusy(true);
     setMsg(null);
     try {
@@ -216,7 +218,7 @@ export default function ContentStudio() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "18px 0 0" }}>
               <label style={{ ...labelStyle, marginBottom: 0 }}>Transcript</label>
               {sessionText && (
-                <button className="btn btn-ghost btn-sm" onClick={() => setTranscript(sessionText)} disabled={busy} title={sessionName}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setTranscript(sessionText)} disabled={isBusy} title={sessionName}>
                   Use current episode{sessionName ? ` · ${sessionName}` : ""}
                 </button>
               )}
@@ -233,7 +235,7 @@ export default function ContentStudio() {
                 <option value="episode">Full episode (long-form)</option>
                 <option value="shorts">Short / clip</option>
               </select>
-              <button className="btn btn-primary btn-sm" onClick={generate} disabled={busy || !transcript.trim()}>
+              <button className="btn btn-primary btn-sm" onClick={generate} disabled={isBusy || !transcript.trim()}>
                 {busy ? <><div className="spinner sm" /> Generating…</> : "Generate"}
               </button>
             </div>
@@ -260,7 +262,7 @@ export default function ContentStudio() {
               className="btn btn-primary btn-sm"
               style={{ marginTop: 10 }}
               onClick={askCustom}
-              disabled={customBusy || !customReq.trim()}
+              disabled={isBusy || !customReq.trim()}
             >
               {customBusy ? <><div className="spinner sm" /> Generating…</> : "Generate"}
             </button>

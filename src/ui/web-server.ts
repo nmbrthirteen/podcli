@@ -20,7 +20,7 @@ import {
   chmodSync,
   realpathSync,
 } from "fs";
-import { mkdir, readdir, unlink } from "fs/promises";
+import { mkdir, readdir, rm, unlink } from "fs/promises";
 import path from "path";
 import { join, dirname, basename, extname, resolve } from "path";
 import { execSync, spawn } from "child_process";
@@ -45,6 +45,7 @@ import type {
   BatchClipsResult,
   ClipHistoryEntry,
   ClipResult,
+  Format,
   ProgressEvent,
   SuggestedClip,
   TranscriptResult,
@@ -284,7 +285,7 @@ function createBatchHistoryRecorder({
   transcriptWords: WordTimestamp[];
   defaultCaptionStyle?: string;
   defaultCropStrategy?: string;
-  defaultFormat?: string;
+  defaultFormat?: Format;
   label: string;
 }) {
   const recordedClipIndexes = new Set<number>();
@@ -337,6 +338,9 @@ app.use(express.static(publicDir));
 
 // File upload config
 const uploadDir = join(paths.working, "uploads");
+const cachedMediaExtensions = new Set([".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a"]);
+const transcriptCacheExtensions = new Set([".json"]);
+const packedTranscriptExtensions = new Set([".md"]);
 const upload = multer({
   storage: multer.diskStorage({
     destination: async (_req, _file, cb) => {
@@ -375,6 +379,43 @@ const upload = multer({
     }
   },
 });
+
+async function clearCacheFiles(dir: string, extensions: Set<string>): Promise<number> {
+  if (!existsSync(dir)) return 0;
+  const entries = await readdir(dir, { withFileTypes: true });
+  let deleted = 0;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (!extensions.has(extname(entry.name).toLowerCase())) continue;
+    await rm(join(dir, entry.name), { force: true });
+    deleted += 1;
+  }
+  return deleted;
+}
+
+function clearEpisodeSessionState(): void {
+  sessionTranscripts.clear();
+  allowedSourcePaths.clear();
+  uiState.videoPath = "";
+  uiState.filePath = "";
+  uiState.activeExportJobId = null;
+  uiState.transcript = null;
+  uiState.rawTranscriptText = "";
+  uiState.suggestions = [];
+  uiState.deselectedIndices = [];
+  uiState.phase = "idle";
+  uiState.results = [];
+  uiState.energyData = {};
+  uiState.lastUpdated = Date.now();
+}
+
+function activeBlockingJobs(): JobState[] {
+  return [...jobs.values()].filter(
+    (job) =>
+      job.status === "running" &&
+      ["transcribe", "create_clip", "batch_clips"].includes(job.type),
+  );
+}
 
 function isPublicIp(address: string): boolean {
   const family = isIP(address);
@@ -441,6 +482,31 @@ async function validateDownloadUrl(rawUrl: unknown): Promise<string> {
 }
 
 // --- API Routes ---
+
+/**
+ * POST /api/session-cache/clear - Clear per-session uploads and transcript caches.
+ */
+app.post("/api/session-cache/clear", async (_req, res) => {
+  try {
+    const active = activeBlockingJobs();
+    if (active.length > 0) {
+      res.status(409).json({
+        error: "Cannot clear session cache while jobs are running",
+        jobs: active.map((job) => ({ id: job.id, type: job.type, status: job.status })),
+      });
+      return;
+    }
+    const uploads = await clearCacheFiles(uploadDir, cachedMediaExtensions);
+    const transcripts = await clearCacheFiles(paths.transcripts, transcriptCacheExtensions);
+    const packed = await clearCacheFiles(paths.packed, packedTranscriptExtensions);
+    clearEpisodeSessionState();
+    persistState();
+    broadcastSSE("state-sync", uiState);
+    res.json({ ok: true, uploads, transcripts, packed });
+  } catch (err) {
+    res.status(500).json({ error: `Failed to clear session cache: ${errMsg(err)}` });
+  }
+});
 
 /**
  * POST /api/upload — Upload a podcast file
@@ -778,6 +844,8 @@ app.post("/api/transcribe", async (req, res) => {
   const {
     file_path,
     model_size = "base",
+    engine,
+    assemblyai_api_key,
     language,
     enable_diarization = false,
     num_speakers,
@@ -787,9 +855,8 @@ app.post("/api/transcribe", async (req, res) => {
     res.status(400).json({ error: "File not found" });
     return;
   }
-
   // Check cache first
-  const cached = await cache.get(file_path);
+  const cached = await cache.get(file_path, engine);
   if (cached) {
     const jobId = uuidv4();
     sessionTranscripts.set(file_path, cached as unknown as ServerTranscript);
@@ -819,7 +886,7 @@ app.post("/api/transcribe", async (req, res) => {
   executor
     .execute(
       "transcribe",
-      { file_path, model_size, language, enable_diarization, num_speakers },
+      { file_path, model_size, engine, assemblyai_api_key, language, enable_diarization, num_speakers },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
@@ -844,7 +911,7 @@ app.post("/api/transcribe", async (req, res) => {
       persistState();
       // Cache it
       try {
-        await cache.set(file_path, result.data as unknown as TranscriptResult);
+        await cache.set(file_path, result.data as unknown as TranscriptResult, engine);
       } catch (err) {
         log.warn("Failed to cache transcript", { file_path, err: errMsg(err) });
       }

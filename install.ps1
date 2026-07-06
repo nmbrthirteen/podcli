@@ -32,13 +32,25 @@ function Test-PathEntryEquals {
   }
 }
 
+function Send-EnvironmentPathChange {
+  if (-not ('Podcli.NativeMethods' -as [type])) {
+    Add-Type -Namespace Podcli -Name NativeMethods -MemberDefinition @'
+[DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Auto)]
+public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+'@
+  }
+
+  $result = [UIntPtr]::Zero
+  $status = [Podcli.NativeMethods]::SendMessageTimeout([IntPtr]0xffff, 0x1a, [UIntPtr]::Zero, 'Environment', 0x0002, 5000, [ref]$result)
+  if ($status -eq [IntPtr]::Zero) {
+    $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+    Write-Warning "could not broadcast PATH update (SendMessageTimeout error $errorCode); restart your terminal"
+  }
+}
+
 if ($Uninstall) {
   Write-Host "Uninstalling podcli..."
-  if ($Purge) {
-    $targets = @($homeDir)
-  } else {
-    $targets = @($binDir, (Join-Path $homeDir 'runtime'), (Join-Path $homeDir 'models'), (Join-Path $homeDir 'tools'))
-  }
+  $targets = @($homeDir)
   foreach ($p in $targets) {
     if (Test-Path $p) {
       try {
@@ -55,15 +67,11 @@ if ($Uninstall) {
     $kept = @($parts | Where-Object { -not (Test-PathEntryEquals $_ $binDir) })
     if ($kept.Count -ne $parts.Count) {
       $pathEntry.Key.SetValue('Path', ($kept -join ';'), $pathEntry.Kind)
+      Send-EnvironmentPathChange
       Write-Host "  removed from user PATH (restart your terminal)"
     }
   }
-  if ($Purge) {
-    Write-Host "  removed managed data."
-  } else {
-    Write-Host "  kept user data (config, knowledge, presets, assets, history, cache)."
-    Write-Host "  To remove everything: rerun with -Uninstall -Purge"
-  }
+  Write-Host "  removed managed data."
   exit 0
 }
 
@@ -83,10 +91,7 @@ $dest = Join-Path $binDir 'podcli.exe'
 Invoke-WebRequest "$base/$asset" -OutFile $dest -UseBasicParsing
 
 try {
-  $sums = (Invoke-WebRequest "$base/checksums.txt" -UseBasicParsing).Content
-  if ($sums -is [byte[]]) {
-    $sums = [System.Text.Encoding]::UTF8.GetString($sums)
-  }
+  $sums = Invoke-RestMethod "$base/checksums.txt" -Headers @{ 'Accept' = 'text/plain'; 'User-Agent' = 'podcli-install' }
   $want = $sums -split "`n" |
     Where-Object { $_ -match ([regex]::Escape($asset) + '\s*$') } |
     ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1
@@ -106,6 +111,7 @@ if ($pathEntry) {
   $parts = @($pathEntry.Value -split ';' | Where-Object { $_ })
   if (-not ($parts | Where-Object { Test-PathEntryEquals $_ $binDir })) {
     $pathEntry.Key.SetValue('Path', ($binDir + ';' + $pathEntry.Value), $pathEntry.Kind)
+    Send-EnvironmentPathChange
     Write-Host "  added to PATH (restart your terminal)"
   }
 }

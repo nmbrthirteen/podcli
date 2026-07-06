@@ -87,7 +87,7 @@ export interface ClipResult {
   output_path: string;
   duration: number;
   file_size_mb: number;
-  format?: string;
+  format?: Format;
   caption_overlay_path?: string;
   cropped_source_path?: string;
 }
@@ -118,7 +118,7 @@ export interface UIState {
   settings?: {
     captionStyle?: string;
     cropStrategy?: string;
-    format?: string;
+    format?: Format;
     logoPath?: string;
     outroPath?: string;
   };
@@ -134,7 +134,7 @@ export interface CreateClipInput {
   title?: string;
   caption_style?: string;
   crop_strategy?: string;
-  format?: string;
+  format?: Format;
   logo_path?: string;
   outro_path?: string;
   transcript_words?: WordTimestamp[];
@@ -149,7 +149,7 @@ export interface BatchClipSpec {
   title?: string;
   caption_style?: string;
   crop_strategy?: string;
-  format?: string;
+  format?: Format;
   logo_path?: string | null;
   allow_ass_fallback?: boolean;
   keep_caption_overlay?: boolean;
@@ -162,7 +162,7 @@ export interface BatchClipsInput {
   clip_numbers?: number[];
   clips?: BatchClipSpec[];
   export_selected?: boolean;
-  format?: string;
+  format?: Format;
   clean_fillers?: boolean;
   allow_ass_fallback?: boolean;
   keep_caption_overlay?: boolean;
@@ -185,7 +185,7 @@ export interface BatchClipsResult {
     end_second?: number;
     caption_style?: string;
     crop_strategy?: string;
-    format?: string;
+    format?: Format;
     title?: string;
     file_size_mb?: number;
     duration?: number;
@@ -234,7 +234,7 @@ export interface ClipHistoryEntry {
   end_second: number;
   caption_style: string;
   crop_strategy: string;
-  format?: string;
+  format?: Format;
   logo_path?: string;
   outro_path?: string;
   title: string;

@@ -507,6 +507,8 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       const [transcriptMode, setTranscriptMode] = useState('whisper');
       const [transcriptText, setTranscriptText] = useState('');
       const [timeAdjust, setTimeAdjust] = useState(-1);
+      const [transcriptionEngine, setTranscriptionEngine] = useState('whisper');
+      const [assemblyAiKey, setAssemblyAiKey] = useState('');
       const [whisperModel, setWhisperModel] = useState('base');
       const [captionStyle, setCaptionStyle] = useState('branded');
       const [cropStrategy, setCropStrategy] = useState('face');
@@ -517,6 +519,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       const [outroPath, setOutroPath] = useState('');
       const initializedRef = useRef(false);
       const outroRef = useRef();
+      const videoFileRef = useRef();
       const [outroUploading, setOutroUploading] = useState(false);
       const [transcriptDragOver, setTranscriptDragOver] = useState(false);
       const [transcriptFileName, setTranscriptFileName] = useState('');
@@ -722,7 +725,19 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           const fileData = await api('/select-file', { method: 'POST', body: JSON.stringify({ file_path: vp }) });
           if (fileData.error) { setTranscribing(false); return; }
           setFile(fileData);
-          const data = await api('/transcribe', { method: 'POST', body: JSON.stringify({ file_path: vp, model_size: whisperModel, enable_diarization: speakerStatus?.configured || false }) });
+          const engine = transcriptionEngine === 'assemblyai' ? 'assemblyai' : undefined;
+          const data = await api('/transcribe', { method: 'POST', body: JSON.stringify({
+            file_path: vp,
+            model_size: whisperModel,
+            engine,
+            assemblyai_api_key: transcriptionEngine === 'assemblyai' ? assemblyAiKey.trim() : undefined,
+            enable_diarization: transcriptionEngine === 'assemblyai' || (speakerStatus?.configured || false),
+          }) });
+          if (data.error) {
+            setError(data.error);
+            setTranscribing(false);
+            return;
+          }
           if (data.cached && data.data) {
             // Instant cache hit
             setTranscript(data.data);
@@ -750,15 +765,15 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         }
       }, [transcribeStream?.status]);
 
-      // Auto-trigger transcribe when video path is set and mode is whisper
+      // Auto-trigger transcribe when video path is set and auto transcript mode is active
       const autoTranscribeRef = useRef('');
       useEffect(() => {
         const vp = videoPath.trim();
-        if (transcriptMode === 'whisper' && vp && !isHttpUrl(vp) && !transcript && !transcribing && vp !== autoTranscribeRef.current) {
+        if (transcriptMode === 'whisper' && transcriptionEngine === 'whisper' && vp && !isHttpUrl(vp) && !transcript && !transcribing && vp !== autoTranscribeRef.current) {
           autoTranscribeRef.current = vp;
           autoTranscribe(vp);
         }
-      }, [videoPath, transcriptMode, transcript, transcribing]);
+      }, [videoPath, transcriptMode, transcriptionEngine, transcript, transcribing]);
 
       // Fetch clip history on mount and after exports
       const fetchHistory = () => { fetch('/api/history?limit=50').then(r => r.json()).then(d => { if (Array.isArray(d)) setClipHistory(d); }).catch(() => { }); };
@@ -826,10 +841,14 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           else if (d.suggestions && !d.deselectedIndices) setDeselected(new Set());
           if (d.phase) setPhase(d.phase);
           if (sseEvent.type === 'state' && Array.isArray(d.results)) setResults(d.results);
-          if (d.activeExportJobId) setBatchJobId(d.activeExportJobId);
+          if (d.activeExportJobId !== undefined) setBatchJobId(d.activeExportJobId);
           if (d.videoPath !== undefined) setVideoPath(d.videoPath);
-          if (d.transcript) { setTranscript(d.transcript); if (d.videoPath) autoTranscribeRef.current = d.videoPath; }
-          if (d.rawTranscriptText && !transcript) setTranscriptText(d.rawTranscriptText);
+          if (d.transcript !== undefined) {
+            setTranscript(d.transcript);
+            if (d.videoPath) autoTranscribeRef.current = d.videoPath;
+            if (d.transcript === null) autoTranscribeRef.current = '';
+          }
+          if (d.rawTranscriptText !== undefined && (d.transcript === null || !transcript)) setTranscriptText(d.rawTranscriptText);
           if (d.settings) {
             if (d.settings.captionStyle) setCaptionStyle(d.settings.captionStyle);
             if (d.settings.cropStrategy) setCropStrategy(d.settings.cropStrategy);
@@ -909,15 +928,26 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         setActiveClipIdx(null);
       };
 
-      // Native file browse
-      const doBrowse = useCallback(async () => {
-        setBrowsing(true);
+      const setUploadedVideo = useCallback(async (file) => {
+        if (!file) return;
+        setBrowsing(true); setError(null);
         try {
-          const d = await api('/browse-file');
+          const d = await uploadFile(file, () => { });
+          if (d.error) setError(d.error);
           if (d.file_path) setVideoPath(d.file_path);
-        } catch (e) { setError('Browse failed: ' + e.message); }
+        } catch (e) { setError('Upload failed: ' + e.message); }
         finally { setBrowsing(false); }
       }, []);
+
+      const doBrowse = useCallback(() => {
+        videoFileRef.current?.click();
+      }, []);
+
+      const handleVideoFileSelect = (e) => {
+        const f = e.target.files?.[0];
+        e.target.value = '';
+        setUploadedVideo(f);
+      };
 
       const downloadVideo = async () => {
         const url = videoPath.trim();
@@ -952,6 +982,8 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           setDeselected(new Set());
           setResults([]);
           setEnergyData({});
+          setPreviewSrc(null);
+          setActiveClipIdx(null);
           autoTranscribeRef.current = '';
           setDownloadingVideo(false);
           setDownloadJobId(null);
@@ -1177,7 +1209,11 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         return 'pending';
       };
 
-      const handleVideoDrop = (e) => { e.preventDefault(); };
+      const handleVideoDrop = (e) => {
+        e.preventDefault();
+        const f = e.dataTransfer?.files?.[0];
+        setUploadedVideo(f);
+      };
       const handleTranscriptDrop = (e) => { e.preventDefault(); setTranscriptDragOver(false); const files = e.dataTransfer?.files; if (!files?.length) return; const f = files[0]; setTranscriptFileName(f.name); const reader = new FileReader(); reader.onload = (ev) => setTranscriptText(ev.target.result); reader.readAsText(f); };
       const handleTranscriptFileSelect = (e) => { const f = e.target.files?.[0]; if (!f) return; setTranscriptFileName(f.name); const reader = new FileReader(); reader.onload = (ev) => setTranscriptText(ev.target.result); reader.readAsText(f); };
       const preventDef = (e) => e.preventDefault();
@@ -1246,6 +1282,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                 {!videoPath && (
                   <div className="drop-zone" style={{ cursor: 'pointer' }} onClick={browsing || isProcessing ? undefined : doBrowse}
                     onDragOver={preventDef} onDrop={handleVideoDrop}>
+                    <input ref={videoFileRef} type="file" accept=".mp4,.mov,.mkv,.webm,.mp3,.wav,.m4a" onChange={handleVideoFileSelect} style={{ display: 'none' }} />
                     {browsing ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div className="spinner sm" />
@@ -1287,7 +1324,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                 <div className="section-label">Transcript</div>
                 <div className="tabs">
                   <div className={`tab ${transcriptMode === 'import' ? 'active' : ''}`} onClick={() => setTranscriptMode('import')}>Paste transcript</div>
-                  <div className={`tab ${transcriptMode === 'whisper' ? 'active' : ''}`} onClick={() => setTranscriptMode('whisper')}>Auto (Whisper)</div>
+                  <div className={`tab ${transcriptMode === 'whisper' ? 'active' : ''}`} onClick={() => setTranscriptMode('whisper')}>Auto</div>
                 </div>
                 {transcriptMode === 'import' && (
                   <div className="fade-in">
@@ -1320,14 +1357,33 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                 )}
                 {transcriptMode === 'whisper' && (
                   <div className="fade-in">
-                    <div className="row" style={{ marginBottom: 10 }}><div>
-                      <label className="field-label">Model</label>
-                      <select value={whisperModel} onChange={e => setWhisperModel(e.target.value)} disabled={isProcessing || transcribing}>
-                        <option value="tiny">Tiny (fastest)</option><option value="base">Base</option>
-                        <option value="small">Small</option><option value="medium">Medium</option>
-                        <option value="large">Large (best)</option>
-                      </select>
-                    </div></div>
+                    <div className="row" style={{ marginBottom: 10 }}>
+                      <div>
+                        <label className="field-label">Engine</label>
+                        <select value={transcriptionEngine} onChange={e => { setTranscriptionEngine(e.target.value); setTranscript(null); setCachedTranscript(false); autoTranscribeRef.current = ''; }} disabled={isProcessing || transcribing}>
+                          <option value="whisper">Whisper</option>
+                          <option value="assemblyai">AssemblyAI</option>
+                        </select>
+                      </div>
+                      {transcriptionEngine === 'whisper' && (
+                        <div>
+                          <label className="field-label">Model</label>
+                          <select value={whisperModel} onChange={e => setWhisperModel(e.target.value)} disabled={isProcessing || transcribing}>
+                            <option value="tiny">Tiny (fastest)</option><option value="base">Base</option>
+                            <option value="small">Small</option><option value="medium">Medium</option>
+                            <option value="large">Large (best)</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                    {transcriptionEngine === 'assemblyai' && (
+                      <div style={{ marginBottom: 10 }}>
+                        <label className="field-label">AssemblyAI API key</label>
+                        <input type="password" value={assemblyAiKey} onChange={e => setAssemblyAiKey(e.target.value)}
+                          placeholder="aai_..." disabled={isProcessing || transcribing}
+                          style={{ fontSize: 12, padding: '9px 13px' }} />
+                      </div>
+                    )}
 
                     {/* Transcription progress */}
                     {transcribing && !cachedTranscript && (

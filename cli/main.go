@@ -20,9 +20,10 @@ import (
 )
 
 // Version is set at build time via -ldflags "-X main.Version=...".
-var Version = "2.0.0-dev"
+var Version = "2.2.1"
 
 func main() {
+	os.Setenv("PODCLI_VERSION", Version)
 	args := os.Args[1:]
 	if len(args) == 0 {
 		os.Exit(runEngine(args)) // backend's branded interactive menu

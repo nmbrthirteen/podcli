@@ -66,9 +66,15 @@ def _engine_cache_suffix() -> str:
     """Namespace the cache by engine so a whisper.cpp run doesn't reuse a
     whisper-py transcript (their timings/word splits differ). whisper-py keeps
     the bare filename, which the TS transcript cache also writes."""
-    engine = os.environ.get("PODCLI_ENGINE", "whisper-py").strip().lower()
+    return engine_cache_suffix(os.environ.get("PODCLI_ENGINE", "whisper-py"))
+
+
+def engine_cache_suffix(engine: str | None) -> str:
+    engine = (engine or "whisper-py").strip().lower()
     if engine in ("whispercpp", "whisper-cpp", "whisper.cpp", "cpp"):
         return "-whispercpp"
+    if engine in ("assemblyai", "assembly-ai", "aai"):
+        return "-assemblyai"
     return ""
 
 

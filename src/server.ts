@@ -31,7 +31,8 @@ import { TranscriptCache } from "./services/transcript-cache.js";
 import { paths } from "./config/paths.js";
 import { childLogger } from "./utils/logger.js";
 import { mcpError } from "./utils/errors.js";
-import type { BatchClipsResult, UIState, WordTimestamp } from "./models/index.js";
+import { podcliVersion } from "./version.js";
+import type { BatchClipsResult, Format, UIState, WordTimestamp } from "./models/index.js";
 
 const log = childLogger("server");
 
@@ -224,7 +225,7 @@ async function getWorkflowGuidance(): Promise<string> {
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "podcli",
-    version: "1.0.0",
+    version: podcliVersion(),
   });
 
   // =============================================
@@ -662,7 +663,7 @@ export function createServer(): McpServer {
             end_second: params.end_second as number,
             caption_style: (params.caption_style || "hormozi") as string,
             crop_strategy: (params.crop_strategy || "speaker") as string,
-            format: (params.format || "vertical") as string,
+            format: (params.format || "vertical") as Format,
             logo_path: params.logo_path as string | undefined,
             title: (params.title || "clip") as string,
             output_path: parsed.output_path,
@@ -1135,6 +1136,10 @@ export function createServer(): McpServer {
         .string()
         .optional()
         .describe("Crop strategy (for check)"),
+      format: z
+        .enum(["vertical", "horizontal", "square"])
+        .optional()
+        .describe("Output format (for check)"),
       limit: z.number().optional().default(20).describe("Max results for list"),
     },
     async ({
@@ -1145,6 +1150,7 @@ export function createServer(): McpServer {
       end_second,
       caption_style,
       crop_strategy,
+      format,
       limit,
     }) => {
       try {
@@ -1195,6 +1201,7 @@ export function createServer(): McpServer {
             end_second,
             caption_style || "hormozi",
             crop_strategy || "speaker",
+            format || "vertical",
           );
           if (dup) {
             return {

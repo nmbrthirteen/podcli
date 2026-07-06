@@ -99,6 +99,7 @@ jobs:
           node-version: '20'
       - name: Build studio bundle
         run: |
+          npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
           npm ci
           sh scripts/build-studio.sh dist/studio
           tar -czf studio-bundle.tar.gz -C dist/studio .

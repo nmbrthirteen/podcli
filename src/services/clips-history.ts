@@ -4,7 +4,7 @@ import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
 import { paths } from "../config/paths.js";
 import { sliceTranscript } from "../utils/transcript.js";
-import type { BatchClipsResult, ClipHistoryEntry, WordTimestamp } from "../models/index.js";
+import type { BatchClipsResult, ClipHistoryEntry, Format, WordTimestamp } from "../models/index.js";
 
 type BatchResultRow = BatchClipsResult["results"][number];
 
@@ -13,7 +13,7 @@ interface BatchRecordContext {
   transcriptWords?: WordTimestamp[] | null;
   defaultCaptionStyle?: string;
   defaultCropStrategy?: string;
-  defaultFormat?: string;
+  defaultFormat?: Format;
   contentTypeFor?: (start: number, end: number) => string | undefined;
 }
 

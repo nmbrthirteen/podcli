@@ -18,6 +18,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from version import VERSION
 
 # Windows stdout/stderr default to cp1252, which can't encode chars like '→'; output is UTF-8.
 for _stream in (sys.stdout, sys.stderr):
@@ -360,6 +361,11 @@ def cmd_studio(args):
         cmd += ["--paragraph", args.paragraph]
     if args.language:
         cmd += ["--language", args.language]
+    if getattr(args, "engine", None):
+        cmd += ["--engine", args.engine]
+    env = os.environ.copy()
+    if getattr(args, "assemblyai_api_key", None):
+        env["ASSEMBLYAI_API_KEY"] = args.assemblyai_api_key
     cmd += [
         "--caption-style", args.caption_style,
         "--crop", args.crop,
@@ -386,7 +392,7 @@ def cmd_studio(args):
         cmd += ["--no-outro"]
 
     import subprocess
-    rc = subprocess.run(cmd).returncode
+    rc = subprocess.run(cmd, env=env).returncode
     sys.exit(rc)
 
 
@@ -437,6 +443,8 @@ def cmd_process(args):
     # CLI overrides
     if getattr(args, "engine", None):
         os.environ["PODCLI_ENGINE"] = args.engine
+    if getattr(args, "assemblyai_api_key", None):
+        os.environ["ASSEMBLYAI_API_KEY"] = args.assemblyai_api_key
     if args.caption_style:
         config["caption_style"] = args.caption_style
     if args.crop:
@@ -585,7 +593,8 @@ def cmd_process(args):
             result = cached
             print(f"         {len(segments)} segments, {len(words)} words")
         else:
-            print("  [1/4] Transcribing with Whisper...")
+            engine_label = "AssemblyAI" if os.environ.get("PODCLI_ENGINE", "").strip().lower() in ("assemblyai", "assembly-ai", "aai") else "Whisper"
+            print(f"  [1/4] Transcribing with {engine_label}...")
             _ensure_ssl_certs()
             import warnings
             warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
@@ -615,6 +624,7 @@ def cmd_process(args):
                 result = transcribe_file(
                     file_path=video_path,
                     model_size=config.get("whisper_model", "base"),
+                    engine=os.environ.get("PODCLI_ENGINE") or None,
                     enable_diarization=not config.get("no_speakers", False),
                     progress_callback=_transcribe_progress,
                 )
@@ -3095,8 +3105,6 @@ def cmd_info(args):
     print()
 
 
-VERSION = "1.0.0"
-
 BANNER = """
 \033[38;2;212;135;74m  ┌─────────────────────────────────────┐
   │                                     │
@@ -3309,7 +3317,8 @@ def main():
     proc.add_argument("-n", "--top", type=int, help="Number of top clips to export (default: 5)")
     proc.add_argument("-o", "--output", help="Output directory (default: ./clips)")
     proc.add_argument("-p", "--preset", help="Load a saved preset")
-    proc.add_argument("--engine", choices=["whisper-py", "whispercpp"], help="Transcription engine (default: whisper-py; whispercpp is the native, PyTorch-free path)")
+    proc.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], help="Transcription engine (default: whisper-py; whispercpp is local; assemblyai uses ASSEMBLYAI_API_KEY)")
+    proc.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai")
     proc.add_argument("--fast", action="store_true", help="Draft mode: tiny Whisper, heuristic selection, center crop, low quality")
     proc.add_argument("--thumbnails", dest="thumbnails", action="store_true", default=None, help="Force thumbnail generation on")
     proc.add_argument("--no-thumbnails", dest="thumbnails", action="store_false", help="Skip thumbnail generation")
@@ -3335,6 +3344,8 @@ def main():
     studio.add_argument("--end", type=float, help="Fragment end (seconds)")
     studio.add_argument("--paragraph", help="Find the fragment by matching this text in the transcript")
     studio.add_argument("--language", help="Transcription language (e.g. es). Auto-detect if omitted.")
+    studio.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], help="Transcription engine")
+    studio.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai")
     studio.add_argument("--caption-style", choices=["hormozi", "karaoke", "subtle", "branded"], default="hormozi")
     studio.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"], default="face")
     studio.add_argument("-o", "--output", help="Final output path")

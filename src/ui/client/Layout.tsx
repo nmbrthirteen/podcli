@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { NavLink, Link, Outlet } from "react-router-dom";
 import {
   LayoutGrid,
@@ -30,6 +30,14 @@ function Icon({ name }: { name: string }) {
 }
 
 export default function Layout() {
+  useEffect(() => {
+    fetch("/api/session-cache/clear", { method: "POST" }).then((res) => {
+      if (!res.ok) console.warn("Failed to clear session cache", res.status);
+    }).catch((err: unknown) => {
+      console.warn("Failed to clear session cache", err);
+    });
+  }, []);
+
   return (
     <div className="shell">
       <aside className="sidebar">

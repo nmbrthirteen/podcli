@@ -7,11 +7,16 @@ Produces word-level timestamps with speaker labels by:
 3. Merging speaker labels onto each word and segment
 """
 
+import json
+import http.client
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Optional, Callable
 
 
@@ -79,6 +84,248 @@ def _transcribe_with_whispercpp(file_path, model_size, language, progress_callba
     return result
 
 
+def _assemblyai_base_url() -> str:
+    region = os.environ.get("ASSEMBLYAI_REGION", "").strip().lower()
+    if region == "eu":
+        return "https://api.eu.assemblyai.com/v2"
+    return "https://api.assemblyai.com/v2"
+
+
+def _assemblyai_json_request(method: str, url: str, api_key: str, payload: Optional[dict], timeout: int) -> dict:
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    headers = {"Authorization": api_key}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            req = urllib.request.Request(url, data=body, headers=headers, method=method)
+            with urllib.request.urlopen(req, timeout=timeout) as res:
+                return json.loads(res.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace")
+            last_error = RuntimeError(
+                f"AssemblyAI request failed: method={method} url={url} status={e.code} body={detail}"
+            )
+            if e.code not in (408, 409, 425, 429) and e.code < 500:
+                raise last_error from e
+            print(
+                f"Warning: AssemblyAI request retry {attempt}/3 failed: method={method} url={url} status={e.code} body={detail}",
+                file=sys.stderr,
+            )
+            if attempt < 3:
+                time.sleep(attempt)
+        except (urllib.error.URLError, TimeoutError) as e:
+            last_error = e
+            print(
+                f"Warning: AssemblyAI request retry {attempt}/3 failed: method={method} url={url} error={e}",
+                file=sys.stderr,
+            )
+            if attempt < 3:
+                time.sleep(attempt)
+    raise RuntimeError(
+        f"AssemblyAI request failed after retries: method={method} url={url} error={last_error}"
+    ) from last_error
+
+
+def _assemblyai_upload(file_path: str, api_key: str, base_url: str) -> str:
+    url = f"{base_url}/upload"
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RuntimeError(f"AssemblyAI upload URL is invalid: url={url}")
+
+    last_error = None
+    for attempt in range(1, 4):
+        conn = None
+        try:
+            size = os.path.getsize(file_path)
+            conn = http.client.HTTPSConnection(parsed.netloc, timeout=3600)
+            conn.putrequest("POST", parsed.path)
+            conn.putheader("Authorization", api_key)
+            conn.putheader("Content-Type", "application/octet-stream")
+            conn.putheader("Content-Length", str(size))
+            conn.endheaders()
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = f.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    conn.send(chunk)
+
+            res = conn.getresponse()
+            detail = res.read().decode("utf-8", errors="replace")
+            if res.status < 200 or res.status >= 300:
+                last_error = RuntimeError(
+                    f"AssemblyAI upload failed: url={url} file_path={file_path} status={res.status} body={detail}"
+                )
+                if res.status not in (408, 409, 425, 429) and res.status < 500:
+                    raise last_error
+                print(
+                    f"Warning: AssemblyAI upload retry {attempt}/3 failed: file_path={file_path} status={res.status} body={detail}",
+                    file=sys.stderr,
+                )
+                if attempt < 3:
+                    time.sleep(attempt)
+                continue
+
+            data = json.loads(detail)
+            upload_url = data.get("upload_url")
+            if not upload_url:
+                raise RuntimeError(f"AssemblyAI upload response missing upload_url: body={data}")
+            return upload_url
+        except (OSError, TimeoutError, http.client.HTTPException) as e:
+            last_error = e
+            print(
+                f"Warning: AssemblyAI upload retry {attempt}/3 failed: file_path={file_path} error={e}",
+                file=sys.stderr,
+            )
+            if attempt < 3:
+                time.sleep(attempt)
+        finally:
+            if conn:
+                conn.close()
+    raise RuntimeError(
+        f"AssemblyAI upload failed after retries: url={url} file_path={file_path} error={last_error}"
+    ) from last_error
+
+
+def _assemblyai_speaker(raw_speaker: Optional[str]) -> Optional[str]:
+    if raw_speaker is None:
+        return None
+    label = str(raw_speaker).strip()
+    if not label:
+        return None
+    if len(label) == 1 and label.isalpha():
+        return f"SPEAKER_{ord(label.upper()) - ord('A'):02d}"
+    return label
+
+
+def _assemblyai_words(data: dict) -> list[dict]:
+    return [
+        {
+            "word": str(w.get("text", "")).strip(),
+            "start": round(float(w.get("start", 0)) / 1000.0, 3),
+            "end": round(float(w.get("end", 0)) / 1000.0, 3),
+            "confidence": round(float(w.get("confidence", 0)), 3),
+            "speaker": _assemblyai_speaker(w.get("speaker")),
+        }
+        for w in data.get("words", [])
+        if str(w.get("text", "")).strip()
+    ]
+
+
+def _assemblyai_result(data: dict) -> dict:
+    words = _assemblyai_words(data)
+    utterances = data.get("utterances") or []
+    if utterances:
+        segments = [
+            {
+                "id": i,
+                "start": round(float(u.get("start", 0)) / 1000.0, 3),
+                "end": round(float(u.get("end", 0)) / 1000.0, 3),
+                "text": str(u.get("text", "")).strip(),
+                "speaker": _assemblyai_speaker(u.get("speaker")),
+            }
+            for i, u in enumerate(utterances)
+            if str(u.get("text", "")).strip()
+        ]
+    else:
+        segments = [{
+            "id": 0,
+            "start": words[0]["start"] if words else 0.0,
+            "end": words[-1]["end"] if words else 0.0,
+            "text": str(data.get("text") or "").strip(),
+            "speaker": None,
+        }]
+
+    speaker_segments = [
+        {
+            "speaker": segment["speaker"],
+            "start": segment["start"],
+            "end": segment["end"],
+        }
+        for segment in segments
+        if segment["speaker"]
+    ]
+    speakers = sorted({s["speaker"] for s in speaker_segments})
+    speaker_map = {
+        speaker: {
+            "label": speaker,
+            "total_time": round(
+                sum(s["end"] - s["start"] for s in speaker_segments if s["speaker"] == speaker),
+                2,
+            ),
+            "segments": sum(1 for s in speaker_segments if s["speaker"] == speaker),
+        }
+        for speaker in speakers
+    }
+    return {
+        "transcript": str(data.get("text") or "").strip(),
+        "segments": segments,
+        "words": words,
+        "duration": round(float(data.get("audio_duration") or (words[-1]["end"] if words else 0.0)), 3),
+        "language": str(data.get("language_code") or "en"),
+        "speakers": {
+            "num_speakers": len(speakers),
+            "speakers": speaker_map,
+        },
+        "speaker_segments": speaker_segments,
+        "engine": "assemblyai",
+    }
+
+
+def _transcribe_with_assemblyai(file_path, language, enable_diarization, num_speakers, progress_callback):
+    api_key = os.environ.get("ASSEMBLYAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("ASSEMBLYAI_API_KEY is required when PODCLI_ENGINE=assemblyai")
+
+    base_url = _assemblyai_base_url()
+    if progress_callback:
+        progress_callback(10, "Uploading media to AssemblyAI...")
+    upload_url = _assemblyai_upload(file_path, api_key, base_url)
+
+    payload = {
+        "audio_url": upload_url,
+        "punctuate": True,
+        "format_text": True,
+        "speaker_labels": bool(enable_diarization),
+    }
+    if language:
+        payload["language_code"] = language
+    else:
+        payload["language_detection"] = True
+    if num_speakers:
+        payload["speakers_expected"] = num_speakers
+
+    if progress_callback:
+        progress_callback(20, "Starting AssemblyAI transcript...")
+    started = _assemblyai_json_request("POST", f"{base_url}/transcript", api_key, payload, 60)
+    transcript_id = started.get("id")
+    if not transcript_id:
+        raise RuntimeError(f"AssemblyAI transcript response missing id: body={started}")
+
+    url = f"{base_url}/transcript/{transcript_id}"
+    for _ in range(720):
+        data = _assemblyai_json_request("GET", url, api_key, None, 60)
+        status = data.get("status")
+        if status == "completed":
+            if progress_callback:
+                progress_callback(50, "AssemblyAI transcription complete")
+            return _assemblyai_result(data)
+        if status == "error":
+            raise RuntimeError(
+                f"AssemblyAI transcript failed: transcript_id={transcript_id} error={data.get('error')}"
+            )
+        if status not in ("queued", "processing"):
+            raise RuntimeError(
+                f"AssemblyAI transcript returned unknown status: transcript_id={transcript_id} status={status} body={data}"
+            )
+        if progress_callback:
+            progress_callback(30, f"AssemblyAI transcript {status}...")
+        time.sleep(5)
+    raise TimeoutError(f"AssemblyAI transcript timed out: transcript_id={transcript_id}")
+
+
 def _attach_speakers_and_faces(
     file_path,
     base,
@@ -93,8 +340,8 @@ def _attach_speakers_and_faces(
     words = base.get("words") or []
     duration = base.get("duration") or (segments[-1]["end"] if segments else 0.0)
 
-    speaker_segments = []
-    speaker_summary = {"num_speakers": 0, "speakers": {}}
+    speaker_segments = base.get("speaker_segments") or []
+    speaker_summary = base.get("speakers") or {"num_speakers": 0, "speakers": {}}
     diarization_warning = None
 
     if enable_diarization:
@@ -158,7 +405,8 @@ def _attach_speakers_and_faces(
             if progress_callback:
                 progress_callback(90, diarization_warning)
     else:
-        diarization_warning = "Speaker detection disabled"
+        if not speaker_segments:
+            diarization_warning = "Speaker detection disabled"
 
     face_map = None
     try:
@@ -192,6 +440,7 @@ def _attach_speakers_and_faces(
 def transcribe_file(
     file_path: str,
     model_size: str = "base",
+    engine: Optional[str] = None,
     language: Optional[str] = None,
     enable_diarization: bool = True,
     num_speakers: Optional[int] = None,
@@ -214,9 +463,16 @@ def transcribe_file(
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    requested = os.environ.get("PODCLI_ENGINE", "").strip().lower()
+    requested = (engine if engine is not None else os.environ.get("PODCLI_ENGINE", "")).strip().lower()
     engine = requested or "whisper-py"
     use_cpp = engine in ("whispercpp", "whisper-cpp", "whisper.cpp", "cpp")
+    use_assemblyai = engine in ("assemblyai", "assembly-ai", "aai")
+
+    if use_assemblyai:
+        base = _transcribe_with_assemblyai(
+            file_path, language, enable_diarization, num_speakers, progress_callback
+        )
+        return _attach_speakers_and_faces(file_path, base, False, num_speakers, progress_callback)
 
     # Native installs ship whisper.cpp, not openai-whisper. Fall back to it
     # automatically — whether whisper is missing OR a broken install fails to
@@ -239,6 +495,7 @@ def transcribe_file(
 
     if use_cpp:
         base = _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
+        base["engine"] = "whispercpp"
         # whisper.cpp is the no-torch path: importing torch for diarization can
         # hard-crash native runtimes. Skip diarization, keep face analysis (OpenCV).
         return _attach_speakers_and_faces(
@@ -326,6 +583,7 @@ def transcribe_file(
         "words": words,
         "duration": duration,
         "language": detected_lang,
+        "engine": "whisper-py",
     }
     return _attach_speakers_and_faces(
         file_path, base, enable_diarization, num_speakers, progress_callback

@@ -99,11 +99,11 @@ export default function StudioHome() {
           <div className="spinner sm" /> Loading…
         </div>
       ) : episodes.length === 0 ? (
-        <div className="drop-zone" style={{ textAlign: "center", padding: "48px 20px" }}>
+        <Link to="/episode" className="drop-zone" style={{ textAlign: "center", padding: "48px 20px", display: "block", textDecoration: "none" }}>
           <div className="label">
-            <Link to="/episode" style={{ color: "var(--accent)" }}>Start a new episode</Link>
+            <span style={{ color: "var(--accent)" }}>Start a new episode</span>
           </div>
-        </div>
+        </Link>
       ) : (
         <div>
           {episodes.map((ep) => (
