@@ -684,6 +684,30 @@ def _dedupe_clips_by_range(clips: list[dict]) -> list[dict]:
     return sorted(kept, key=lambda c: c.get("start_second", 0))
 
 
+def _drop_clips_overlapping(clips: list[dict], exclude_clips: list[dict]) -> list[dict]:
+    """Drop clips that overlap an excluded range by >50% of the shorter clip.
+    The prompt already asks the AI to skip these; this enforces it if it doesn't."""
+    if not exclude_clips:
+        return clips
+    kept = []
+    for clip in clips:
+        start = float(clip.get("start_second", 0))
+        end = float(clip.get("end_second", 0))
+        dur = max(0.0, end - start)
+        overlaps = False
+        for ex in exclude_clips:
+            ex_start = float(ex.get("start_second", 0))
+            ex_end = float(ex.get("end_second", 0))
+            overlap = max(0.0, min(end, ex_end) - max(start, ex_start))
+            shorter = min(dur, max(0.0, ex_end - ex_start)) or 1.0
+            if overlap / shorter > 0.5:
+                overlaps = True
+                break
+        if not overlaps:
+            kept.append(clip)
+    return kept
+
+
 def _select_top_by_score(clips: list[dict], top_n: int) -> list[dict]:
     """Keep the highest-scored `top_n` clips, then order them by start time.
     Ranking by score must come before truncation — otherwise the earliest clips
@@ -1014,7 +1038,9 @@ def suggest_with_claude(
                     "_ai_engine": engine,
                 })
 
-            selected = _select_top_by_score(normalized, top_n)
+            selected = _select_top_by_score(
+                _drop_clips_overlapping(normalized, exclude_clips or []), top_n
+            )
 
             if selected:
                 if progress_callback:

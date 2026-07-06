@@ -247,7 +247,7 @@ export default function ClipDetail() {
 
           <div className="section">
             <label style={labelStyle}>Title & captions</label>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%" }} />
+            <textarea value={title} onChange={(e) => setTitle(e.target.value)} rows={2} style={{ width: "100%", resize: "vertical", lineHeight: 1.5 }} />
             <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
               <select value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value)} style={{ flex: 1 }}>
                 {CAPTION_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
