@@ -80,18 +80,39 @@ func wantsRuntime(args []string) bool {
 
 // ensureRuntime self-provisions on first run so `podcli` works without a separate
 // `podcli setup`. Not called on the mcp path, whose stdout is the JSON-RPC channel.
-func ensureRuntime() {
-	if _, ok := engine.BackendRoot(); ok {
-		return
+func ensureRuntime() error {
+	if _, ok := engine.BackendRoot(); !ok {
+		fmt.Fprintln(os.Stderr, "First run - setting up podcli (one-time download)...")
+		setup(nil)
 	}
-	fmt.Fprintln(os.Stderr, "First run - setting up podcli (one-time download)...")
-	setup(nil)
+	return ensureBackendDeps()
+}
+
+func ensureBackendDeps() error {
+	if !engine.IsHermeticPython() {
+		return nil
+	}
+	root, ok := engine.BackendRoot()
+	if !ok {
+		return nil
+	}
+	reqs := filepath.Join(root, "requirements-runtime.txt")
+	if _, err := os.Stat(reqs); err != nil {
+		return nil
+	}
+	if _, err := provision.EnsurePython(reqs); err != nil {
+		return fmt.Errorf("could not install Python dependencies: %w\n  run `podcli setup` to retry", err)
+	}
+	return nil
 }
 
 func runEngine(args []string) int {
 	update.NotifyIfOutdated(Version)
 	if wantsRuntime(args) {
-		ensureRuntime()
+		if err := ensureRuntime(); err != nil {
+			fmt.Fprintln(os.Stderr, "podcli:", err)
+			return 1
+		}
 	}
 	if transcribeEngine(args) == "whispercpp" {
 		model, err := provision.EnsureModel(transcribeModel(args))

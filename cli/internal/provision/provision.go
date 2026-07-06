@@ -711,18 +711,53 @@ func EnsurePython(requirements string) (string, error) {
 		}
 	}
 	if requirements != "" {
-		if err := pipInstall(bin, requirements); err != nil {
+		if err := ensureDeps(bin, requirements); err != nil {
 			return "", err
 		}
 	}
 	return bin, nil
 }
 
+func ensureDeps(pybin, requirements string) error {
+	sum, err := sha256file(requirements)
+	if err == nil && sum != "" && depsInstalled(pybin, sum) {
+		return nil
+	}
+	if err := pipInstall(pybin, requirements); err != nil {
+		return err
+	}
+	if sum != "" {
+		os.WriteFile(depsStamp(pybin), []byte(sum), 0o644)
+	}
+	return nil
+}
+
+func depsStamp(pybin string) string {
+	return filepath.Join(pythonRoot(pybin), ".podcli-deps")
+}
+
+func depsInstalled(pybin, sum string) bool {
+	b, err := os.ReadFile(depsStamp(pybin))
+	return err == nil && strings.TrimSpace(string(b)) == sum
+}
+
 func pipInstall(pybin, requirements string) error {
+	if err := ensurePip(pybin); err != nil {
+		return err
+	}
 	fmt.Fprintf(os.Stderr, "  installing python deps (%s) - pulls ~80MB, first run takes a minute\n", filepath.Base(requirements))
 	cmd := exec.Command(pybin, "-m", "pip", "install", "--disable-pip-version-check", "--progress-bar=on", "-r", requirements)
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	return cmd.Run()
+}
+
+func ensurePip(pybin string) error {
+	if exec.Command(pybin, "-m", "pip", "--version").Run() == nil {
+		return nil
+	}
+	cmd := exec.Command(pybin, "-m", "ensurepip", "--upgrade")
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	return cmd.Run()
 }
 
