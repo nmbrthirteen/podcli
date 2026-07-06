@@ -1,0 +1,500 @@
+import React, { useEffect, useRef, useState } from "react";
+import { api, basename } from "./lib";
+import { BackIcon, TrashIcon, PlayIcon, PauseIcon, DownloadIcon } from "./icons";
+
+interface Moment {
+  start: number;
+  end: number;
+  why: string;
+  text: string;
+  enabled: boolean;
+  dirty: boolean;
+  clip_path?: string;
+  clip_exists?: boolean;
+}
+
+interface HighlightsResp {
+  session_id: string;
+  source: string;
+  format: string;
+  out_dir: string;
+  reel_path: string | null;
+  moments: Moment[];
+}
+
+interface SessionSummary {
+  session_id: string;
+  source: string;
+  profile: string;
+  format: string;
+  moment_count: number;
+  enabled_count: number;
+  reel_path: string | null;
+}
+
+type Format = "vertical" | "horizontal" | "square";
+
+const download = (p: string) => `/api/reel-download?path=${encodeURIComponent(p)}`;
+
+const FORMAT_LABEL: Record<Format, string> = {
+  horizontal: "16:9",
+  vertical: "9:16",
+  square: "1:1",
+};
+
+const mmss = (s: number) => {
+  const t = Math.max(0, s);
+  return `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+};
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="field-label">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function MomentTrim({
+  src,
+  moment,
+  onCommit,
+  saving,
+}: {
+  src: string;
+  moment: Moment;
+  onCommit: (start: number, end: number) => void;
+  saving: boolean;
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [dur, setDur] = useState(0);
+  const [cur, setCur] = useState(moment.start);
+  const [playing, setPlaying] = useState(false);
+  const [draft, setDraft] = useState<{ start: number; end: number } | null>(null);
+  const drag = useRef<null | "in" | "out">(null);
+
+  const start = draft?.start ?? moment.start;
+  const end = draft?.end ?? moment.end;
+
+  const pad = Math.max(8, (moment.end - moment.start) * 0.6);
+  const winA = Math.max(0, moment.start - pad);
+  const winB = Math.min(dur || moment.end + pad, moment.end + pad);
+  const span = Math.max(0.1, winB - winA);
+  const pct = (t: number) => `${((t - winA) / span) * 100}%`;
+
+  useEffect(() => {
+    const v = video.current;
+    if (v) v.currentTime = moment.start;
+    setCur(moment.start);
+  }, [moment.start, moment.end, src]);
+
+  const timeAt = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el) return winA;
+    const r = el.getBoundingClientRect();
+    return winA + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * span;
+  };
+
+  const onMove = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    const t = timeAt(e.clientX);
+    setDraft((d) => {
+      const base = d ?? { start: moment.start, end: moment.end };
+      if (drag.current === "in") return { start: Math.min(t, base.end - 0.5), end: base.end };
+      return { start: base.start, end: Math.max(t, base.start + 0.5) };
+    });
+    if (video.current) {
+      video.current.currentTime = t;
+      setCur(t);
+    }
+  };
+
+  const endDrag = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    drag.current = null;
+    if (draft) onCommit(round1(draft.start), round1(draft.end));
+  };
+
+  const toggle = () => {
+    const v = video.current;
+    if (!v) return;
+    if (v.paused) {
+      if (v.currentTime < start || v.currentTime >= end) v.currentTime = start;
+      v.play();
+    } else v.pause();
+  };
+
+  const onTime = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const t = e.currentTarget.currentTime;
+    if (playing && t >= end) {
+      e.currentTarget.currentTime = start;
+      setCur(start);
+    } else setCur(t);
+  };
+
+  return (
+    <div>
+      <div className="clip-player" style={{ marginBottom: 10 }}>
+        <video
+          ref={video}
+          src={src}
+          playsInline
+          preload="metadata"
+          onClick={toggle}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onTimeUpdate={onTime}
+          onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
+          style={{ maxHeight: 360, width: "100%", objectFit: "contain", background: "#000" }}
+        />
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button className="clip-player-btn" onClick={toggle} aria-label={playing ? "Pause" : "Play"}
+          style={{ flexShrink: 0 }}>
+          {playing ? <PauseIcon /> : <PlayIcon />}
+        </button>
+        <div
+          ref={trackRef}
+          className="rf-track"
+          style={{ flex: 1, marginTop: 0 }}
+          onPointerMove={onMove}
+          onPointerUp={endDrag}
+        >
+          <div className="rf-region" style={{ left: pct(start), width: `calc(${pct(end)} - ${pct(start)})` }} />
+          <div className="rf-playhead" style={{ left: pct(cur) }} />
+          <div
+            className="rf-handle"
+            style={{ left: pct(start), background: "var(--accent)" }}
+            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); drag.current = "in"; }}
+          />
+          <div
+            className="rf-handle"
+            style={{ left: pct(end), background: "var(--accent)" }}
+            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); drag.current = "out"; }}
+          />
+        </div>
+        <span className="clip-player-time" style={{ minWidth: 118, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+          {saving ? "saving…" : `${mmss(start)}–${mmss(end)} · ${Math.round(end - start)}s`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+export default function HighlightsPage() {
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [videoPath, setVideoPath] = useState("");
+  const [browsing, setBrowsing] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [format, setFormat] = useState<Format>("horizontal");
+  const [topN, setTopN] = useState(10);
+  const [minDur, setMinDur] = useState(15);
+  const [maxDur, setMaxDur] = useState(60);
+  const [session, setSession] = useState<HighlightsResp | null>(null);
+  const [selected, setSelected] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function refreshList() {
+    try {
+      const r = await api<{ sessions: SessionSummary[] }>("/reel", {
+        method: "POST",
+        body: JSON.stringify({ action: "list" }),
+      });
+      setSessions(r.sessions || []);
+    } catch {
+      /* list is best-effort */
+    }
+  }
+
+  useEffect(() => {
+    refreshList();
+  }, []);
+
+  async function call(body: Record<string, unknown>, label: string) {
+    setBusy(true);
+    setMsg(label);
+    try {
+      const r = await api<HighlightsResp>("/reel", { method: "POST", body: JSON.stringify(body) });
+      setSession(r);
+      setSelected(0);
+      setMsg(null);
+      refreshList();
+    } catch (e: unknown) {
+      setMsg("Error: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function browse() {
+    setBrowsing(true);
+    try {
+      const d = await api<{ file_path?: string }>("/browse-file");
+      if (d.file_path) setVideoPath(d.file_path);
+    } catch {
+      /* dialog cancelled */
+    } finally {
+      setBrowsing(false);
+    }
+  }
+
+  async function uploadDropped(file: File) {
+    setBrowsing(true);
+    setMsg(`Uploading ${file.name}…`);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const d = (await res.json()) as { file_path?: string; error?: string };
+      if (d.file_path) setVideoPath(d.file_path);
+      else setMsg(d.error || "Upload failed");
+    } catch {
+      setMsg("Upload failed");
+    } finally {
+      setBrowsing(false);
+      setMsg(null);
+    }
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) uploadDropped(file);
+  }
+
+  const detect = () =>
+    call(
+      { action: "new", video_path: videoPath, profile: "auto", format, top_n: topN, min_dur: minDur, max_dur: maxDur },
+      "Finding the best moments (one-time, ~2 min)…",
+    );
+
+  const open = (id: string) => call({ action: "show", session_id: id }, "Loading…");
+
+  const editOp = (index: number, op: string, seconds = 0) =>
+    session &&
+    call({ action: "edit", session_id: session.session_id, index, op, seconds }, "Rebuilding…");
+
+  async function commitTrim(index: number, start: number, end: number) {
+    if (!session) return;
+    setSession({ ...session, moments: session.moments.map((m, i) => (i === index ? { ...m, start, end } : m)) });
+    setSaving(true);
+    try {
+      const r = await api<HighlightsResp>("/reel", {
+        method: "POST",
+        body: JSON.stringify({ action: "edit", session_id: session.session_id, index: index + 1, op: "set", start, end }),
+      });
+      setSession(r);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(e: React.MouseEvent, id: string) {
+    e.stopPropagation();
+    if (!window.confirm("Delete this highlights session?")) return;
+    setBusy(true);
+    try {
+      await api("/reel", { method: "POST", body: JSON.stringify({ action: "delete", session_id: id }) });
+      if (session?.session_id === id) setSession(null);
+      refreshList();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const enabled = session?.moments.filter((m) => m.enabled).length ?? 0;
+  const streamSrc = session ? `/api/stream-source?path=${encodeURIComponent(session.source)}` : "";
+  const active = session?.moments[selected];
+
+  return (
+    <div className="app">
+      <div className="header">
+        <h1 style={{ margin: 0 }}>Highlights</h1>
+      </div>
+
+      <div className="section card">
+        <div className="card-title" style={{ marginBottom: 14 }}>Find highlights</div>
+
+        {!videoPath ? (
+          <div
+            className={`drop-zone ${dragOver ? "drag-over" : ""}`}
+            style={{ cursor: browsing ? "default" : "pointer" }}
+            onClick={browsing ? undefined : browse}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+          >
+            {browsing ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                <div className="spinner sm" /> <span style={{ fontSize: 13, fontWeight: 600 }}>Working…</span>
+              </div>
+            ) : (
+              <div className="label"><strong>Browse</strong> or drop a video file here</div>
+            )}
+          </div>
+        ) : (
+          <div className="file-badge fade-in">
+            <div className="dot" />
+            <div className="name">{basename(videoPath)}</div>
+            <button className="btn btn-ghost btn-sm" onClick={() => setVideoPath("")} style={{ padding: "4px 10px", fontSize: 11 }}>
+              Clear
+            </button>
+          </div>
+        )}
+        <input
+          type="text"
+          placeholder="…or paste a local video path"
+          value={videoPath}
+          onChange={(e) => setVideoPath(e.target.value)}
+          style={{ width: "100%", marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 12 }}
+        />
+
+        <div className="row" style={{ marginTop: 14 }}>
+          <Field label="Format">
+            <select value={format} onChange={(e) => setFormat(e.target.value as Format)}>
+              <option value="horizontal">Horizontal 16:9</option>
+              <option value="vertical">Vertical 9:16</option>
+              <option value="square">Square 1:1</option>
+            </select>
+          </Field>
+          <Field label="Moments">
+            <input type="number" min={1} max={50} value={topN} onChange={(e) => setTopN(Number(e.target.value))} style={{ width: "100%" }} />
+          </Field>
+          <Field label="Min length (s)">
+            <input type="number" min={1} value={minDur} onChange={(e) => setMinDur(Number(e.target.value))} style={{ width: "100%" }} />
+          </Field>
+          <Field label="Max length (s)">
+            <input type="number" min={1} value={maxDur} onChange={(e) => setMaxDur(Number(e.target.value))} style={{ width: "100%" }} />
+          </Field>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+          <button className="btn btn-primary" disabled={busy || !videoPath.trim()} onClick={detect}>
+            {busy && msg?.startsWith("Finding") ? "Finding…" : "Find highlights"}
+          </button>
+        </div>
+      </div>
+
+      {msg && (
+        <div className="set-note" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          {busy && <div className="spinner sm" />} {msg}
+        </div>
+      )}
+
+      {session ? (
+        <div className="stream-in">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setSession(null)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <BackIcon /> All highlights
+            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span className="hint">{enabled}/{session.moments.length} in the cut</span>
+              {session.reel_path && (
+                <a className="btn btn-primary btn-sm" href={download(session.reel_path)} style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <DownloadIcon /> Download reel
+                </a>
+              )}
+            </div>
+          </div>
+
+          {active && (
+            <div className="section card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <span className="section-label" style={{ margin: 0 }}>Moment {selected + 1}</span>
+                <span className="pill pill-blue">{active.why}</span>
+                <span className="spacer" style={{ flex: 1 }} />
+                {active.clip_exists && active.clip_path && (
+                  <a className="btn btn-ghost btn-sm" href={download(active.clip_path)} style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <DownloadIcon /> Clip
+                  </a>
+                )}
+                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => editOp(selected + 1, "toggle")}>
+                  {active.enabled ? "Exclude from cut" : "Include in cut"}
+                </button>
+                <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => editOp(selected + 1, "drop")}>
+                  <TrashIcon />
+                </button>
+              </div>
+              <MomentTrim
+                key={selected}
+                src={streamSrc}
+                moment={active}
+                saving={saving}
+                onCommit={(s, e) => commitTrim(selected, s, e)}
+              />
+              {active.text && <p className="card-desc" style={{ marginTop: 12, marginBottom: 0 }}>{active.text}</p>}
+            </div>
+          )}
+
+          <div className="section-label" style={{ margin: "4px 0 10px" }}>All moments</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {session.moments.map((m, idx) => (
+              <div
+                key={idx}
+                className="card"
+                onClick={() => setSelected(idx)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", margin: 0, cursor: "pointer",
+                  opacity: m.enabled ? 1 : 0.45,
+                  borderColor: idx === selected ? "var(--accent-edge)" : "var(--border)",
+                }}
+              >
+                <span className="hint" style={{ width: 20, textAlign: "right" }}>{idx + 1}</span>
+                <strong style={{ fontVariantNumeric: "tabular-nums", minWidth: 96 }}>{mmss(m.start)}–{mmss(m.end)}</strong>
+                <span className="pill pill-blue">{m.why}</span>
+                <span className="hint" style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{Math.round(m.end - m.start)}s</span>
+                {m.clip_exists && m.clip_path && (
+                  <a className="btn btn-ghost btn-sm" href={download(m.clip_path)} title="Download clip"
+                    onClick={(e) => e.stopPropagation()} style={{ textDecoration: "none", padding: "4px 8px" }}>
+                    <DownloadIcon size={13} />
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : sessions.length === 0 ? (
+        <div className="empty-state">No highlights yet. Drop in a video above to find its best moments.</div>
+      ) : (
+        <>
+          <div className="section-label" style={{ marginBottom: 12 }}>Saved</div>
+          <div className="stream-in">
+            {sessions.map((s) => (
+              <div
+                key={s.session_id}
+                className="card"
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: 16, cursor: "pointer" }}
+                onClick={() => !busy && open(s.session_id)}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="clip-card-title" style={{ marginBottom: 4 }}>{basename(s.source) || s.session_id}</div>
+                  <div className="meta" style={{ gap: 8 }}>
+                    <span className="pill pill-blue">{s.profile}</span>
+                    <span className="hint">{FORMAT_LABEL[s.format as Format] || s.format}</span>
+                    <span className="hint">·</span>
+                    <span className="hint">{s.enabled_count}/{s.moment_count} moments</span>
+                  </div>
+                </div>
+                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={(e) => { e.stopPropagation(); open(s.session_id); }}>
+                  Open
+                </button>
+                <button className="btn btn-danger btn-sm" title="Delete" disabled={busy} onClick={(e) => remove(e, s.session_id)}>
+                  <TrashIcon />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
