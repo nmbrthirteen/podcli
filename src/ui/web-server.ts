@@ -2635,7 +2635,17 @@ app.post("/api/claude-suggest", async (req, res) => {
   }
 
   try {
-    const params: Record<string, unknown> = { segments: segs, top_n };
+    // Feed already-known moments to the AI so it doesn't re-suggest the same
+    // ranges: clips already rendered for this video plus current suggestions.
+    const rendered = uiState.videoPath
+      ? await clipsHistory.getBySource(uiState.videoPath).catch(() => [])
+      : [];
+    const existing_clips = [
+      ...rendered.map((c) => ({ start_second: c.start_second, end_second: c.end_second, title: c.title })),
+      ...uiState.suggestions.map((s) => ({ start_second: s.start_second, end_second: s.end_second, title: s.title })),
+    ];
+
+    const params: Record<string, unknown> = { segments: segs, top_n, existing_clips };
     if (min_duration) params.min_duration = min_duration;
     if (max_duration) params.max_duration = max_duration;
     const result = await executor.execute<{ clips?: SuggestedClip[] }>(

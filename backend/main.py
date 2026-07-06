@@ -503,6 +503,7 @@ def handle_suggest_clips(task_id: str, params: dict):
 
     segments = params.get("segments", [])
     top_n = params.get("top_n", 5)
+    existing_clips = params.get("existing_clips", [])
 
     if not segments:
         emit_result(task_id, "error", error="segments is required")
@@ -522,6 +523,7 @@ def handle_suggest_clips(task_id: str, params: dict):
     clips = suggest_with_claude(
         segments=segments,
         top_n=top_n,
+        exclude_clips=existing_clips,
         progress_callback=lambda pct, msg: emit_progress(task_id, "suggesting", pct, msg),
     )
 
