@@ -113,10 +113,11 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
     throw new Error("Transcription returned no data");
   }
   const data = result.data;
+  const resolvedEngine = data.engine;
 
   // Cache the raw result
-  await cache.set(filePath, data, engine);
-  const packed = await cache.getPackedMarkdown(filePath, data.engine ?? engine);
+  await cache.set(filePath, data, resolvedEngine);
+  const packed = await cache.getPackedMarkdown(filePath, resolvedEngine);
 
   return JSON.stringify({ cached: false, packed_ready: !!packed, ...formatResult(data) });
 }
