@@ -1,5 +1,5 @@
 import React from "react";
-import { Play, Pause, ChevronLeft, ChevronRight, SkipBack, SkipForward, X, Trash2, ArrowLeft } from "lucide-react";
+import { Play, Pause, ChevronLeft, ChevronRight, SkipBack, SkipForward, X, Trash2, ArrowLeft, Download } from "lucide-react";
 
 const block = { display: "block" } as const;
 
@@ -12,3 +12,4 @@ export const CutBackIcon = () => <SkipBack size={15} style={block} fill="current
 export const CutForwardIcon = () => <SkipForward size={15} style={block} fill="currentColor" />;
 export const CloseIcon = () => <X size={15} style={block} />;
 export const TrashIcon = ({ size = 14 }: { size?: number }) => <Trash2 size={size} style={block} />;
+export const DownloadIcon = ({ size = 14 }: { size?: number }) => <Download size={size} style={block} />;
