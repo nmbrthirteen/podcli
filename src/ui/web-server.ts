@@ -37,6 +37,7 @@ import { AssetManager } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths } from "../config/paths.js";
+import { DEMO_ASSETS_DIR } from "./demo-fixtures.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
 import { sliceTranscript, sliceWords, findContentType } from "../utils/transcript.js";
@@ -62,6 +63,7 @@ const publicDir = existsSync(join(__dirname, "public", "index.html"))
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3847");
+const DEMO = process.env.PODCLI_DEMO === "1";
 
 // --- Services ---
 const executor = new PythonExecutor();
@@ -1473,6 +1475,7 @@ app.get("/api/image", (req, res) => {
     return;
   }
   const allowedRoots = [paths.output, paths.working, paths.assets].map((p) => path.resolve(p));
+  if (DEMO) allowedRoots.push(path.resolve(DEMO_ASSETS_DIR));
   if (!allowedRoots.some((root) => resolved === root || resolved.startsWith(root + path.sep))) {
     res.status(403).json({ error: "access denied" });
     return;
@@ -1719,6 +1722,7 @@ async function bakeThumbnailCard(clipPath: string, image: string, stripStart = 0
 }
 
 app.patch("/api/clips/:id", async (req, res) => {
+  if (DEMO) { res.json({ ok: true }); return; } // fixtures are read-only
   const { title, caption_style, thumbnail_config } = req.body || {};
   const args = ["clips", "edit", req.params.id];
   if (title != null) args.push("--title", String(title));
@@ -1737,6 +1741,7 @@ app.patch("/api/clips/:id", async (req, res) => {
 });
 
 app.delete("/api/clips/:id", async (req, res) => {
+  if (DEMO) { res.json({ ok: true }); return; } // fixtures are read-only
   const r = await runCli(["clips", "delete", req.params.id, "--yes"]);
   if (r.code !== 0) {
     res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "delete failed" });
@@ -2017,7 +2022,7 @@ app.get("/api/youtube/status", async (_req, res) => {
   try {
     const clips = await clipsHistory.load();
     res.json({
-      authorized: existsSync(join(paths.home, "youtube-token.json")),
+      authorized: DEMO || existsSync(join(paths.home, "youtube-token.json")),
       linked: clips.filter((c) => c.youtube_video_id).length,
       with_metrics: clips.filter((c) => c.metrics && (c.metrics.views != null || c.metrics.retention != null)).length,
       total: clips.length,
