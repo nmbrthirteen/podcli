@@ -38,6 +38,7 @@ interface SessionSummary {
 type Format = "vertical" | "horizontal" | "square";
 
 const download = (p: string) => `/api/reel-download?path=${encodeURIComponent(p)}`;
+const isHttpUrl = (v: string) => /^https?:\/\//i.test(v.trim());
 
 const FORMAT_LABEL: Record<Format, string> = {
   horizontal: "16:9",
@@ -190,9 +191,71 @@ function MomentTrim({
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
+interface JobState {
+  status?: string;
+  progress?: number;
+  message?: string;
+  error?: string;
+  result?: { file_path?: string };
+}
+
+function useJob(jobId: string | null): JobState | null {
+  const [state, setState] = useState<JobState | null>(null);
+  useEffect(() => {
+    if (!jobId) {
+      setState(null);
+      return;
+    }
+    const es = new EventSource(`/api/job/${jobId}/stream`);
+    es.onmessage = (e) => {
+      const d = JSON.parse(e.data) as JobState;
+      setState(d);
+      if (d.status === "done" || d.status === "error") es.close();
+    };
+    es.onerror = () => es.close();
+    return () => es.close();
+  }, [jobId]);
+  return state;
+}
+
+function DownloadRow({
+  jobId,
+  url,
+  onDone,
+  onError,
+}: {
+  jobId: string;
+  url: string;
+  onDone: (jobId: string, filePath?: string) => void;
+  onError: (jobId: string, error?: string) => void;
+}) {
+  const job = useJob(jobId);
+  const fired = useRef(false);
+  useEffect(() => {
+    if (!job || fired.current) return;
+    if (job.status === "done") {
+      fired.current = true;
+      onDone(jobId, job.result?.file_path);
+    } else if (job.status === "error") {
+      fired.current = true;
+      onError(jobId, job.error);
+    }
+  }, [job?.status]);
+  return (
+    <div className="file-badge">
+      <div className="spinner sm" />
+      <div className="name">
+        Downloading {basename(url)}
+        {job?.progress ? ` · ${Math.round(job.progress)}%` : ""}
+      </div>
+    </div>
+  );
+}
+
 export default function HighlightsPage() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [videoPaths, setVideoPaths] = useState<string[]>([]);
+  const [downloads, setDownloads] = useState<{ jobId: string; url: string }[]>([]);
   const [pathDraft, setPathDraft] = useState("");
   const [browsing, setBrowsing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -282,9 +345,35 @@ export default function HighlightsPage() {
     if (files.length) uploadDropped(files);
   }
 
+  async function startDownload(url: string) {
+    try {
+      const d = await api<{ job_id?: string; error?: string }>("/download-video", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      });
+      if (d.error) setMsg("Download failed: " + d.error);
+      else if (d.job_id) setDownloads((prev) => [...prev, { jobId: d.job_id!, url }]);
+    } catch (e) {
+      setMsg("Download failed: " + (e instanceof Error ? e.message : String(e)));
+    }
+  }
+
+  const onDownloadDone = (jobId: string, filePath?: string) => {
+    setDownloads((prev) => prev.filter((d) => d.jobId !== jobId));
+    if (filePath) addPath(filePath);
+    else setMsg("Download finished without a video file.");
+  };
+  const onDownloadError = (jobId: string, error?: string) => {
+    setDownloads((prev) => prev.filter((d) => d.jobId !== jobId));
+    setMsg("Download failed: " + (error || "unknown error"));
+  };
+
   function commitDraft() {
     const p = pathDraft.trim();
-    if (p) addPath(p);
+    if (p) {
+      if (isHttpUrl(p)) startDownload(p);
+      else addPath(p);
+    }
     setPathDraft("");
   }
 
@@ -364,7 +453,7 @@ export default function HighlightsPage() {
           )}
         </div>
 
-        {videoPaths.length > 0 && (
+        {(videoPaths.length > 0 || downloads.length > 0) && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
             {videoPaths.map((p, i) => (
               <div key={p} className="file-badge fade-in">
@@ -375,11 +464,14 @@ export default function HighlightsPage() {
                 </button>
               </div>
             ))}
+            {downloads.map((d) => (
+              <DownloadRow key={d.jobId} jobId={d.jobId} url={d.url} onDone={onDownloadDone} onError={onDownloadError} />
+            ))}
           </div>
         )}
         <input
           type="text"
-          placeholder="…or paste a local video path, press Enter to add"
+          placeholder="…or paste a local path or YouTube/video URL, press Enter to add"
           value={pathDraft}
           onChange={(e) => setPathDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitDraft(); } }}
