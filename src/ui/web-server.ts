@@ -544,8 +544,14 @@ app.post("/api/download-video", async (req, res) => {
     "--js-runtimes",
     `node:${process.execPath}`,
     "--no-playlist",
+    // Best video+audio up to 1080p merged to mp4. A bare muxed stream (b[ext=mp4])
+    // is 360p on YouTube, which then upscales into a terrible-looking reel.
     "--format",
-    "b[ext=mp4]/b",
+    "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b",
+    "--merge-output-format",
+    "mp4",
+    "--ffmpeg-location",
+    paths.ffmpegPath,
     "--restrict-filenames",
     "--windows-filenames",
     "--paths",

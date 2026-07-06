@@ -19,6 +19,7 @@ interface HighlightsResp {
   source: string;
   sources?: string[];
   format: string;
+  logo?: string;
   out_dir: string;
   reel_path: string | null;
   moments: Moment[];
@@ -260,9 +261,14 @@ export default function HighlightsPage() {
   const [browsing, setBrowsing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [format, setFormat] = useState<Format>("horizontal");
+  const [auto, setAuto] = useState(true);
   const [topN, setTopN] = useState(10);
   const [minDur, setMinDur] = useState(15);
   const [maxDur, setMaxDur] = useState(60);
+  const [logoPath, setLogoPath] = useState("");
+  const [logoUploading, setLogoUploading] = useState(false);
+  const createLogoRef = useRef<HTMLInputElement>(null);
+  const sessionLogoRef = useRef<HTMLInputElement>(null);
   const [session, setSession] = useState<HighlightsResp | null>(null);
   const [selected, setSelected] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -283,6 +289,9 @@ export default function HighlightsPage() {
 
   useEffect(() => {
     refreshList();
+    api<{ settings?: { logoPath?: string } }>("/ui-state")
+      .then((s) => { if (s.settings?.logoPath) setLogoPath(s.settings.logoPath); })
+      .catch(() => {});
   }, []);
 
   async function call(body: Record<string, unknown>, label: string) {
@@ -377,11 +386,46 @@ export default function HighlightsPage() {
     setPathDraft("");
   }
 
+  async function uploadImage(f: File): Promise<string | null> {
+    setLogoUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const d = (await res.json()) as { file_path?: string; error?: string };
+      if (d.file_path) {
+        api("/ui-state", {
+          method: "POST",
+          body: JSON.stringify({ _source: "ui", settings: { logoPath: d.file_path } }),
+        }).catch(() => {});
+        return d.file_path;
+      }
+      setMsg(d.error || "Logo upload failed");
+      return null;
+    } catch {
+      setMsg("Logo upload failed");
+      return null;
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  async function applySessionLogo(f: File | null) {
+    if (!session) return;
+    const logo = f ? await uploadImage(f) : "";
+    if (f && !logo) return;
+    call(
+      { action: "build", session_id: session.session_id, logo },
+      f ? "Adding logo and rebuilding…" : "Removing logo…",
+    );
+  }
+
   const detect = () => {
     const seed =
       videoPaths.length === 1 ? { video_path: videoPaths[0] } : { video_paths: videoPaths };
+    const tuning = auto ? { auto: true } : { top_n: topN, min_dur: minDur, max_dur: maxDur };
     call(
-      { action: "new", ...seed, profile: "auto", format, top_n: topN, min_dur: minDur, max_dur: maxDur },
+      { action: "new", ...seed, profile: "auto", format, ...tuning, ...(logoPath ? { logo: logoPath } : {}) },
       videoPaths.length > 1
         ? `Finding the best moments across ${videoPaths.length} videos (one-time)…`
         : "Finding the best moments (one-time, ~2 min)…",
@@ -479,6 +523,15 @@ export default function HighlightsPage() {
           style={{ width: "100%", marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 12 }}
         />
 
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 16 }}>
+          <span className="field-label" style={{ margin: 0 }}>Moments</span>
+          <div style={{ display: "inline-flex", gap: 4 }}>
+            <button className={`btn btn-sm ${auto ? "btn-primary" : "btn-ghost"}`} onClick={() => setAuto(true)}>Auto</button>
+            <button className={`btn btn-sm ${!auto ? "btn-primary" : "btn-ghost"}`} onClick={() => setAuto(false)}>Custom</button>
+          </div>
+          {auto && <span className="hint">Best moments and how many, picked for you</span>}
+        </div>
+
         <div className="row" style={{ marginTop: 14 }}>
           <Field label="Format">
             <select value={format} onChange={(e) => setFormat(e.target.value as Format)}>
@@ -487,15 +540,37 @@ export default function HighlightsPage() {
               <option value="square">Square 1:1</option>
             </select>
           </Field>
-          <Field label="Moments">
-            <input type="number" min={1} max={50} value={topN} onChange={(e) => setTopN(Number(e.target.value))} style={{ width: "100%" }} />
-          </Field>
-          <Field label="Min length (s)">
-            <input type="number" min={1} value={minDur} onChange={(e) => setMinDur(Number(e.target.value))} style={{ width: "100%" }} />
-          </Field>
-          <Field label="Max length (s)">
-            <input type="number" min={1} value={maxDur} onChange={(e) => setMaxDur(Number(e.target.value))} style={{ width: "100%" }} />
-          </Field>
+          {!auto && (
+            <>
+              <Field label="Moments">
+                <input type="number" min={1} max={50} value={topN} onChange={(e) => setTopN(Number(e.target.value))} style={{ width: "100%" }} />
+              </Field>
+              <Field label="Min length (s)">
+                <input type="number" min={1} value={minDur} onChange={(e) => setMinDur(Number(e.target.value))} style={{ width: "100%" }} />
+              </Field>
+              <Field label="Max length (s)">
+                <input type="number" min={1} value={maxDur} onChange={(e) => setMaxDur(Number(e.target.value))} style={{ width: "100%" }} />
+              </Field>
+            </>
+          )}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
+          <span className="field-label" style={{ margin: 0 }}>Logo</span>
+          {logoPath ? (
+            <div className="file-badge">
+              <div className="dot" />
+              <div className="name">{basename(logoPath)}</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setLogoPath("")} style={{ padding: "4px 10px", fontSize: 11 }}>Remove</button>
+            </div>
+          ) : (
+            <button className="btn btn-ghost btn-sm" disabled={logoUploading} onClick={() => createLogoRef.current?.click()}>
+              {logoUploading ? "Uploading…" : "Add logo"}
+            </button>
+          )}
+          <span className="hint">Overlaid top-right on every clip</span>
+          <input ref={createLogoRef} type="file" accept=".png,.jpg,.jpeg,.svg,.webp" style={{ display: "none" }}
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadImage(f).then((p) => p && setLogoPath(p)); }} />
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
@@ -523,11 +598,19 @@ export default function HighlightsPage() {
             </button>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span className="hint">{enabled}/{session.moments.length} in the cut</span>
+              <button className="btn btn-ghost btn-sm" disabled={busy || logoUploading} onClick={() => sessionLogoRef.current?.click()}>
+                {logoUploading ? "Uploading…" : session.logo ? "Change logo" : "Add logo"}
+              </button>
+              {session.logo && (
+                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => applySessionLogo(null)}>Remove logo</button>
+              )}
               {session.reel_path && (
                 <a className="btn btn-primary btn-sm" href={download(session.reel_path)} style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <DownloadIcon /> Download reel
                 </a>
               )}
+              <input ref={sessionLogoRef} type="file" accept=".png,.jpg,.jpeg,.svg,.webp" style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) applySessionLogo(f); }} />
             </div>
           </div>
 

@@ -2102,6 +2102,14 @@ export function createServer(): McpServer {
         .enum(["vertical", "horizontal", "square"])
         .optional()
         .describe("For 'new': reel aspect ratio (default horizontal)"),
+      auto: z
+        .boolean()
+        .optional()
+        .describe("For 'new': let detection pick the best moments and how many, ignoring top_n/min_dur/max_dur"),
+      logo: z
+        .string()
+        .optional()
+        .describe("For 'new'/'build': path to a logo image overlaid top-right on the reel; empty string removes it"),
       top_n: z.number().optional().describe("For 'new': number of moments"),
       min_dur: z.number().optional().describe("For 'new': shortest moment in seconds (default 15)"),
       max_dur: z.number().optional().describe("For 'new': longest moment in seconds (default 60)"),

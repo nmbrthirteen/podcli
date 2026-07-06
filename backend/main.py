@@ -388,6 +388,7 @@ def handle_manage_reel(task_id: str, params: dict):
             "source": session.source,
             "sources": sources,
             "format": session.format,
+            "logo": session.logo,
             "out_dir": session.out_dir,
             "reel_path": reel_file if os.path.exists(reel_file) else None,
             "moments": moments,
@@ -397,12 +398,16 @@ def handle_manage_reel(task_id: str, params: dict):
         if action == "new":
             from services.transcript_packer import compute_cache_hash, load_cached_transcript_for_video
             video_paths = params.get("video_paths") or []
+            # Auto lets the saliency threshold decide how many moments clear the bar,
+            # capped for sanity, with a wide length range so windows aren't constrained.
+            auto = bool(params.get("auto"))
             common = dict(
                 profile=params.get("profile", "auto"),
                 format=params.get("format", "horizontal"),
-                top_n=int(params.get("top_n", 10)),
-                min_dur=float(params.get("min_dur", 15.0)),
-                max_dur=float(params.get("max_dur", 60.0)),
+                top_n=50 if auto else int(params.get("top_n", 10)),
+                min_dur=5.0 if auto else float(params.get("min_dur", 15.0)),
+                max_dur=120.0 if auto else float(params.get("max_dur", 60.0)),
+                logo=params.get("logo") or "",
                 progress_callback=lambda p, m: emit_progress(task_id, "detecting", p, m),
             )
             if video_paths:
@@ -435,6 +440,10 @@ def handle_manage_reel(task_id: str, params: dict):
             emit_result(task_id, "success", data=payload(session, reel))
         elif action == "build":
             session = ReelSession.load(params["session_id"])
+            if "logo" in params:
+                session.logo = params.get("logo") or ""
+                for mm in session.moments:
+                    mm.dirty = True
             reel = build_reel(session, progress_callback=lambda p, m: emit_progress(task_id, "building", p, m))
             emit_result(task_id, "success", data=payload(session, reel))
         else:
