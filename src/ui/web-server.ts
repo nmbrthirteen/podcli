@@ -1565,10 +1565,38 @@ app.post("/api/analyze-energy", async (req, res) => {
 app.post("/api/reel", async (req, res) => {
   try {
     const result = await executor.execute("manage_reel", req.body || {});
-    res.json(result.data || {});
+    const data = (result.data || {}) as any;
+    if (typeof data.source === "string") registerSourcePath(data.source);
+    if (typeof data.reel_path === "string") registerSourcePath(data.reel_path);
+    if (Array.isArray(data.moments)) {
+      for (const m of data.moments) {
+        if (m && typeof m.clip_path === "string" && m.clip_exists) registerSourcePath(m.clip_path);
+      }
+    }
+    res.json(data);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get("/api/reel-download", (req, res) => {
+  const filePath = req.query.path as string;
+  if (!filePath) {
+    res.status(400).json({ error: "path required" });
+    return;
+  }
+  let resolved: string;
+  try {
+    resolved = realpathSync(path.resolve(filePath));
+  } catch {
+    res.status(404).json({ error: "File not found" });
+    return;
+  }
+  if (extname(resolved).toLowerCase() !== ".mp4" || !allowedSourcePaths.has(resolved)) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+  res.download(resolved);
 });
 
 // --- Encoder info ---

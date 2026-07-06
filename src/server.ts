@@ -2077,10 +2077,10 @@ export function createServer(): McpServer {
   // =============================================
   server.tool(
     "manage_reel",
-    "Create and iterate on a highlights reel. Detection runs once with action 'new'; after that, edit individual moments fast (longer/shorter/earlier/later/shift/drop/toggle) and rebuild without re-detecting. Actions: 'new' (video_path, profile, top_n), 'show' (session_id), 'edit' (session_id, index, op, seconds), 'build' (session_id).",
+    "Create and iterate on a highlights reel. Detection runs once with action 'new'; after that, edit individual moments fast (longer/shorter/earlier/later/shift/drop/toggle) and rebuild without re-detecting. Actions: 'new' (video_path, profile, format, top_n, min_dur, max_dur), 'list', 'show' (session_id), 'edit' (session_id, index, op, seconds), 'build' (session_id), 'delete' (session_id).",
     {
       action: z
-        .enum(["new", "show", "edit", "build"])
+        .enum(["new", "list", "show", "edit", "build", "delete"])
         .describe("What to do with the reel"),
       video_path: z
         .string()
@@ -2089,24 +2089,38 @@ export function createServer(): McpServer {
       session_id: z
         .string()
         .optional()
-        .describe("For show/edit/build: the reel session id returned by 'new'"),
+        .describe("For show/edit/build/delete: the reel session id returned by 'new'"),
       profile: z
-        .enum(["party", "action"])
+        .enum(["auto", "party", "action"])
         .optional()
-        .describe("For 'new': detection profile (default party)"),
+        .describe("For 'new': detection profile (default auto)"),
+      format: z
+        .enum(["vertical", "horizontal", "square"])
+        .optional()
+        .describe("For 'new': reel aspect ratio (default horizontal)"),
       top_n: z.number().optional().describe("For 'new': number of moments"),
+      min_dur: z.number().optional().describe("For 'new': shortest moment in seconds (default 15)"),
+      max_dur: z.number().optional().describe("For 'new': longest moment in seconds (default 60)"),
       index: z
         .number()
         .optional()
         .describe("For 'edit': 1-based moment number to adjust"),
       op: z
-        .enum(["longer", "shorter", "earlier", "later", "shift", "drop", "toggle"])
+        .enum(["longer", "shorter", "earlier", "later", "shift", "set", "drop", "toggle"])
         .optional()
         .describe("For 'edit': how to change the moment"),
       seconds: z
         .number()
         .optional()
         .describe("For 'edit': seconds for longer/shorter/earlier/later/shift"),
+      start: z
+        .number()
+        .optional()
+        .describe("For 'edit' with op 'set': absolute start time in seconds"),
+      end: z
+        .number()
+        .optional()
+        .describe("For 'edit' with op 'set': absolute end time in seconds"),
     },
     async (params) => {
       try {

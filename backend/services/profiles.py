@@ -35,6 +35,17 @@ def _weights(**kw) -> dict[str, float]:
 
 
 PROFILES = {
+    "auto": ContentProfile(
+        name="auto",
+        candidate_source="saliency",
+        channel_weights=_weights(
+            audio_event=0.3, energy=0.25, motion=0.2, prosody=0.15, face_reaction=0.1
+        ),
+        reaction_lookback_sec=7.0,
+        reaction_payoff_sec=2.0,
+        peak_min_gap_sec=8.0,
+        peak_top_percentile=0.15,
+    ),
     "podcast": ContentProfile(
         name="podcast",
         candidate_source="llm",

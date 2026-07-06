@@ -362,19 +362,31 @@ def handle_detect_highlights(task_id: str, params: dict):
 def handle_manage_reel(task_id: str, params: dict):
     """Create and iterate on a highlights reel — the MCP surface over the reel service.
 
-    Actions: new (detect + build), show, edit (adjust one moment + rebuild), build.
+    Actions: new (detect + build), list, show, edit (adjust one moment + rebuild),
+    build, delete.
     """
     from dataclasses import asdict
-    from services.reel import ReelSession, seed_session, edit_moment, build_reel
+    from services.reel import (
+        ReelSession, seed_session, edit_moment, build_reel, list_sessions, delete_session,
+    )
 
     action = params.get("action", "show")
 
     def payload(session, reel=None):
+        moments = []
+        for i, m in enumerate(session.moments, 1):
+            d = asdict(m)
+            d["clip_path"] = os.path.join(session.out_dir, "clips", f"clip_{i:02d}.mp4")
+            d["clip_exists"] = os.path.exists(d["clip_path"])
+            moments.append(d)
+        reel_file = reel or os.path.join(session.out_dir, "highlights_reel.mp4")
         return {
             "session_id": session.session_id,
+            "source": session.source,
+            "format": session.format,
             "out_dir": session.out_dir,
-            "reel_path": reel,
-            "moments": [asdict(m) for m in session.moments],
+            "reel_path": reel_file if os.path.exists(reel_file) else None,
+            "moments": moments,
         }
 
     try:
@@ -386,18 +398,28 @@ def handle_manage_reel(task_id: str, params: dict):
             cached = load_cached_transcript_for_video(video)
             words = cached.get("words") if cached else None
             session = seed_session(
-                sid, video, out_dir, profile=params.get("profile", "party"),
-                top_n=int(params.get("top_n", 10)), words=words,
+                sid, video, out_dir, profile=params.get("profile", "auto"),
+                format=params.get("format", "horizontal"),
+                top_n=int(params.get("top_n", 10)),
+                min_dur=float(params.get("min_dur", 15.0)),
+                max_dur=float(params.get("max_dur", 60.0)),
+                words=words,
                 progress_callback=lambda p, m: emit_progress(task_id, "detecting", p, m),
             )
             reel = build_reel(session, progress_callback=lambda p, m: emit_progress(task_id, "building", p, m))
             emit_result(task_id, "success", data=payload(session, reel))
+        elif action == "list":
+            emit_result(task_id, "success", data={"sessions": list_sessions()})
+        elif action == "delete":
+            ok = delete_session(params["session_id"])
+            emit_result(task_id, "success", data={"deleted": ok, "session_id": params["session_id"]})
         elif action == "show":
             emit_result(task_id, "success", data=payload(ReelSession.load(params["session_id"])))
         elif action == "edit":
             session = edit_moment(
                 ReelSession.load(params["session_id"]),
                 int(params["index"]), params["op"], float(params.get("seconds", 0.0)),
+                start=params.get("start"), end=params.get("end"),
             )
             reel = build_reel(session, progress_callback=lambda p, m: emit_progress(task_id, "building", p, m))
             emit_result(task_id, "success", data=payload(session, reel))

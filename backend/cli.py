@@ -398,7 +398,9 @@ def cmd_studio(args):
 
 def cmd_reel(args):
     """Create and iterate on a highlights reel — detect once, then edit moments fast."""
-    from services.reel import ReelSession, seed_session, edit_moment, build_reel
+    from services.reel import (
+        ReelSession, seed_session, edit_moment, build_reel, list_sessions, delete_session,
+    )
     from services.transcript_packer import compute_cache_hash, load_cached_transcript_for_video
 
     def _mmss(s):
@@ -420,7 +422,9 @@ def cmd_reel(args):
         words = cached.get("words") if cached else None
         print("  Detecting moments (one-time)...")
         session = seed_session(
-            sid, video, out_dir, profile=args.profile or "party", top_n=args.top or 10,
+            sid, video, out_dir, profile=args.profile or "auto",
+            format=args.format or "horizontal", top_n=args.top or 10,
+            min_dur=args.min_dur, max_dur=args.max_dur,
             words=words, progress_callback=lambda p, m: print(f"    {m}") if m else None,
         )
         _show(session)
@@ -429,6 +433,13 @@ def cmd_reel(args):
         print(f"  ✓ {reel}")
         print(f"  session: {sid}")
         print(f"  edit with: podcli reel edit {sid} <N> <longer|shorter|earlier|later|shift|drop|toggle> [secs]")
+    elif action == "list":
+        for s in list_sessions():
+            print(f"  {s['session_id']}  {s['profile']}/{s['format']}  "
+                  f"{s['enabled_count']}/{s['moment_count']} moments  {os.path.basename(s['source'])}")
+    elif action == "delete":
+        ok = delete_session(args.session)
+        print(f"  {'✓ deleted' if ok else '✗ no such session'} {args.session}")
     elif action == "show":
         _show(ReelSession.load(args.session))
     elif action == "edit":
@@ -440,7 +451,8 @@ def cmd_reel(args):
         reel = build_reel(ReelSession.load(args.session))
         print(f"  ✓ {reel}")
     else:
-        print("  Usage: podcli reel new <video> | show <session> | edit <session> N <op> [secs] | build <session>")
+        print("  Usage: podcli reel new <video> | list | show <session> | "
+              "edit <session> N <op> [secs] | build <session> | delete <session>")
 
 
 def cmd_process(args):
@@ -3468,9 +3480,18 @@ def main():
     reel_sub = reel_p.add_subparsers(dest="reel_action")
     rn = reel_sub.add_parser("new", help="Detect moments and build a reel")
     rn.add_argument("video", help="Path to the source video")
-    rn.add_argument("--profile", choices=["party", "action"], default="party")
+    rn.add_argument("--profile", choices=["auto", "party", "action"], default="auto")
+    rn.add_argument("--format", choices=["vertical", "horizontal", "square"], default="horizontal",
+                    help="Reel aspect ratio (default horizontal 1920x1080)")
     rn.add_argument("-n", "--top", type=int, help="Number of moments (default 10)")
+    rn.add_argument("--min-dur", type=float, default=15.0, dest="min_dur",
+                    help="Shortest moment in seconds (default 15)")
+    rn.add_argument("--max-dur", type=float, default=60.0, dest="max_dur",
+                    help="Longest moment in seconds (default 60)")
     rn.add_argument("-o", "--output", help="Output directory")
+    reel_sub.add_parser("list", help="List saved reel sessions")
+    rdel = reel_sub.add_parser("delete", help="Delete a reel session")
+    rdel.add_argument("session")
     rsh = reel_sub.add_parser("show", help="List the moments in a reel session")
     rsh.add_argument("session", help="Session id (printed by 'reel new')")
     red = reel_sub.add_parser("edit", help="Adjust one moment and rebuild")
