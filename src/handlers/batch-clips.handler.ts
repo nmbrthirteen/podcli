@@ -218,6 +218,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
           clean_fillers: input.clean_fillers !== false,
           logo_path: settings.logoPath || null,
           outro_path: settings.outroPath || null,
+          intro_path: settings.introPath || null,
           keep_caption_overlay: input.keep_caption_overlay === true,
         }),
       });
@@ -249,6 +250,8 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     keep_caption_overlay: input.keep_caption_overlay === true,
     output_dir: paths.output,
     logo_path: settings.logoPath || null,
+    outro_path: settings.outroPath || null,
+    intro_path: settings.introPath || null,
   });
 
   if (!result.data) {

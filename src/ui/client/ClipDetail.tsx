@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { PageHeader } from "./Page";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { api, upload, fmt, basename, labelStyle } from "./lib";
 import ClipPlayer from "./ClipPlayer";
@@ -85,7 +86,7 @@ export default function ClipDetail() {
   }, []);
 
   if (loading) return <div className="app"><div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text2)", padding: 40 }}><div className="spinner sm" /> Loading…</div></div>;
-  if (!clip) return <div className="app"><div className="header"><h1>Clip not found</h1></div><Link to="/" style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}><BackIcon /> Library</Link></div>;
+  if (!clip) return <div className="app"><PageHeader title="Clip not found" /><Link to="/" style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}><BackIcon /> Library</Link></div>;
 
   const tc = clip.thumbnail_config || {};
   const dirty = title !== clip.title || captionStyle !== clip.caption_style;
@@ -217,18 +218,16 @@ export default function ClipDetail() {
 
   return (
     <div className="app">
-      <div className="header">
-        <Link to="/" style={{ fontSize: 12, color: "var(--text3)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}><BackIcon size={12} /> Library</Link>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
-          <h1 style={{ margin: 0 }}>{clip.title}</h1>
-          <div className="set-actions">
-            <a className="btn btn-ghost btn-sm" href={`/api/clips/${clip.id}/download`} download style={{ textDecoration: "none" }}>Download</a>
-            <button className="btn btn-ghost btn-sm" onClick={reopen} disabled={busy !== null}>{busy === "reopen" ? <div className="spinner sm" /> : "Reopen in editor"}</button>
-            {davinciOn && <button className="btn btn-ghost btn-sm" onClick={exportDavinci} disabled={busy !== null}>{busy === "davinci" ? <div className="spinner sm" /> : "Export for DaVinci"}</button>}
-            <button className="btn btn-danger btn-sm" onClick={del} disabled={busy !== null}>{busy === "delete" ? <div className="spinner sm" /> : "Delete"}</button>
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        back={<Link to="/" style={{ fontSize: 12, color: "var(--text3)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}><BackIcon size={12} /> Library</Link>}
+        title={clip.title}
+        actions={<>
+          <a className="btn btn-ghost btn-sm" href={`/api/clips/${clip.id}/download`} download style={{ textDecoration: "none" }}>Download</a>
+          <button className="btn btn-ghost btn-sm" onClick={reopen} disabled={busy !== null}>{busy === "reopen" ? <div className="spinner sm" /> : "Reopen in editor"}</button>
+          {davinciOn && <button className="btn btn-ghost btn-sm" onClick={exportDavinci} disabled={busy !== null}>{busy === "davinci" ? <div className="spinner sm" /> : "Export for DaVinci"}</button>}
+          <button className="btn btn-danger btn-sm" onClick={del} disabled={busy !== null}>{busy === "delete" ? <div className="spinner sm" /> : "Delete"}</button>
+        </>}
+      />
 
       <div className="clip-detail">
         <div className="clip-detail-player">

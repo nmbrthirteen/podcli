@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { PageHeader } from "./Page";
 import { api } from "./lib";
 import CopyButton from "./CopyButton";
 
@@ -51,9 +52,10 @@ export default function McpSetupPage() {
 
   return (
     <div className="app" style={{ maxWidth: 780 }}>
-      <div className="header"><h1>MCP setup</h1></div>
-
-      <span className="pill" style={{ ...STATUS_STYLE[statusKind], fontSize: 11 }}>{statusText}</span>
+      <PageHeader
+        title="MCP setup"
+        actions={<span className="pill" style={{ ...STATUS_STYLE[statusKind], fontSize: 11 }}>{statusText}</span>}
+      />
 
       <div className="section" style={{ marginTop: 18 }}>
         <div className="section-label">Claude Desktop</div>

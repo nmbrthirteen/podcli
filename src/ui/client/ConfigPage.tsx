@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { PageHeader } from "./Page";
 import { api, upload } from "./lib";
 
 type SettingRow = {
@@ -149,7 +150,7 @@ export default function ConfigPage() {
 
   return (
     <div className="app" style={{ maxWidth: 760 }}>
-      <div className="header"><h1>Config</h1></div>
+      <PageHeader title="Config" />
 
       <div className="section">
         {statusError ? (
@@ -177,7 +178,7 @@ export default function ConfigPage() {
               <span className="v" style={{ color: aiCli.available ? "var(--green)" : "var(--yellow)" }}>
                 {aiCli.available
                   ? `Found ${aiCli.candidates?.map((c) => c.engine).join(", ") || "CLI"}`
-                  : "Not detected — set a path below or install Claude Code / Codex"}
+                  : "Not detected. Set a path below or install Claude Code / Codex"}
               </span>
             </div>
             {(aiCli.candidates || []).map((c) => (
@@ -246,7 +247,7 @@ export default function ConfigPage() {
               <div className="set-file">
                 <input
                   type="password"
-                  placeholder={s.set ? "Replace token" : (s.placeholder || "token")}
+                  placeholder={s.set ? "Replace token" : (s.placeholder || "Token")}
                   value={secretInputs[s.key] ?? ""}
                   onChange={(e) => setSecretInputs((p) => ({ ...p, [s.key]: e.target.value }))}
                   style={{ flex: 1 }}

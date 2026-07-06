@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { PageHeader } from "./Page";
 import { Link } from "react-router-dom";
 import { api, fmt, timeAgo, basename } from "./lib";
 import { TrashIcon, PlayIcon } from "./icons";
@@ -81,12 +82,10 @@ export default function StudioHome() {
 
   return (
     <div className="app">
-      <div className="header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h1 style={{ margin: 0 }}>Library</h1>
-          <Link to="/episode" className="btn btn-primary btn-sm" style={{ textDecoration: "none" }}>+ New episode</Link>
-        </div>
-      </div>
+      <PageHeader
+        title="Library"
+        actions={<Link to="/episode" className="btn btn-primary btn-sm" style={{ textDecoration: "none" }}>+ New episode</Link>}
+      />
 
       {exporting > 0 && (
         <div className="set-note ok" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>

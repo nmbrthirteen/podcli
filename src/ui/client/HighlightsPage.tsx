@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
+import { PageHeader } from "./Page";
 import { api, basename } from "./lib";
+import { useJob } from "./useJob";
+import AssetPicker from "./AssetPicker";
+import RecentSources from "./RecentSources";
 import { BackIcon, TrashIcon, PlayIcon, PauseIcon, DownloadIcon } from "./icons";
 
 interface Moment {
@@ -183,7 +187,7 @@ function MomentTrim({
           />
         </div>
         <span className="clip-player-time" style={{ minWidth: 118, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-          {saving ? "saving…" : `${mmss(start)}–${mmss(end)} · ${Math.round(end - start)}s`}
+          {saving ? "saving…" : `${mmss(start)}-${mmss(end)} · ${Math.round(end - start)}s`}
         </span>
       </div>
     </div>
@@ -191,33 +195,6 @@ function MomentTrim({
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
-
-interface JobState {
-  status?: string;
-  progress?: number;
-  message?: string;
-  error?: string;
-  result?: { file_path?: string };
-}
-
-function useJob(jobId: string | null): JobState | null {
-  const [state, setState] = useState<JobState | null>(null);
-  useEffect(() => {
-    if (!jobId) {
-      setState(null);
-      return;
-    }
-    const es = new EventSource(`/api/job/${jobId}/stream`);
-    es.onmessage = (e) => {
-      const d = JSON.parse(e.data) as JobState;
-      setState(d);
-      if (d.status === "done" || d.status === "error") es.close();
-    };
-    es.onerror = () => es.close();
-    return () => es.close();
-  }, [jobId]);
-  return state;
-}
 
 function DownloadRow({
   jobId,
@@ -266,9 +243,6 @@ export default function HighlightsPage() {
   const [minDur, setMinDur] = useState(15);
   const [maxDur, setMaxDur] = useState(60);
   const [logoPath, setLogoPath] = useState("");
-  const [logoUploading, setLogoUploading] = useState(false);
-  const createLogoRef = useRef<HTMLInputElement>(null);
-  const sessionLogoRef = useRef<HTMLInputElement>(null);
   const [session, setSession] = useState<HighlightsResp | null>(null);
   const [selected, setSelected] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -386,37 +360,19 @@ export default function HighlightsPage() {
     setPathDraft("");
   }
 
-  async function uploadImage(f: File): Promise<string | null> {
-    setLogoUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", f);
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
-      const d = (await res.json()) as { file_path?: string; error?: string };
-      if (d.file_path) {
-        api("/ui-state", {
-          method: "POST",
-          body: JSON.stringify({ _source: "ui", settings: { logoPath: d.file_path } }),
-        }).catch(() => {});
-        return d.file_path;
-      }
-      setMsg(d.error || "Logo upload failed");
-      return null;
-    } catch {
-      setMsg("Logo upload failed");
-      return null;
-    } finally {
-      setLogoUploading(false);
-    }
+  function chooseLogo(path: string) {
+    setLogoPath(path);
+    api("/ui-state", {
+      method: "POST",
+      body: JSON.stringify({ _source: "ui", settings: { logoPath: path } }),
+    }).catch(() => {});
   }
 
-  async function applySessionLogo(f: File | null) {
+  function applySessionLogoPath(path: string) {
     if (!session) return;
-    const logo = f ? await uploadImage(f) : "";
-    if (f && !logo) return;
     call(
-      { action: "build", session_id: session.session_id, logo },
-      f ? "Adding logo and rebuilding…" : "Removing logo…",
+      { action: "build", session_id: session.session_id, logo: path },
+      path ? "Applying logo and rebuilding…" : "Removing logo…",
     );
   }
 
@@ -473,9 +429,7 @@ export default function HighlightsPage() {
 
   return (
     <div className="app">
-      <div className="header">
-        <h1 style={{ margin: 0 }}>Highlights</h1>
-      </div>
+      <PageHeader title="Highlights" />
 
       <div className="section card">
         <div className="card-title" style={{ marginBottom: 14 }}>Find highlights</div>
@@ -513,21 +467,24 @@ export default function HighlightsPage() {
             ))}
           </div>
         )}
-        <input
-          type="text"
-          placeholder="…or paste a local path or YouTube/video URL, press Enter to add"
-          value={pathDraft}
-          onChange={(e) => setPathDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitDraft(); } }}
-          onBlur={commitDraft}
-          style={{ width: "100%", marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 12 }}
-        />
+        <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+          <input
+            type="text"
+            placeholder="Or paste a local path or YouTube/video URL, press Enter to add"
+            value={pathDraft}
+            onChange={(e) => setPathDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitDraft(); } }}
+            onBlur={commitDraft}
+            style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 12 }}
+          />
+          <RecentSources onPick={addPath} exclude={videoPaths} />
+        </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 16 }}>
           <span className="field-label" style={{ margin: 0 }}>Moments</span>
           <div style={{ display: "inline-flex", gap: 4 }}>
-            <button className={`btn btn-sm ${auto ? "btn-primary" : "btn-ghost"}`} onClick={() => setAuto(true)}>Auto</button>
-            <button className={`btn btn-sm ${!auto ? "btn-primary" : "btn-ghost"}`} onClick={() => setAuto(false)}>Custom</button>
+            <button className={`btn ${auto ? "btn-primary" : "btn-ghost"} btn-sm`} onClick={() => setAuto(true)}>Auto</button>
+            <button className={`btn ${!auto ? "btn-primary" : "btn-ghost"} btn-sm`} onClick={() => setAuto(false)}>Custom</button>
           </div>
           {auto && <span className="hint">Best moments and how many, picked for you</span>}
         </div>
@@ -555,22 +512,9 @@ export default function HighlightsPage() {
           )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
-          <span className="field-label" style={{ margin: 0 }}>Logo</span>
-          {logoPath ? (
-            <div className="file-badge">
-              <div className="dot" />
-              <div className="name">{basename(logoPath)}</div>
-              <button className="btn btn-ghost btn-sm" onClick={() => setLogoPath("")} style={{ padding: "4px 10px", fontSize: 11 }}>Remove</button>
-            </div>
-          ) : (
-            <button className="btn btn-ghost btn-sm" disabled={logoUploading} onClick={() => createLogoRef.current?.click()}>
-              {logoUploading ? "Uploading…" : "Add logo"}
-            </button>
-          )}
-          <span className="hint">Overlaid top-right on every clip</span>
-          <input ref={createLogoRef} type="file" accept=".png,.jpg,.jpeg,.svg,.webp" style={{ display: "none" }}
-            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadImage(f).then((p) => p && setLogoPath(p)); }} />
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginTop: 14 }}>
+          <AssetPicker type="logo" label="Logo" value={logoPath} onChange={chooseLogo} />
+          <span className="hint" style={{ paddingBottom: 8 }}>Overlaid top-right on every clip</span>
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
@@ -598,19 +542,12 @@ export default function HighlightsPage() {
             </button>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span className="hint">{enabled}/{session.moments.length} in the cut</span>
-              <button className="btn btn-ghost btn-sm" disabled={busy || logoUploading} onClick={() => sessionLogoRef.current?.click()}>
-                {logoUploading ? "Uploading…" : session.logo ? "Change logo" : "Add logo"}
-              </button>
-              {session.logo && (
-                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => applySessionLogo(null)}>Remove logo</button>
-              )}
+              <AssetPicker type="logo" value={session.logo || ""} disabled={busy} onChange={applySessionLogoPath} />
               {session.reel_path && (
                 <a className="btn btn-primary btn-sm" href={download(session.reel_path)} style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <DownloadIcon /> Download reel
                 </a>
               )}
-              <input ref={sessionLogoRef} type="file" accept=".png,.jpg,.jpeg,.svg,.webp" style={{ display: "none" }}
-                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) applySessionLogo(f); }} />
             </div>
           </div>
 
@@ -660,7 +597,7 @@ export default function HighlightsPage() {
                 }}
               >
                 <span className="hint" style={{ width: 20, textAlign: "right" }}>{idx + 1}</span>
-                <strong style={{ fontVariantNumeric: "tabular-nums", minWidth: 96 }}>{mmss(m.start)}–{mmss(m.end)}</strong>
+                <strong style={{ fontVariantNumeric: "tabular-nums", minWidth: 96 }}>{mmss(m.start)}-{mmss(m.end)}</strong>
                 <span className="pill pill-blue">{m.why}</span>
                 {(session.sources?.length ?? 1) > 1 && m.source && (
                   <span className="hint" title={m.source} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

@@ -33,7 +33,7 @@ import { v4 as uuidv4 } from "uuid";
 import { PythonExecutor } from "../services/python-executor.js";
 import { TranscriptCache } from "../services/transcript-cache.js";
 import { FileManager } from "../services/file-manager.js";
-import { AssetManager } from "../services/asset-manager.js";
+import { AssetManager, inferType } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths } from "../config/paths.js";
@@ -43,6 +43,7 @@ import { childLogger } from "../utils/logger.js";
 import { sliceTranscript, sliceWords, findContentType } from "../utils/transcript.js";
 import { errMsg } from "../utils/errors.js";
 import type {
+  AssetType,
   BatchClipsResult,
   ClipHistoryEntry,
   ClipResult,
@@ -118,6 +119,7 @@ interface UIState {
     format: string;
     logoPath: string;
     outroPath: string;
+    introPath: string;
   };
   phase: string;
   results: unknown[];
@@ -151,6 +153,7 @@ function loadPersistedState(): UIState {
           format: saved.settings?.format || "vertical",
           logoPath: saved.settings?.logoPath || "",
           outroPath: saved.settings?.outroPath || "",
+          introPath: saved.settings?.introPath || "",
         },
         // Never restore mid-export phases
         phase: ["exporting", "parsing", "suggesting"].includes(saved.phase)
@@ -182,6 +185,7 @@ function loadPersistedState(): UIState {
       format: "vertical",
       logoPath: "",
       outroPath: "",
+      introPath: "",
     },
     phase: "idle",
     results: [],
@@ -195,10 +199,36 @@ const uiState: UIState = loadPersistedState();
 // Files the server confirmed the user selected; /api/stream-source serves only
 // these, so a forged /api/ui-state can't grant reads of arbitrary files.
 const allowedSourcePaths = new Set<string>();
+
+// Recent source videos, referenced in place (never copied) so they can be
+// re-picked without re-uploading. Persisted as paths only — no GB bloat.
+const sourcesFile = join(paths.home, "sources.json");
+const VIDEO_SOURCE_EXTS = new Set([".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi"]);
+let recentSources: string[] = loadRecentSources();
+
+function loadRecentSources(): string[] {
+  try {
+    const raw = JSON.parse(readFileSync(sourcesFile, "utf-8"));
+    return Array.isArray(raw) ? raw.filter((p) => typeof p === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberSource(realPath: string): void {
+  if (!VIDEO_SOURCE_EXTS.has(extname(realPath).toLowerCase())) return;
+  recentSources = [realPath, ...recentSources.filter((p) => p !== realPath)].slice(0, 40);
+  try {
+    writeFileSync(sourcesFile, JSON.stringify(recentSources, null, 2), "utf-8");
+  } catch {}
+}
+
 function registerSourcePath(p: string | undefined | null): void {
   if (!p) return;
   try {
-    allowedSourcePaths.add(realpathSync(path.resolve(p)));
+    const real = realpathSync(path.resolve(p));
+    allowedSourcePaths.add(real);
+    rememberSource(real);
   } catch {}
 }
 registerSourcePath(uiState.videoPath);
@@ -335,8 +365,9 @@ function createBatchHistoryRecorder({
 // --- Middleware ---
 app.use(express.json({ limit: "50mb" }));
 
-// Serve static frontend
-app.use(express.static(publicDir));
+// Serve static frontend. redirect:false so the /assets page route isn't shadowed
+// by a 301 to the Vite bundle's assets/ directory; it falls through to the SPA.
+app.use(express.static(publicDir, { redirect: false }));
 
 // File upload config
 const uploadDir = join(paths.working, "uploads");
@@ -943,6 +974,7 @@ app.post("/api/create-clip", async (req, res) => {
     title = "clip",
     logo_path = null,
     outro_path = null,
+    intro_path = null,
     clean_fillers = false,
     allow_ass_fallback = false,
     content_type = null,
@@ -980,6 +1012,10 @@ app.post("/api/create-clip", async (req, res) => {
   }
   if (outro_path && !existsSync(outro_path)) {
     res.status(400).json({ error: `Outro file not found: ${outro_path}` });
+    return;
+  }
+  if (intro_path && !existsSync(intro_path)) {
+    res.status(400).json({ error: `Intro file not found: ${intro_path}` });
     return;
   }
   const validStyles = ["hormozi", "karaoke", "subtle", "branded"];
@@ -1034,6 +1070,7 @@ app.post("/api/create-clip", async (req, res) => {
         output_dir: paths.output,
         logo_path,
         outro_path,
+        intro_path,
         clean_fillers,
         allow_ass_fallback,
       },
@@ -1059,6 +1096,7 @@ app.post("/api/create-clip", async (req, res) => {
           format,
           logo_path: logo_path || undefined,
           outro_path: outro_path || undefined,
+          intro_path: intro_path || undefined,
           title,
           output_path: d?.output_path || "",
           file_size_mb: d?.file_size_mb || 0,
@@ -1070,7 +1108,7 @@ app.post("/api/create-clip", async (req, res) => {
         await clipsHistory.saveWords(rec.id, clipWords);
         await clipsHistory.saveRecipe(rec.id, {
           caption_style, crop_strategy, format, logo_path: logo_path || null, outro_path: outro_path || null,
-          clean_fillers, transcript_words: clipWords,
+          intro_path: intro_path || null, clean_fillers, transcript_words: clipWords,
         });
         broadcastHistoryUpdated(jobId, [rec]);
       } catch (err) {
@@ -1099,6 +1137,7 @@ app.post("/api/batch-clips", async (req, res) => {
     transcript_words = [],
     logo_path = null,
     outro_path = null,
+    intro_path = null,
     clean_fillers = false,
     keep_caption_overlay = false,
   } = req.body;
@@ -1139,6 +1178,10 @@ app.post("/api/batch-clips", async (req, res) => {
     res.status(400).json({ error: `Outro file not found: ${outro_path}` });
     return;
   }
+  if (intro_path && !existsSync(intro_path)) {
+    res.status(400).json({ error: `Intro file not found: ${intro_path}` });
+    return;
+  }
 
   await fileManager.ensureDirectories();
 
@@ -1175,6 +1218,7 @@ app.post("/api/batch-clips", async (req, res) => {
         output_dir: paths.output,
         logo_path,
         outro_path,
+        intro_path,
         clean_fillers,
         keep_caption_overlay: keep_caption_overlay === true,
         face_map: uiState.transcript?.face_map,
@@ -1669,32 +1713,166 @@ app.post("/api/presets", async (req, res) => {
 });
 
 // --- Assets ---
+function uniqueAssetName(base: string, taken: Set<string>): string {
+  const slug = (base || "asset").replace(/[^a-zA-Z0-9._-]/g, "-").replace(/^-+|-+$/g, "") || "asset";
+  if (!taken.has(slug)) return slug;
+  let i = 2;
+  while (taken.has(`${slug}-${i}`)) i++;
+  return `${slug}-${i}`;
+}
+
 app.get("/api/assets", async (req, res) => {
   try {
     const items = await assetManager.list(req.query.type as string | undefined);
     res.json(items);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  } catch (err: unknown) {
+    res.status(500).json({ error: errMsg(err) });
   }
 });
 
 app.post("/api/assets/register", async (req, res) => {
-  const { name, path: filePath, type = "other" } = req.body;
+  const { name, path: filePath, type } = req.body;
   try {
-    const asset = await assetManager.register(name, filePath, type);
+    const asset = await assetManager.register(name, filePath, type || inferType(filePath));
+    broadcastSSE("assets-updated", { name });
     res.json(asset);
-  } catch (err: any) {
-    res.status(400).json({ error: err.message });
+  } catch (err: unknown) {
+    res.status(400).json({ error: errMsg(err) });
+  }
+});
+
+app.post("/api/assets/upload", upload.single("file"), async (req, res) => {
+  if (!req.file) {
+    res.status(400).json({ error: "No file uploaded" });
+    return;
+  }
+  try {
+    const existing = new Set((await assetManager.list()).map((a) => a.name));
+    const wanted = (req.body?.name as string) || basename(req.file.originalname, extname(req.file.originalname));
+    const name = existing.has(wanted) && !req.body?.overwrite ? uniqueAssetName(wanted, existing) : wanted;
+    const type = (req.body?.type as AssetType) || inferType(req.file.originalname);
+    const asset = await assetManager.importFile(req.file.path, name, type);
+    await unlink(req.file.path).catch(() => {});
+    broadcastSSE("assets-updated", { name });
+    res.json(asset);
+  } catch (err: unknown) {
+    res.status(400).json({ error: errMsg(err) });
+  }
+});
+
+app.post("/api/assets/url", async (req, res) => {
+  let url: string;
+  try {
+    url = await validateDownloadUrl(req.body?.url);
+  } catch (err: unknown) {
+    res.status(400).json({ error: errMsg(err) });
+    return;
+  }
+  const jobId = uuidv4();
+  const job: JobState = {
+    id: jobId,
+    type: "download_video",
+    status: "running",
+    progress: 0,
+    message: "Downloading asset",
+    createdAt: Date.now(),
+  };
+  jobs.set(jobId, job);
+  res.json({ job_id: jobId });
+
+  (async () => {
+    try {
+      const existing = new Set((await assetManager.list()).map((a) => a.name));
+      const wanted = (req.body?.name as string) || basename(new URL(url).pathname) || "asset";
+      const name = existing.has(wanted) ? uniqueAssetName(wanted, existing) : wanted;
+      const type = (req.body?.type as AssetType) || inferType(url);
+      const asset = await assetManager.importUrl(url, name, type);
+      job.status = "done";
+      job.progress = 100;
+      job.result = asset;
+      broadcastSSE("job-complete", { jobId, result: asset });
+      broadcastSSE("assets-updated", { name });
+    } catch (err: unknown) {
+      job.status = "error";
+      job.error = errMsg(err);
+      broadcastSSE("job-error", { jobId, error: job.error });
+    }
+  })();
+});
+
+app.post("/api/assets/:name/default", async (req, res) => {
+  try {
+    const asset = await assetManager.setDefault(req.params.name);
+    broadcastSSE("assets-updated", { name: asset.name });
+    res.json(asset);
+  } catch (err: unknown) {
+    res.status(400).json({ error: errMsg(err) });
+  }
+});
+
+app.delete("/api/assets/:name/default", async (req, res) => {
+  try {
+    await assetManager.clearDefault(req.params.name);
+    broadcastSSE("assets-updated", { name: req.params.name });
+    res.json({ ok: true });
+  } catch (err: unknown) {
+    res.status(400).json({ error: errMsg(err) });
+  }
+});
+
+app.post("/api/assets/:name/rename", async (req, res) => {
+  try {
+    const asset = await assetManager.rename(req.params.name, req.body?.new_name);
+    broadcastSSE("assets-updated", { name: asset.name });
+    res.json(asset);
+  } catch (err: unknown) {
+    res.status(400).json({ error: errMsg(err) });
+  }
+});
+
+app.get("/api/assets/:name/download", async (req, res) => {
+  try {
+    const resolved = await assetManager.resolve(req.params.name);
+    if (!resolved || !existsSync(resolved)) {
+      res.status(404).json({ error: `Asset "${req.params.name}" not found` });
+      return;
+    }
+    if (req.query.dl) {
+      res.download(resolved, basename(resolved));
+    } else {
+      res.sendFile(resolved);
+    }
+  } catch (err: unknown) {
+    res.status(500).json({ error: errMsg(err) });
+  }
+});
+
+app.delete("/api/assets/:name", async (req, res) => {
+  try {
+    await assetManager.unregister(req.params.name);
+    broadcastSSE("assets-updated", { name: req.params.name });
+    res.json({ ok: true });
+  } catch (err: unknown) {
+    res.status(400).json({ error: errMsg(err) });
   }
 });
 
 app.post("/api/assets/unregister", async (req, res) => {
   try {
     await assetManager.unregister(req.body.name);
+    broadcastSSE("assets-updated", { name: req.body.name });
     res.json({ ok: true });
-  } catch (err: any) {
-    res.status(400).json({ error: err.message });
+  } catch (err: unknown) {
+    res.status(400).json({ error: errMsg(err) });
   }
+});
+
+// Recent source videos (referenced in place, not copied).
+app.get("/api/sources", (_req, res) => {
+  const items = recentSources
+    .map((p) => ({ path: p, name: basename(p), exists: existsSync(p) }))
+    .filter((s) => s.exists);
+  res.json(items);
 });
 
 // --- Clip History ---
@@ -2216,6 +2394,7 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       transcript_words: words,
       logo_path: (recipe.logo_path as string) ?? clip.logo_path ?? null,
       outro_path: (recipe.outro_path as string) ?? clip.outro_path ?? null,
+      intro_path: (recipe.intro_path as string) ?? clip.intro_path ?? null,
       clean_fillers: recipe.clean_fillers !== undefined ? recipe.clean_fillers : true,
       ...(recipe.keep_segments ? { keep_segments: recipe.keep_segments } : {}),
       title: clip.title,
@@ -3038,6 +3217,8 @@ app.post("/api/ui-state", (req, res) => {
       uiState.settings.logoPath = body.settings.logoPath;
     if (body.settings.outroPath !== undefined)
       uiState.settings.outroPath = body.settings.outroPath;
+    if (body.settings.introPath !== undefined)
+      uiState.settings.introPath = body.settings.introPath;
   }
   uiState.lastUpdated = Date.now();
   persistState();
@@ -3079,6 +3260,7 @@ app.post("/api/mcp/export", async (req, res) => {
       : []);
   const logoPath = req.body.logo_path || uiState.settings.logoPath || null;
   const outroPath = req.body.outro_path || uiState.settings.outroPath || null;
+  const introPath = req.body.intro_path || uiState.settings.introPath || null;
   const captionStyle =
     req.body.caption_style || uiState.settings.captionStyle || "branded";
   const cropStrategy =
@@ -3149,6 +3331,7 @@ app.post("/api/mcp/export", async (req, res) => {
         output_dir: paths.output,
         logo_path: logoPath,
         outro_path: outroPath,
+        intro_path: introPath,
         face_map: uiState.transcript?.face_map,
       },
       (event) => {

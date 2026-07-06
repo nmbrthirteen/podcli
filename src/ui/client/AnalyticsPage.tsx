@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
+import { PageHeader } from "./Page";
 import { Link } from "react-router-dom";
-import { api, upload, fmt, labelStyle } from "./lib";
+import { TrendingUp, Eye, Percent, MousePointerClick } from "lucide-react";
+import { api, upload, fmt } from "./lib";
 
 interface Row { key: string; count: number; avgViews: number; avgRetention: number; avgCtr: number }
 interface Data {
@@ -9,25 +11,47 @@ interface Data {
   top: Array<{ id: string; title: string; content_type?: string; caption_style: string; duration: number; metrics: any }>;
 }
 
-const fmtViews = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+const fmtViews = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
 
-function Group({ title, rows, metric }: { title: string; rows: Row[]; metric: "avgRetention" | "avgCtr" | "avgViews" }) {
+function weighted(rows: Row[], metric: "avgRetention" | "avgCtr") {
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  if (!total) return 0;
+  return Math.round(rows.reduce((s, r) => s + r[metric] * r.count, 0) / total);
+}
+function totalViews(rows: Row[]) {
+  return rows.reduce((s, r) => s + r.avgViews * r.count, 0);
+}
+function best(rows: Row[], metric: "avgRetention" | "avgCtr" | "avgViews") {
+  return rows.length ? rows.reduce((a, b) => (b[metric] > a[metric] ? b : a)) : null;
+}
+
+function StatTile({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
+  return (
+    <div className="stat-tile">
+      <div className="stat-icon">{icon}</div>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value}</div>
+      {sub && <div className="stat-sub">{sub}</div>}
+    </div>
+  );
+}
+
+function BarGroup({ title, hint, rows, metric }: { title: string; hint: string; rows: Row[]; metric: "avgRetention" | "avgCtr" | "avgViews" }) {
   const max = Math.max(1, ...rows.map((r) => r[metric]));
   const unit = metric === "avgViews" ? "" : "%";
   return (
-    <div className="section">
-      <div className="section-label">{title}</div>
+    <div className="section card">
+      <div className="section-label" style={{ marginBottom: 2 }}>{title}</div>
+      <div className="hint" style={{ marginBottom: 14 }}>{hint}</div>
       {rows.length === 0 ? (
-        <div style={{ color: "var(--text3)", fontSize: 12 }}>No data yet</div>
+        <div className="analytics-empty">No data yet</div>
       ) : rows.map((r) => (
-        <div key={r.key} style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-            <span style={{ color: "var(--text)" }}>{r.key} <span style={{ color: "var(--text3)" }}>· {r.count}</span></span>
-            <span style={{ color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{metric === "avgViews" ? fmtViews(r[metric]) : r[metric] + unit}</span>
+        <div key={r.key} className="bar-row">
+          <div className="bar-head">
+            <span className="bar-key">{r.key} <span className="bar-count">· {r.count}</span></span>
+            <span className="bar-val">{metric === "avgViews" ? fmtViews(r[metric]) : r[metric] + unit}</span>
           </div>
-          <div style={{ height: 6, borderRadius: 3, background: "var(--surface2)" }}>
-            <div style={{ width: `${(r[metric] / max) * 100}%`, height: "100%", borderRadius: 3, background: "var(--accent)" }} />
-          </div>
+          <div className="bar-track"><div className="bar-fill" style={{ width: `${(r[metric] / max) * 100}%` }} /></div>
         </div>
       ))}
     </div>
@@ -109,64 +133,73 @@ export default function AnalyticsPage() {
     } catch (e: any) { setMsg(`Import failed: ${e.message}`); setBusy(false); }
   };
 
+  const hasData = !!data && data.published > 0;
+  const bestRetention = data ? best(data.byContentType, "avgRetention") : null;
+  const bestCtr = data ? best(data.byCaptionStyle, "avgCtr") : null;
+  const bestLength = data ? best(data.byLength, "avgRetention") : null;
+  const insights = [
+    bestRetention && { label: "Holds viewers best", value: bestRetention.key, metric: `${bestRetention.avgRetention}% retention` },
+    bestCtr && { label: "Best packaging", value: `${bestCtr.key} captions`, metric: `${bestCtr.avgCtr}% CTR` },
+    bestLength && { label: "Ideal length", value: bestLength.key, metric: `${bestLength.avgRetention}% retention` },
+  ].filter(Boolean) as { label: string; value: string; metric: string }[];
+
   return (
     <div className="app">
-      <div className="header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h1 style={{ margin: 0 }}>Analytics</h1>
-          <div className="set-actions">
-            <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && importCsv(e.target.files[0])} />
-            <button className="btn btn-ghost btn-sm" onClick={() => setShowConnect((v) => !v)} disabled={busy}>Connect</button>
-            {status?.authorized && <button className="btn btn-ghost btn-sm" onClick={loadProposals} disabled={busy}>Link clips</button>}
-            <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} disabled={busy}>Import CSV</button>
-            <button className="btn btn-ghost btn-sm" onClick={analyze} disabled={busy}>Analyze patterns</button>
-            <button className="btn btn-primary btn-sm" onClick={() => sync()} disabled={busy}>{busy ? <div className="spinner sm" /> : "Sync YouTube"}</button>
-          </div>
-        </div>
-        {status && (
-          <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 8 }}>
-            {status.authorized ? "YouTube connected" : "Not connected"} · {status.with_metrics}/{status.total} clips with metrics
-          </div>
-        )}
-        {msg && <div className="set-note ok" style={{ marginTop: 10, wordBreak: "break-all" }}>{msg}</div>}
+      <PageHeader
+        title="Analytics"
+        actions={<>
+          <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && importCsv(e.target.files[0])} />
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowConnect((v) => !v)} disabled={busy}>Connect</button>
+          {status?.authorized && <button className="btn btn-ghost btn-sm" onClick={loadProposals} disabled={busy}>Link clips</button>}
+          <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()} disabled={busy}>Import CSV</button>
+          <button className="btn btn-ghost btn-sm" onClick={analyze} disabled={busy || !hasData}>Teach Claude</button>
+          <button className="btn btn-primary btn-sm" onClick={() => sync()} disabled={busy}>{busy ? <div className="spinner sm" /> : "Sync YouTube"}</button>
+        </>}
+      />
+
+      <div className="analytics-status">
+        <span className={`status-dot ${status?.authorized ? "on" : ""}`} />
+        {status ? (status.authorized ? "YouTube connected" : "Not connected") : "…"}
+        {status && <span className="analytics-status-sub">· {status.with_metrics}/{status.total} clips with metrics</span>}
       </div>
+      {msg && <div className="set-note ok" style={{ marginTop: 10, wordBreak: "break-all" }}>{msg}</div>}
 
       {showConnect && (
-        <div className="section">
+        <div className="section card">
           <div className="section-label">Connect YouTube (read-only)</div>
-          <ol style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7, margin: "0 0 14px", paddingLeft: 18 }}>
+          <ol className="analytics-steps">
             <li>In Google Cloud Console, enable the <strong>YouTube Data API v3</strong> + <strong>YouTube Analytics API</strong>.</li>
             <li>Create an <strong>OAuth client ID</strong> (type: Desktop app) and paste its ID + secret below.</li>
             <li>Save, then run <code>podcli youtube auth</code> in your terminal to authorize.</li>
           </ol>
           <div className="thumb-fields">
             <div>
-              <label style={labelStyle}>OAuth client ID</label>
+              <label className="section-label">OAuth client ID</label>
               <input type="text" value={clientId} onChange={(e) => setClientId(e.target.value)} style={{ width: "100%" }} />
             </div>
             <div>
-              <label style={labelStyle}>OAuth client secret {hasSecret ? "(saved)" : ""}</label>
+              <label className="section-label">OAuth client secret {hasSecret ? "(saved)" : ""}</label>
               <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={hasSecret ? "••••••••" : ""} style={{ width: "100%" }} />
             </div>
           </div>
-          <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button className="btn btn-primary btn-sm" onClick={saveConfig} disabled={busy || !clientId}>Save credentials</button>
-            <span style={{ fontSize: 12, color: "var(--text3)" }}>then run <code>podcli youtube auth</code> to authorize · or use Import CSV (no auth)</span>
+            <span className="hint">then run <code>podcli youtube auth</code> to authorize · or use Import CSV (no auth)</span>
           </div>
         </div>
       )}
 
       {proposals !== null && (
-        <div className="section">
+        <div className="section card">
           <div className="section-label">Link clips to uploads</div>
           {proposals.length === 0 ? (
-            <div style={{ fontSize: 13, color: "var(--text2)" }}>No proposals. Every clip is linked, or no upload matched.</div>
+            <div className="analytics-empty">No proposals. Every clip is linked, or no upload matched.</div>
           ) : (
             proposals.map((p) => (
-              <div key={p.clip_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
+              <div key={p.clip_id} className="analytics-row">
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.clip_title}</div>
-                  <div style={{ fontSize: 12, color: "var(--text3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div className="analytics-row-title">{p.clip_title}</div>
+                  <div className="analytics-row-sub">
                     → {p.video_title} <span style={{ color: p.score >= 0.8 ? "var(--green)" : "var(--text3)" }}>(score {p.score})</span>
                   </div>
                 </div>
@@ -179,34 +212,63 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      {!data || data.published === 0 ? (
-        <div className="drop-zone" style={{ textAlign: "center", padding: "48px 20px", color: "var(--text2)" }}>
-          <div className="label" style={{ marginTop: 8 }}>No performance data yet.</div>
-          <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>
-            Connect YouTube and sync, or import a YouTube Studio analytics CSV.
+      {!hasData ? (
+        <div className="analytics-hero">
+          <TrendingUp size={32} strokeWidth={1.5} />
+          <div className="analytics-hero-title">No performance data yet</div>
+          <div className="analytics-hero-sub">
+            Connect YouTube and sync, or import a YouTube Studio analytics CSV. Once clips have metrics,
+            you'll see what holds viewers, what earns clicks, and which clips to make more of.
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap", justifyContent: "center" }}>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowConnect(true)}>Connect YouTube</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()}>Import CSV</button>
           </div>
         </div>
       ) : (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 8 }}>
-            <Group title="Retention by content type: what holds viewers" rows={data.byContentType} metric="avgRetention" />
-            <Group title="CTR by caption style: packaging" rows={data.byCaptionStyle} metric="avgCtr" />
-            <Group title="Retention by length" rows={data.byLength} metric="avgRetention" />
-            <Group title="Views by content type: reach" rows={data.byContentType} metric="avgViews" />
+          <div className="stat-row">
+            <StatTile icon={<Eye size={16} />} label="Total views" value={fmtViews(totalViews(data!.byContentType))} sub={`${data!.published} of ${data!.total} clips published`} />
+            <StatTile icon={<Percent size={16} />} label="Avg retention" value={`${weighted(data!.byContentType, "avgRetention")}%`} sub="how much people watch" />
+            <StatTile icon={<MousePointerClick size={16} />} label="Avg CTR" value={`${weighted(data!.byCaptionStyle, "avgCtr")}%`} sub="clicks per impression" />
+            <StatTile icon={<TrendingUp size={16} />} label="Tracked clips" value={String(data!.top.length)} sub="with metrics" />
           </div>
 
-          <div className="section">
+          {insights.length > 0 && (
+            <div className="section insights">
+              <div className="section-label">What's working</div>
+              <div className="insight-grid">
+                {insights.map((i) => (
+                  <div key={i.label} className="insight">
+                    <div className="insight-label">{i.label}</div>
+                    <div className="insight-value">{i.value}</div>
+                    <div className="insight-metric">{i.metric}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="analytics-charts">
+            <BarGroup title="Retention by content type" hint="What holds viewers" rows={data!.byContentType} metric="avgRetention" />
+            <BarGroup title="CTR by caption style" hint="How packaging drives clicks" rows={data!.byCaptionStyle} metric="avgCtr" />
+            <BarGroup title="Retention by length" hint="The sweet spot for watch time" rows={data!.byLength} metric="avgRetention" />
+            <BarGroup title="Views by content type" hint="What reaches the most people" rows={data!.byContentType} metric="avgViews" />
+          </div>
+
+          <div className="section card">
             <div className="section-label">Top clips</div>
-            {data.top.map((c) => (
-              <Link key={c.id} to={`/clip/${c.id}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: "1px solid var(--border)", textDecoration: "none", color: "inherit" }}>
+            {data!.top.map((c, i) => (
+              <Link key={c.id} to={`/clip/${c.id}`} className="top-clip">
+                <span className="rank-badge">{i + 1}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</div>
+                  <div className="top-clip-title">{c.title}</div>
                   <div className="hint" style={{ marginTop: 2 }}>{fmt(c.duration)} · {c.caption_style}{c.content_type ? ` · ${c.content_type}` : ""}</div>
                 </div>
-                <div style={{ display: "flex", gap: 16, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
-                  <span title="Views (reach)">{fmtViews(c.metrics?.views || 0)} views</span>
-                  {c.metrics?.retention != null && <span style={{ color: "var(--text2)" }} title="Retention (content)">{c.metrics.retention}% ret</span>}
-                  {c.metrics?.ctr != null && <span style={{ color: "var(--text2)" }} title="CTR (packaging)">{c.metrics.ctr}% ctr</span>}
+                <div className="top-clip-metrics">
+                  <span className="metric-strong">{fmtViews(c.metrics?.views || 0)} views</span>
+                  {c.metrics?.retention != null && <span>{c.metrics.retention}% ret</span>}
+                  {c.metrics?.ctr != null && <span>{c.metrics.ctr}% ctr</span>}
                 </div>
               </Link>
             ))}

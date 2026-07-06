@@ -13,6 +13,7 @@ import {
   Users as UsersGlyph,
   Inbox,
   X,
+  RotateCcw,
   Plus,
   Play,
   Pencil,
@@ -24,6 +25,9 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import CopyButton from './CopyButton';
+import AssetPicker from './AssetPicker';
+import RecentSources from './RecentSources';
+import { PageHeader } from './Page';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
@@ -515,12 +519,10 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       const [format, setFormat] = useState('vertical');
       const [showTikTokFrame, setShowTikTokFrame] = useState(false);
       const [logoPath, setLogoPath] = useState('');
-      const logoRef = useRef();
       const [outroPath, setOutroPath] = useState('');
+      const [introPath, setIntroPath] = useState('');
       const initializedRef = useRef(false);
-      const outroRef = useRef();
       const videoFileRef = useRef();
-      const [outroUploading, setOutroUploading] = useState(false);
       const [transcriptDragOver, setTranscriptDragOver] = useState(false);
       const [transcriptFileName, setTranscriptFileName] = useState('');
 
@@ -541,8 +543,6 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       const [retryIdx, setRetryIdx] = useState(null);
       const [retryJobId, setRetryJobId] = useState(null);
       const retryStream = useJob(retryJobId);
-
-      const [logoUploading, setLogoUploading] = useState(false);
       const [browsing, setBrowsing] = useState(false);
       const [downloadingVideo, setDownloadingVideo] = useState(false);
       const [downloadJobId, setDownloadJobId] = useState(null);
@@ -607,6 +607,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           if (d.format) setFormat(d.format);
           if (d.logo_path !== undefined) setLogoPath(d.logo_path || '');
           if (d.outro_path !== undefined) setOutroPath(d.outro_path || '');
+          if (d.intro_path !== undefined) setIntroPath(d.intro_path || '');
           if (d.video_path !== undefined) {
             const nextVideoPath = d.video_path || '';
             const changedVideo = nextVideoPath.trim() !== videoPath.trim();
@@ -646,7 +647,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         try {
           await api('/presets', { method: 'POST', body: JSON.stringify({
             action: 'save', name: presetName.trim(),
-            config: { caption_style: captionStyle, crop_strategy: cropStrategy, format, logo_path: logoPath, outro_path: outroPath, video_path: videoPath.trim(), whisper_model: whisperModel, transcription_engine: transcriptionEngine, time_adjust: timeAdjust, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
+            config: { caption_style: captionStyle, crop_strategy: cropStrategy, format, logo_path: logoPath, outro_path: outroPath, intro_path: introPath, video_path: videoPath.trim(), whisper_model: whisperModel, transcription_engine: transcriptionEngine, time_adjust: timeAdjust, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
           })});
           setActivePreset(presetName.trim());
           setPresetName(''); setShowPresetSave(false);
@@ -797,7 +798,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           filePath: file?.file_path || '',
           suggestions,
           deselectedIndices: Array.from(deselected),
-          settings: { captionStyle, cropStrategy, format, logoPath, outroPath },
+          settings: { captionStyle, cropStrategy, format, logoPath, outroPath, introPath },
           phase,
           results,
           energyData,
@@ -806,7 +807,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         if (key === prevSyncRef.current) return;
         prevSyncRef.current = key;
         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => { });
-      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, format, logoPath, outroPath, phase, results, energyData]);
+      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, format, logoPath, outroPath, introPath, phase, results, energyData]);
 
       // Sync transcript separately (large payload)
       const prevTranscriptRef = useRef(null);
@@ -1026,7 +1027,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           method: 'POST', body: JSON.stringify({
             video_path: vp,
             clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy, format })),
-            transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, clean_fillers: cleanFillers || undefined,
+            transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, intro_path: introPath || undefined, clean_fillers: cleanFillers || undefined,
           })
         });
         setBatchJobId(data.job_id);
@@ -1045,7 +1046,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           method: 'POST', body: JSON.stringify({
             video_path: vp, start_second: c.start_second, end_second: c.end_second,
             title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy, format,
-            transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, clean_fillers: cleanFillers || undefined,
+            transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, intro_path: introPath || undefined, clean_fillers: cleanFillers || undefined,
           })
         });
         setRetryJobId(data.job_id);
@@ -1060,18 +1061,6 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
 
       const toggleClip = (i) => setDeselected(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
       const selectedCount = suggestions.length - deselected.size;
-      const handleLogoUpload = async (f) => {
-        setLogoUploading(true);
-        try { const d = await uploadFile(f, () => { }); if (d.file_path) setLogoPath(d.file_path); }
-        catch (e) { setError('Logo upload failed'); }
-        finally { setLogoUploading(false); }
-      };
-      const handleOutroUpload = async (f) => {
-        setOutroUploading(true);
-        try { const d = await uploadFile(f, () => { }); if (d.file_path) setOutroPath(d.file_path); }
-        catch (e) { setError('Outro upload failed'); }
-        finally { setOutroUploading(false); }
-      };
       const buildLocalPrompt = () => {
         const parts = [];
         const hasTranscriptReady = transcript || transcriptText.trim();
@@ -1139,7 +1128,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
               _source: 'ui',
               videoPath: videoPath.trim(),
               rawTranscriptText: transcriptText.trim() || undefined,
-              settings: { captionStyle, cropStrategy, format, logoPath, outroPath },
+              settings: { captionStyle, cropStrategy, format, logoPath, outroPath, introPath },
             }),
           }).catch(() => { });
         }
@@ -1225,35 +1214,33 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
 
       return (
         <div className="app">
-          <div className="header">
-            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {mcpConnected && (
-                  <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'var(--green-subtle)', color: 'var(--green)', border: '1px solid var(--green-border)' }}>
-                    MCP linked
-                  </span>
-                )}
-                {encoderInfo && (
-                  <span className="pill pill-blue" style={{ fontSize: 10, letterSpacing: '0.5px' }}>
-                    {encoderInfo.best === 'libx264' ? 'CPU' : encoderInfo.best.replace('h264_', '').toUpperCase()}
-                  </span>
-                )}
-                {speakerStatus && !speakerStatus.configured && (
-                  <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'rgba(250,204,21,0.08)', color: '#facc15', border: '1px solid rgba(250,204,21,0.2)', cursor: 'pointer' }}
-                    title="Speaker detection not configured. Click to learn more"
-                    onClick={() => window.open('https://huggingface.co/pyannote/speaker-diarization-3.1', '_blank')}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>Speakers <X size={11} /></span>
-                  </span>
-                )}
-                {speakerStatus && speakerStatus.configured && (
-                  <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'var(--green-subtle)', color: 'var(--green)', border: '1px solid var(--green-border)' }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>Speakers <Check size={11} /></span>
-                  </span>
-                )}
-              </div>
-            </div>
-            <h1>Podcast content studio</h1>
-          </div>
+          <PageHeader
+            title="Podcast content studio"
+            actions={<>
+              {mcpConnected && (
+                <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'var(--green-subtle)', color: 'var(--green)', border: '1px solid var(--green-border)' }}>
+                  MCP linked
+                </span>
+              )}
+              {encoderInfo && (
+                <span className="pill pill-blue" style={{ fontSize: 10, letterSpacing: '0.5px' }}>
+                  {encoderInfo.best === 'libx264' ? 'CPU' : encoderInfo.best.replace('h264_', '').toUpperCase()}
+                </span>
+              )}
+              {speakerStatus && !speakerStatus.configured && (
+                <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'rgba(250,204,21,0.08)', color: '#facc15', border: '1px solid rgba(250,204,21,0.2)', cursor: 'pointer' }}
+                  title="Speaker detection not configured. Click to learn more"
+                  onClick={() => window.open('https://huggingface.co/pyannote/speaker-diarization-3.1', '_blank')}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>Speakers <X size={11} /></span>
+                </span>
+              )}
+              {speakerStatus && speakerStatus.configured && (
+                <span className="pill" style={{ fontSize: 10, letterSpacing: '0.5px', background: 'var(--green-subtle)', color: 'var(--green)', border: '1px solid var(--green-border)' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>Speakers <Check size={11} /></span>
+                </span>
+              )}
+            </>}
+          />
 
           {speakerStatus && !speakerStatus.configured && !sessionStorage.getItem('dismiss-speaker') && (
             <div className="fade-in" style={{ margin: '0 0 16px', padding: '14px 16px', background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.15)', borderRadius: 'var(--radius)', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
@@ -1269,8 +1256,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                   <span style={{ color: 'var(--text3)' }}>3.</span> Add <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11, padding: '1px 5px', background: 'rgba(250,204,21,0.1)', borderRadius: 4, color: '#facc15' }}>HF_TOKEN=hf_...</code> to your <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>.env</code>
                 </div>
               </div>
-              <button onClick={() => { sessionStorage.setItem('dismiss-speaker', '1'); setSpeakerStatus({...speakerStatus, _dismissed: true}); }}
-                style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 16, padding: 4, lineHeight: 1 }}
+              <button className="icon-btn" onClick={() => { sessionStorage.setItem('dismiss-speaker', '1'); setSpeakerStatus({...speakerStatus, _dismissed: true}); }}
                 title="Dismiss"><X size={12} /></button>
             </div>
           )}
@@ -1311,6 +1297,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                     disabled={isProcessing || browsing}
                     onKeyDown={e => { if (e.key === 'Enter' && sourceIsUrl) downloadVideo(); }}
                     style={{ flex: 1, fontSize: 12, padding: '9px 13px', background: 'var(--bg)', borderColor: videoPath ? 'var(--green-border)' : 'var(--border)' }} />
+                  <RecentSources onPick={setVideoPath} exclude={videoPath ? [videoPath] : []} />
                   <button className="btn btn-ghost btn-sm" onClick={downloadVideo} disabled={!sourceIsUrl || isProcessing || browsing}>
                     {downloadingVideo ? <div className="spinner sm" /> : <><DownloadGlyph size={14} /> Download</>}
                   </button>
@@ -1491,38 +1478,12 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                     </select>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   {captionStyle === 'branded' && (
-                    logoPath ? (
-                      <div className="asset-pill fade-in">
-                        <span className="asset-pill-icon">
-                          <img src={`/api/stream-source?path=${encodeURIComponent(logoPath)}`}
-                            style={{ width: 16, height: 16, objectFit: 'contain', borderRadius: 3 }} onError={e => { e.target.style.display = 'none' }} />
-                        </span>
-                        <span className="asset-pill-name">{logoPath.split('/').pop()}</span>
-                        <button className="asset-pill-x" onClick={() => setLogoPath('')} disabled={isProcessing}><X size={12} /></button>
-                      </div>
-                    ) : (
-                      <button className="asset-add fade-in" onClick={() => logoRef.current?.click()} disabled={isProcessing || logoUploading}>
-                        {logoUploading ? <div className="spinner sm" /> : <Plus size={12} />} Logo
-                      </button>
-                    )
+                    <AssetPicker type="logo" label="Logo" value={logoPath} onChange={setLogoPath} disabled={isProcessing} />
                   )}
-                  {outroPath ? (
-                    <div className="asset-pill">
-                      <span className="asset-pill-icon" style={{ display: 'inline-flex' }}><Play size={11} /></span>
-                      <span className="asset-pill-name">{outroPath.split('/').pop()}</span>
-                      <button className="asset-pill-x" onClick={() => setOutroPath('')} disabled={isProcessing}><X size={12} /></button>
-                    </div>
-                  ) : (
-                    <button className="asset-add" onClick={() => outroRef.current?.click()} disabled={isProcessing || outroUploading}>
-                      {outroUploading ? <div className="spinner sm" /> : <Plus size={12} />} Outro
-                    </button>
-                  )}
-                  <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg,.svg" style={{ display: 'none' }}
-                    onChange={e => e.target.files[0] && handleLogoUpload(e.target.files[0])} />
-                  <input ref={outroRef} type="file" accept=".mp4,.mov,.mkv,.webm" style={{ display: 'none' }}
-                    onChange={e => e.target.files[0] && handleOutroUpload(e.target.files[0])} />
+                  <AssetPicker type="intro" label="Intro" value={introPath} onChange={setIntroPath} disabled={isProcessing} />
+                  <AssetPicker type="outro" label="Outro" value={outroPath} onChange={setOutroPath} disabled={isProcessing} />
                 </div>
 
                 {/* Advanced Settings */}
@@ -1781,7 +1742,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                           <div className="clip-actions" onClick={e => e.stopPropagation()}>
                             <button className="btn btn-ghost btn-sm" onClick={() => onPlayRendered(outputFile)} title="Preview"><Play size={13} /></button>
                             <a href={`/api/download/${outputFile}`} className="btn btn-primary btn-sm" download title="Download"><Download size={14} /></a>
-                            <button className="btn btn-ghost btn-sm" disabled={isRetryingThis} onClick={() => retryClip(resultIdx)} title="Retry">{'\u21BB'}</button>
+                            <button className="btn btn-ghost btn-sm" disabled={isRetryingThis} onClick={() => retryClip(resultIdx)} title="Retry"><RotateCcw size={13} /></button>
                           </div>
                         )}
                         {phase === 'done' && !off && r && failed && (
@@ -1934,39 +1895,6 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                     onToggleFrame={() => setShowTikTokFrame(v => !v)}
                   />
                 )}
-                {/* Settings tags */}
-                <div className="preview-settings">
-                  <div className={`preview-tag ${settingsFlash === 'caption' ? 'changed' : ''}`}
-                    style={settingsFlash === 'caption' ? { animation: 'tagFlash 0.6s var(--ease)' } : {}}>
-                    Caption {'\u00B7'} <strong>{captionStyle}</strong>
-                  </div>
-                  <div className={`preview-tag ${settingsFlash === 'crop' ? 'changed' : ''}`}
-                    style={settingsFlash === 'crop' ? { animation: 'tagFlash 0.6s var(--ease)' } : {}}>
-                    Crop {'\u00B7'} <strong>{cropStrategy}</strong>
-                  </div>
-                  {logoPath && (
-                    <div className="preview-tag">
-                      Logo {'\u00B7'} <strong>{logoPath.split('/').pop()}</strong>
-                    </div>
-                  )}
-                  {outroPath && (
-                    <div className="preview-tag">
-                      Outro {'\u00B7'} <strong>{outroPath.split('/').pop()}</strong>
-                    </div>
-                  )}
-                  {activePreset && (
-                    <div className="preview-tag" style={{ background: 'var(--accent-subtle)', borderColor: 'rgba(219,139,72,0.2)' }}>
-                      Preset {'\u00B7'} <strong>{activePreset}</strong>
-                    </div>
-                  )}
-                  {cleanFillers && (
-                    <div className="preview-tag">
-                      Clean fillers {'\u00B7'} <strong>on</strong>
-                    </div>
-                  )}
-                </div>
-
-                {/* Spec recap \u2014 form state as a reviewable summary card */}
                 <SpecRecap
                   captionStyle={captionStyle}
                   cropStrategy={cropStrategy}

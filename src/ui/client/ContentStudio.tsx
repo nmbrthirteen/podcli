@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { PageHeader } from "./Page";
 import { api, basename, labelStyle } from "./lib";
 import CopyButton from "./CopyButton";
 
@@ -179,7 +180,7 @@ export default function ContentStudio() {
         <input
           value={regenNote}
           onChange={(e) => setRegenNote(e.target.value)}
-          placeholder="optional: how to change it"
+          placeholder="Optional: how to change it"
           style={{ flex: 1, fontSize: 12 }}
           onKeyDown={(e) => { if (e.key === "Enter") regenerate(field); }}
           autoFocus
@@ -199,9 +200,7 @@ export default function ContentStudio() {
 
   return (
     <div className="app">
-      <div className="header">
-        <h1>Content studio</h1>
-      </div>
+      <PageHeader title="Content studio" />
 
       <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 380px", minWidth: 320 }}>
@@ -218,8 +217,8 @@ export default function ContentStudio() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "18px 0 0" }}>
               <label style={{ ...labelStyle, marginBottom: 0 }}>Transcript</label>
               {sessionText && (
-                <button className="btn btn-ghost btn-sm" onClick={() => setTranscript(sessionText)} disabled={isBusy} title={sessionName}>
-                  Use current episode{sessionName ? ` · ${sessionName}` : ""}
+                <button className="btn btn-ghost btn-sm" onClick={() => setTranscript(sessionText)} disabled={isBusy} title={sessionName ? `Use transcript from ${sessionName}` : "Use the current episode transcript"}>
+                  Use current episode
                 </button>
               )}
             </div>

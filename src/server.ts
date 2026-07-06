@@ -25,7 +25,7 @@ import {
 import { registerIntegrationMcpTools } from "./handlers/integrations.handler.js";
 import { FileManager } from "./services/file-manager.js";
 import { KnowledgeBase } from "./services/knowledge-base.js";
-import { AssetManager } from "./services/asset-manager.js";
+import { AssetManager, inferType } from "./services/asset-manager.js";
 import { ClipsHistory } from "./services/clips-history.js";
 import { TranscriptCache } from "./services/transcript-cache.js";
 import { paths } from "./config/paths.js";
@@ -1033,19 +1033,31 @@ export function createServer(): McpServer {
   // =============================================
   server.tool(
     "manage_assets",
-    "Register and manage reusable assets (logos, videos). Registered assets can be referenced by name in create_clip instead of full paths.",
+    "Register and manage reusable assets (logos, outros, intros, music, images). Reference them by name in create_clip/manage_reel instead of full paths. One logo/outro/intro/music can be the default, applied automatically when none is passed.",
     {
       action: z
-        .enum(["list", "register", "unregister", "resolve", "import"])
+        .enum([
+          "list",
+          "register",
+          "import",
+          "import_url",
+          "unregister",
+          "resolve",
+          "set_default",
+          "clear_default",
+          "rename",
+        ])
         .describe("Action to perform"),
       name: z.string().optional().describe("Asset name (e.g. 'podcast-logo')"),
-      path: z.string().optional().describe("Absolute file path (for register)"),
+      new_name: z.string().optional().describe("New asset name (for rename)"),
+      path: z.string().optional().describe("Absolute file path (for register/import)"),
+      url: z.string().optional().describe("Remote URL to download (for import_url)"),
       type: z
-        .enum(["logo", "video", "image", "other"])
+        .enum(["logo", "outro", "intro", "music", "image", "audio", "other"])
         .optional()
-        .describe("Asset type (for register/list filter)"),
+        .describe("Asset type (for register/import/list filter)"),
     },
-    async ({ action, name, path, type }) => {
+    async ({ action, name, new_name, path, url, type }) => {
       try {
         if (action === "list") {
           const items = await assets.list(type || undefined);
@@ -1056,17 +1068,39 @@ export function createServer(): McpServer {
               ],
             };
           const text = items
-            .map((a) => `- ${a.name} (${a.type}): ${a.path}`)
+            .map((a) => `- ${a.name} (${a.type})${a.default ? " [default]" : ""}: ${a.path}`)
             .join("\n");
           return { content: [{ type: "text" as const, text }] };
         }
         if (action === "register" && name && path) {
-          const asset = await assets.register(name, path, type || "other");
+          const asset = await assets.register(name, path, type || inferType(path));
           return {
             content: [
               {
                 type: "text" as const,
                 text: `Registered "${asset.name}" → ${asset.path}`,
+              },
+            ],
+          };
+        }
+        if (action === "import" && path && name) {
+          const asset = await assets.importFile(path, name, type || inferType(path));
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Imported "${asset.name}" → ${asset.path}`,
+              },
+            ],
+          };
+        }
+        if (action === "import_url" && url && name) {
+          const asset = await assets.importUrl(url, name, type || inferType(url));
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Imported "${asset.name}" from URL → ${asset.path}`,
               },
             ],
           };
@@ -1090,14 +1124,30 @@ export function createServer(): McpServer {
             ],
           };
         }
-        if (action === "import" && path && name) {
-          const asset = await assets.importFile(path, name, type || "other");
+        if (action === "set_default" && name) {
+          const asset = await assets.setDefault(name);
           return {
             content: [
               {
                 type: "text" as const,
-                text: `Imported "${asset.name}" → ${asset.path}`,
+                text: `"${asset.name}" is now the default ${asset.type}.`,
               },
+            ],
+          };
+        }
+        if (action === "clear_default" && name) {
+          await assets.clearDefault(name);
+          return {
+            content: [
+              { type: "text" as const, text: `"${name}" is no longer a default.` },
+            ],
+          };
+        }
+        if (action === "rename" && name && new_name) {
+          const asset = await assets.rename(name, new_name);
+          return {
+            content: [
+              { type: "text" as const, text: `Renamed to "${asset.name}".` },
             ],
           };
         }
@@ -1668,8 +1718,12 @@ export function createServer(): McpServer {
         .string()
         .optional()
         .describe("Path or registered asset name for outro video"),
+      intro_path: z
+        .string()
+        .optional()
+        .describe("Path or registered asset name for intro video"),
     },
-    async ({ caption_style, crop_strategy, logo_path, outro_path }) => {
+    async ({ caption_style, crop_strategy, logo_path, outro_path, intro_path }) => {
       try {
         const settings: Record<string, string> = {};
         if (caption_style) settings.captionStyle = caption_style;
@@ -1682,13 +1736,17 @@ export function createServer(): McpServer {
           const resolved = await assets.resolve(outro_path);
           settings.outroPath = resolved || outro_path;
         }
+        if (intro_path) {
+          const resolved = await assets.resolve(intro_path);
+          settings.introPath = resolved || intro_path;
+        }
 
         if (Object.keys(settings).length === 0) {
           return {
             content: [
               {
                 type: "text" as const,
-                text: "No settings provided. Specify at least one of: caption_style, crop_strategy, logo_path, outro_path.",
+                text: "No settings provided. Specify at least one of: caption_style, crop_strategy, logo_path, outro_path, intro_path.",
               },
             ],
           };

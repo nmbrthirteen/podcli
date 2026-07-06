@@ -8,6 +8,7 @@ import EpisodeWorkspace from "./EpisodeWorkspace";
 import ThumbnailStudio from "./ThumbnailStudio";
 import ContentStudio from "./ContentStudio";
 import HighlightsPage from "./HighlightsPage";
+import AssetsPage from "./AssetsPage";
 import AnalyticsPage from "./AnalyticsPage";
 import KnowledgePage from "./KnowledgePage";
 import ConfigPage from "./ConfigPage";
@@ -27,6 +28,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/thumbnails" element={<ThumbnailStudio />} />
           <Route path="/thumbnail" element={<Navigate to="/thumbnails" replace />} />
           <Route path="/clip/:id" element={<ClipDetail />} />
+          <Route path="/assets" element={<AssetsPage />} />
           <Route path="/knowledge" element={<KnowledgePage />} />
           <Route path="/config" element={<ConfigPage />} />
           <Route path="/integrations" element={<IntegrationsPage />} />

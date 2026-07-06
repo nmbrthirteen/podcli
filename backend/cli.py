@@ -548,6 +548,21 @@ def cmd_process(args):
             auto_outro = default_outro()
             if auto_outro:
                 config["outro_path"] = auto_outro
+    if getattr(args, "intro", None):
+        from services.asset_store import resolve as resolve_asset_intro
+        resolved = resolve_asset_intro(args.intro)
+        if resolved:
+            config["intro_path"] = resolved
+        else:
+            print(f"  Warning: Intro '{args.intro}' not found (checked assets and filesystem)", file=sys.stderr)
+            config["intro_path"] = args.intro
+    elif not config.get("intro_path"):
+        from services.profiles import get_profile as _get_profile_intro
+        if _get_profile_intro(config.get("profile")).candidate_source != "saliency":
+            from services.asset_store import default_intro
+            auto_intro = default_intro()
+            if auto_intro:
+                config["intro_path"] = auto_intro
     if args.time_adjust is not None:
         config["time_adjust"] = args.time_adjust
     if args.no_energy:
@@ -943,6 +958,7 @@ def cmd_process(args):
                         output_dir=output_dir,
                         logo_path=config.get("logo_path") or None,
                         outro_path=config.get("outro_path") or None,
+                        intro_path=config.get("intro_path") or None,
                         keep_segments=clip.get("segments"),
                         face_map=face_map,
                         allow_ass_fallback=config.get("allow_ass_fallback", False),
@@ -1156,6 +1172,7 @@ def cmd_process(args):
                                 output_dir=output_dir,
                                 logo_path=config.get("logo_path") or None,
                                 outro_path=config.get("outro_path") or None,
+                                intro_path=config.get("intro_path") or None,
                                 keep_segments=clip.get("segments"),
                                 face_map=face_map,
                                 allow_ass_fallback=config.get("allow_ass_fallback", False),
@@ -1480,6 +1497,7 @@ def _post_render_loop(
                     output_dir=output_dir,
                     logo_path=config.get("logo_path") or None,
                     outro_path=config.get("outro_path") or None,
+                    intro_path=config.get("intro_path") or None,
                     keep_segments=clip.get("segments"),
                     face_map=face_map,
                     allow_ass_fallback=config.get("allow_ass_fallback", False),
@@ -1665,6 +1683,7 @@ def _post_render_loop(
                                         output_dir=output_dir,
                                         logo_path=config.get("logo_path") or None,
                                         outro_path=config.get("outro_path") or None,
+                                        intro_path=config.get("intro_path") or None,
                                         keep_segments=f_clip.get("segments"),
                                         face_map=face_map,
                                         allow_ass_fallback=config.get("allow_ass_fallback", False),
@@ -1720,6 +1739,7 @@ def _post_render_loop(
                                         output_dir=output_dir,
                                         logo_path=config.get("logo_path") or None,
                                         outro_path=config.get("outro_path") or None,
+                                        intro_path=config.get("intro_path") or None,
                                         keep_segments=nc.get("segments"),
                                         face_map=face_map,
                                         allow_ass_fallback=config.get("allow_ass_fallback", False),
@@ -2076,6 +2096,9 @@ def cmd_presets(args):
         if args.outro:
             from services.asset_store import resolve as _resolve_outro
             config["outro_path"] = _resolve_outro(args.outro) or args.outro
+        if getattr(args, "intro", None):
+            from services.asset_store import resolve as _resolve_intro
+            config["intro_path"] = _resolve_intro(args.intro) or args.intro
         if args.top:
             config["top_clips"] = args.top
         if args.time_adjust is not None:
@@ -2134,8 +2157,11 @@ def cmd_presets(args):
 
 
 def cmd_assets(args):
-    """Manage named assets (logos, intros, outros)."""
-    from services.asset_store import register, unregister, list_assets, resolve
+    """Manage named assets (logos, intros, outros, music)."""
+    from services.asset_store import (
+        register, import_file, import_url, unregister, list_assets,
+        resolve, set_default, clear_default, rename as rename_asset,
+    )
 
     accent = "\033[38;2;212;135;74m"
     gray = "\033[38;5;245m"
@@ -2154,23 +2180,68 @@ def cmd_assets(args):
         for a in assets:
             exists = os.path.exists(a["path"])
             status = f"{green}✓{reset}" if exists else "\033[38;2;248;113;113m✗ missing\033[0m"
-            print(f"    {accent}{a['name']}{reset}  {gray}({a['type']}){reset}  {status}")
+            star = f"  {accent}★ default{reset}" if a.get("default") else ""
+            print(f"    {accent}{a['name']}{reset}  {gray}({a['type']}){reset}  {status}{star}")
             print(f"      {gray}{a['path']}{reset}")
         print()
         print(f"  {gray}Use in commands:{reset}  {accent}--logo mylogo{reset}  {gray}or{reset}  {accent}--outro myoutro{reset}")
         print()
 
     elif args.assets_action == "add":
-        name = args.name
-        file_path = args.path
-        asset_type = getattr(args, "type", "auto") or "auto"
+        asset_type = getattr(args, "type", None) or "auto"
         try:
-            asset = register(name, file_path, asset_type)
-            print(f"\n  {green}✓{reset} Registered {accent}{name}{reset} ({asset['type']})")
+            fn = import_file if getattr(args, "copy", False) else register
+            asset = fn(args.name, args.path, asset_type)
+            print(f"\n  {green}✓{reset} Registered {accent}{args.name}{reset} ({asset['type']})")
             print(f"    {gray}{asset['path']}{reset}\n")
         except FileNotFoundError as e:
             print(f"\n  ✗ {e}\n", file=sys.stderr)
             sys.exit(1)
+
+    elif args.assets_action == "add-url":
+        asset_type = getattr(args, "type", None) or "auto"
+        try:
+            print(f"\n  Downloading {gray}{args.url}{reset} ...")
+            asset = import_url(args.url, args.name, asset_type)
+            print(f"  {green}✓{reset} Imported {accent}{args.name}{reset} ({asset['type']})")
+            print(f"    {gray}{asset['path']}{reset}\n")
+        except Exception as e:
+            print(f"\n  ✗ {e}\n", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.assets_action == "default":
+        asset = set_default(args.name)
+        if asset:
+            print(f"\n  {green}✓{reset} {accent}{args.name}{reset} is now the default {asset['type']}\n")
+        else:
+            print(f"\n  '{args.name}' not found\n", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.assets_action == "undefault":
+        if clear_default(args.name):
+            print(f"\n  {green}✓{reset} Cleared default on {accent}{args.name}{reset}\n")
+        else:
+            print(f"\n  '{args.name}' is not a default\n")
+
+    elif args.assets_action == "rename":
+        try:
+            asset = rename_asset(args.name, args.new_name)
+            print(f"\n  {green}✓{reset} Renamed to {accent}{asset['name']}{reset}\n")
+        except (KeyError, ValueError) as e:
+            print(f"\n  ✗ {e}\n", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.assets_action == "export":
+        src = resolve(args.name)
+        if not src:
+            print(f"\n  ✗ Not found: {args.name}\n", file=sys.stderr)
+            sys.exit(1)
+        dest = args.dest
+        if os.path.isdir(dest):
+            dest = os.path.join(dest, os.path.basename(src))
+        import shutil
+        shutil.copyfile(src, dest)
+        print(f"\n  {green}✓{reset} Exported {accent}{args.name}{reset} → {gray}{dest}{reset}\n")
 
     elif args.assets_action == "remove":
         if unregister(args.name):
@@ -3465,6 +3536,7 @@ def main():
     proc.add_argument("--logo", help="Logo image (asset name or path)")
     proc.add_argument("--outro", help="Outro video (asset name or path)")
     proc.add_argument("--no-outro", action="store_true", help="Do not append an outro (default for highlight profiles)")
+    proc.add_argument("--intro", help="Intro video (asset name or path)")
     proc.add_argument("--time-adjust", type=float, help="Timestamp offset in seconds")
     proc.add_argument("--no-energy", action="store_true", help="Skip audio energy analysis")
     proc.add_argument("--no-speakers", action="store_true", help="Skip speaker detection (faster, uses face detection only)")
@@ -3545,6 +3617,7 @@ def main():
     pre_save.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
     pre_save.add_argument("--logo", help="Logo (asset name or path)")
     pre_save.add_argument("--outro", help="Outro (asset name or path)")
+    pre_save.add_argument("--intro", help="Intro (asset name or path)")
     pre_save.add_argument("--top", type=int, help="Default top clips count")
     pre_save.add_argument("--time-adjust", type=float)
     pre_save.add_argument("--quality", choices=["low", "medium", "high", "max"])
@@ -3564,12 +3637,34 @@ def main():
     ast = sub.add_parser("assets", help="Manage named assets (logos, intros, outros)")
     ast_sub = ast.add_subparsers(dest="assets_action")
 
+    _asset_types = ["logo", "outro", "intro", "music", "image", "audio", "other"]
+
     ast_list = ast_sub.add_parser("list", help="List all registered assets")
 
     ast_add = ast_sub.add_parser("add", help="Register a file as a named asset")
     ast_add.add_argument("name", help="Short name (e.g., 'mylogo', 'outro')")
     ast_add.add_argument("path", help="Path to file")
-    ast_add.add_argument("--type", choices=["logo", "video", "image", "audio", "other"], help="Asset type (default: auto-detect)")
+    ast_add.add_argument("--type", choices=_asset_types, help="Asset type (default: auto-detect)")
+    ast_add.add_argument("--copy", action="store_true", help="Copy the file into .podcli/assets/ instead of referencing it in place")
+
+    ast_url = ast_sub.add_parser("add-url", help="Download a URL into the asset library")
+    ast_url.add_argument("name", help="Short name (e.g., 'outro')")
+    ast_url.add_argument("url", help="Remote URL (direct file or video URL)")
+    ast_url.add_argument("--type", choices=_asset_types, help="Asset type (default: auto-detect)")
+
+    ast_default = ast_sub.add_parser("default", help="Mark an asset the default for its type")
+    ast_default.add_argument("name")
+
+    ast_undefault = ast_sub.add_parser("undefault", help="Clear an asset's default flag")
+    ast_undefault.add_argument("name")
+
+    ast_rename = ast_sub.add_parser("rename", help="Rename a registered asset")
+    ast_rename.add_argument("name")
+    ast_rename.add_argument("new_name")
+
+    ast_export = ast_sub.add_parser("export", help="Copy an asset's file out to a destination")
+    ast_export.add_argument("name")
+    ast_export.add_argument("dest", help="Destination file or directory")
 
     ast_rm = ast_sub.add_parser("remove", help="Remove a named asset")
     ast_rm.add_argument("name")
@@ -4305,7 +4400,7 @@ def _interactive_process():
     outro = None
     try:
         from services.asset_store import list_assets as list_assets_o
-        outros = [a for a in list_assets_o() if a["type"] == "video" and os.path.exists(a["path"])]
+        outros = [a for a in list_assets_o() if a["type"] in ("outro", "video") and os.path.exists(a["path"])]
         if outros:
             outro_choices = [questionary.Choice("None", value=None)]
             outro_choices += [questionary.Choice(f"{a['name']} ({os.path.basename(a['path'])})", value=a["path"]) for a in outros]
@@ -4464,7 +4559,9 @@ def _interactive_assets():
     """Interactive asset management using questionary."""
     import questionary
     from questionary import Style
-    from services.asset_store import register, unregister, list_assets
+    from services.asset_store import (
+        register, import_url, unregister, list_assets, set_default,
+    )
 
     green = "\033[38;2;74;222;128m"
     gray = "\033[38;5;245m"
@@ -4488,11 +4585,16 @@ def _interactive_assets():
         for a in current:
             exists = os.path.exists(a["path"])
             icon = f"{green}✓{reset}" if exists else f"{red}✗{reset}"
-            print(f"    {icon} {accent}{a['name']}{reset}  {gray}({a['type']}) {os.path.basename(a['path'])}{reset}")
+            star = f" {accent}★{reset}" if a.get("default") else ""
+            print(f"    {icon} {accent}{a['name']}{reset}  {gray}({a['type']}) {os.path.basename(a['path'])}{reset}{star}")
         print()
 
-    actions = [questionary.Choice("Add asset", value="add")]
+    actions = [
+        questionary.Choice("Add asset from file", value="add"),
+        questionary.Choice("Add asset from URL", value="add-url"),
+    ]
     if current:
+        actions.append(questionary.Choice("Set default", value="default"))
         actions.append(questionary.Choice("Remove asset", value="remove"))
     actions.append(questionary.Choice("← Back", value="_back"))
 
@@ -4514,6 +4616,28 @@ def _interactive_assets():
             print(f"    {gray}{asset['path']}{reset}\n")
         except FileNotFoundError as e:
             print(f"\n  {red}✗{reset} {e}\n", file=sys.stderr)
+
+    elif action == "add-url":
+        name = questionary.text("Asset name (e.g. outro):", style=qstyle).ask()
+        if not name:
+            return
+        url = questionary.text("URL:", style=qstyle).ask()
+        if not url:
+            return
+        try:
+            print(f"\n  Downloading ...")
+            asset = import_url(url, name)
+            print(f"  {green}✓{reset} Imported {accent}{name}{reset} ({asset['type']})")
+            print(f"    {gray}{asset['path']}{reset}\n")
+        except Exception as e:
+            print(f"\n  {red}✗{reset} {e}\n", file=sys.stderr)
+
+    elif action == "default":
+        choices = [questionary.Choice(f"{a['name']} ({a['type']})", value=a["name"]) for a in current]
+        pick = questionary.select("Default for its type:", choices=choices, style=qstyle).ask()
+        if pick:
+            asset = set_default(pick)
+            print(f"\n  {green}✓{reset} {accent}{pick}{reset} is now the default {asset['type']}\n")
 
     elif action == "remove":
         choices = [questionary.Choice(f"{a['name']} ({a['type']})", value=a["name"]) for a in current]
@@ -4632,7 +4756,7 @@ def _interactive_presets():
     # Outro from assets
     try:
         from services.asset_store import list_assets as list_assets_o
-        outros = [a for a in list_assets_o() if a["type"] == "video" and os.path.exists(a["path"])]
+        outros = [a for a in list_assets_o() if a["type"] in ("outro", "video") and os.path.exists(a["path"])]
         if outros:
             outro_choices = [questionary.Choice("None", value="")]
             outro_choices += [questionary.Choice(f"{a['name']} ({os.path.basename(a['path'])})", value=a["path"]) for a in outros]
