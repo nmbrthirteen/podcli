@@ -35,6 +35,7 @@ class Moment:
     end: float
     why: str = "energy_peak"
     text: str = ""
+    source: str = ""  # empty falls back to the session source (single-video reels)
     enabled: bool = True
     dirty: bool = True  # needs a re-cut before the next build
 
@@ -105,6 +106,40 @@ def seed_session(
     ]
     session = ReelSession(
         session_id, source, profile, out_dir, format=get_format(format).name, moments=moments
+    )
+    session.save()
+    return session
+
+
+def seed_session_pooled(
+    session_id: str,
+    sources: list[str],
+    out_dir: str,
+    profile: str = "auto",
+    format: str = "horizontal",
+    top_n: int = 10,
+    min_dur: float = 15.0,
+    max_dur: float = 60.0,
+    progress_callback: Optional[Callable] = None,
+) -> ReelSession:
+    """Detect across many videos, rank globally, and persist one editable session."""
+    from services.saliency import detect_highlights_pooled
+
+    clips = detect_highlights_pooled(
+        sources, profile_name=profile, top_n=top_n, min_dur=min_dur, max_dur=max_dur,
+        progress_callback=progress_callback,
+    )
+    moments = [
+        Moment(
+            start=round(c["start_second"], 1),
+            end=round(c["end_second"], 1),
+            why=c.get("reasons", ["energy_peak"])[0],
+            source=c.get("source_file", ""),
+        )
+        for c in clips
+    ]
+    session = ReelSession(
+        session_id, sources[0], profile, out_dir, format=get_format(format).name, moments=moments
     )
     session.save()
     return session
@@ -190,7 +225,7 @@ def build_reel(session: ReelSession, progress_callback: Optional[Callable] = Non
         if m.dirty or not os.path.exists(clip):
             if progress_callback:
                 progress_callback(int(n / len(active) * 90), f"cutting moment {i}")
-            clip = _cut(session.source, session.out_dir, i, m, session.format)
+            clip = _cut(m.source or session.source, session.out_dir, i, m, session.format)
             m.dirty = False
         files.append(clip)
     session.save()
@@ -232,6 +267,7 @@ def list_sessions() -> list[dict]:
             "format": data.get("format", "horizontal"),
             "moment_count": len(moments),
             "enabled_count": sum(1 for m in moments if m.get("enabled", True)),
+            "source_count": len({m.get("source") for m in moments if m.get("source")}) or 1,
             "reel_path": reel if os.path.exists(reel) else None,
             "mtime": os.path.getmtime(path),
         })

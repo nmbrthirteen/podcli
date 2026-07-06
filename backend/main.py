@@ -365,9 +365,11 @@ def handle_manage_reel(task_id: str, params: dict):
     Actions: new (detect + build), list, show, edit (adjust one moment + rebuild),
     build, delete.
     """
+    import hashlib
     from dataclasses import asdict
     from services.reel import (
-        ReelSession, seed_session, edit_moment, build_reel, list_sessions, delete_session,
+        ReelSession, seed_session, seed_session_pooled, edit_moment, build_reel,
+        list_sessions, delete_session,
     )
 
     action = params.get("action", "show")
@@ -380,9 +382,11 @@ def handle_manage_reel(task_id: str, params: dict):
             d["clip_exists"] = os.path.exists(d["clip_path"])
             moments.append(d)
         reel_file = reel or os.path.join(session.out_dir, "highlights_reel.mp4")
+        sources = sorted({m.source for m in session.moments if m.source}) or [session.source]
         return {
             "session_id": session.session_id,
             "source": session.source,
+            "sources": sources,
             "format": session.format,
             "out_dir": session.out_dir,
             "reel_path": reel_file if os.path.exists(reel_file) else None,
@@ -392,20 +396,26 @@ def handle_manage_reel(task_id: str, params: dict):
     try:
         if action == "new":
             from services.transcript_packer import compute_cache_hash, load_cached_transcript_for_video
-            video = params["video_path"]
-            sid = compute_cache_hash(video)
-            out_dir = params.get("out_dir") or os.path.join(os.getcwd(), f"reel_{sid[:8]}")
-            cached = load_cached_transcript_for_video(video)
-            words = cached.get("words") if cached else None
-            session = seed_session(
-                sid, video, out_dir, profile=params.get("profile", "auto"),
+            video_paths = params.get("video_paths") or []
+            common = dict(
+                profile=params.get("profile", "auto"),
                 format=params.get("format", "horizontal"),
                 top_n=int(params.get("top_n", 10)),
                 min_dur=float(params.get("min_dur", 15.0)),
                 max_dur=float(params.get("max_dur", 60.0)),
-                words=words,
                 progress_callback=lambda p, m: emit_progress(task_id, "detecting", p, m),
             )
+            if video_paths:
+                sid = hashlib.sha256("\n".join(sorted(video_paths)).encode()).hexdigest()[:16]
+                out_dir = params.get("out_dir") or os.path.join(os.getcwd(), f"reel_{sid[:8]}")
+                session = seed_session_pooled(sid, video_paths, out_dir, **common)
+            else:
+                video = params["video_path"]
+                sid = compute_cache_hash(video)
+                out_dir = params.get("out_dir") or os.path.join(os.getcwd(), f"reel_{sid[:8]}")
+                cached = load_cached_transcript_for_video(video)
+                words = cached.get("words") if cached else None
+                session = seed_session(sid, video, out_dir, words=words, **common)
             reel = build_reel(session, progress_callback=lambda p, m: emit_progress(task_id, "building", p, m))
             emit_result(task_id, "success", data=payload(session, reel))
         elif action == "list":

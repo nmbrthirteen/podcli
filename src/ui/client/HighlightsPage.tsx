@@ -7,6 +7,7 @@ interface Moment {
   end: number;
   why: string;
   text: string;
+  source?: string;
   enabled: boolean;
   dirty: boolean;
   clip_path?: string;
@@ -16,6 +17,7 @@ interface Moment {
 interface HighlightsResp {
   session_id: string;
   source: string;
+  sources?: string[];
   format: string;
   out_dir: string;
   reel_path: string | null;
@@ -29,6 +31,7 @@ interface SessionSummary {
   format: string;
   moment_count: number;
   enabled_count: number;
+  source_count?: number;
   reel_path: string | null;
 }
 
@@ -189,7 +192,8 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export default function HighlightsPage() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [videoPath, setVideoPath] = useState("");
+  const [videoPaths, setVideoPaths] = useState<string[]>([]);
+  const [pathDraft, setPathDraft] = useState("");
   const [browsing, setBrowsing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [format, setFormat] = useState<Format>("horizontal");
@@ -234,11 +238,16 @@ export default function HighlightsPage() {
     }
   }
 
+  const addPath = (p: string) =>
+    setVideoPaths((prev) => (p && !prev.includes(p) ? [...prev, p] : prev));
+  const removePath = (i: number) => setVideoPaths((prev) => prev.filter((_, n) => n !== i));
+
   async function browse() {
     setBrowsing(true);
     try {
-      const d = await api<{ file_path?: string }>("/browse-file");
-      if (d.file_path) setVideoPath(d.file_path);
+      const d = await api<{ file_path?: string; file_paths?: string[] }>("/browse-file?multiple=1");
+      const picked = d.file_paths?.length ? d.file_paths : d.file_path ? [d.file_path] : [];
+      setVideoPaths((prev) => [...prev, ...picked.filter((p) => !prev.includes(p))]);
     } catch {
       /* dialog cancelled */
     } finally {
@@ -246,16 +255,18 @@ export default function HighlightsPage() {
     }
   }
 
-  async function uploadDropped(file: File) {
+  async function uploadDropped(files: File[]) {
     setBrowsing(true);
-    setMsg(`Uploading ${file.name}…`);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
-      const d = (await res.json()) as { file_path?: string; error?: string };
-      if (d.file_path) setVideoPath(d.file_path);
-      else setMsg(d.error || "Upload failed");
+      for (const file of files) {
+        setMsg(`Uploading ${file.name}…`);
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        const d = (await res.json()) as { file_path?: string; error?: string };
+        if (d.file_path) addPath(d.file_path);
+        else setMsg(d.error || "Upload failed");
+      }
     } catch {
       setMsg("Upload failed");
     } finally {
@@ -267,15 +278,26 @@ export default function HighlightsPage() {
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) uploadDropped(file);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) uploadDropped(files);
   }
 
-  const detect = () =>
+  function commitDraft() {
+    const p = pathDraft.trim();
+    if (p) addPath(p);
+    setPathDraft("");
+  }
+
+  const detect = () => {
+    const seed =
+      videoPaths.length === 1 ? { video_path: videoPaths[0] } : { video_paths: videoPaths };
     call(
-      { action: "new", video_path: videoPath, profile: "auto", format, top_n: topN, min_dur: minDur, max_dur: maxDur },
-      "Finding the best moments (one-time, ~2 min)…",
+      { action: "new", ...seed, profile: "auto", format, top_n: topN, min_dur: minDur, max_dur: maxDur },
+      videoPaths.length > 1
+        ? `Finding the best moments across ${videoPaths.length} videos (one-time)…`
+        : "Finding the best moments (one-time, ~2 min)…",
     );
+  };
 
   const open = (id: string) => call({ action: "show", session_id: id }, "Loading…");
 
@@ -312,8 +334,9 @@ export default function HighlightsPage() {
   }
 
   const enabled = session?.moments.filter((m) => m.enabled).length ?? 0;
-  const streamSrc = session ? `/api/stream-source?path=${encodeURIComponent(session.source)}` : "";
   const active = session?.moments[selected];
+  const activeSource = active?.source || session?.source || "";
+  const streamSrc = activeSource ? `/api/stream-source?path=${encodeURIComponent(activeSource)}` : "";
 
   return (
     <div className="app">
@@ -324,37 +347,43 @@ export default function HighlightsPage() {
       <div className="section card">
         <div className="card-title" style={{ marginBottom: 14 }}>Find highlights</div>
 
-        {!videoPath ? (
-          <div
-            className={`drop-zone ${dragOver ? "drag-over" : ""}`}
-            style={{ cursor: browsing ? "default" : "pointer" }}
-            onClick={browsing ? undefined : browse}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={onDrop}
-          >
-            {browsing ? (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-                <div className="spinner sm" /> <span style={{ fontSize: 13, fontWeight: 600 }}>Working…</span>
+        <div
+          className={`drop-zone ${dragOver ? "drag-over" : ""}`}
+          style={{ cursor: browsing ? "default" : "pointer" }}
+          onClick={browsing ? undefined : browse}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+        >
+          {browsing ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+              <div className="spinner sm" /> <span style={{ fontSize: 13, fontWeight: 600 }}>Working…</span>
+            </div>
+          ) : (
+            <div className="label"><strong>Browse</strong> or drop video files here</div>
+          )}
+        </div>
+
+        {videoPaths.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+            {videoPaths.map((p, i) => (
+              <div key={p} className="file-badge fade-in">
+                <div className="dot" />
+                <div className="name">{basename(p)}</div>
+                <button className="btn btn-ghost btn-sm" onClick={() => removePath(i)} style={{ padding: "4px 10px", fontSize: 11 }}>
+                  Remove
+                </button>
               </div>
-            ) : (
-              <div className="label"><strong>Browse</strong> or drop a video file here</div>
-            )}
-          </div>
-        ) : (
-          <div className="file-badge fade-in">
-            <div className="dot" />
-            <div className="name">{basename(videoPath)}</div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setVideoPath("")} style={{ padding: "4px 10px", fontSize: 11 }}>
-              Clear
-            </button>
+            ))}
           </div>
         )}
         <input
           type="text"
-          placeholder="…or paste a local video path"
-          value={videoPath}
-          onChange={(e) => setVideoPath(e.target.value)}
+          placeholder="…or paste a local video path, press Enter to add"
+          value={pathDraft}
+          onChange={(e) => setPathDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitDraft(); } }}
+          onBlur={commitDraft}
           style={{ width: "100%", marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 12 }}
         />
 
@@ -378,8 +407,12 @@ export default function HighlightsPage() {
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-          <button className="btn btn-primary" disabled={busy || !videoPath.trim()} onClick={detect}>
-            {busy && msg?.startsWith("Finding") ? "Finding…" : "Find highlights"}
+          <button className="btn btn-primary" disabled={busy || videoPaths.length === 0} onClick={detect}>
+            {busy && msg?.startsWith("Finding")
+              ? "Finding…"
+              : videoPaths.length > 1
+                ? `Find best across ${videoPaths.length} videos`
+                : "Find highlights"}
           </button>
         </div>
       </div>
@@ -411,6 +444,9 @@ export default function HighlightsPage() {
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                 <span className="section-label" style={{ margin: 0 }}>Moment {selected + 1}</span>
                 <span className="pill pill-blue">{active.why}</span>
+                {(session.sources?.length ?? 1) > 1 && active.source && (
+                  <span className="hint" title={active.source}>{basename(active.source)}</span>
+                )}
                 <span className="spacer" style={{ flex: 1 }} />
                 {active.clip_exists && active.clip_path && (
                   <a className="btn btn-ghost btn-sm" href={download(active.clip_path)} style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -451,6 +487,11 @@ export default function HighlightsPage() {
                 <span className="hint" style={{ width: 20, textAlign: "right" }}>{idx + 1}</span>
                 <strong style={{ fontVariantNumeric: "tabular-nums", minWidth: 96 }}>{mmss(m.start)}–{mmss(m.end)}</strong>
                 <span className="pill pill-blue">{m.why}</span>
+                {(session.sources?.length ?? 1) > 1 && m.source && (
+                  <span className="hint" title={m.source} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {basename(m.source)}
+                  </span>
+                )}
                 <span className="hint" style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{Math.round(m.end - m.start)}s</span>
                 {m.clip_exists && m.clip_path && (
                   <a className="btn btn-ghost btn-sm" href={download(m.clip_path)} title="Download clip"
@@ -463,7 +504,7 @@ export default function HighlightsPage() {
           </div>
         </div>
       ) : sessions.length === 0 ? (
-        <div className="empty-state">No highlights yet. Drop in a video above to find its best moments.</div>
+        <div className="empty-state">No highlights yet. Drop in one or more videos above to find their best moments.</div>
       ) : (
         <>
           <div className="section-label" style={{ marginBottom: 12 }}>Saved</div>
@@ -476,7 +517,11 @@ export default function HighlightsPage() {
                 onClick={() => !busy && open(s.session_id)}
               >
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="clip-card-title" style={{ marginBottom: 4 }}>{basename(s.source) || s.session_id}</div>
+                  <div className="clip-card-title" style={{ marginBottom: 4 }}>
+                    {(s.source_count ?? 1) > 1
+                      ? `${s.source_count} videos`
+                      : basename(s.source) || s.session_id}
+                  </div>
                   <div className="meta" style={{ gap: 8 }}>
                     <span className="pill pill-blue">{s.profile}</span>
                     <span className="hint">{FORMAT_LABEL[s.format as Format] || s.format}</span>
