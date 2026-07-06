@@ -520,19 +520,18 @@ def handle_suggest_clips(task_id: str, params: dict):
         )
         return
 
+    errors: list[str] = []
     clips = suggest_with_claude(
         segments=segments,
         top_n=top_n,
         exclude_clips=existing_clips,
         progress_callback=lambda pct, msg: emit_progress(task_id, "suggesting", pct, msg),
+        error_sink=errors,
     )
 
     if clips is None:
-        emit_result(
-            task_id,
-            "error",
-            error="AI CLI found but suggestion failed — check claude/codex login and try again",
-        )
+        detail = errors[0] if errors else "check claude/codex login and try again"
+        emit_result(task_id, "error", error=detail)
         return
 
     emit_result(task_id, "success", data={"clips": clips})
