@@ -4,6 +4,7 @@ import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
 import { paths } from "../config/paths.js";
 import { sliceTranscript } from "../utils/transcript.js";
+import { isDemoMode, demoClips } from "../ui/demo-fixtures.js";
 import type { BatchClipsResult, ClipHistoryEntry, Format, WordTimestamp } from "../models/index.js";
 
 type BatchResultRow = BatchClipsResult["results"][number];
@@ -31,6 +32,7 @@ export class ClipsHistory {
   }
 
   async load(): Promise<ClipHistoryEntry[]> {
+    if (isDemoMode()) return demoClips();
     try {
       if (!existsSync(this.historyPath)) return [];
       const raw = await readFile(this.historyPath, "utf-8");
@@ -41,6 +43,7 @@ export class ClipsHistory {
   }
 
   private async save(entries: ClipHistoryEntry[]): Promise<void> {
+    if (isDemoMode()) return; // demo fixtures are read-only; never persist to clips.json
     await this.ensureDir();
     // Write to a temp file and atomically rename so a crash or a concurrent
     // reader never sees a half-written clips.json.
@@ -181,6 +184,8 @@ export class ClipsHistory {
   async remove(idOrPrefix: string): Promise<ClipHistoryEntry | null> {
     const id = await this.resolveId(idOrPrefix);
     if (!id) return null;
+    // Demo entries are read-only fixtures — never delete their (shipped) artifacts.
+    if (isDemoMode()) return (await this.findById(id)) ?? null;
     const entry = await this.mutate((entries) => {
       const idx = entries.findIndex((e) => e.id === id);
       if (idx < 0) return null;

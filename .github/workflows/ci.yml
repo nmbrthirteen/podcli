@@ -21,6 +21,19 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  docs-drift:
+    name: Docs drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node scripts/gen-docs-manifest.mjs
+      - run: node scripts/check-docs-drift.mjs
+
   python:
     name: Python tests
     runs-on: ubuntu-latest

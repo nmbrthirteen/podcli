@@ -4,7 +4,7 @@ import { PlayIcon, PauseIcon } from "./icons";
 
 const fmt = (s: number) => (Number.isFinite(s) ? fmtTime(s) : "0:00");
 
-export default function ClipPlayer({ src, onTime }: { src: string; onTime?: (t: number) => void }) {
+export default function ClipPlayer({ src, poster, onTime }: { src: string; poster?: string; onTime?: (t: number) => void }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [t, setT] = useState(0);
@@ -36,6 +36,7 @@ export default function ClipPlayer({ src, onTime }: { src: string; onTime?: (t: 
       <video
         ref={ref}
         src={src}
+        poster={poster}
         playsInline
         onClick={toggle}
         onPlay={() => setPlaying(true)}

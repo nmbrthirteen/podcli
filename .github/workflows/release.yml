@@ -142,6 +142,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      LANDING_DISPATCH_TOKEN: ${{ secrets.LANDING_DISPATCH_TOKEN }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -156,3 +158,11 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+      - name: Rebuild the landing site so the changelog picks up this release
+        if: ${{ env.LANDING_DISPATCH_TOKEN != '' }}
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer $LANDING_DISPATCH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/nmbrthirteen/podcli-landing/dispatches \
+            -d '{"event_type":"release"}'

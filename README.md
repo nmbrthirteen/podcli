@@ -9,6 +9,7 @@
 
 <p align="center">
   <a href="https://podcli.com"><strong>podcli.com</strong></a> ·
+  <a href="https://podcli.com/docs">Docs</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#mcp-server-claude-integration">MCP</a> ·
   <a href="#features">Features</a>
@@ -31,6 +32,8 @@ podcli process episode.mp4
 ```
 
 One command transcribes, picks the best moments, crops to the face, and burns captions in. Nothing leaves your machine.
+
+Full documentation lives at [podcli.com/docs](https://podcli.com/docs). The docs are open source, edit them at [nmbrthirteen/podcli-docs](https://github.com/nmbrthirteen/podcli-docs).
 
 ---
 
@@ -148,8 +151,8 @@ Both halves share the same **knowledge base** (`.podcli/knowledge/`) — your sh
 - **Clip history** — tracks everything to avoid duplicates
 - **Preset system** — save named configurations per show
 - **Content studio** — generate titles, descriptions, tags, and hashtags in the web UI; regenerate any section with your own guidance, or ask for anything custom
-- **MCP server** — 17 tools for Claude Desktop / Claude Code integration
-- **Web UI** — single-page flow at `localhost:3847`
+- **MCP server** — 22 tools for Claude Desktop / Claude Code integration
+- **Web UI** — multi-page studio at `localhost:3847`
 - **CLI** — one-command processing: `podcli process episode.mp4`
 
 ---
