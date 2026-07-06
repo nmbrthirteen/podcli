@@ -10,6 +10,7 @@ import {
   Plug,
   Terminal,
   BarChart3,
+  Scissors,
 } from "lucide-react";
 
 const icons: Record<string, typeof LayoutGrid> = {
@@ -22,6 +23,7 @@ const icons: Record<string, typeof LayoutGrid> = {
   integrations: Plug,
   mcp: Terminal,
   analytics: BarChart3,
+  highlights: Scissors,
 };
 
 function Icon({ name }: { name: string }) {
@@ -49,7 +51,7 @@ export default function Layout() {
         <NavLink to="/" end className="sidebar-link"><Icon name="library" /> Library</NavLink>
         <NavLink to="/episode" className="sidebar-link"><Icon name="episode" /> New episode</NavLink>
         <NavLink to="/content" className="sidebar-link"><Icon name="content" /> Content</NavLink>
-        <NavLink to="/reel" className="sidebar-link"><Icon name="content" /> Reel</NavLink>
+        <NavLink to="/highlights" className="sidebar-link"><Icon name="highlights" /> Highlights</NavLink>
         <NavLink to="/thumbnails" className="sidebar-link"><Icon name="thumbnail" /> Thumbnails</NavLink>
 
         <div className="sidebar-section">Workspace</div>
