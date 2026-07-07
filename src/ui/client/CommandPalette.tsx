@@ -74,9 +74,6 @@ export default function CommandPalette() {
     });
   }, [open]);
 
-  // Keep the active row valid when the query or the loaded data changes.
-  useEffect(() => setActive(0), [query, clips, assets]);
-
   const go = useCallback((run: () => void) => { close(); run(); }, [close]);
 
   const results = useMemo<Cmd[]>(() => {
@@ -110,6 +107,7 @@ export default function CommandPalette() {
   }, [results]);
 
   const flat = results;
+  const activeIdx = Math.min(active, Math.max(0, flat.length - 1));
 
   if (!open || typeof document === "undefined") return null;
 
@@ -121,12 +119,12 @@ export default function CommandPalette() {
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => { setQuery(e.target.value); setActive(0); }}
             onKeyDown={(e) => {
               if (e.key === "Escape") close();
               else if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, flat.length - 1)); }
               else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
-              else if (e.key === "Enter" && flat[active]) { e.preventDefault(); go(flat[active].run); }
+              else if (e.key === "Enter" && flat[activeIdx]) { e.preventDefault(); go(flat[activeIdx].run); }
             }}
             placeholder="Search pages, clips, and assets"
           />
@@ -143,14 +141,14 @@ export default function CommandPalette() {
                 return (
                   <button
                     key={c.id}
-                    className={`cmdk-item${idx === active ? " active" : ""}`}
+                    className={`cmdk-item${idx === activeIdx ? " active" : ""}`}
                     onMouseEnter={() => setActive(idx)}
                     onClick={() => go(c.run)}
                   >
                     <span className="cmdk-item-icon">{GROUP_ICON[c.group]}</span>
                     <span className="cmdk-item-label">{c.label}</span>
                     {c.sub && <span className="cmdk-item-sub">{c.sub}</span>}
-                    {idx === active && <CornerDownLeft size={13} className="cmdk-item-enter" />}
+                    {idx === activeIdx && <CornerDownLeft size={13} className="cmdk-item-enter" />}
                   </button>
                 );
               })}
