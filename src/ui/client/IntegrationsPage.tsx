@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { PageHeader } from "./Page";
 import { api } from "./lib";
 
 const CATEGORY: Record<string, string> = {
@@ -46,7 +47,7 @@ export default function IntegrationsPage() {
 
   return (
     <div className="app" style={{ maxWidth: 820 }}>
-      <div className="header"><h1>Integrations</h1></div>
+      <PageHeader title="Integrations" />
 
       {error ? (
         <div className="set-note err">{error}</div>

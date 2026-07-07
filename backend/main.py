@@ -133,6 +133,7 @@ def handle_transcribe(task_id: str, params: dict):
 def handle_create_clip(task_id: str, params: dict):
     """Create a single finished short-form clip."""
     from services.clip_generator import generate_clip
+    from services import asset_store
 
     emit_progress(task_id, "starting", 0, "Preparing clip...")
     result = generate_clip(
@@ -146,8 +147,9 @@ def handle_create_clip(task_id: str, params: dict):
         transcript_words=params.get("transcript_words", []),
         title=params.get("title", "clip"),
         output_dir=params.get("output_dir"),
-        logo_path=params.get("logo_path"),
-        outro_path=params.get("outro_path"),
+        logo_path=asset_store.resolve(params.get("logo_path")),
+        outro_path=asset_store.resolve(params.get("outro_path")),
+        intro_path=asset_store.resolve(params.get("intro_path")),
         clean_fillers=params.get("clean_fillers", True),
         face_map=params.get("face_map"),
         keep_segments=params.get("keep_segments"),
@@ -162,6 +164,7 @@ def handle_create_clip(task_id: str, params: dict):
 def handle_batch_clips(task_id: str, params: dict):
     """Create multiple clips in sequence."""
     from services.clip_generator import generate_clip
+    from services import asset_store
 
     clips = params["clips"]
     results = []
@@ -185,8 +188,9 @@ def handle_batch_clips(task_id: str, params: dict):
                 transcript_words=params.get("transcript_words", []),
                 title=clip.get("title", f"clip_{i + 1}"),
                 output_dir=params.get("output_dir"),
-                logo_path=clip.get("logo_path") or params.get("logo_path"),
-                outro_path=params.get("outro_path"),
+                logo_path=asset_store.resolve(clip.get("logo_path") or params.get("logo_path")),
+                outro_path=asset_store.resolve(params.get("outro_path")),
+                intro_path=asset_store.resolve(clip.get("intro_path") or params.get("intro_path")),
                 clean_fillers=params.get("clean_fillers", True),
                 face_map=params.get("face_map"),
                 keep_segments=clip.get("keep_segments"),
@@ -401,13 +405,14 @@ def handle_manage_reel(task_id: str, params: dict):
             # Auto lets the saliency threshold decide how many moments clear the bar,
             # capped for sanity, with a wide length range so windows aren't constrained.
             auto = bool(params.get("auto"))
+            from services import asset_store
             common = dict(
                 profile=params.get("profile", "auto"),
                 format=params.get("format", "horizontal"),
                 top_n=50 if auto else int(params.get("top_n", 10)),
                 min_dur=5.0 if auto else float(params.get("min_dur", 15.0)),
                 max_dur=120.0 if auto else float(params.get("max_dur", 60.0)),
-                logo=params.get("logo") or "",
+                logo=params.get("logo") or asset_store.default_logo() or "",
                 progress_callback=lambda p, m: emit_progress(task_id, "detecting", p, m),
             )
             if video_paths:

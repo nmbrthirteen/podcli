@@ -122,6 +122,7 @@ export interface UIState {
     format?: Format;
     logoPath?: string;
     outroPath?: string;
+    introPath?: string;
   };
   phase?: string;
   lastUpdated?: number;
@@ -138,6 +139,7 @@ export interface CreateClipInput {
   format?: Format;
   logo_path?: string;
   outro_path?: string;
+  intro_path?: string;
   transcript_words?: WordTimestamp[];
   clean_fillers?: boolean;
   allow_ass_fallback?: boolean;
@@ -152,6 +154,7 @@ export interface BatchClipSpec {
   crop_strategy?: string;
   format?: Format;
   logo_path?: string | null;
+  intro_path?: string | null;
   allow_ass_fallback?: boolean;
   keep_caption_overlay?: boolean;
   keep_segments?: Array<{ start: number; end: number }>;
@@ -196,14 +199,28 @@ export interface BatchClipsResult {
 
 // === Asset Models ===
 
+export type AssetType =
+  | "logo"
+  | "outro"
+  | "intro"
+  | "music"
+  | "video"
+  | "image"
+  | "audio"
+  | "other";
+
 export interface Asset {
   name: string;
-  type: "logo" | "video" | "image" | "other";
+  type: AssetType;
   path: string;
   addedAt: string;
+  default?: boolean;
 }
 
+export const ASSETS_SCHEMA_VERSION = 2;
+
 export interface AssetRegistry {
+  schemaVersion?: number;
   assets: Asset[];
 }
 
@@ -238,6 +255,7 @@ export interface ClipHistoryEntry {
   format?: Format;
   logo_path?: string;
   outro_path?: string;
+  intro_path?: string;
   title: string;
   output_path: string;
   file_size_mb: number;

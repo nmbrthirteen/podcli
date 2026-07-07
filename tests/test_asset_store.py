@@ -75,10 +75,66 @@ class AssetStoreTests(unittest.TestCase):
 
     def test_list_filters_by_type(self):
         asset_store.register("l1", self._make_file("l1.png"), "logo")
-        asset_store.register("v1", self._make_file("v1.mp4"), "video")
+        asset_store.register("o1", self._make_file("o1.mp4"), "outro")
         self.assertEqual(len(asset_store.list_assets("logo")), 1)
-        self.assertEqual(len(asset_store.list_assets("video")), 1)
+        self.assertEqual(len(asset_store.list_assets("outro")), 1)
         self.assertEqual(len(asset_store.list_assets()), 2)
+
+    def test_legacy_video_type_migrates_to_outro(self):
+        asset_store.register("legacy", self._make_file("legacy.mp4"), "video")
+        loaded = asset_store.list_assets()
+        self.assertEqual(loaded[0]["type"], "outro")
+        self.assertEqual(len(asset_store.list_assets("outro")), 1)
+        self.assertEqual(len(asset_store.list_assets("video")), 0)
+        with open(self.registry_file) as f:
+            self.assertEqual(json.load(f)["schemaVersion"], asset_store.SCHEMA_VERSION)
+
+    def test_set_and_clear_default(self):
+        a = self._make_file("d1.png")
+        b = self._make_file("d2.png")
+        asset_store.register("d1", a, "logo")
+        asset_store.register("d2", b, "logo")
+        self.assertEqual(asset_store.default_logo(), a)  # first-existing fallback
+        asset_store.set_default("d2")
+        self.assertEqual(asset_store.default_logo(), b)
+        flagged = [x for x in asset_store.list_assets("logo") if x.get("default")]
+        self.assertEqual(len(flagged), 1)
+        self.assertTrue(asset_store.clear_default("d2"))
+        self.assertEqual(asset_store.default_logo(), a)
+
+    def test_outro_and_video_share_default_group(self):
+        vid = self._make_file("share.mp4")
+        asset_store.register("shared", vid, "outro")
+        asset_store.set_default("shared")
+        self.assertEqual(asset_store.default_outro(), vid)
+
+    def test_rename_keeps_file_and_default(self):
+        p = self._make_file("r.png")
+        asset_store.register("old", p, "logo")
+        asset_store.set_default("old")
+        renamed = asset_store.rename("old", "new")
+        self.assertEqual(renamed["name"], "new")
+        self.assertTrue(renamed["default"])
+        self.assertEqual(asset_store.resolve("new"), p)
+        self.assertIsNone(asset_store.resolve("old"))
+
+    def test_rename_rejects_duplicate(self):
+        asset_store.register("a", self._make_file("a.png"), "logo")
+        asset_store.register("b", self._make_file("b.png"), "logo")
+        with self.assertRaises(ValueError):
+            asset_store.rename("a", "b")
+
+    def test_register_sanitizes_unsafe_names(self):
+        asset = asset_store.register("my logo/v2", self._make_file("s.png"), "logo")
+        self.assertEqual(asset["name"], "my-logo-v2")
+        self.assertTrue(asset_store.resolve("my-logo-v2"))
+
+    def test_import_file_copies_into_assets_dir(self):
+        src = self._make_file("orig.png")
+        with mock.patch.dict(asset_store.paths, {"assets": self.tmpdir}):
+            asset = asset_store.import_file(src, "copied", "logo")
+        self.assertNotEqual(asset["path"], src)
+        self.assertTrue(os.path.exists(asset["path"]))
 
     def test_unregister_returns_true_when_removed(self):
         asset_store.register("tmp", self._make_file("t.png"), "logo")

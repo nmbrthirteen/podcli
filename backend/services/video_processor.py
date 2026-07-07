@@ -2515,6 +2515,25 @@ def _build_transition_keyframes(
     return x_keyframes, y_keyframes
 
 
+def scale_to_frame(input_path: str, output_path: str, width: int, height: int) -> str:
+    """Re-encode a video to exactly width×height (aspect preserved, padded)."""
+    _run_ffmpeg_with_fallback(
+        cmd_parts_before_enc=[
+            "ffmpeg", "-y",
+            "-i", input_path,
+            "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                   f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
+        ],
+        cmd_parts_after_enc=[
+            "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+            "-movflags", "+faststart",
+        ],
+        output_path=output_path,
+        label="scale_to_frame",
+    )
+    return output_path
+
+
 def concat_outro(
     input_path: str,
     outro_path: str,

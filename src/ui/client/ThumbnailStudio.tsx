@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { PageHeader } from "./Page";
 import { api, upload, basename, labelStyle } from "./lib";
 import ThumbnailTemplate from "./ThumbnailTemplate";
 
@@ -136,12 +137,10 @@ export default function ThumbnailStudio() {
 
   return (
     <div className="app">
-      <div className="header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
-          <h1 style={{ margin: 0 }}>Thumbnail studio</h1>
-          <button className="btn btn-ghost btn-sm" onClick={() => setEditingTemplate(true)}>Edit template</button>
-        </div>
-      </div>
+      <PageHeader
+        title="Thumbnail studio"
+        actions={<button className="btn btn-ghost btn-sm" onClick={() => setEditingTemplate(true)}>Edit template</button>}
+      />
 
       <div className="section">
         <label style={labelStyle}>Source</label>

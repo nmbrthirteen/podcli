@@ -110,7 +110,11 @@ export const createClipToolDef = {
       },
       outro_path: {
         type: "string",
-        description: "Path to an outro video to append at the end of the clip",
+        description: "Outro video (asset name or path) appended at the end of the clip. Uses the default outro asset if omitted.",
+      },
+      intro_path: {
+        type: "string",
+        description: "Intro video (asset name or path) prepended before the clip. Uses the default intro asset if omitted.",
       },
       keep_caption_overlay: {
         type: "boolean",
@@ -157,6 +161,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
   const format = input.format || settings.format || "vertical";
   const logoPath = input.logo_path || settings.logoPath || null;
   const outroPath = input.outro_path || settings.outroPath || null;
+  const introPath = input.intro_path || settings.introPath || null;
   const transcriptWords = input.transcript_words ?? transcript?.words ?? [];
 
   // Pull multi-cut segments from suggestion (if available)
@@ -187,6 +192,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     keep_caption_overlay: input.keep_caption_overlay === true,
     logo_path: logoPath,
     outro_path: outroPath,
+    intro_path: introPath,
     ...(keepSegments && { keep_segments: keepSegments }),
   });
 

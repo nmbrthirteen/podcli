@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { PageHeader } from "./Page";
+import { Trash2 } from 'lucide-react';
 import { api, upload } from './lib';
 
 export default function KnowledgePage() {
@@ -95,10 +97,10 @@ export default function KnowledgePage() {
 
       return (
         <div className="app">
-          <div className="header">
-            <h1>Knowledge base</h1>
-            {kbDir && <div className="dir-path">{kbDir}</div>}
-          </div>
+          <PageHeader
+            title="Knowledge base"
+            actions={kbDir ? <div className="dir-path">{kbDir}</div> : null}
+          />
 
           <div
             className={`drop-zone knowledge-drop-zone ${dragOver ? 'drag-over' : ''}`}
@@ -120,7 +122,7 @@ export default function KnowledgePage() {
                   className={`file-card ${activeFile === f.filename ? 'active' : ''}`}
                   onClick={() => openFile(f)}
                 >
-                  <button className="file-delete" onClick={(e) => deleteFile(f.filename, e)}>{'\u00D7'}</button>
+                  <button className="file-delete" onClick={(e) => deleteFile(f.filename, e)} title="Delete"><Trash2 size={13} /></button>
                   <div className="file-name">{f.filename}</div>
                   <div className="file-meta">{new Date(f.updatedAt).toLocaleDateString()}</div>
                   <div className="file-preview">{f.content.split('\n').filter(l => l.trim() && !l.startsWith('#')).slice(0, 2).join(' ')}</div>
@@ -141,7 +143,7 @@ export default function KnowledgePage() {
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && createFile()}
             />
-            <button className="btn btn-primary" onClick={createFile}>Create</button>
+            <button className="btn btn-primary btn-sm" onClick={createFile}>Create</button>
           </div>
 
           {activeFile && (
@@ -150,8 +152,8 @@ export default function KnowledgePage() {
                 <span className="editor-filename">{activeFile}</span>
                 <div className="editor-actions">
                   {dirty && <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, padding: '4px 8px' }}>unsaved</span>}
-                  <button className="btn btn-ghost" onClick={() => { setActiveFile(null); setEditorContent(''); setDirty(false); }}>Close</button>
-                  <button className="btn btn-primary" onClick={saveFile}>Save</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setActiveFile(null); setEditorContent(''); setDirty(false); }}>Close</button>
+                  <button className="btn btn-primary btn-sm" onClick={saveFile}>Save</button>
                 </div>
               </div>
               <textarea

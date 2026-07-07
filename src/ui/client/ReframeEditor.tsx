@@ -176,7 +176,7 @@ export default function ReframeEditor({
             {keyframes.map((k) => (
               <span key={k.tAbs} className="pill" style={{ fontSize: 11, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }} onClick={() => seek(k.tAbs)}>
                 {fmtMs(k.tAbs)} · {Math.round(k.x_pct)}%
-                <button onClick={(e) => { e.stopPropagation(); setKeyframes((kf) => kf.filter((x) => x.tAbs !== k.tAbs)); }} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", padding: 0 }}>×</button>
+                <button className="asset-pill-x" onClick={(e) => { e.stopPropagation(); setKeyframes((kf) => kf.filter((x) => x.tAbs !== k.tAbs)); }}><CloseIcon /></button>
               </span>
             ))}
           </div>

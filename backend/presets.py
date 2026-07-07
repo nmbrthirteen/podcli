@@ -33,6 +33,7 @@ DEFAULT_PRESET = {
     "time_adjust": -1.0,
     "logo_path": "",
     "outro_path": "",
+    "intro_path": "",
     "video_path": "",
     "transcript_path": "",
     "output_dir": "",

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { PageHeader } from "./Page";
 import { api, labelStyle } from "./lib";
 import { BackIcon } from "./icons";
 
@@ -146,12 +147,10 @@ export default function ThumbnailTemplate({ onBack }: { onBack?: () => void }) {
 
   return (
     <div className="app">
-      <div className="header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
-          <h1 style={{ margin: 0 }}>Edit template</h1>
-          {onBack && <button className="btn btn-ghost btn-sm" onClick={onBack}><BackIcon /> Back to generator</button>}
-        </div>
-      </div>
+      <PageHeader
+        title="Edit template"
+        actions={onBack && <button className="btn btn-ghost btn-sm" onClick={onBack}><BackIcon /> Back to generator</button>}
+      />
 
       <div className="tmpl-layout">
         <div className="tmpl-preview">

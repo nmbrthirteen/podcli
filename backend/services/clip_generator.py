@@ -583,6 +583,7 @@ def generate_clip(
     face_map: dict = None,
     logo_path: Optional[str] = None,
     outro_path: Optional[str] = None,
+    intro_path: Optional[str] = None,
     clean_fillers: bool = True,
     keep_segments: list[dict] = None,
     trim_opening: Optional[bool] = None,
@@ -724,7 +725,9 @@ def generate_clip(
     caption_overlay_path = None
 
     try:
-        total_steps = 4 + (1 if outro_path and os.path.exists(str(outro_path)) else 0)
+        total_steps = 4 + (1 if outro_path and os.path.exists(str(outro_path)) else 0) + (
+            1 if intro_path and os.path.exists(str(intro_path)) else 0
+        )
 
         # Step 1: Cut the segment(s) from the source video
         if progress_callback:
@@ -870,16 +873,30 @@ def generate_clip(
         normalized_path = os.path.join(work_dir, "normalized.mp4")
         normalize_audio(captioned_path, normalized_path)
 
-        # Step 5: Append outro (if provided)
+        # Step 5: Prepend intro, then append outro (if provided).
+        # concat_outro joins two clips head-to-tail, so passing the intro first
+        # puts it in front of the clip.
+        final_video_path = normalized_path
+        if intro_path and os.path.exists(intro_path):
+            if progress_callback:
+                progress_callback(83, "Adding intro")
+            # concat_outro outputs at its first arg's dimensions, so match the
+            # intro to the clip's frame or a landscape intro reshapes the clip.
+            from services.video_processor import get_dimensions, scale_to_frame
+            cw, ch = get_dimensions(final_video_path)
+            intro_scaled = os.path.join(work_dir, "intro_scaled.mp4")
+            scale_to_frame(intro_path, intro_scaled, cw, ch)
+            with_intro_path = os.path.join(work_dir, "with_intro.mp4")
+            concat_outro(intro_scaled, final_video_path, with_intro_path)
+            final_video_path = with_intro_path
+
         if outro_path and os.path.exists(outro_path):
             if progress_callback:
                 progress_callback(85, f"Adding outro ({total_steps}/{total_steps})")
 
             with_outro_path = os.path.join(work_dir, "with_outro.mp4")
-            concat_outro(normalized_path, outro_path, with_outro_path)
+            concat_outro(final_video_path, outro_path, with_outro_path)
             final_video_path = with_outro_path
-        else:
-            final_video_path = normalized_path
 
         # Step 6: Move to output
         if progress_callback:

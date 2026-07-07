@@ -51,9 +51,51 @@ describe("AssetManager", () => {
 
   it("filters list by type", async () => {
     await manager.register("logo1", makeFile("l1.png"), "logo");
-    await manager.register("vid1", makeFile("v1.mp4"), "video");
+    await manager.register("out1", makeFile("o1.mp4"), "outro");
     expect(await manager.list("logo")).toHaveLength(1);
-    expect(await manager.list("video")).toHaveLength(1);
+    expect(await manager.list("outro")).toHaveLength(1);
+  });
+
+  it("normalizes legacy 'video' type to 'outro' on load", async () => {
+    await manager.register("legacy", makeFile("legacy.mp4"), "video");
+    const list = await manager.list();
+    expect(list[0].type).toBe("outro");
+    expect(await manager.list("outro")).toHaveLength(1);
+    expect(await manager.list("video")).toHaveLength(0);
+  });
+
+  it("marks one default per type and falls back to first-existing", async () => {
+    const l1 = makeFile("d1.png");
+    const l2 = makeFile("d2.png");
+    await manager.register("d1", l1, "logo");
+    await manager.register("d2", l2, "logo");
+    expect(await manager.getDefault("logo")).toBe(l1);
+    await manager.setDefault("d2");
+    expect(await manager.getDefault("logo")).toBe(l2);
+    const flagged = (await manager.list("logo")).filter((a) => a.default);
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0].name).toBe("d2");
+  });
+
+  it("outro and legacy video share one default group", async () => {
+    const o = makeFile("share.mp4");
+    await manager.register("shared", o, "outro");
+    await manager.setDefault("shared");
+    expect(await manager.getDefault("outro")).toBe(o);
+    expect(await manager.getDefault("video")).toBe(o);
+  });
+
+  it("sanitizes unsafe names so they round-trip through URL routes", async () => {
+    const asset = await manager.register("my logo/v2", makeFile("s.png"), "logo");
+    expect(asset.name).toBe("my-logo-v2");
+    expect(await manager.resolve("my-logo-v2")).toBeTruthy();
+  });
+
+  it("importFile copies into the assets dir", async () => {
+    const src = makeFile("src-logo.png");
+    const asset = await manager.importFile(src, "copied", "logo");
+    expect(asset.path).toContain(join(tmp, "assets"));
+    expect(asset.path).not.toBe(src);
   });
 
   it("resolve returns path for registered name, direct path, or null", async () => {

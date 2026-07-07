@@ -11,6 +11,7 @@ import {
   Terminal,
   BarChart3,
   Scissors,
+  Package,
 } from "lucide-react";
 
 const icons: Record<string, typeof LayoutGrid> = {
@@ -24,6 +25,7 @@ const icons: Record<string, typeof LayoutGrid> = {
   mcp: Terminal,
   analytics: BarChart3,
   highlights: Scissors,
+  assets: Package,
 };
 
 function Icon({ name }: { name: string }) {
@@ -55,6 +57,7 @@ export default function Layout() {
         <NavLink to="/thumbnails" className="sidebar-link"><Icon name="thumbnail" /> Thumbnails</NavLink>
 
         <div className="sidebar-section">Workspace</div>
+        <NavLink to="/assets" className="sidebar-link"><Icon name="assets" /> Assets</NavLink>
         <NavLink to="/knowledge" className="sidebar-link"><Icon name="knowledge" /> Knowledge</NavLink>
         <NavLink to="/config" className="sidebar-link"><Icon name="config" /> Config</NavLink>
         <NavLink to="/integrations" className="sidebar-link"><Icon name="integrations" /> Integrations</NavLink>
