@@ -65,12 +65,17 @@ export default function CommandPalette() {
     if (!open) return;
     inputRef.current?.focus();
     if (loaded.current) return;
-    loaded.current = true;
-    api<{ id: string; title: string }[]>("/history?limit=100").then((h) => setClips(h || [])).catch(() => {});
-    api<{ name: string; type: string }[]>("/assets").then((a) => setAssets(a || [])).catch(() => {});
+    Promise.allSettled([
+      api<{ id: string; title: string }[]>("/history?limit=100").then((h) => setClips(h || [])),
+      api<{ name: string; type: string }[]>("/assets").then((a) => setAssets(a || [])),
+    ]).then((r) => {
+      // Only cache success, so a failed fetch retries on the next open.
+      if (r.every((x) => x.status === "fulfilled")) loaded.current = true;
+    });
   }, [open]);
 
-  useEffect(() => setActive(0), [query]);
+  // Keep the active row valid when the query or the loaded data changes.
+  useEffect(() => setActive(0), [query, clips, assets]);
 
   const go = useCallback((run: () => void) => { close(); run(); }, [close]);
 
