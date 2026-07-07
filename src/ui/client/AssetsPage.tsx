@@ -306,7 +306,8 @@ export default function AssetsPage() {
   }
 
   function bulkDownload() {
-    for (const name of selected) triggerDownload(name);
+    // Stagger so browsers don't block rapid multiple downloads.
+    [...selected].forEach((name, i) => setTimeout(() => triggerDownload(name), i * 300));
   }
 
   return (

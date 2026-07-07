@@ -33,7 +33,7 @@ import { v4 as uuidv4 } from "uuid";
 import { PythonExecutor } from "../services/python-executor.js";
 import { TranscriptCache } from "../services/transcript-cache.js";
 import { FileManager } from "../services/file-manager.js";
-import { AssetManager, inferType } from "../services/asset-manager.js";
+import { AssetManager, inferType, safeName } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths } from "../config/paths.js";
@@ -972,9 +972,6 @@ app.post("/api/create-clip", async (req, res) => {
     format = "vertical",
     transcript_words = [],
     title = "clip",
-    logo_path = null,
-    outro_path = null,
-    intro_path = null,
     clean_fillers = false,
     allow_ass_fallback = false,
     content_type = null,
@@ -983,6 +980,22 @@ app.post("/api/create-clip", async (req, res) => {
   if (!video_path || !existsSync(video_path)) {
     res.status(400).json({ error: "Video file not found" });
     return;
+  }
+
+  // Resolve asset names (or paths) to real paths; reject only if provided-and-unresolvable.
+  let logo_path: string | null = null;
+  let outro_path: string | null = null;
+  let intro_path: string | null = null;
+  for (const [key, raw] of [["logo", req.body.logo_path], ["outro", req.body.outro_path], ["intro", req.body.intro_path]] as const) {
+    if (!raw) continue;
+    const resolved = await assetManager.resolve(raw);
+    if (!resolved) {
+      res.status(400).json({ error: `${key} not found: ${raw}` });
+      return;
+    }
+    if (key === "logo") logo_path = resolved;
+    else if (key === "outro") outro_path = resolved;
+    else intro_path = resolved;
   }
 
   // Validate clip params before spawning Python
@@ -1004,18 +1017,6 @@ app.post("/api/create-clip", async (req, res) => {
     res.status(400).json({
       error: `Clip too long (${Math.round(duration)}s). Max ${maxDur} seconds.`,
     });
-    return;
-  }
-  if (logo_path && !existsSync(logo_path)) {
-    res.status(400).json({ error: `Logo file not found: ${logo_path}` });
-    return;
-  }
-  if (outro_path && !existsSync(outro_path)) {
-    res.status(400).json({ error: `Outro file not found: ${outro_path}` });
-    return;
-  }
-  if (intro_path && !existsSync(intro_path)) {
-    res.status(400).json({ error: `Intro file not found: ${intro_path}` });
     return;
   }
   const validStyles = ["hormozi", "karaoke", "subtle", "branded"];
@@ -1135,9 +1136,6 @@ app.post("/api/batch-clips", async (req, res) => {
     video_path,
     clips,
     transcript_words = [],
-    logo_path = null,
-    outro_path = null,
-    intro_path = null,
     clean_fillers = false,
     keep_caption_overlay = false,
   } = req.body;
@@ -1149,6 +1147,21 @@ app.post("/api/batch-clips", async (req, res) => {
   if (!clips || !Array.isArray(clips) || clips.length === 0) {
     res.status(400).json({ error: "No clips provided" });
     return;
+  }
+
+  let logo_path: string | null = null;
+  let outro_path: string | null = null;
+  let intro_path: string | null = null;
+  for (const [key, raw] of [["logo", req.body.logo_path], ["outro", req.body.outro_path], ["intro", req.body.intro_path]] as const) {
+    if (!raw) continue;
+    const resolved = await assetManager.resolve(raw);
+    if (!resolved) {
+      res.status(400).json({ error: `${key} not found: ${raw}` });
+      return;
+    }
+    if (key === "logo") logo_path = resolved;
+    else if (key === "outro") outro_path = resolved;
+    else intro_path = resolved;
   }
   // Validate each clip's timing
   for (let i = 0; i < clips.length; i++) {
@@ -1169,18 +1182,6 @@ app.post("/api/batch-clips", async (req, res) => {
       });
       return;
     }
-  }
-  if (logo_path && !existsSync(logo_path)) {
-    res.status(400).json({ error: `Logo file not found: ${logo_path}` });
-    return;
-  }
-  if (outro_path && !existsSync(outro_path)) {
-    res.status(400).json({ error: `Outro file not found: ${outro_path}` });
-    return;
-  }
-  if (intro_path && !existsSync(intro_path)) {
-    res.status(400).json({ error: `Intro file not found: ${intro_path}` });
-    return;
   }
 
   await fileManager.ensureDirectories();
@@ -1748,7 +1749,7 @@ app.post("/api/assets/upload", upload.single("file"), async (req, res) => {
   }
   try {
     const existing = new Set((await assetManager.list()).map((a) => a.name));
-    const wanted = (req.body?.name as string) || basename(req.file.originalname, extname(req.file.originalname));
+    const wanted = safeName((req.body?.name as string) || basename(req.file.originalname, extname(req.file.originalname)));
     const name = existing.has(wanted) && !req.body?.overwrite ? uniqueAssetName(wanted, existing) : wanted;
     const type = (req.body?.type as AssetType) || inferType(req.file.originalname);
     const asset = await assetManager.importFile(req.file.path, name, type);
@@ -1784,7 +1785,7 @@ app.post("/api/assets/url", async (req, res) => {
   (async () => {
     try {
       const existing = new Set((await assetManager.list()).map((a) => a.name));
-      const wanted = (req.body?.name as string) || basename(new URL(url).pathname) || "asset";
+      const wanted = safeName((req.body?.name as string) || basename(new URL(url).pathname) || "asset");
       const name = existing.has(wanted) ? uniqueAssetName(wanted, existing) : wanted;
       const type = req.body?.type as AssetType | undefined;
       const asset = await assetManager.importUrl(url, name, type);

@@ -124,6 +124,11 @@ class AssetStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             asset_store.rename("a", "b")
 
+    def test_register_sanitizes_unsafe_names(self):
+        asset = asset_store.register("my logo/v2", self._make_file("s.png"), "logo")
+        self.assertEqual(asset["name"], "my-logo-v2")
+        self.assertTrue(asset_store.resolve("my-logo-v2"))
+
     def test_import_file_copies_into_assets_dir(self):
         src = self._make_file("orig.png")
         with mock.patch.dict(asset_store.paths, {"assets": self.tmpdir}):

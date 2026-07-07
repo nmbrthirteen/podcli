@@ -88,6 +88,12 @@ def _save(assets: list[dict]):
     os.replace(tmp, path)
 
 
+def _safe_name(name: str) -> str:
+    """Keep names URL-safe so they round-trip through the web /assets/:name routes."""
+    slug = "".join(c if c.isalnum() or c in "._-" else "-" for c in (name or "").strip())
+    return slug.strip("-") or "asset"
+
+
 def _infer_type(file_path: str) -> str:
     ext = os.path.splitext(file_path)[1].lower()
     if ext in (".png", ".svg"):
@@ -121,6 +127,7 @@ def register(name: str, file_path: str, asset_type: str = "auto") -> dict:
     if asset_type == "auto":
         asset_type = _infer_type(file_path)
 
+    name = _safe_name(name)
     assets = _load()
 
     existing = next((i for i, a in enumerate(assets) if a["name"] == name), None)
@@ -203,7 +210,7 @@ def clear_default(name: str) -> bool:
 
 def rename(name: str, new_name: str) -> dict:
     """Rename an asset, keeping its file, type, and default flag."""
-    new_name = (new_name or "").strip()
+    new_name = _safe_name(new_name)
     if not new_name:
         raise ValueError("New name is required")
     assets = _load()

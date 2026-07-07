@@ -85,6 +85,12 @@ describe("AssetManager", () => {
     expect(await manager.getDefault("video")).toBe(o);
   });
 
+  it("sanitizes unsafe names so they round-trip through URL routes", async () => {
+    const asset = await manager.register("my logo/v2", makeFile("s.png"), "logo");
+    expect(asset.name).toBe("my-logo-v2");
+    expect(await manager.resolve("my-logo-v2")).toBeTruthy();
+  });
+
   it("importFile copies into the assets dir", async () => {
     const src = makeFile("src-logo.png");
     const asset = await manager.importFile(src, "copied", "logo");

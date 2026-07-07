@@ -68,10 +68,11 @@ export class AssetManager {
     await rename(tmp, this.registryPath);
   }
 
-  async register(name: string, filePath: string, type: AssetType): Promise<Asset> {
+  async register(rawName: string, filePath: string, type: AssetType): Promise<Asset> {
     if (!existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
     }
+    const name = safeName(rawName);
     const registry = await this.load();
     const existing = registry.assets.findIndex((a) => a.name === name);
     const prior = existing >= 0 ? registry.assets[existing] : undefined;
@@ -125,7 +126,7 @@ export class AssetManager {
   }
 
   async rename(name: string, newName: string): Promise<Asset> {
-    const trimmed = newName.trim();
+    const trimmed = safeName(newName);
     if (!trimmed) throw new Error("New name is required");
     const registry = await this.load();
     const target = registry.assets.find((a) => a.name === name);
@@ -172,6 +173,11 @@ export class AssetManager {
     // Infer from the downloaded file, not the URL (query strings break extname).
     return this.register(name, destPath, type ?? inferType(destPath));
   }
+}
+
+/** Keep names URL-safe so they round-trip through /api/assets/:name routes. */
+export function safeName(name: string): string {
+  return (name || "").trim().replace(/[^a-zA-Z0-9._-]/g, "-").replace(/^-+|-+$/g, "") || "asset";
 }
 
 function sameDefaultGroup(a: string, b: string): boolean {
