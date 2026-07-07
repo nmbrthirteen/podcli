@@ -1363,6 +1363,49 @@ p, li, figcaption, blockquote, .subtitle, .file-preview, .card-desc, .int-row .d
   .stream-in { animation: none; }
 }
 
+/* ── Command palette (global search) ── */
+.sidebar-search {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  margin: 6px 0 14px; padding: 8px 10px; cursor: pointer;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text3); font-family: inherit; font-size: 13px;
+  transition: border-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+.sidebar-search:hover { border-color: var(--border-hover); color: var(--text2); }
+.sidebar-search span { flex: 1; text-align: left; }
+.sidebar-search kbd { font-size: 10px; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; color: var(--text3); }
+
+.cmdk-overlay {
+  position: fixed; inset: 0; z-index: 1000; display: flex; align-items: flex-start; justify-content: center;
+  padding: 12vh 16px 16px; background: rgba(0,0,0,0.6); backdrop-filter: blur(6px);
+  animation: fadeIn 0.12s var(--ease);
+}
+.cmdk {
+  width: 100%; max-width: 580px; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border-hover);
+  border-radius: var(--radius-lg); box-shadow: 0 24px 64px rgba(0,0,0,0.55);
+  animation: scaleIn 0.16s var(--ease-out);
+}
+.cmdk-head { display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.cmdk-search-icon { color: var(--text3); flex-shrink: 0; }
+.cmdk-head input { flex: 1; border: none !important; background: transparent !important; box-shadow: none !important; padding: 15px 0 !important; font-size: 15px; color: var(--text); }
+.cmdk-kbd { font-size: 10px; color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; flex-shrink: 0; }
+.cmdk-list { max-height: 54vh; overflow-y: auto; padding: 8px; }
+.cmdk-empty { padding: 28px; text-align: center; color: var(--text3); font-size: 13px; }
+.cmdk-group + .cmdk-group { margin-top: 6px; }
+.cmdk-group-label { font-size: 10px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text3); padding: 6px 10px 4px; }
+.cmdk-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 10px; background: none; border: none; border-radius: var(--radius-sm);
+  color: var(--text2); font-family: inherit; font-size: 13.5px; cursor: pointer;
+}
+.cmdk-item.active { background: var(--surface2); color: var(--text); }
+.cmdk-item-icon { display: inline-flex; color: var(--text3); flex-shrink: 0; }
+.cmdk-item.active .cmdk-item-icon { color: var(--accent); }
+.cmdk-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item-sub { font-size: 11px; color: var(--text3); text-transform: capitalize; flex-shrink: 0; }
+.cmdk-item-enter { color: var(--text3); flex-shrink: 0; }
+
 /* ── Assets page ── */
 .asset-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .asset-count { color: var(--text3); font-weight: 500; margin-left: 4px; }

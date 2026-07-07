@@ -12,7 +12,9 @@ import {
   BarChart3,
   Scissors,
   Package,
+  Search,
 } from "lucide-react";
+import CommandPalette from "./CommandPalette";
 
 const icons: Record<string, typeof LayoutGrid> = {
   library: LayoutGrid,
@@ -49,6 +51,12 @@ export default function Layout() {
           <img src="/podcli-logo-transparent.png" alt="podcli" />
         </Link>
 
+        <button className="sidebar-search" onClick={() => window.dispatchEvent(new Event("open-command-palette"))}>
+          <Search className="ico" strokeWidth={1.8} size={15} />
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+
         <div className="sidebar-section">Studio</div>
         <NavLink to="/" end className="sidebar-link"><Icon name="library" /> Library</NavLink>
         <NavLink to="/episode" className="sidebar-link"><Icon name="episode" /> New episode</NavLink>
@@ -70,6 +78,7 @@ export default function Layout() {
       <main className="shell-main">
         <Outlet />
       </main>
+      <CommandPalette />
     </div>
   );
 }
