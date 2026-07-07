@@ -32,7 +32,7 @@ export function assetSrc(name: string): string {
   return `/api/assets/${encodeURIComponent(name)}/download`;
 }
 
-export function useAssets() {
+export function useAssets({ live = true }: { live?: boolean } = {}) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,11 +51,12 @@ export function useAssets() {
 
   useEffect(() => {
     refresh();
+    if (!live) return;
     const es = new EventSource("/api/events");
     const onChange = () => refresh();
     es.addEventListener("assets-updated", onChange);
     return () => es.close();
-  }, [refresh]);
+  }, [refresh, live]);
 
   const uploadFile = useCallback(
     async (file: File, type: AssetType, name?: string) => {

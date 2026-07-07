@@ -21,7 +21,15 @@ export function useJob(jobId: string | null): JobState | null {
       setState(d);
       if (d.status === "done" || d.status === "error") es.close();
     };
-    es.onerror = () => es.close();
+    es.onerror = () => {
+      es.close();
+      // Surface a dropped connection so consumers don't hang on the last status.
+      setState((s) =>
+        s && (s.status === "done" || s.status === "error")
+          ? s
+          : { ...s, status: "error", error: s?.error || "Lost connection to the job stream" },
+      );
+    };
     return () => es.close();
   }, [jobId]);
   return state;

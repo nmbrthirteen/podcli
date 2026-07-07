@@ -3,6 +3,7 @@ import { existsSync, createWriteStream } from "fs";
 import { join, extname } from "path";
 import { spawn } from "child_process";
 import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import { paths } from "../config/paths.js";
 import { ASSETS_SCHEMA_VERSION } from "../models/index.js";
 import type { Asset, AssetType, AssetRegistry } from "../models/index.js";
@@ -43,7 +44,8 @@ export class AssetManager {
       if (!existsSync(this.registryPath)) return { schemaVersion: ASSETS_SCHEMA_VERSION, assets: [] };
       const raw = await readFile(this.registryPath, "utf-8");
       const parsed = JSON.parse(raw);
-      registry = Array.isArray(parsed) ? { assets: parsed } : (parsed as AssetRegistry);
+      const bag = Array.isArray(parsed) ? { assets: parsed } : (parsed ?? {});
+      registry = { ...bag, assets: Array.isArray(bag.assets) ? bag.assets : [] } as AssetRegistry;
     } catch {
       return { schemaVersion: ASSETS_SCHEMA_VERSION, assets: [] };
     }
@@ -161,12 +163,14 @@ export class AssetManager {
     return this.register(name, destPath, type);
   }
 
-  async importUrl(url: string, name: string, type: AssetType): Promise<Asset> {
+  async importUrl(url: string, name: string, type?: AssetType): Promise<Asset> {
+    assertSafeUrl(url);
     await this.ensureDir();
     const destPath = looksLikeDirectFile(url)
       ? await downloadDirect(url, join(this.assetsDir, safeAssetFilename(name, url)))
       : await downloadWithYtDlp(url, this.assetsDir, name);
-    return this.register(name, destPath, type);
+    // Infer from the downloaded file, not the URL (query strings break extname).
+    return this.register(name, destPath, type ?? inferType(destPath));
   }
 }
 
@@ -209,19 +213,51 @@ function looksLikeDirectFile(url: string): boolean {
   }
 }
 
-async function downloadDirect(url: string, destPath: string): Promise<string> {
-  const res = await fetch(url, { redirect: "follow" });
-  if (!res.ok || !res.body) {
-    throw new Error(`Download failed (${res.status}) for ${url}`);
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
+/** Basic SSRF guard: only http(s), and reject obvious localhost/private hosts. */
+function assertSafeUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid URL: ${url}`);
   }
-  await new Promise<void>((resolveP, rejectP) => {
-    const out = createWriteStream(destPath);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Unsupported URL protocol: ${parsed.protocol}`);
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (
+    host === "localhost" ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    host.endsWith(".localhost") ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+  ) {
+    throw new Error(`Refusing to download from a private/loopback host: ${host}`);
+  }
+}
+
+async function downloadDirect(url: string, destPath: string): Promise<string> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), DOWNLOAD_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { redirect: "follow", signal: ac.signal });
+    if (!res.ok || !res.body) {
+      throw new Error(`Download failed (${res.status}) for ${url}`);
+    }
+    // pipeline rejects on source errors too, so a dropped connection can't
+    // throw an uncaught 'error' and crash the server.
     // @ts-expect-error - Web ReadableStream is accepted by Node's fromWeb.
-    Readable.fromWeb(res.body).pipe(out);
-    out.on("finish", () => resolveP());
-    out.on("error", rejectP);
-  });
-  return destPath;
+    await pipeline(Readable.fromWeb(res.body), createWriteStream(destPath));
+    return destPath;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function downloadWithYtDlp(url: string, destDir: string, name: string): Promise<string> {

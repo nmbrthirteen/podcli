@@ -228,10 +228,10 @@ export default function AnalyticsPage() {
       ) : (
         <>
           <div className="stat-row">
-            <StatTile icon={<Eye size={16} />} label="Total views" value={fmtViews(totalViews(data!.byContentType))} sub={`${data!.published} of ${data!.total} clips published`} />
+            <StatTile icon={<Eye size={16} />} label="Total views" value={fmtViews(totalViews(data!.byContentType))} sub="across published clips" />
             <StatTile icon={<Percent size={16} />} label="Avg retention" value={`${weighted(data!.byContentType, "avgRetention")}%`} sub="how much people watch" />
             <StatTile icon={<MousePointerClick size={16} />} label="Avg CTR" value={`${weighted(data!.byCaptionStyle, "avgCtr")}%`} sub="clicks per impression" />
-            <StatTile icon={<TrendingUp size={16} />} label="Tracked clips" value={String(data!.top.length)} sub="with metrics" />
+            <StatTile icon={<TrendingUp size={16} />} label="Published" value={String(data!.published)} sub={`of ${data!.total} clips`} />
           </div>
 
           {insights.length > 0 && (

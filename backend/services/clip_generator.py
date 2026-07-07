@@ -880,8 +880,14 @@ def generate_clip(
         if intro_path and os.path.exists(intro_path):
             if progress_callback:
                 progress_callback(83, "Adding intro")
+            # concat_outro outputs at its first arg's dimensions, so match the
+            # intro to the clip's frame or a landscape intro reshapes the clip.
+            from services.video_processor import get_dimensions, scale_to_frame
+            cw, ch = get_dimensions(final_video_path)
+            intro_scaled = os.path.join(work_dir, "intro_scaled.mp4")
+            scale_to_frame(intro_path, intro_scaled, cw, ch)
             with_intro_path = os.path.join(work_dir, "with_intro.mp4")
-            concat_outro(intro_path, final_video_path, with_intro_path)
+            concat_outro(intro_scaled, final_video_path, with_intro_path)
             final_video_path = with_intro_path
 
         if outro_path and os.path.exists(outro_path):

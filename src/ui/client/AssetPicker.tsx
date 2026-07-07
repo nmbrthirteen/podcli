@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, Check, Upload } from "lucide-react";
 import { basename } from "./lib";
-import { useAssets, assetSrc, type Asset, type AssetType } from "./useAssets";
+import { useAssets, assetSrc, ASSET_GROUPS, type Asset, type AssetType } from "./useAssets";
 
 function Thumb({ asset }: { asset: Asset }) {
   const src = assetSrc(asset.name);
@@ -30,7 +30,7 @@ export default function AssetPicker({
   allowNone?: boolean;
   disabled?: boolean;
 }) {
-  const { assets, uploadFile } = useAssets();
+  const { assets, uploadFile } = useAssets({ live: false });
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -93,7 +93,7 @@ export default function AssetPicker({
           <input
             ref={fileRef}
             type="file"
-            accept={type === "logo" || type === "image" ? "image/*" : type === "music" ? "audio/*" : "video/*"}
+            accept={ASSET_GROUPS.find((g) => g.type === type)?.accept ?? "*/*"}
             style={{ display: "none" }}
             onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onUpload(f); }}
           />

@@ -859,6 +859,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
             if (d.settings.format) setFormat(d.settings.format);
             if (d.settings.logoPath !== undefined) setLogoPath(d.settings.logoPath);
             if (d.settings.outroPath !== undefined) setOutroPath(d.settings.outroPath);
+            if (d.settings.introPath !== undefined) setIntroPath(d.settings.introPath);
           }
           // Mark initialized after first state restoration so sync useEffects don't overwrite with defaults
           if (sseEvent.type === 'state') {

@@ -1752,11 +1752,12 @@ app.post("/api/assets/upload", upload.single("file"), async (req, res) => {
     const name = existing.has(wanted) && !req.body?.overwrite ? uniqueAssetName(wanted, existing) : wanted;
     const type = (req.body?.type as AssetType) || inferType(req.file.originalname);
     const asset = await assetManager.importFile(req.file.path, name, type);
-    await unlink(req.file.path).catch(() => {});
     broadcastSSE("assets-updated", { name });
     res.json(asset);
   } catch (err: unknown) {
     res.status(400).json({ error: errMsg(err) });
+  } finally {
+    await unlink(req.file.path).catch(() => {});
   }
 });
 
@@ -1785,7 +1786,7 @@ app.post("/api/assets/url", async (req, res) => {
       const existing = new Set((await assetManager.list()).map((a) => a.name));
       const wanted = (req.body?.name as string) || basename(new URL(url).pathname) || "asset";
       const name = existing.has(wanted) ? uniqueAssetName(wanted, existing) : wanted;
-      const type = (req.body?.type as AssetType) || inferType(url);
+      const type = req.body?.type as AssetType | undefined;
       const asset = await assetManager.importUrl(url, name, type);
       job.status = "done";
       job.progress = 100;
@@ -1832,15 +1833,17 @@ app.post("/api/assets/:name/rename", async (req, res) => {
 
 app.get("/api/assets/:name/download", async (req, res) => {
   try {
-    const resolved = await assetManager.resolve(req.params.name);
-    if (!resolved || !existsSync(resolved)) {
+    // Look up by registered name only — never fall through to treating the
+    // param as a filesystem path (that would allow arbitrary file reads).
+    const asset = (await assetManager.list()).find((a) => a.name === req.params.name);
+    if (!asset || !existsSync(asset.path)) {
       res.status(404).json({ error: `Asset "${req.params.name}" not found` });
       return;
     }
     if (req.query.dl) {
-      res.download(resolved, basename(resolved));
+      res.download(asset.path, basename(asset.path));
     } else {
-      res.sendFile(resolved);
+      res.sendFile(asset.path);
     }
   } catch (err: unknown) {
     res.status(500).json({ error: errMsg(err) });
@@ -2394,7 +2397,8 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       transcript_words: words,
       logo_path: (recipe.logo_path as string) ?? clip.logo_path ?? null,
       outro_path: (recipe.outro_path as string) ?? clip.outro_path ?? null,
-      intro_path: (recipe.intro_path as string) ?? clip.intro_path ?? null,
+      // Honor an explicit null in the recipe (intro removed), not the stale clip value.
+      intro_path: "intro_path" in recipe ? (recipe.intro_path ?? null) : (clip.intro_path ?? null),
       clean_fillers: recipe.clean_fillers !== undefined ? recipe.clean_fillers : true,
       ...(recipe.keep_segments ? { keep_segments: recipe.keep_segments } : {}),
       title: clip.title,

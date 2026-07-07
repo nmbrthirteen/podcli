@@ -1095,7 +1095,7 @@ export function createServer(): McpServer {
           };
         }
         if (action === "import_url" && url && name) {
-          const asset = await assets.importUrl(url, name, type || inferType(url));
+          const asset = await assets.importUrl(url, name, type);
           return {
             content: [
               {

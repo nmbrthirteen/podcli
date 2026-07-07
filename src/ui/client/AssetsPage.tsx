@@ -113,14 +113,19 @@ function OverflowMenu({ items }: { items: { label: string; onClick: () => void; 
 
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
-    document.addEventListener("mousedown", close);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
+    // Skip the trigger so its onClick can toggle closed, not reopen.
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const dismiss = () => setOpen(false);
+    document.addEventListener("mousedown", onDocMouseDown);
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
     return () => {
-      document.removeEventListener("mousedown", close);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
+      document.removeEventListener("mousedown", onDocMouseDown);
+      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", dismiss);
     };
   }, [open]);
 
@@ -187,6 +192,8 @@ function AssetCard({
   const [draft, setDraft] = useState(asset.name);
 
   function commitRename() {
+    // Guard against Enter + unmount-blur both firing on the same rename.
+    if (!renaming) return;
     setRenaming(false);
     const next = draft.trim();
     if (next && next !== asset.name) onRename(next);
