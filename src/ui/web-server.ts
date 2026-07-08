@@ -3289,7 +3289,7 @@ app.post("/api/mcp/export", async (req, res) => {
   const styledClips = clips.map((c: any) => ({
     start_second: c.start_second,
     end_second: c.end_second,
-    title: (c.title || "clip").slice(0, 40),
+    title: c.title || "clip",
     caption_style: c.caption_style || captionStyle,
     crop_strategy: c.crop_strategy || cropStrategy,
     format: c.format || format,

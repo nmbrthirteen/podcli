@@ -41,11 +41,18 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          go generate ./...   # sync backend + PodStack commands for go:embed
+          go generate ./...   # sync backend + PodStack commands for go:embed, write VERSION
+          # The launcher embeds VERSION (generated from package.json). Refuse to ship a
+          # tag that disagrees with it rather than publish a mislabelled binary.
+          EMBEDDED="$(cat VERSION)"
+          if [ "$VERSION" != "$EMBEDDED" ]; then
+            echo "tag v${VERSION} does not match package.json version ${EMBEDDED}" >&2
+            exit 1
+          fi
           EXT=""
           [ "${{ matrix.goos }}" = "windows" ] && EXT=".exe"
           OUT="podcli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
-          go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" -o "../${OUT}" .
+          go build -trimpath -ldflags "-s -w" -o "../${OUT}" .
           echo "ASSET=${OUT}" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:

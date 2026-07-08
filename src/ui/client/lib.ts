@@ -1,7 +1,15 @@
 import type { CSSProperties } from "react";
 
-export const fmt = (s: number) =>
-  `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+// Rolls into hours past 3600s: podcast timestamps ran past "78:31" without it.
+export const fmt = (s: number) => {
+  const t = Math.max(0, s);
+  const hours = Math.floor(t / 3600);
+  const minutes = Math.floor((t % 3600) / 60);
+  const seconds = Math.floor(t % 60);
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
+};
 
 export const fmtMs = (s: number) =>
   `${fmt(s)}.${String(Math.floor((s % 1) * 1000)).padStart(3, "0")}`;

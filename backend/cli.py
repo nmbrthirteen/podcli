@@ -1999,9 +1999,8 @@ def _suggest_clips(
                     break
             if not title:
                 title = text[:60].strip()
-            if len(title) > 55:
-                # Cut at word boundary
-                title = title[:55].rsplit(" ", 1)[0] + "..."
+            from utils.text import truncate_title
+            title = truncate_title(title)
 
             if score >= 5:  # Higher threshold = better clips
                 clips.append({

@@ -648,7 +648,7 @@ select {
 .checkbox:hover { border-color: var(--accent); }
 .checkbox.checked { background: var(--accent); border-color: var(--accent); }
 .clip-info { flex: 1; min-width: 0; }
-.clip-title { font-size: 13px; font-weight: 600; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip-title { font-size: 13px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 .clip-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
 .clip-meta .err { color: var(--red); }
 .clip-actions { display: flex; gap: 4px; flex-shrink: 0; }
