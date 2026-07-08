@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -162,8 +163,22 @@ func Run(current string) int {
 		printSelfUpdateFailure(os.Stderr, err)
 		return 1
 	}
+	if err := refreshRuntime(managedBin()); err != nil {
+		fmt.Fprintf(os.Stderr, "podcli: binary updated, but refreshing the runtime failed (%v).\n", err)
+		fmt.Fprintln(os.Stderr, "The next `podcli` run will retry, or run `podcli setup --refresh` now.")
+		return 1
+	}
 	fmt.Printf("Updated to podcli %s.\n", tag)
 	return 0
+}
+
+// refreshRuntime re-provisions the version-bound artifacts under runtime/ (Python
+// backend, its deps, studio and Remotion bundles). It shells out to the binary we
+// just installed because the new backend is embedded in that binary, not this one.
+func refreshRuntime(bin string) error {
+	cmd := exec.Command(bin, "setup", "--refresh")
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
 func printSelfUpdateFailure(w io.Writer, err error) {

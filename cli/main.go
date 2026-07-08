@@ -21,7 +21,7 @@ import (
 )
 
 // Version is set at build time via -ldflags "-X main.Version=...".
-var Version = "2.2.1"
+var Version = "2.4.1"
 
 func main() {
 	os.Setenv("PODCLI_VERSION", Version)
@@ -44,6 +44,12 @@ func main() {
 	case "mcp":
 		if len(args) >= 2 && args[1] == "install" {
 			os.Exit(mcpInstall())
+		}
+		// Safe on this path despite stdout being the JSON-RPC channel: it only writes
+		// to stderr. Skipping it would strand MCP-only clients on a stale backend.
+		if err := refreshBackend(); err != nil {
+			fmt.Fprintln(os.Stderr, "podcli:", err)
+			os.Exit(1)
 		}
 		code, err := engine.RunMCP()
 		if err != nil {
@@ -99,13 +105,36 @@ func refreshStudioBundles() {
 }
 
 // ensureRuntime self-provisions on first run so `podcli` works without a separate
-// `podcli setup`. Not called on the mcp path, whose stdout is the JSON-RPC channel.
+// `podcli setup`. Not called on the mcp path, whose stdout is the JSON-RPC channel;
+// that path calls refreshBackend directly, which only writes to stderr.
 func ensureRuntime() error {
 	if _, ok := engine.BackendRoot(); !ok {
 		fmt.Fprintln(os.Stderr, "First run - setting up podcli (one-time download)...")
 		setup(nil)
+	} else if err := refreshBackend(); err != nil {
+		return err
 	}
 	return ensureBackendDeps()
+}
+
+// refreshBackend re-extracts the embedded backend after a launcher upgrade, since
+// `podcli update` replaces only the binary. Must run before ensureBackendDeps: the
+// dep stamp hashes the backend's own requirements-runtime.txt, so a stale tree
+// pins a stale dep set.
+func refreshBackend() error {
+	managed := filepath.Join(paths.RuntimeDir(), "backend")
+	root, _ := engine.BackendRoot()
+	if root != managed {
+		return nil // repo checkout or PODCLI_BACKEND override: the user's tree, not ours
+	}
+	if backend.IsCurrent(managed, Version) {
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "Updating backend to podcli %s...\n", Version)
+	if err := backend.Extract(managed, Version); err != nil {
+		return fmt.Errorf("could not update the Python backend: %w\n  run `podcli setup --refresh` to retry", err)
+	}
+	return nil
 }
 
 func ensureBackendDeps() error {
@@ -133,6 +162,9 @@ func runEngine(args []string) int {
 			fmt.Fprintln(os.Stderr, "podcli:", err)
 			return 1
 		}
+	} else if err := refreshBackend(); err != nil {
+		fmt.Fprintln(os.Stderr, "podcli:", err)
+		return 1
 	}
 	if wantsStudio(args) {
 		refreshStudioBundles()
@@ -221,6 +253,7 @@ func setup(args []string) int {
 	size := "base"
 	vad := false
 	speakers := false
+	refresh := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--model":
@@ -232,34 +265,44 @@ func setup(args []string) int {
 			vad = true
 		case "--speakers":
 			speakers = true
+		case "--refresh":
+			refresh = true
 		}
 	}
 	fmt.Printf("Provisioning into %s\n", paths.Home())
-	p, err := provision.EnsureModel(size)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "podcli: setup:", err)
-		return 1
+	// Extracted from the binary, so it costs nothing and can't fail on a bad network.
+	// First, so an interrupted or offline setup still leaves a backend matching this
+	// launcher rather than the one a previous release installed.
+	backendDir := filepath.Join(paths.RuntimeDir(), "backend")
+	if err := backend.Extract(backendDir, Version); err != nil {
+		fmt.Fprintf(os.Stderr, "  backend: skipped (%v) - falling back to repo/PODCLI_BACKEND\n", err)
+		backendDir, _ = engine.BackendRoot()
+	} else {
+		fmt.Printf("  backend: %s\n", backendDir)
 	}
-	fmt.Printf("  model:  %s\n", p)
-	if vad {
-		vp, err := provision.EnsureVADModel()
+	// --refresh re-provisions what a launcher upgrade invalidates. It must not pull a
+	// model: the user's chosen size isn't known here, and defaulting to base would
+	// download one they never asked for.
+	if !refresh {
+		p, err := provision.EnsureModel(size)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "podcli: setup:", err)
 			return 1
 		}
-		fmt.Printf("  vad:    %s\n", vp)
+		fmt.Printf("  model:  %s\n", p)
+		if vad {
+			vp, err := provision.EnsureVADModel()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "podcli: setup:", err)
+				return 1
+			}
+			fmt.Printf("  vad:    %s\n", vp)
+		}
 	}
 	if fp, err := provision.EnsureFFmpeg(); err != nil {
 		fmt.Fprintf(os.Stderr, "  ffmpeg: skipped (%v) - backend will use PATH ffmpeg\n", err)
 	} else {
 		fmt.Printf("  ffmpeg: %s\n", fp)
-	}
-	backendDir := filepath.Join(paths.RuntimeDir(), "backend")
-	if err := backend.Extract(backendDir); err != nil {
-		fmt.Fprintf(os.Stderr, "  backend: skipped (%v) - falling back to repo/PODCLI_BACKEND\n", err)
-		backendDir, _ = engine.BackendRoot()
-	} else {
-		fmt.Printf("  backend: %s\n", backendDir)
 	}
 	if backendDir != "" {
 		reqs := filepath.Join(backendDir, "requirements-runtime.txt")
@@ -559,6 +602,23 @@ Options:
   --purge       Kept for compatibility; uninstall already removes everything`)
 }
 
+// backendStamp annotates an unmanaged or out-of-date backend, the drift the
+// launcher version alone can't show: it exports PODCLI_VERSION into the backend,
+// so a stale backend reports the launcher's version as its own.
+func backendStamp(root string) string {
+	if root != filepath.Join(paths.RuntimeDir(), "backend") {
+		return "  (unmanaged - repo or PODCLI_BACKEND)"
+	}
+	switch v := backend.Version(root); v {
+	case Version:
+		return ""
+	case "":
+		return "  (STALE: unstamped - run `podcli setup --refresh`)"
+	default:
+		return fmt.Sprintf("  (STALE: %s - run `podcli setup --refresh`)", v)
+	}
+}
+
 func doctor() {
 	fmt.Printf("podcli %s\n\n", Version)
 	fmt.Println("Paths")
@@ -571,7 +631,7 @@ func doctor() {
 	}
 	fmt.Println("\nEngine resolution")
 	if root, ok := engine.BackendRoot(); ok {
-		fmt.Printf("  backend:  %s\n", root)
+		fmt.Printf("  backend:  %s%s\n", root, backendStamp(root))
 	} else {
 		fmt.Printf("  backend:  NOT FOUND (set PODCLI_BACKEND or run inside the repo)\n")
 	}
@@ -664,6 +724,7 @@ Launcher commands:
   uninstall            Remove podcli app files (keeps user data unless --purge)
   setup [--model base] [--vad] [--speakers]
                        Provision runtimes + models (--speakers adds pyannote+torch, ~2GB)
+  setup --refresh      Re-provision runtimes for this launcher version, skipping models
   mcp                  Run the MCP server (stdio) for Claude/Codex
   mcp install          Register the MCP server with Claude Code
   config set update.auto off    Disable auto-update (also: PODCLI_NO_UPDATE=1)
