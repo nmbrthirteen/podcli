@@ -54,6 +54,7 @@ episodes/
 *.srt
 uploads/
 output/
+out/
 cli/internal/backend/files/
 cli/internal/podstack/commands/
 cli/podcli
