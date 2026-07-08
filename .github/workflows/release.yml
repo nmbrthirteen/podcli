@@ -172,4 +172,4 @@ jobs:
             -H "Authorization: Bearer $LANDING_DISPATCH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/nmbrthirteen/podcli-landing/dispatches \
-            -d '{"event_type":"release"}'
+            -d "{\"event_type\":\"release\",\"client_payload\":{\"tag\":\"${GITHUB_REF_NAME}\"}}"
