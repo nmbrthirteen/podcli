@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PageHeader } from "./Page";
-import { api, basename } from "./lib";
+import { api, basename, fmt } from "./lib";
 import { useJob } from "./useJob";
 import AssetPicker from "./AssetPicker";
 import RecentSources from "./RecentSources";
@@ -49,11 +49,6 @@ const FORMAT_LABEL: Record<Format, string> = {
   horizontal: "16:9",
   vertical: "9:16",
   square: "1:1",
-};
-
-const mmss = (s: number) => {
-  const t = Math.max(0, s);
-  return `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -187,7 +182,7 @@ function MomentTrim({
           />
         </div>
         <span className="clip-player-time" style={{ minWidth: 118, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-          {saving ? "saving…" : `${mmss(start)}-${mmss(end)} · ${Math.round(end - start)}s`}
+          {saving ? "saving…" : `${fmt(start)}-${fmt(end)} · ${Math.round(end - start)}s`}
         </span>
       </div>
     </div>
@@ -597,7 +592,7 @@ export default function HighlightsPage() {
                 }}
               >
                 <span className="hint" style={{ width: 20, textAlign: "right" }}>{idx + 1}</span>
-                <strong style={{ fontVariantNumeric: "tabular-nums", minWidth: 96 }}>{mmss(m.start)}-{mmss(m.end)}</strong>
+                <strong style={{ fontVariantNumeric: "tabular-nums", minWidth: 96 }}>{fmt(m.start)}-{fmt(m.end)}</strong>
                 <span className="pill pill-blue">{m.why}</span>
                 {(session.sources?.length ?? 1) > 1 && m.source && (
                   <span className="hint" title={m.source} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

@@ -1027,7 +1027,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         const data = await api('/batch-clips', {
           method: 'POST', body: JSON.stringify({
             video_path: vp,
-            clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy, format })),
+            clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title, caption_style: captionStyle, crop_strategy: cropStrategy, format })),
             transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, intro_path: introPath || undefined, clean_fillers: cleanFillers || undefined,
           })
         });
@@ -1046,7 +1046,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         const data = await api('/create-clip', {
           method: 'POST', body: JSON.stringify({
             video_path: vp, start_second: c.start_second, end_second: c.end_second,
-            title: c.title.slice(0, 40), caption_style: captionStyle, crop_strategy: cropStrategy, format,
+            title: c.title, caption_style: captionStyle, crop_strategy: cropStrategy, format,
             transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, intro_path: introPath || undefined, clean_fillers: cleanFillers || undefined,
           })
         });

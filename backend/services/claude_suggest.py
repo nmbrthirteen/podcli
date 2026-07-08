@@ -19,6 +19,7 @@ from config.paths import paths
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
+from utils.text import clean_title
 
 
 def _cli_name_exts() -> list[str]:
@@ -844,7 +845,7 @@ Transcript:
                     continue
 
                 found.append({
-                    "title": c.get("title", "Untitled")[:55],
+                    "title": clean_title(c.get("title", "Untitled")),
                     "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
                     "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
                     "segments": keep_segments,
@@ -1043,7 +1044,7 @@ def suggest_with_claude(
                     continue
 
                 normalized.append({
-                    "title": c.get("title", "Untitled")[:55],
+                    "title": clean_title(c.get("title", "Untitled")),
                     "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
                     "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
                     "segments": keep_segments,
