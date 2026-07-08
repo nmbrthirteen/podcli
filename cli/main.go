@@ -20,9 +20,6 @@ import (
 	"podcli/internal/update"
 )
 
-// Version is set at build time via -ldflags "-X main.Version=...".
-var Version = "2.4.1"
-
 func main() {
 	os.Setenv("PODCLI_VERSION", Version)
 	args := os.Args[1:]

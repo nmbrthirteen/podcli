@@ -15,10 +15,16 @@ unscoped name `podcli` is blocked by npm as too similar to `pod-cli`.)
 
 ## Cutting a release
 
-1. Pick the version `X.Y.Z` and tag with it. The installers resolve the latest
-   release automatically.
+1. Bump the version in `package.json`. It is the single source of truth: the
+   launcher embeds `cli/VERSION`, which `go generate` writes from `package.json`,
+   and the Python backend reads it too.
+   ```bash
+   cd cli && go generate ./... && git add VERSION   # refresh the embedded version
+   ```
+   A tag that disagrees with `package.json` fails the release build, and
+   `go test ./...` in `cli/` fails if `VERSION` is stale.
 2. Merge to `main` and make sure CI is green.
-3. Tag and push:
+3. Tag and push. The tag must match `package.json`:
    ```bash
    git tag vX.Y.Z
    git push origin vX.Y.Z
