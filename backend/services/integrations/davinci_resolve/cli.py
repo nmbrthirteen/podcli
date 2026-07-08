@@ -18,6 +18,7 @@ if str(REPO_ROOT / "backend") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 from services.integrations.davinci_resolve import emitter
+from utils.text import safe_filename
 from services.integrations._shared.media_probe import probe_media
 from services.integrations._shared.timeline_ir import (
     CaptionLayer,
@@ -68,7 +69,7 @@ def main() -> int:
         return 1
 
     out = args.out or (
-        REPO_ROOT / "data" / "export" / "davinci_resolve" / f"{args.title.replace(' ', '_')}.fcpxml"
+        REPO_ROOT / "data" / "export" / "davinci_resolve" / f"{safe_filename(args.title)}.fcpxml"
     )
 
     short = _build_short(args.title, args.source, args.captions)

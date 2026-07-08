@@ -159,6 +159,9 @@ func nodeEnv() []string {
 	if root, ok := BackendRoot(); ok {
 		env = append(env, "PODCLI_BACKEND="+root)
 	}
+	// Node spawns the Python backend and passes its own env through, so these must be
+	// set here too, not only in Run(). Titles cross that pipe as UTF-8 JSON.
+	env = append(env, "PYTHONIOENCODING=utf-8", "PYTHONUTF8=1")
 	env = append(env, "PYTHON_PATH="+Python())
 	if ff := FFmpeg(); ff != "" {
 		env = append(env, "FFMPEG_PATH="+ff)

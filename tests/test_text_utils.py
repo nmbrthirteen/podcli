@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"))
 
-from utils.text import clean_title, truncate_title  # noqa: E402
+from utils.text import clean_title, safe_filename, truncate_title  # noqa: E402
 
 
 def test_clean_title_keeps_full_text():
@@ -42,3 +42,48 @@ def test_truncate_title_strips_trailing_punctuation():
 def test_truncate_title_hard_cuts_a_single_long_word():
     out = truncate_title("x" * 80)
     assert out == "x" * 55 + "…"
+
+
+def test_safe_filename_replaces_spaces():
+    assert safe_filename("My great clip") == "My_great_clip"
+
+
+def test_safe_filename_strips_path_separators():
+    assert safe_filename("../../etc/passwd") == "etcpasswd"
+    assert safe_filename("a/b\\c") == "abc"
+
+
+def test_safe_filename_strips_characters_windows_rejects():
+    assert safe_filename('what: is "this"? <yes> | no*') == "what_is_this_yes_no"
+
+
+def test_safe_filename_drops_smart_punctuation():
+    assert safe_filename("In the end — your “shit” has to work") == "In_the_end_your_shit_has_to_work"
+
+
+def test_safe_filename_caps_length():
+    assert len(safe_filename("word " * 50)) <= 50
+
+
+def test_safe_filename_has_no_leading_or_trailing_underscore():
+    out = safe_filename("  — hello —  ")
+    assert out == "hello"
+
+
+def test_safe_filename_falls_back_when_nothing_survives():
+    assert safe_filename("———") == "clip"
+    assert safe_filename("") == "clip"
+    assert safe_filename(None) == "clip"
+
+
+# Windows rejects these stems whatever the extension, so "CON.fcpxml" fails too.
+def test_safe_filename_escapes_windows_reserved_device_names():
+    assert safe_filename("CON") == "CON_clip"
+    assert safe_filename("nul") == "nul_clip"
+    assert safe_filename("com1") == "com1_clip"
+    assert safe_filename("LPT9") == "LPT9_clip"
+
+
+def test_safe_filename_leaves_names_merely_containing_reserved_words():
+    assert safe_filename("Conference") == "Conference"
+    assert safe_filename("CON artists") == "CON_artists"

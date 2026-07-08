@@ -89,3 +89,17 @@ export const paths = {
   ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
   ffprobePath: process.env.FFPROBE_PATH || "ffprobe",
 };
+
+// Python falls back to the host locale encoding, which is cp1252 on most Windows
+// installs. Titles carry em dashes and smart quotes, and U+201D encodes byte 0x9D,
+// which cp1252 leaves undefined: reading it raises UnicodeDecodeError. Every spawn
+// of the Python backend goes through here so no call site can forget.
+export function pythonEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PYTHONUNBUFFERED: "1",
+    PYTHONIOENCODING: "utf-8",
+    PYTHONUTF8: "1",
+    ...extra,
+  };
+}

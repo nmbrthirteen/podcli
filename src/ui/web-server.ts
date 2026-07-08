@@ -36,7 +36,7 @@ import { FileManager } from "../services/file-manager.js";
 import { AssetManager, inferType, safeName } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import { KnowledgeBase } from "../services/knowledge-base.js";
-import { paths } from "../config/paths.js";
+import { paths, pythonEnv } from "../config/paths.js";
 import { DEMO_ASSETS_DIR } from "./demo-fixtures.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
@@ -597,9 +597,7 @@ app.post("/api/download-video", async (req, res) => {
     "after_move:podcli-filepath:%(filepath)s",
     url,
   ];
-  const proc = spawn(paths.pythonPath, args, {
-    env: { ...process.env, PYTHONUNBUFFERED: "1" },
-  });
+  const proc = spawn(paths.pythonPath, args, { env: pythonEnv() });
 
   let stdout = "";
   let stderr = "";
@@ -1900,7 +1898,7 @@ const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").trim();
 function runPy(scriptAndArgs: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const proc = spawn(paths.pythonPath, scriptAndArgs, {
-      env: { ...process.env, PYTHONUNBUFFERED: "1", PODCLI_HOME: paths.home, PODCLI_DATA: paths.dataDir },
+      env: pythonEnv({ PODCLI_HOME: paths.home, PODCLI_DATA: paths.dataDir }),
     });
     let stdout = "", stderr = "";
     proc.stdout.on("data", (d) => (stdout += d));
