@@ -715,8 +715,10 @@ def generate_clip(
         keep_segments = None
         duration = end_second - start_second
 
+    length_warning = None
     if duration > spec.dur_max:
-        raise ValueError(f"Clip too long ({duration:.0f}s). Max {spec.dur_max} seconds for {spec.name}.")
+        length_warning = f"{duration:.0f}s, over the {spec.dur_max}s {spec.name} target"
+        print(f"  {length_warning}", file=sys.stderr, flush=True)
 
     # Load style config for branded-specific settings
     style_config = get_style(caption_style)
@@ -940,6 +942,8 @@ def generate_clip(
             "crop_strategy": crop_strategy,
             "format": spec.name,
         }
+        if length_warning:
+            out["warning"] = length_warning
         if keep_caption_overlay and caption_overlay_path and os.path.exists(caption_overlay_path):
             out["caption_overlay_path"] = caption_overlay_path
             out["cropped_source_path"] = cropped_path
