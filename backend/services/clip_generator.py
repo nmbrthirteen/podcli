@@ -14,6 +14,7 @@ import re
 from typing import Optional, Callable
 
 from utils.proc import run as proc_run, ProcError
+from utils.text import safe_filename
 from config.paths import paths
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -902,10 +903,7 @@ def generate_clip(
         if progress_callback:
             progress_callback(95, "Saving final clip...")
 
-        # Clean filename
-        safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in title)
-        safe_title = safe_title.strip().replace(" ", "_")[:50]
-        output_filename = f"{safe_title}_short.mp4"
+        output_filename = f"{safe_filename(title)}_short.mp4"
 
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)

@@ -4,7 +4,7 @@ import { join, extname } from "path";
 import { spawn } from "child_process";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
-import { paths } from "../config/paths.js";
+import { paths, pythonEnv } from "../config/paths.js";
 import { ASSETS_SCHEMA_VERSION } from "../models/index.js";
 import type { Asset, AssetType, AssetRegistry } from "../models/index.js";
 
@@ -282,7 +282,7 @@ function downloadWithYtDlp(url: string, destDir: string, name: string): Promise<
     url,
   ];
   return new Promise((resolveP, rejectP) => {
-    const proc = spawn(paths.pythonPath, args, { env: { ...process.env, PYTHONUNBUFFERED: "1" } });
+    const proc = spawn(paths.pythonPath, args, { env: pythonEnv() });
     let stdout = "";
     let stderr = "";
     let filePath = "";

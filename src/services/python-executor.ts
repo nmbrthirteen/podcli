@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "child_process";
 import { v4 as uuidv4 } from "uuid";
-import { paths } from "../config/paths.js";
+import { paths, pythonEnv } from "../config/paths.js";
 import type { TaskRequest, TaskResult, ProgressEvent } from "../models/index.js";
 
 type ProgressCallback = (event: ProgressEvent) => void;
@@ -67,12 +67,10 @@ export class PythonExecutor {
       const proc = spawn(paths.pythonPath, [paths.pythonBackend], {
         stdio: ["pipe", "pipe", "pipe"],
         detached: !isWindows,
-        env: {
-          ...process.env,
-          PYTHONUNBUFFERED: "1",
+        env: pythonEnv({
           PODCLI_HOME: paths.home,
           PODCLI_DATA: paths.dataDir,
-        },
+        }),
       });
 
       let stdout = "";

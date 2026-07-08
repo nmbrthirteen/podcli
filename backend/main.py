@@ -10,8 +10,11 @@ import json
 import os
 import sys
 
-# Windows stdout/stderr default to cp1252, which can't encode chars like '→'; IPC is UTF-8.
-for _stream in (sys.stdout, sys.stderr):
+# Windows streams default to cp1252; IPC is UTF-8. stdin matters as much as the
+# others: the task JSON arrives from Node, and a curly quote (U+201D) carries byte
+# 0x9D, which cp1252 leaves undefined, so decoding it raised UnicodeDecodeError
+# before the request was ever parsed.
+for _stream in (sys.stdin, sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         try:
             _stream.reconfigure(encoding="utf-8", errors="replace")
