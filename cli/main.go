@@ -623,7 +623,9 @@ func doctor() {
 	fmt.Printf("  runtime:  %s\n", paths.RuntimeDir())
 	fmt.Printf("  models:   %s\n", paths.ModelsDir())
 	fmt.Printf("  presets/knowledge/assets/history/cache: %s  (global - follow you everywhere)\n", paths.Home())
-	if cwd, err := os.Getwd(); err == nil {
+	if out := os.Getenv("PODCLI_OUTPUT"); out != "" {
+		fmt.Printf("  clips:    %s  (PODCLI_OUTPUT)\n", out)
+	} else if cwd, err := os.Getwd(); err == nil {
 		fmt.Printf("  clips:    %s  (rendered into your working directory)\n", filepath.Join(cwd, "podcli-clips"))
 	}
 	fmt.Println("\nEngine resolution")

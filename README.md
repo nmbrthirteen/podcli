@@ -57,16 +57,40 @@ podcli                       # interactive menu, opens the web studio
 podcli process episode.mp4   # transcribe, pick moments, render clips
 ```
 
-Clips land in `podcli-clips/` in the directory you ran it from.
+Clips land in `podcli-clips/` in the directory you ran it from, so each show keeps its own renders. Everything else (knowledge, presets, assets, clip history, cache) lives in one managed folder that follows you between directories. Set `PODCLI_OUTPUT` to render somewhere fixed instead.
 
 ## What you get
 
-- Clips in 9:16, 16:9, or 1:1, with captions sized for each canvas
-- Face tracking that follows the speaker, including split-screen layouts
+**Clips**
+
+- 9:16, 16:9, or 1:1, with captions sized for each canvas
+- Face tracking that follows the speaker, split-screen layouts included
+- Multi-segment cuts that drop filler, long pauses, and tangents
 - Four caption styles: branded, hormozi, karaoke, subtle
-- Hardware encoding on VideoToolbox, NVENC, and VAAPI, with a CPU fallback
-- A web studio at `localhost:3847` for review, thumbnails, and content
-- A knowledge base that teaches the AI your show's voice and title rules
+- Logos, intros, outros, and background music from a reusable asset library
+- Loudness-normalized audio and hardware encoding on VideoToolbox, NVENC, and VAAPI, with a CPU fallback
+
+**Finding the moments**
+
+- Whisper transcription with speaker diarization, or bring your own transcript as `.txt`, `.srt`, or `.vtt`
+- AssemblyAI as an alternative engine, and yt-dlp to pull an episode straight from a URL
+- AI scoring against your knowledge base, checked against your episode database so it stops resuggesting moments you already published
+- Audio energy and laughter detection to build highlight reels
+
+**The studio at `localhost:3847`**
+
+- Library, episode workspace, per-clip detail, highlights, thumbnails, content, analytics, assets, knowledge, config, integrations, and MCP setup
+- `⌘K` command palette across pages, clips, and assets
+- Titles, descriptions, tags, and hashtags, with any section regenerated on your own guidance
+- Thumbnail studio for 16:9 and 9:16, with frame and text options
+- Transcript corrections that carry through to every render
+
+**Shipping it**
+
+- 26 MCP tools, so an agent can transcribe, score, render, and publish through conversation
+- YouTube publishing plus performance analytics to see which clips landed
+- DaVinci Resolve export as FCPXML when you want to finish by hand
+- Presets, clip history with duplicate detection, and a transcript cache
 
 ## Use it from your agent
 
