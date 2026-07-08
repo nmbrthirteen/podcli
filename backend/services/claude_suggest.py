@@ -541,7 +541,7 @@ All timestamps you return MUST be in SECONDS as numbers (e.g., 123.4), NOT minut
 
 DURATION RULES (CRITICAL):
 - Target: {TARGET_CLIP_DURATION_MIN}-{TARGET_CLIP_DURATION_MAX} seconds (this is the viral sweet spot)
-- Maximum: {MAX_CLIP_DURATION} seconds (absolute hard limit — anything longer WILL FAIL rendering)
+- Maximum: {MAX_CLIP_DURATION} seconds (anything longer still renders, but gets flagged as over target)
 - Minimum: {MIN_CLIP_DURATION} seconds (too short = no payoff)
 - SHORTER IS BETTER. A punchy 25s clip outperforms a 40s clip every time.
 - If a thought takes longer than {TARGET_CLIP_DURATION_MAX}s, use segments to cut the filler in the middle

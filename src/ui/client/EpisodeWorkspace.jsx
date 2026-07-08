@@ -1730,6 +1730,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                               </span>
                             )}
                             {r && !failed && <span> {'\u00B7'} {r.file_size_mb}MB</span>}
+                            {r && !failed && r.warning && <span className="warn"> {'\u00B7'} {r.warning}</span>}
                             {failed && <span className="err"> {'\u00B7'} {r.error?.slice(0, 60)}</span>}
                             {exportStatus === 'rendering' && <span style={{ color: 'var(--accent)' }}> {'\u00B7'} rendering{'\u2026'}</span>}
                           </div>
