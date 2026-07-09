@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/podcli-logo-transparent.png" height="36" alt="podcli" />
+  <img src="public/podcli-badge.png" height="72" alt="podcli" />
 </p>
 
 <p align="center">

@@ -1054,9 +1054,9 @@ def cmd_process(args):
                     import questionary as _rq
                     from questionary import Style as _RS
                     _rstyle = _RS([
-                        ("qmark", "fg:#d4874a bold"), ("question", "bold"),
-                        ("answer", "fg:#4ade80"), ("pointer", "fg:#d4874a bold"),
-                        ("highlighted", "fg:#d4874a bold"), ("selected", "fg:#4ade80"),
+                        ("qmark", "fg:#d97631 bold"), ("question", "bold"),
+                        ("answer", "fg:#4ade80"), ("pointer", "fg:#d97631 bold"),
+                        ("highlighted", "fg:#d97631 bold"), ("selected", "fg:#4ade80"),
                     ])
                     _raction = _rq.select(
                         f"Clip {i+1}/{len(clips)}: {clip['title'][:40]}",
@@ -1313,11 +1313,11 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
     reset = "\033[0m"
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -1458,11 +1458,11 @@ def _post_render_loop(
     reset = "\033[0m"
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -3972,11 +3972,11 @@ def interactive_menu():
     from questionary import Style
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -4180,11 +4180,11 @@ def _interactive_auto():
     reset = "\033[0m"
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -4280,11 +4280,11 @@ def _interactive_process():
     reset = "\033[0m"
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -4453,11 +4453,11 @@ def _interactive_config():
     reset = "\033[0m"
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -4539,11 +4539,11 @@ def _interactive_cache():
     from questionary import Style
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -4569,11 +4569,11 @@ def _interactive_assets():
     reset = "\033[0m"
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -4657,11 +4657,11 @@ def _interactive_presets():
     reset = "\033[0m"
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -4807,11 +4807,11 @@ def _interactive_knowledge():
     reset = "\033[0m"
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -4872,11 +4872,11 @@ def _interactive_corrections():
     reset = "\033[0m"
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
@@ -4924,11 +4924,11 @@ def _interactive_thumbnails():
     from questionary import Style
 
     qstyle = Style([
-        ("qmark", "fg:#d4874a bold"),
+        ("qmark", "fg:#d97631 bold"),
         ("question", "bold"),
         ("answer", "fg:#4ade80"),
-        ("pointer", "fg:#d4874a bold"),
-        ("highlighted", "fg:#d4874a bold"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
         ("selected", "fg:#4ade80"),
         ("instruction", "fg:#a1a1aa"),
     ])
