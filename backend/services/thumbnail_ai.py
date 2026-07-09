@@ -421,8 +421,16 @@ def extract_candidate_frames(
                 crop_w = tile_w
                 crop_h = int(crop_w / target_ratio)
 
+            min_crop_w = int(fw * 0.3)
+            if crop_w < min_crop_w:
+                crop_w = min(min_crop_w, fw)
+                crop_h = int(crop_w / target_ratio)
+
             crop_x = face_cx - crop_w // 2
-            crop_x = max(tile_left, min(crop_x, tile_right - crop_w))
+            if crop_w <= tile_w:
+                crop_x = max(tile_left, min(crop_x, tile_right - crop_w))
+            else:
+                crop_x = max(0, min(crop_x, fw - crop_w))
 
             crop_y = face_cy - int(crop_h * 0.25)
             crop_y = max(0, min(crop_y, fh - crop_h))

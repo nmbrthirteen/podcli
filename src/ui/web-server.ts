@@ -3390,7 +3390,11 @@ app.post("/api/mcp/export", async (req, res) => {
       crop_strategy: c.crop_strategy || cropStrategy,
       format: c.format || format,
       allow_ass_fallback: c.allow_ass_fallback === true || allowAssFallback,
-      keep_segments: Array.isArray(c.segments) && c.segments.length > 0 ? c.segments : c.keep_segments,
+      keep_segments:
+        (Array.isArray(c.segments) && c.segments.length > 0 && c.segments) ||
+        (Array.isArray(c.keep_segments) && c.keep_segments.length > 0 && c.keep_segments) ||
+        (Array.isArray(c.keep_segment) && c.keep_segment.length > 0 && c.keep_segment) ||
+        undefined,
     }),
   );
 

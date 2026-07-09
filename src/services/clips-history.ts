@@ -31,7 +31,6 @@ export interface BatchRecipeContext {
   introPath?: string | null;
   cleanFillers?: boolean;
   clipSpecs?: BatchClipSpec[];
-  defaultFormat?: Format;
 }
 
 export class ClipsHistory {

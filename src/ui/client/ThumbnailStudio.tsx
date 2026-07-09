@@ -79,8 +79,8 @@ export default function ThumbnailStudio() {
   };
 
   const render = async () => {
-    if (!selFrame) { setMsg("Select a frame or upload an image first"); return; }
-    setBusy("render"); setMsg(null);
+    if (!selFrame) { setMsg("Select a frame or upload an image first"); setMsgErr(true); return; }
+    setBusy("render"); setMsg(null); setMsgErr(false);
     try {
       const r = await api("/thumbnail-studio/render", {
         method: "POST",
@@ -95,18 +95,18 @@ export default function ThumbnailStudio() {
       if (!r.path) throw new Error("no thumbnail produced");
       setPreview(r.path);
       setBust(Date.now());
-      setMsg("Thumbnail generated");
-    } catch (e: any) { setMsg(`Generate failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg("Thumbnail generated"); setMsgErr(false);
+    } catch (e: any) { setMsg(`Generate failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   // Pull a different frame from the source (cycles the ranked candidates) and
   // re-render — same one-click flow as Regenerate, but swaps the background frame.
   const newFrame = async () => {
-    setBusy("newframe"); setMsg(null);
+    setBusy("newframe"); setMsg(null); setMsgErr(false);
     try {
       let frames = frameOpts;
       if (!frames.length) {
-        if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); return; }
+        if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); setMsgErr(true); return; }
         const r = await api("/thumbnail-studio/options", {
           method: "POST",
           body: JSON.stringify({
@@ -133,8 +133,8 @@ export default function ThumbnailStudio() {
       if (!r.path) throw new Error("no thumbnail produced");
       setPreview(r.path);
       setBust(Date.now());
-      setMsg(`New frame from source (${next + 1}/${frames.length})`);
-    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg(`New frame from source (${next + 1}/${frames.length})`); setMsgErr(false);
+    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   return (

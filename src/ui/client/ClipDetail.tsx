@@ -172,25 +172,25 @@ export default function ClipDetail() {
   };
 
   const reopen = async () => {
-    setBusy("reopen"); setMsg(null);
+    setBusy("reopen"); setMsg(null); setMsgErr(false);
     try {
       const r = await api(`/clips/${clip.id}/reopen`, { method: "POST", body: "{}" });
       if (r.error) throw new Error(r.error);
       navigate("/episode");
-    } catch (e: any) { setMsg(`Reopen failed: ${e.message}`); setBusy(null); }
+    } catch (e: any) { setMsg(`Reopen failed: ${e.message}`); setMsgErr(true); setBusy(null); }
   };
 
   const exportDavinci = async () => {
-    setBusy("davinci"); setMsg(null);
+    setBusy("davinci"); setMsg(null); setMsgErr(false);
     try {
       const r = await api(`/clips/${clip.id}/davinci`, { method: "POST", body: "{}" });
       if (r.error) throw new Error(r.error);
-      setMsg(r.path ? `DaVinci project: ${r.path}` : "Exported");
-    } catch (e: any) { setMsg(`DaVinci export failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg(r.path ? `DaVinci project: ${r.path}` : "Exported"); setMsgErr(false);
+    } catch (e: any) { setMsg(`DaVinci export failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const generateContent = async () => {
-    setBusy("content"); setMsg(null);
+    setBusy("content"); setMsg(null); setMsgErr(false);
     try {
       const body = {
         clip: {
@@ -206,16 +206,16 @@ export default function ClipDetail() {
       if (r.error) throw new Error(r.error);
       if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing. Is claude/codex installed?");
       load();
-    } catch (e: any) { setMsg(`Content generation failed: ${e.message}`); } finally { setBusy(null); }
+    } catch (e: any) { setMsg(`Content generation failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const del = async () => {
     if (!window.confirm(`Delete "${clip.title}"? This removes the rendered file too.`)) return;
-    setBusy("delete"); setMsg(null);
+    setBusy("delete"); setMsg(null); setMsgErr(false);
     try {
       await api(`/clips/${clip.id}`, { method: "DELETE" });
       navigate("/");
-    } catch (e: any) { setMsg(`Delete failed: ${e.message}`); setBusy(null); }
+    } catch (e: any) { setMsg(`Delete failed: ${e.message}`); setMsgErr(true); setBusy(null); }
   };
 
   return (
@@ -350,7 +350,7 @@ export default function ClipDetail() {
                       {clip.generated_titles.map((t, i) => {
                         const clean = t.replace(/^\d+\.\s*/, "");
                         return (
-                          <button key={i} className={`title-option ${title === clean ? "selected" : ""}`} onClick={() => { setTitle(clean); setMsg("Title set. Click save to apply"); }}>
+                          <button key={i} className={`title-option ${title === clean ? "selected" : ""}`} onClick={() => { setTitle(clean); setMsg("Title set. Click save to apply"); setMsgErr(false); }}>
                             {t}
                           </button>
                         );

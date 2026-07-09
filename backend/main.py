@@ -557,7 +557,7 @@ def handle_suggest_clips(task_id: str, params: dict):
     )
 
     if clips is None:
-        detail = errors[0] if errors else "check claude/codex login and try again"
+        detail = errors[-1] if errors else "check claude/codex login and try again"
         emit_result(task_id, "error", error=detail)
         return
 

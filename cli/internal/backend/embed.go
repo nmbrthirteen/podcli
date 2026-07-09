@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -22,11 +23,12 @@ var integrityFiles = []string{
 	"cli.py",
 	"services/clip_generator.py",
 	"services/claude_suggest.py",
+	"services/thumbnail_ai.py",
 	"main.py",
 }
 
 func embeddedDigest(rel string) (string, error) {
-	data, err := files.ReadFile(filepath.Join("files", filepath.ToSlash(rel)))
+	data, err := files.ReadFile(path.Join("files", filepath.ToSlash(rel)))
 	if err != nil {
 		return "", err
 	}
