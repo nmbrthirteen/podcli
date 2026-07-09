@@ -3285,17 +3285,20 @@ app.post("/api/ui-state", (req, res) => {
     uiState.rawTranscriptText = body.rawTranscriptText;
   if (body.suggestions !== undefined) {
     if (body._source === "ui" && Array.isArray(body.suggestions)) {
-      uiState.suggestions = body.suggestions.map((incoming: SuggestedClip, i: number) => {
-        const existing = uiState.suggestions[i];
-        if (
-          existing?.segments?.length &&
-          !incoming.segments?.length &&
-          Math.abs(existing.start_second - incoming.start_second) < 0.5 &&
-          Math.abs(existing.end_second - incoming.end_second) < 0.5
-        ) {
-          return { ...incoming, segments: existing.segments, duration: existing.duration ?? incoming.duration };
-        }
-        return incoming;
+      uiState.suggestions = body.suggestions.map((incoming: SuggestedClip) => {
+        if (incoming.segments?.length) return incoming;
+        const segments = findSuggestionSegments(
+          uiState.suggestions,
+          incoming.start_second,
+          incoming.end_second,
+        );
+        if (!segments?.length) return incoming;
+        const existing = uiState.suggestions.find(
+          (s) =>
+            Math.abs(s.start_second - incoming.start_second) < 0.5 &&
+            Math.abs(s.end_second - incoming.end_second) < 0.5,
+        );
+        return { ...incoming, segments, duration: existing?.duration ?? incoming.duration };
       });
     } else {
       uiState.suggestions = body.suggestions;

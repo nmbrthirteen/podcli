@@ -106,7 +106,7 @@ export default function ClipDetail() {
   };
 
   const loadOptions = async () => {
-    setBusy("options"); setMsg(null);
+    setBusy("options"); setMsg(null); setMsgErr(false);
     try {
       const r = await api(`/clips/${clip.id}/thumbnail/options?texts=6&frames=6`);
       if (r.error) throw new Error(r.error);
@@ -119,7 +119,7 @@ export default function ClipDetail() {
   };
 
   const uploadFrame = async (f: File) => {
-    setBusy("upload"); setMsg(null);
+    setBusy("upload"); setMsg(null); setMsgErr(false);
     try {
       const fd = new FormData(); fd.append("file", f);
       const r = await upload<any>("/upload", fd);
@@ -145,7 +145,7 @@ export default function ClipDetail() {
   // Pull a different frame from the clip (cycles the ranked candidates) and
   // re-render — same one-click flow as Regenerate, but swaps the background frame.
   const newFrame = async () => {
-    setBusy("newframe"); setMsg(null);
+    setBusy("newframe"); setMsg(null); setMsgErr(false);
     try {
       let frames = frameOpts;
       if (!frames.length) {
@@ -405,7 +405,7 @@ export default function ClipDetail() {
           end={clip.end_second}
           caption_style={clip.caption_style}
           onClose={() => setReframing(false)}
-          onDone={() => { setReframing(false); setBust(Date.now()); setMsg("Reframed & re-rendered"); load(); }}
+          onDone={() => { setReframing(false); setBust(Date.now()); setMsg("Reframed & re-rendered"); setMsgErr(false); load(); }}
         />
       )}
     </div>

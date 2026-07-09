@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { PythonExecutor } from "../services/python-executor.js";
 import { FileManager } from "../services/file-manager.js";
+import { ClipsHistory } from "../services/clips-history.js";
 import { paths } from "../config/paths.js";
 import { childLogger } from "../utils/logger.js";
 import type {
@@ -14,6 +15,7 @@ import type {
 const log = childLogger("batch-clips");
 const executor = new PythonExecutor();
 const fileManager = new FileManager();
+const history = new ClipsHistory();
 
 /** Load UI state from disk. Returns null if unavailable. */
 function loadState(): UIState | null {
@@ -258,6 +260,22 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     throw new Error("Batch clip creation returned no data");
   }
   const data = result.data;
+
+  const recorded = await history.recordBatchResults(data.results, {
+    sourceVideo: videoPath,
+    transcriptWords: transcriptWords,
+    defaultCaptionStyle: settings.captionStyle || "hormozi",
+    defaultCropStrategy: settings.cropStrategy || "speaker",
+    defaultFormat: input.format || settings.format || "vertical",
+  });
+  await history.persistBatchRecipes(data.results, recorded, {
+    transcriptWords: transcriptWords,
+    clipSpecs: clips,
+    logoPath: settings.logoPath || null,
+    outroPath: settings.outroPath || null,
+    introPath: settings.introPath || null,
+    cleanFillers: input.clean_fillers !== false,
+  });
 
   return JSON.stringify({
     total_clips: data.total_clips,

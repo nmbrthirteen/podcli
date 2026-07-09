@@ -30,17 +30,17 @@ export default function ThumbnailStudio() {
   }
 
   const browse = async () => {
-    setBusy("browse"); setMsg(null);
+    setBusy("browse"); setMsg(null); setMsgErr(false);
     try {
       const r = await api("/browse-file");
       if (r.file_path) setVideo({ path: r.file_path, name: r.filename || basename(r.file_path) });
     } catch (e: any) {
-      if (e.message !== "cancelled") setMsg(`Browse failed: ${e.message}`);
+      if (e.message !== "cancelled") { setMsg(`Browse failed: ${e.message}`); setMsgErr(true); }
     } finally { setBusy(null); }
   };
 
   const uploadFile = async (f: File) => {
-    setBusy("upload"); setMsg(null);
+    setBusy("upload"); setMsg(null); setMsgErr(false);
     try {
       const fd = new FormData();
       fd.append("file", f);
@@ -49,11 +49,11 @@ export default function ThumbnailStudio() {
       if (isImage(f.name)) {
         setSelFrame({ path: r.file_path });
         setPreview(null);
-        setMsg("Image set as the thumbnail background");
+        setMsg("Image set as the thumbnail background"); setMsgErr(false);
       } else {
         setVideo({ path: r.file_path, name: f.name });
       }
-    } catch (e: any) { setMsg(`Upload failed: ${e.message}`); } finally { setBusy(null); }
+    } catch (e: any) { setMsg(`Upload failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const loadOptions = async () => {
