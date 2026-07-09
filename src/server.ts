@@ -664,7 +664,7 @@ export function createServer(): McpServer {
           const parsed = JSON.parse(finalResult);
 
           // Record to history
-          await history.record({
+          const rec = await history.record({
             source_video: params.video_path as string,
             start_second: params.start_second as number,
             end_second: params.end_second as number,
@@ -678,6 +678,16 @@ export function createServer(): McpServer {
             duration: parsed.duration,
             content_type: parsed.content_type,
             transcript_slice: parsed.transcript_slice,
+          });
+          const uiStateForRecipe = await readUIState().catch(() => null);
+          const recipeSettings = uiStateForRecipe?.settings ?? {};
+          await history.persistClipRecipe(rec, {
+            transcriptWords: params.transcript_words as WordTimestamp[] | undefined,
+            logoPath: (params.logo_path as string) || recipeSettings.logoPath || null,
+            outroPath: (params.outro_path as string) || recipeSettings.outroPath || null,
+            introPath: recipeSettings.introPath || null,
+            cleanFillers: true,
+            keepSegments: keepSegments ?? undefined,
           });
 
           // Notify UI that export is done
@@ -898,16 +908,34 @@ export function createServer(): McpServer {
         }
 
         if (!usedWebServer) {
-          // Fallback: run directly without web server (no UI progress)
           await uiPing({ phase: "exporting" });
 
-          finalResult = await handleBatchClips(params);
+          const batchParams = {
+            ...params,
+            video_path: resolvedVideoPath || params.video_path,
+            clips: resolvedClips || params.clips,
+            transcript_words: resolvedTranscriptWords || params.transcript_words,
+          };
+          finalResult = await handleBatchClips(batchParams);
           const parsed = JSON.parse(finalResult) as BatchClipsResult;
+          const uiState = await readUIState().catch(() => null);
+          const settings = uiState?.settings ?? {};
 
-          // Record each successful clip
-          await history.recordBatchResults(parsed.results, {
-            sourceVideo: params.video_path || "",
-            transcriptWords: params.transcript_words as WordTimestamp[] | undefined,
+          const recorded = await history.recordBatchResults(parsed.results, {
+            sourceVideo: (batchParams.video_path as string) || "",
+            transcriptWords: batchParams.transcript_words as WordTimestamp[] | undefined,
+          });
+          await history.persistBatchRecipes(parsed.results, recorded, {
+            transcriptWords: batchParams.transcript_words as WordTimestamp[] | undefined,
+            clipSpecs: (batchParams.clips || []) as Array<{
+              start_second: number;
+              end_second: number;
+              keep_segments?: Array<{ start: number; end: number }>;
+            }>,
+            logoPath: settings.logoPath || null,
+            outroPath: settings.outroPath || null,
+            introPath: settings.introPath || null,
+            cleanFillers: true,
           });
 
           await uiPing({ phase: "done" });

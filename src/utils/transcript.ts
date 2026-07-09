@@ -42,3 +42,19 @@ export function findContentType(
   );
   return match?.content_type;
 }
+
+export function findSuggestionSegments(
+  suggestions: Array<{
+    start_second: number;
+    end_second: number;
+    segments?: Array<{ start: number; end: number }>;
+  }> | undefined | null,
+  start: number,
+  end: number,
+): Array<{ start: number; end: number }> | undefined {
+  if (!suggestions?.length) return undefined;
+  const match = suggestions.find(
+    (s) => Math.abs(s.start_second - start) < 0.5 && Math.abs(s.end_second - end) < 0.5,
+  );
+  return match?.segments;
+}

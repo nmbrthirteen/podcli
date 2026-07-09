@@ -43,6 +43,40 @@ def _load_brand_config() -> dict:
     return defaults
 
 
+def _normalize_roi(gray, target_width: int = 320):
+    import cv2
+    h, w = gray.shape[:2]
+    if w <= 0 or h <= 0:
+        return gray
+    if w == target_width:
+        return gray
+    scale = target_width / w
+    new_h = max(1, int(h * scale))
+    return cv2.resize(gray, (target_width, new_h), interpolation=cv2.INTER_AREA)
+
+
+def _tile_bounds_for_face(gray, face_cx: int) -> tuple[int, int]:
+    import cv2
+    import numpy as np
+    h, w = gray.shape[:2]
+    if w < 640 or h < 1:
+        return 0, w
+    gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    seam_frac = np.mean(np.abs(gx) > 15, axis=0)
+    col_mean = np.mean(gray, axis=0)
+    col_max = np.max(gray, axis=0)
+    is_boundary = (seam_frac > 0.5) | ((col_mean <= 24) & (col_max <= 48))
+    bounds = [0]
+    for x in range(2, w - 2):
+        if is_boundary[x] and (not bounds or x - bounds[-1] > w * 0.15):
+            bounds.append(x)
+    bounds.append(w)
+    for i in range(len(bounds) - 1):
+        if bounds[i] <= face_cx < bounds[i + 1]:
+            return bounds[i], bounds[i + 1]
+    return 0, w
+
+
 def _frame_sharpness(frame, face_roi=None) -> float:
     """Laplacian variance — higher = sharper. Measures face region if provided."""
     import cv2
@@ -52,6 +86,7 @@ def _frame_sharpness(frame, face_roi=None) -> float:
     else:
         region = frame
     gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+    gray = _normalize_roi(gray)
     return cv2.Laplacian(gray, cv2.CV_64F).var()
 
 
@@ -67,9 +102,11 @@ def _face_expression_quality(frame, x1: int, y1: int, x2: int, y2: int) -> float
     region = frame[y1:y2, x1:x2]
     h, w = region.shape[:2]
     if h < 30 or w < 30:
-        return 0.3  # Too small to analyze properly
+        return 0.3
 
     gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+    gray = _normalize_roi(gray)
+    h, w = gray.shape[:2]
 
     # 1) Face angle — reject extreme tilt (looking down, sideways)
     #    A front-facing face has the brightest area (forehead) in the top third.
@@ -200,6 +237,9 @@ def extract_candidate_frames(
         end_t = min(duration, duration * 0.9)
     sample_count = max(count * 10, 40)
     candidates = []
+    best_rejected = None
+    expression_floor = 0.25
+    sharpness_floor = 12.0
 
     for i in range(sample_count):
         t = start_t + i * (end_t - start_t) / sample_count
@@ -230,44 +270,27 @@ def extract_candidate_frames(
             if not is_portrait and 0.4 * w < face_cx < 0.6 * w and fw < w * 0.15:
                 continue
 
-            # Sharpness of face region (proxy for eyes open, good expression)
-            sharpness = _frame_sharpness(frame, (x1, y1, x2, y2))
-
-            # Skip very blurry faces (motion blur, out of focus)
-            if sharpness < 12:
-                continue
-
-            # Face expression quality — filter blinking, open mouths
-            expression_quality = _face_expression_quality(frame, x1, y1, x2, y2)
-            if expression_quality < 0.45:
-                continue  # Bad expression (looking down, blinking, mouth open, etc.)
-
-            # Face size as fraction of frame
             face_area_pct = (fw * fh) / (w * h) * 100
+            sharpness = _frame_sharpness(frame, (x1, y1, x2, y2))
+            expression_quality = _face_expression_quality(frame, x1, y1, x2, y2)
 
-            # Score: confidence × sharpness × size_preference × expression
-            # Prefer faces that are 5-25% of frame area (natural portrait)
-            # Penalize extreme close-ups (>35%) and tiny faces (<3%)
+            mid_t = (start_t + end_t) / 2
+            span = max(0.1, end_t - start_t)
+            distance_from_mid = abs(t - mid_t) / (span / 2)
+            position_boost = 1.0 - 0.4 * min(1.0, distance_from_mid)
+
             if face_area_pct > 35:
-                size_factor = 0.4  # Too zoomed in
+                size_factor = 0.4
             elif face_area_pct > 25:
                 size_factor = 0.7
             elif face_area_pct < 3:
-                size_factor = 0.5  # Too small
+                size_factor = 0.5
             else:
-                size_factor = 1.0  # Sweet spot
-
-            # Prefer frames from the middle 60% of the clip — that's where
-            # the emotional peak usually is, and it avoids identical-looking
-            # boundary frames when consecutive clips share the same speaker.
-            mid_t = (start_t + end_t) / 2
-            span = max(0.1, end_t - start_t)
-            distance_from_mid = abs(t - mid_t) / (span / 2)  # 0 = center, 1 = edge
-            position_boost = 1.0 - 0.4 * min(1.0, distance_from_mid)
+                size_factor = 1.0
 
             score = (conf ** 2) * (sharpness ** 0.5) * size_factor * expression_quality * position_boost
 
-            candidates.append({
+            entry = {
                 "frame": frame.copy(),
                 "timestamp": round(t, 1),
                 "confidence": round(float(conf), 3),
@@ -277,9 +300,19 @@ def extract_candidate_frames(
                 "face_h_pct": round(fh / h * 100, 1),
                 "sharpness": round(sharpness, 1),
                 "score": score,
-            })
+            }
+
+            if sharpness < sharpness_floor or expression_quality < expression_floor:
+                if best_rejected is None or score > best_rejected["score"]:
+                    best_rejected = entry
+                continue
+
+            candidates.append(entry)
 
     cap.release()
+
+    if not candidates and best_rejected:
+        candidates.append(best_rejected)
 
     if not candidates:
         return []
@@ -375,15 +408,21 @@ def extract_candidate_frames(
             c["face_x_pct"] = round(face_cx * scale / target_w * 100, 1)
             c["face_y_pct"] = round((face_cy_scaled + y_offset) / target_h * 100, 1)
         else:
-            # Landscape source — crop to 9:16 centered on face
             crop_h = fh
             crop_w = int(crop_h * target_ratio)
             if crop_w > fw:
                 crop_w = fw
                 crop_h = int(crop_w / target_ratio)
 
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            tile_left, tile_right = _tile_bounds_for_face(gray, face_cx)
+            tile_w = tile_right - tile_left
+            if tile_w < crop_w:
+                crop_w = tile_w
+                crop_h = int(crop_w / target_ratio)
+
             crop_x = face_cx - crop_w // 2
-            crop_x = max(0, min(crop_x, fw - crop_w))
+            crop_x = max(tile_left, min(crop_x, tile_right - crop_w))
 
             crop_y = face_cy - int(crop_h * 0.25)
             crop_y = max(0, min(crop_y, fh - crop_h))

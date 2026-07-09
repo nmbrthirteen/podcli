@@ -59,6 +59,7 @@ export default function ClipDetail() {
   const [selFrame, setSelFrame] = useState<{ path: string; info?: any } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgErr, setMsgErr] = useState(false);
   const [bust, setBust] = useState(1);
   const [davinciOn, setDavinciOn] = useState(false);
   const [reframing, setReframing] = useState(false);
@@ -96,12 +97,12 @@ export default function ClipDetail() {
   const patch = (body: any) => api(`/clips/${clip.id}`, { method: "PATCH", body: JSON.stringify(body) });
 
   const save = async () => {
-    setBusy("save"); setMsg(null);
+    setBusy("save"); setMsg(null); setMsgErr(false);
     try {
       const r = await patch({ title, caption_style: captionStyle });
       if (r.error) throw new Error(r.error);
       load();
-    } catch (e: any) { setMsg(`Save failed: ${e.message}`); } finally { setBusy(null); }
+    } catch (e: any) { setMsg(`Save failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const loadOptions = async () => {
@@ -112,8 +113,9 @@ export default function ClipDetail() {
       setTextOpts(r.texts || []);
       setFrameOpts(r.frames || []);
       if ((r.frames || []).length) setSelFrame({ path: r.frames[0].path, info: r.frames[0] });
-      if (!(r.texts || []).length && !(r.frames || []).length) setMsg("No options. Is the AI CLI installed and the source video available?");
-    } catch (e: any) { setMsg(`Options failed: ${e.message}`); } finally { setBusy(null); }
+      if (!(r.texts || []).length && !(r.frames || []).length) { setMsg("No options. Is the AI CLI installed and the source video available?"); setMsgErr(true); }
+      else if (r.warning) { setMsg(r.warning); setMsgErr(true); }
+    } catch (e: any) { setMsg(`Options failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const uploadFrame = async (f: File) => {
@@ -123,12 +125,12 @@ export default function ClipDetail() {
       const r = await upload<any>("/upload", fd);
       if (!r.file_path) throw new Error("upload failed");
       setSelFrame({ path: r.file_path });
-    } catch (e: any) { setMsg(`Upload failed: ${e.message}`); } finally { setBusy(null); }
+    } catch (e: any) { setMsg(`Upload failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const renderThumb = async () => {
-    if (!selFrame) { setMsg("Select or upload a frame first"); return; }
-    setBusy("render"); setMsg(null);
+    if (!selFrame) { setMsg("Select or upload a frame first"); setMsgErr(true); return; }
+    setBusy("render"); setMsg(null); setMsgErr(false);
     try {
       const r = await api(`/clips/${clip.id}/thumbnail/render`, {
         method: "POST",
@@ -136,8 +138,8 @@ export default function ClipDetail() {
       });
       if (r.error) throw new Error(r.error);
       setBust(Date.now()); load();
-      setMsg("Thumbnail generated");
-    } catch (e: any) { setMsg(`Generate failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg("Thumbnail generated"); setMsgErr(false);
+    } catch (e: any) { setMsg(`Generate failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   // Pull a different frame from the clip (cycles the ranked candidates) and
@@ -153,7 +155,7 @@ export default function ClipDetail() {
         setFrameOpts(frames);
         if ((r.texts || []).length) setTextOpts(r.texts);
       }
-      if (!frames.length) { setMsg("No frames found in this clip"); return; }
+      if (!frames.length) { setMsg("No frames found in this clip"); setMsgErr(true); return; }
       const curIdx = frames.findIndex((f: any) => f.path === selFrame?.path);
       const next = ((curIdx < 0 ? frameIdx : curIdx) + 1) % frames.length;
       setFrameIdx(next);
@@ -165,8 +167,8 @@ export default function ClipDetail() {
       });
       if (r.error) throw new Error(r.error);
       setBust(Date.now()); load();
-      setMsg(`New frame from clip (${next + 1}/${frames.length})`);
-    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg(`New frame from clip (${next + 1}/${frames.length})`); setMsgErr(false);
+    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const reopen = async () => {
@@ -243,7 +245,7 @@ export default function ClipDetail() {
         </div>
 
         <div className="clip-detail-editor">
-          {msg && <div className="set-note ok" style={{ wordBreak: "break-all" }}>{msg}</div>}
+          {msg && <div className={`set-note ${msgErr ? "err" : "ok"}`} style={{ wordBreak: "break-all" }}>{msg}</div>}
 
           <div className="section">
             <label style={labelStyle}>Title & captions</label>

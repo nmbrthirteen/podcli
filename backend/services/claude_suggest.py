@@ -799,7 +799,7 @@ Transcript:
                     prompt=prompt,
                     prompt_file=prompt_file,
                     project_dir=project_dir,
-                    timeout=300,
+                    timeout=900,
                 )
             except Exception:
                 continue
@@ -896,7 +896,7 @@ def suggest_with_claude(
     top_n: int = 5,
     exclude_clips: list[dict] | None = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
-    timeout: int = 300,
+    timeout: int = 900,
     error_sink: Optional[list[str]] = None,
 ) -> Optional[list[dict]]:
     """
@@ -1088,7 +1088,9 @@ def suggest_with_claude(
 def suggest_initial_with_claude(
     segments: list[dict],
     top_n: int = 5,
+    exclude_clips: list[dict] | None = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    error_sink: Optional[list[str]] = None,
 ) -> Optional[list[dict]]:
     """
     Initial clip discovery entry point.
@@ -1097,11 +1099,14 @@ def suggest_initial_with_claude(
     quickly and cover the full timeline instead of timing out on one giant
     prompt.
     """
+    exclude_clips = exclude_clips or []
     if not _should_bucket_initial_selection(segments):
         return suggest_with_claude(
             segments=segments,
             top_n=top_n,
+            exclude_clips=exclude_clips,
             progress_callback=progress_callback,
+            error_sink=error_sink,
             timeout=180,
         )
 
@@ -1130,7 +1135,9 @@ def suggest_initial_with_claude(
         return suggest_with_claude(
             segments=segments,
             top_n=top_n,
+            exclude_clips=exclude_clips,
             progress_callback=progress_callback,
+            error_sink=error_sink,
             timeout=180,
         )
 
@@ -1152,7 +1159,7 @@ def suggest_initial_with_claude(
         bucket_clips = suggest_with_claude(
             segments=bucket["segments"],
             top_n=per_bucket_top_n,
-            exclude_clips=aggregated,
+            exclude_clips=exclude_clips + aggregated,
             progress_callback=(
                 None if progress_callback is None
                 else lambda pct, msg, bucket_label=bucket_label: progress_callback(
@@ -1160,6 +1167,7 @@ def suggest_initial_with_claude(
                     f"{bucket_label}: {msg}" if msg else msg,
                 )
             ),
+            error_sink=error_sink,
             timeout=90,
         )
         if not bucket_clips:
@@ -1174,7 +1182,7 @@ def suggest_initial_with_claude(
     fallback_clips = suggest_with_claude(
         segments=segments,
         top_n=top_n,
-        exclude_clips=deduped,
+        exclude_clips=exclude_clips + deduped,
         progress_callback=(
             None if progress_callback is None
             else lambda pct, msg: progress_callback(
@@ -1182,6 +1190,7 @@ def suggest_initial_with_claude(
                 f"global pass: {msg}" if msg else msg,
             )
         ),
+        error_sink=error_sink,
         timeout=120,
     )
     if fallback_clips:

@@ -263,6 +263,7 @@ export interface ClipHistoryEntry {
   created_at: string;
   content_type?: string;
   transcript_slice?: string;
+  keep_segments?: Array<{ start: number; end: number }>;
   thumbnail_config?: ClipThumbnailConfig;
   youtube_video_id?: string;
   metrics?: ClipPerformanceMetrics;

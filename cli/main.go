@@ -272,8 +272,13 @@ func setup(args []string) int {
 	// launcher rather than the one a previous release installed.
 	backendDir := filepath.Join(paths.RuntimeDir(), "backend")
 	if err := backend.Extract(backendDir, Version); err != nil {
-		fmt.Fprintf(os.Stderr, "  backend: skipped (%v) - falling back to repo/PODCLI_BACKEND\n", err)
-		backendDir, _ = engine.BackendRoot()
+		fmt.Fprintf(os.Stderr, "  backend: FAILED (%v)\n", err)
+		backendDir, ok := engine.BackendRoot()
+		if !ok {
+			fmt.Fprintln(os.Stderr, "podcli: setup: no backend available after extract failure")
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "  backend: using fallback %s (may be stale — run `podcli doctor`)\n", backendDir)
 	} else {
 		fmt.Printf("  backend: %s\n", backendDir)
 	}
@@ -606,13 +611,27 @@ func backendStamp(root string) string {
 	if root != filepath.Join(paths.RuntimeDir(), "backend") {
 		return "  (unmanaged - repo or PODCLI_BACKEND)"
 	}
-	switch v := backend.Version(root); v {
+	stamp := backend.Version(root)
+	switch stamp {
 	case Version:
+		if mismatches := backend.IntegrityMismatches(root); len(mismatches) > 0 {
+			return fmt.Sprintf(
+				"  (STALE: stamp %s matches launcher but files differ [%s] - run `podcli setup --refresh`)",
+				stamp,
+				strings.Join(mismatches, ", "),
+			)
+		}
 		return ""
 	case "":
+		if mismatches := backend.IntegrityMismatches(root); len(mismatches) > 0 {
+			return fmt.Sprintf(
+				"  (STALE: unstamped, files differ from launcher [%s] - run `podcli setup --refresh`)",
+				strings.Join(mismatches, ", "),
+			)
+		}
 		return "  (STALE: unstamped - run `podcli setup --refresh`)"
 	default:
-		return fmt.Sprintf("  (STALE: %s - run `podcli setup --refresh`)", v)
+		return fmt.Sprintf("  (STALE: stamped %s, launcher %s - run `podcli setup --refresh`)", stamp, Version)
 	}
 }
 
@@ -630,7 +649,12 @@ func doctor() {
 	}
 	fmt.Println("\nEngine resolution")
 	if root, ok := engine.BackendRoot(); ok {
+		stamp := backend.Version(root)
 		fmt.Printf("  backend:  %s%s\n", root, backendStamp(root))
+		if stamp != "" && stamp != Version {
+			fmt.Printf("  backend stamp: %s (launcher %s)\n", stamp, Version)
+		}
+		fmt.Printf("  note:     Python may report launcher version via PODCLI_VERSION; trust stamp + file hashes above\n")
 	} else {
 		fmt.Printf("  backend:  NOT FOUND (set PODCLI_BACKEND or run inside the repo)\n")
 	}

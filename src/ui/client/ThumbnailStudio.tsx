@@ -21,6 +21,7 @@ export default function ThumbnailStudio() {
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgErr, setMsgErr] = useState(false);
   const [bust, setBust] = useState(1);
   const [editingTemplate, setEditingTemplate] = useState(false);
 
@@ -56,8 +57,8 @@ export default function ThumbnailStudio() {
   };
 
   const loadOptions = async () => {
-    if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); return; }
-    setBusy("options"); setMsg(null);
+    if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); setMsgErr(true); return; }
+    setBusy("options"); setMsg(null); setMsgErr(false);
     try {
       const r = await api("/thumbnail-studio/options", {
         method: "POST",
@@ -72,8 +73,9 @@ export default function ThumbnailStudio() {
       setFrameOpts(r.frames || []);
       setBust(Date.now());
       if ((r.frames || []).length) setSelFrame({ path: r.frames[0].path, info: r.frames[0] });
-      if (!(r.texts || []).length && !(r.frames || []).length) setMsg("No options. Is the AI CLI installed? Pick a video for frame options.");
-    } catch (e: any) { setMsg(`Options failed: ${e.message}`); } finally { setBusy(null); }
+      if (!(r.texts || []).length && !(r.frames || []).length) { setMsg("No options. Is the AI CLI installed? Pick a video for frame options."); setMsgErr(true); }
+      else if (r.warning) { setMsg(r.warning); setMsgErr(true); }
+    } catch (e: any) { setMsg(`Options failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const render = async () => {
@@ -118,7 +120,7 @@ export default function ThumbnailStudio() {
         setFrameOpts(frames);
         if ((r.texts || []).length) setTextOpts(r.texts);
       }
-      if (!frames.length) { setMsg("No frames found. Pick a video source first."); return; }
+      if (!frames.length) { setMsg("No frames found. Pick a video source first."); setMsgErr(true); return; }
       const curIdx = frames.findIndex((f: any) => f.path === selFrame?.path);
       const next = ((curIdx < 0 ? frameIdx : curIdx) + 1) % frames.length;
       setFrameIdx(next);
@@ -170,7 +172,7 @@ export default function ThumbnailStudio() {
         </div>
       </div>
 
-      {msg && <div className="set-note ok" style={{ wordBreak: "break-word" }}>{msg}</div>}
+      {msg && <div className={`set-note ${msgErr ? "err" : "ok"}`} style={{ wordBreak: "break-word" }}>{msg}</div>}
 
       <div className="section">
         <label style={labelStyle}>Thumbnail</label>

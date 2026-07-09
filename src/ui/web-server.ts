@@ -40,7 +40,7 @@ import { paths, pythonEnv } from "../config/paths.js";
 import { DEMO_ASSETS_DIR } from "./demo-fixtures.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
-import { sliceTranscript, sliceWords, findContentType } from "../utils/transcript.js";
+import { sliceTranscript, sliceWords, findContentType, findSuggestionSegments } from "../utils/transcript.js";
 import { errMsg } from "../utils/errors.js";
 import type {
   AssetType,
@@ -303,6 +303,14 @@ function setExportState(phase: string, activeExportJobId: string | null) {
   persistState();
 }
 
+function enrichClipWithSegments<T extends { start_second: number; end_second: number; keep_segments?: Array<{ start: number; end: number }> }>(
+  clip: T,
+): T {
+  if (clip.keep_segments?.length) return clip;
+  const segments = findSuggestionSegments(uiState.suggestions, clip.start_second, clip.end_second);
+  return segments?.length ? { ...clip, keep_segments: segments } : clip;
+}
+
 function createBatchHistoryRecorder({
   jobId,
   sourceVideo,
@@ -311,6 +319,11 @@ function createBatchHistoryRecorder({
   defaultCropStrategy,
   defaultFormat,
   label,
+  clipSpecs,
+  logoPath,
+  outroPath,
+  introPath,
+  cleanFillers,
 }: {
   jobId: string;
   sourceVideo: string;
@@ -319,6 +332,18 @@ function createBatchHistoryRecorder({
   defaultCropStrategy?: string;
   defaultFormat?: Format;
   label: string;
+  clipSpecs?: Array<{
+    start_second: number;
+    end_second: number;
+    caption_style?: string;
+    crop_strategy?: string;
+    format?: Format;
+    keep_segments?: Array<{ start: number; end: number }>;
+  }>;
+  logoPath?: string | null;
+  outroPath?: string | null;
+  introPath?: string | null;
+  cleanFillers?: boolean;
 }) {
   const recordedClipIndexes = new Set<number>();
   const pendingWrites: Promise<void>[] = [];
@@ -332,6 +357,26 @@ function createBatchHistoryRecorder({
       defaultFormat,
       contentTypeFor: (s, e) => findContentType(uiState.suggestions, s, e),
     });
+    let recordedIdx = 0;
+    for (const row of rows) {
+      if (row.status !== "success" || !row.output_path) continue;
+      const rec = recorded[recordedIdx++];
+      if (!rec) continue;
+      const spec =
+        typeof row.clip_index === "number" ? clipSpecs?.[row.clip_index] : undefined;
+      try {
+        await clipsHistory.persistClipRecipe(rec, {
+          transcriptWords,
+          logoPath,
+          outroPath,
+          introPath,
+          cleanFillers,
+          keepSegments: spec?.keep_segments,
+        });
+      } catch (err) {
+        log.warn(`Failed to save recipe for ${label} clip`, { err: errMsg(err) });
+      }
+    }
     for (const row of rows) {
       if (row.status === "success" && row.output_path && typeof row.clip_index === "number") {
         recordedClipIndexes.add(row.clip_index);
@@ -973,6 +1018,7 @@ app.post("/api/create-clip", async (req, res) => {
     clean_fillers = false,
     allow_ass_fallback = false,
     content_type = null,
+    keep_segments,
   } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
@@ -1041,6 +1087,12 @@ app.post("/api/create-clip", async (req, res) => {
 
   await fileManager.ensureDirectories();
 
+  const enriched = enrichClipWithSegments({
+    start_second,
+    end_second,
+    keep_segments: Array.isArray(keep_segments) ? keep_segments : undefined,
+  });
+
   const jobId = uuidv4();
   const job: JobState = {
     id: jobId,
@@ -1059,8 +1111,8 @@ app.post("/api/create-clip", async (req, res) => {
       "create_clip",
       {
         video_path,
-        start_second,
-        end_second,
+        start_second: enriched.start_second,
+        end_second: enriched.end_second,
         caption_style,
         crop_strategy,
         format,
@@ -1072,6 +1124,7 @@ app.post("/api/create-clip", async (req, res) => {
         intro_path,
         clean_fillers,
         allow_ass_fallback,
+        ...(enriched.keep_segments?.length && { keep_segments: enriched.keep_segments }),
       },
       (event) => {
         job.progress = event.percent;
@@ -1103,11 +1156,13 @@ app.post("/api/create-clip", async (req, res) => {
           content_type: content_type || undefined,
           transcript_slice: sliceTranscript(transcript_words, start_second, end_second),
         });
-        const clipWords = sliceWords(transcript_words, start_second, end_second);
-        await clipsHistory.saveWords(rec.id, clipWords);
-        await clipsHistory.saveRecipe(rec.id, {
-          caption_style, crop_strategy, format, logo_path: logo_path || null, outro_path: outro_path || null,
-          intro_path: intro_path || null, clean_fillers, transcript_words: clipWords,
+        await clipsHistory.persistClipRecipe(rec, {
+          transcriptWords: transcript_words,
+          logoPath: logo_path,
+          outroPath: outro_path,
+          introPath: intro_path,
+          cleanFillers: clean_fillers,
+          keepSegments: enriched.keep_segments,
         });
         broadcastHistoryUpdated(jobId, [rec]);
       } catch (err) {
@@ -1184,6 +1239,10 @@ app.post("/api/batch-clips", async (req, res) => {
 
   await fileManager.ensureDirectories();
 
+  const enrichedClips = clips.map((c: { start_second: number; end_second: number; keep_segments?: Array<{ start: number; end: number }> }) =>
+    enrichClipWithSegments(c),
+  );
+
   const jobId = uuidv4();
   const job: JobState = {
     id: jobId,
@@ -1200,6 +1259,11 @@ app.post("/api/batch-clips", async (req, res) => {
     sourceVideo: video_path,
     transcriptWords: transcript_words,
     label: "batch",
+    clipSpecs: enrichedClips,
+    logoPath: logo_path,
+    outroPath: outro_path,
+    introPath: intro_path,
+    cleanFillers: clean_fillers,
   });
 
   broadcastSSE("export-started", { jobId, clipCount: clips.length });
@@ -1212,7 +1276,7 @@ app.post("/api/batch-clips", async (req, res) => {
       "batch_clips",
       {
         video_path,
-        clips,
+        clips: enrichedClips,
         transcript_words,
         output_dir: paths.output,
         logo_path,
@@ -2045,7 +2109,13 @@ app.get("/api/clips/:id/thumbnail/options", async (req, res) => {
   ]);
   if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "options failed" }); return; }
   const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
-  try { res.json(JSON.parse(jsonLine || "{}")); } catch { res.status(500).json({ error: "bad options output" }); }
+  try {
+    const parsed = JSON.parse(jsonLine || "{}");
+    if (!parsed.frames?.length && (parsed.texts?.length || 0) > 0) {
+      parsed.warning = "No suitable frames found in this clip — try another moment or upload a frame.";
+    }
+    res.json(parsed);
+  } catch { res.status(500).json({ error: "bad options output" }); }
 });
 
 // Render one final thumbnail from a chosen frame + headline (empty lines = AI writes the text).
@@ -2125,7 +2195,13 @@ app.post("/api/thumbnail-studio/options", async (req, res) => {
   const r = await runCli(args);
   if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "options failed" }); return; }
   const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
-  try { res.json(JSON.parse(jsonLine || "{}")); } catch { res.status(500).json({ error: "bad options output" }); }
+  try {
+    const parsed = JSON.parse(jsonLine || "{}");
+    if (!parsed.frames?.length && (parsed.texts?.length || 0) > 0) {
+      parsed.warning = "No suitable frames found — try another moment or upload a frame.";
+    }
+    res.json(parsed);
+  } catch { res.status(500).json({ error: "bad options output" }); }
 });
 
 app.post("/api/thumbnail-studio/render", async (req, res) => {
@@ -2882,15 +2958,19 @@ app.post("/api/claude-suggest", async (req, res) => {
         score: c.score,
         suggested_caption_style: c.suggested_caption_style || "hormozi",
       }));
-      // Deselection is positional; replacing the list invalidates old indices.
       uiState.deselectedIndices = [];
       uiState.phase = "review";
+      broadcastSSE("state-sync", uiState);
+    } else {
+      uiState.phase = "idle";
       broadcastSSE("state-sync", uiState);
     }
 
     res.json({ clips, source: "python" });
   } catch (err: unknown) {
     const msg = errMsg(err);
+    uiState.phase = "idle";
+    broadcastSSE("state-sync", uiState);
     res
       .status(500)
       .json({ error: `Suggestion failed: ${msg.substring(0, 200)}` });
@@ -3203,7 +3283,24 @@ app.post("/api/ui-state", (req, res) => {
   if (body.transcript !== undefined) uiState.transcript = body.transcript;
   if (body.rawTranscriptText !== undefined)
     uiState.rawTranscriptText = body.rawTranscriptText;
-  if (body.suggestions !== undefined) uiState.suggestions = body.suggestions;
+  if (body.suggestions !== undefined) {
+    if (body._source === "ui" && Array.isArray(body.suggestions)) {
+      uiState.suggestions = body.suggestions.map((incoming: SuggestedClip, i: number) => {
+        const existing = uiState.suggestions[i];
+        if (
+          existing?.segments?.length &&
+          !incoming.segments?.length &&
+          Math.abs(existing.start_second - incoming.start_second) < 0.5 &&
+          Math.abs(existing.end_second - incoming.end_second) < 0.5
+        ) {
+          return { ...incoming, segments: existing.segments, duration: existing.duration ?? incoming.duration };
+        }
+        return incoming;
+      });
+    } else {
+      uiState.suggestions = body.suggestions;
+    }
+  }
   if (body.deselectedIndices !== undefined)
     uiState.deselectedIndices = body.deselectedIndices;
   if (body.phase !== undefined) uiState.phase = body.phase;
@@ -3284,18 +3381,18 @@ app.post("/api/mcp/export", async (req, res) => {
   await fileManager.ensureDirectories();
 
   // Apply style settings to clips that don't have their own
-  const styledClips = clips.map((c: any) => ({
-    start_second: c.start_second,
-    end_second: c.end_second,
-    title: c.title || "clip",
-    caption_style: c.caption_style || captionStyle,
-    crop_strategy: c.crop_strategy || cropStrategy,
-    format: c.format || format,
-    allow_ass_fallback: c.allow_ass_fallback === true || allowAssFallback,
-    // Preserve multi-cut segments from suggestions
-    ...(Array.isArray(c.segments) &&
-      c.segments.length > 0 && { keep_segments: c.segments }),
-  }));
+  const styledClips = clips.map((c: any) =>
+    enrichClipWithSegments({
+      start_second: c.start_second,
+      end_second: c.end_second,
+      title: c.title || "clip",
+      caption_style: c.caption_style || captionStyle,
+      crop_strategy: c.crop_strategy || cropStrategy,
+      format: c.format || format,
+      allow_ass_fallback: c.allow_ass_fallback === true || allowAssFallback,
+      keep_segments: Array.isArray(c.segments) && c.segments.length > 0 ? c.segments : c.keep_segments,
+    }),
+  );
 
   const jobId = uuidv4();
   const job: JobState = {
@@ -3316,6 +3413,11 @@ app.post("/api/mcp/export", async (req, res) => {
     defaultCropStrategy: cropStrategy,
     defaultFormat: format,
     label: "MCP export",
+    clipSpecs: styledClips,
+    logoPath,
+    outroPath,
+    introPath,
+    cleanFillers: req.body.clean_fillers === true,
   });
 
   // Broadcast to UI so it can track progress

@@ -677,7 +677,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         if (editingClip === null) return;
         setSuggestions(prev => {
           const next = [...prev];
-          next[editingClip] = { ...next[editingClip], title: editForm.title, start_second: editForm.start, end_second: editForm.end, duration: Math.round(editForm.end - editForm.start) };
+          next[editingClip] = { ...next[editingClip], title: editForm.title, start_second: editForm.start, end_second: editForm.end, duration: Math.round(editForm.end - editForm.start), segments: undefined };
           return next;
         });
         setEditingClip(null);
@@ -1020,6 +1020,16 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         }
       };
 
+      const clipExportPayload = (c) => ({
+        start_second: c.start_second,
+        end_second: c.end_second,
+        title: c.title,
+        caption_style: captionStyle,
+        crop_strategy: cropStrategy,
+        format,
+        ...(Array.isArray(c.segments) && c.segments.length > 0 && { keep_segments: c.segments }),
+      });
+
       const startExport = async () => {
         setPhase('exporting'); setResults([]);
         const sc = suggestions.filter((_, i) => !deselected.has(i));
@@ -1027,7 +1037,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         const data = await api('/batch-clips', {
           method: 'POST', body: JSON.stringify({
             video_path: vp,
-            clips: sc.map(c => ({ start_second: c.start_second, end_second: c.end_second, title: c.title, caption_style: captionStyle, crop_strategy: cropStrategy, format })),
+            clips: sc.map(clipExportPayload),
             transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, intro_path: introPath || undefined, clean_fillers: cleanFillers || undefined,
           })
         });
@@ -1048,6 +1058,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
             video_path: vp, start_second: c.start_second, end_second: c.end_second,
             title: c.title, caption_style: captionStyle, crop_strategy: cropStrategy, format,
             transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, intro_path: introPath || undefined, clean_fillers: cleanFillers || undefined,
+            ...(Array.isArray(c.segments) && c.segments.length > 0 && { keep_segments: c.segments }),
           })
         });
         setRetryJobId(data.job_id);
@@ -1145,6 +1156,12 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           });
           const data = await res.json();
 
+          if (!res.ok) {
+            setPhase('idle');
+            setError(data.error || 'Suggestion failed');
+            return;
+          }
+
           if (data.clips && data.clips.length > 0) {
             // Claude returned suggestions — populate directly
             const mapped = data.clips.map((c, i) => ({
@@ -1153,7 +1170,8 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
               start_second: c.start_second,
               end_second: c.end_second,
               reasoning: c.reasoning || c.content_type || '',
-              duration: Math.round((c.end_second || 0) - (c.start_second || 0)),
+              segments: c.segments,
+              duration: c.duration ?? Math.round((c.end_second || 0) - (c.start_second || 0)),
             }));
             setSuggestions(mapped);
             setEnergyData({});
@@ -1191,6 +1209,11 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || transcribing || downloadingVideo;
       const sourceIsUrl = isHttpUrl(videoPath);
       const selectedClips = suggestions.filter((_, i) => !deselected.has(i));
+      const exportStats = phase === 'done' ? {
+        total: selectedClips.length,
+        ok: results.filter(r => r?.status === 'success').length,
+        failed: results.filter(r => r?.status === 'error').length,
+      } : null;
 
       const getExportStatus = (resultIdx) => {
         if (phase !== 'exporting' || !batchStream) return null;
@@ -1755,6 +1778,16 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                       </div>
                     );
                   })}
+
+                  {phase === 'done' && exportStats && (exportStats.failed > 0 || exportStats.ok < exportStats.total) && (
+                    <div className={`set-note ${exportStats.ok === 0 ? 'err' : ''}`} style={{ marginTop: 14, background: exportStats.ok === 0 ? undefined : 'var(--amber-subtle, rgba(251,191,36,0.1))', color: exportStats.ok === 0 ? undefined : 'var(--amber, #f59e0b)', border: exportStats.ok === 0 ? undefined : '1px solid rgba(251,191,36,0.25)' }}>
+                      {exportStats.ok} of {exportStats.total} clip{exportStats.total !== 1 ? 's' : ''} exported
+                      {exportStats.failed > 0 && ` — ${exportStats.failed} failed`}
+                      {exportStats.failed > 0 && results.filter(r => r?.status === 'error').slice(0, 3).map((r, i) => (
+                        <span key={i} style={{ display: 'block', marginTop: 4, fontSize: 11, opacity: 0.9 }}>{r.error?.slice(0, 120)}</span>
+                      ))}
+                    </div>
+                  )}
 
                   {phase === 'exporting' && batchStream && (
                     <div style={{ marginTop: 14 }}>

@@ -638,10 +638,14 @@ def generate_clip(
         trim_opening = not (keep_segments and len(keep_segments) > 0)
 
     llm_start_second, llm_end_second = start_second, end_second
+    orig_keep_segments = None
     if keep_segments and len(keep_segments) > 0:
         llm_start_second = keep_segments[0]["start"]
         llm_end_second = keep_segments[-1]["end"]
-    llm_total = max(0.01, llm_end_second - llm_start_second)
+        orig_keep_segments = [dict(s) for s in keep_segments if s["end"] > s["start"]]
+        llm_total = max(0.01, sum(s["end"] - s["start"] for s in orig_keep_segments))
+    else:
+        llm_total = max(0.01, llm_end_second - llm_start_second)
 
     # Multi-segment cutting: if keep_segments provided, use those ranges.
     # Otherwise auto-detect silences/fillers and build tight segments.
@@ -710,10 +714,17 @@ def generate_clip(
             file=sys.stderr,
             flush=True,
         )
-        start_second = llm_start_second
-        end_second = llm_end_second
-        keep_segments = None
-        duration = end_second - start_second
+        if orig_keep_segments:
+            keep_segments = [dict(s) for s in orig_keep_segments]
+            keep_segments.sort(key=lambda s: s["start"])
+            start_second = keep_segments[0]["start"]
+            end_second = keep_segments[-1]["end"]
+            duration = sum(s["end"] - s["start"] for s in keep_segments)
+        elif (llm_end_second - llm_start_second) <= spec.dur_max:
+            start_second = llm_start_second
+            end_second = llm_end_second
+            keep_segments = None
+            duration = end_second - start_second
 
     length_warning = None
     if duration > spec.dur_max:
