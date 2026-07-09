@@ -11,13 +11,13 @@
   --text: #f4f2ee;
   --text2: #ada79c;
   --text3: #8a8377;
-  --accent: #f2894a;
-  --accent-hover: #ff9f61;
-  --accent-2: #ffb37c;
-  --accent-edge: #b3612a;
-  --accent-subtle: rgba(242, 137, 74, 0.14);
-  --accent-dim: rgba(242, 137, 74, 0.10);
-  --accent-glow: rgba(242, 137, 74, 0.30);
+  --accent: #d97631;
+  --accent-hover: #df8d53;
+  --accent-2: #e6a476;
+  --accent-edge: #ad5a20;
+  --accent-subtle: rgba(217, 118, 49, 0.14);
+  --accent-dim: rgba(217, 118, 49, 0.10);
+  --accent-glow: rgba(217, 118, 49, 0.30);
   --green: #4ade80;
   --green-subtle: rgba(74, 222, 128, 0.09);
   --green-border: rgba(74, 222, 128, 0.22);
@@ -636,8 +636,8 @@ select {
 }
 .clip-item:hover { border-color: var(--border-hover); }
 .clip-item.dimmed { opacity: 0.35; }
-.clip-item.active-clip { border-color: rgba(219, 139, 72, 0.3); background: rgba(219, 139, 72, 0.03); }
-.clip-item.selected { border-color: var(--accent); background: rgba(219, 139, 72, 0.04); }
+.clip-item.active-clip { border-color: rgba(217, 118, 49, 0.3); background: rgba(217, 118, 49, 0.03); }
+.clip-item.selected { border-color: var(--accent); background: rgba(217, 118, 49, 0.04); }
 .checkbox {
   width: 20px; height: 20px; border-radius: 6px;
   border: 1.5px solid var(--border); display: flex;

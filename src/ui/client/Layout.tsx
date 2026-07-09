@@ -48,7 +48,7 @@ export default function Layout() {
     <div className="shell">
       <aside className="sidebar">
         <Link to="/" className="sidebar-logo">
-          <img src="/podcli-logo-transparent.png" alt="podcli" />
+          <img src="/podcli-logo.svg" alt="podcli" />
         </Link>
 
         <button className="sidebar-search" onClick={() => window.dispatchEvent(new Event("open-command-palette"))}>
