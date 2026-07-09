@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
 import { paths } from "../config/paths.js";
-import { sliceTranscript } from "../utils/transcript.js";
+import { sliceTranscript, sliceWords } from "../utils/transcript.js";
 import { isDemoMode, demoClips } from "../ui/demo-fixtures.js";
 import type { BatchClipsResult, ClipHistoryEntry, Format, WordTimestamp } from "../models/index.js";
 
@@ -16,6 +16,21 @@ interface BatchRecordContext {
   defaultCropStrategy?: string;
   defaultFormat?: Format;
   contentTypeFor?: (start: number, end: number) => string | undefined;
+}
+
+export interface BatchClipSpec {
+  start_second: number;
+  end_second: number;
+  keep_segments?: Array<{ start: number; end: number }>;
+}
+
+export interface BatchRecipeContext {
+  transcriptWords?: WordTimestamp[] | null;
+  logoPath?: string | null;
+  outroPath?: string | null;
+  introPath?: string | null;
+  cleanFillers?: boolean;
+  clipSpecs?: BatchClipSpec[];
 }
 
 export class ClipsHistory {
@@ -113,6 +128,59 @@ export class ClipsHistory {
       );
     }
     return recorded;
+  }
+
+  async persistBatchRecipes(
+    rows: BatchResultRow[] | undefined,
+    recorded: ClipHistoryEntry[],
+    ctx: BatchRecipeContext,
+  ): Promise<void> {
+    if (!rows?.length || !recorded.length) return;
+    let recordedIdx = 0;
+    for (const row of rows) {
+      if (row.status !== "success" || !row.output_path) continue;
+      const rec = recorded[recordedIdx++];
+      if (!rec) continue;
+      const spec =
+        typeof row.clip_index === "number" ? ctx.clipSpecs?.[row.clip_index] : undefined;
+      await this.persistClipRecipe(rec, {
+        transcriptWords: ctx.transcriptWords,
+        logoPath: ctx.logoPath,
+        outroPath: ctx.outroPath,
+        introPath: ctx.introPath,
+        cleanFillers: ctx.cleanFillers,
+        keepSegments: spec?.keep_segments,
+      });
+    }
+  }
+
+  async persistClipRecipe(
+    rec: ClipHistoryEntry,
+    ctx: {
+      transcriptWords?: WordTimestamp[] | null;
+      logoPath?: string | null;
+      outroPath?: string | null;
+      introPath?: string | null;
+      cleanFillers?: boolean;
+      keepSegments?: Array<{ start: number; end: number }>;
+    },
+  ): Promise<void> {
+    const words = sliceWords(ctx.transcriptWords ?? [], rec.start_second, rec.end_second);
+    await this.saveWords(rec.id, words);
+    await this.saveRecipe(rec.id, {
+      caption_style: rec.caption_style,
+      crop_strategy: rec.crop_strategy,
+      format: rec.format || "vertical",
+      logo_path: ctx.logoPath ?? rec.logo_path ?? null,
+      outro_path: ctx.outroPath ?? rec.outro_path ?? null,
+      intro_path: ctx.introPath ?? rec.intro_path ?? null,
+      clean_fillers: ctx.cleanFillers ?? false,
+      transcript_words: words,
+      ...(ctx.keepSegments?.length && { keep_segments: ctx.keepSegments }),
+    });
+    if (ctx.keepSegments?.length) {
+      await this.update(rec.id, { keep_segments: ctx.keepSegments });
+    }
   }
 
   /**

@@ -5,9 +5,12 @@
 package backend
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -15,6 +18,57 @@ import (
 //go:generate sh sync.sh
 //go:embed all:files
 var files embed.FS
+
+var integrityFiles = []string{
+	"cli.py",
+	"services/clip_generator.py",
+	"services/claude_suggest.py",
+	"services/thumbnail_ai.py",
+	"main.py",
+}
+
+func embeddedDigest(rel string) (string, error) {
+	data, err := files.ReadFile(path.Join("files", filepath.ToSlash(rel)))
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func fileDigest(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// ExtractedMatchesEmbedded reports whether dest holds the same bytes as the
+// launcher bundle for a relative backend path.
+func ExtractedMatchesEmbedded(dest, rel string) bool {
+	want, err := embeddedDigest(rel)
+	if err != nil {
+		return false
+	}
+	got, err := fileDigest(filepath.Join(dest, rel))
+	if err != nil {
+		return false
+	}
+	return want == got
+}
+
+// IntegrityMismatches lists embedded backend files that differ on disk.
+func IntegrityMismatches(dest string) []string {
+	var out []string
+	for _, rel := range integrityFiles {
+		if !ExtractedMatchesEmbedded(dest, rel) {
+			out = append(out, rel)
+		}
+	}
+	return out
+}
 
 // stampName matches the marker provision writes for the studio and Remotion
 // bundles, so every version-bound artifact under runtime/ is checked the same way.

@@ -526,7 +526,7 @@ def handle_corrections(task_id: str, params: dict):
 
 def handle_suggest_clips(task_id: str, params: dict):
     """AI-powered clip suggestion using Claude/Codex and PodStack knowledge base."""
-    from services.claude_suggest import suggest_with_claude, _find_ai_cli_candidates
+    from services.claude_suggest import suggest_initial_with_claude, _find_ai_cli_candidates
 
     segments = params.get("segments", [])
     top_n = params.get("top_n", 5)
@@ -548,7 +548,7 @@ def handle_suggest_clips(task_id: str, params: dict):
         return
 
     errors: list[str] = []
-    clips = suggest_with_claude(
+    clips = suggest_initial_with_claude(
         segments=segments,
         top_n=top_n,
         exclude_clips=existing_clips,
@@ -557,7 +557,7 @@ def handle_suggest_clips(task_id: str, params: dict):
     )
 
     if clips is None:
-        detail = errors[0] if errors else "check claude/codex login and try again"
+        detail = errors[-1] if errors else "check claude/codex login and try again"
         emit_result(task_id, "error", error=detail)
         return
 

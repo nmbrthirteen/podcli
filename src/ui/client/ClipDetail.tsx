@@ -59,6 +59,7 @@ export default function ClipDetail() {
   const [selFrame, setSelFrame] = useState<{ path: string; info?: any } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgErr, setMsgErr] = useState(false);
   const [bust, setBust] = useState(1);
   const [davinciOn, setDavinciOn] = useState(false);
   const [reframing, setReframing] = useState(false);
@@ -96,39 +97,40 @@ export default function ClipDetail() {
   const patch = (body: any) => api(`/clips/${clip.id}`, { method: "PATCH", body: JSON.stringify(body) });
 
   const save = async () => {
-    setBusy("save"); setMsg(null);
+    setBusy("save"); setMsg(null); setMsgErr(false);
     try {
       const r = await patch({ title, caption_style: captionStyle });
       if (r.error) throw new Error(r.error);
       load();
-    } catch (e: any) { setMsg(`Save failed: ${e.message}`); } finally { setBusy(null); }
+    } catch (e: any) { setMsg(`Save failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const loadOptions = async () => {
-    setBusy("options"); setMsg(null);
+    setBusy("options"); setMsg(null); setMsgErr(false);
     try {
       const r = await api(`/clips/${clip.id}/thumbnail/options?texts=6&frames=6`);
       if (r.error) throw new Error(r.error);
       setTextOpts(r.texts || []);
       setFrameOpts(r.frames || []);
       if ((r.frames || []).length) setSelFrame({ path: r.frames[0].path, info: r.frames[0] });
-      if (!(r.texts || []).length && !(r.frames || []).length) setMsg("No options. Is the AI CLI installed and the source video available?");
-    } catch (e: any) { setMsg(`Options failed: ${e.message}`); } finally { setBusy(null); }
+      if (!(r.texts || []).length && !(r.frames || []).length) { setMsg("No options. Is the AI CLI installed and the source video available?"); setMsgErr(true); }
+      else if (r.warning) { setMsg(r.warning); setMsgErr(true); }
+    } catch (e: any) { setMsg(`Options failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const uploadFrame = async (f: File) => {
-    setBusy("upload"); setMsg(null);
+    setBusy("upload"); setMsg(null); setMsgErr(false);
     try {
       const fd = new FormData(); fd.append("file", f);
       const r = await upload<any>("/upload", fd);
       if (!r.file_path) throw new Error("upload failed");
       setSelFrame({ path: r.file_path });
-    } catch (e: any) { setMsg(`Upload failed: ${e.message}`); } finally { setBusy(null); }
+    } catch (e: any) { setMsg(`Upload failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const renderThumb = async () => {
-    if (!selFrame) { setMsg("Select or upload a frame first"); return; }
-    setBusy("render"); setMsg(null);
+    if (!selFrame) { setMsg("Select or upload a frame first"); setMsgErr(true); return; }
+    setBusy("render"); setMsg(null); setMsgErr(false);
     try {
       const r = await api(`/clips/${clip.id}/thumbnail/render`, {
         method: "POST",
@@ -136,14 +138,14 @@ export default function ClipDetail() {
       });
       if (r.error) throw new Error(r.error);
       setBust(Date.now()); load();
-      setMsg("Thumbnail generated");
-    } catch (e: any) { setMsg(`Generate failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg("Thumbnail generated"); setMsgErr(false);
+    } catch (e: any) { setMsg(`Generate failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   // Pull a different frame from the clip (cycles the ranked candidates) and
   // re-render — same one-click flow as Regenerate, but swaps the background frame.
   const newFrame = async () => {
-    setBusy("newframe"); setMsg(null);
+    setBusy("newframe"); setMsg(null); setMsgErr(false);
     try {
       let frames = frameOpts;
       if (!frames.length) {
@@ -153,7 +155,7 @@ export default function ClipDetail() {
         setFrameOpts(frames);
         if ((r.texts || []).length) setTextOpts(r.texts);
       }
-      if (!frames.length) { setMsg("No frames found in this clip"); return; }
+      if (!frames.length) { setMsg("No frames found in this clip"); setMsgErr(true); return; }
       const curIdx = frames.findIndex((f: any) => f.path === selFrame?.path);
       const next = ((curIdx < 0 ? frameIdx : curIdx) + 1) % frames.length;
       setFrameIdx(next);
@@ -165,30 +167,30 @@ export default function ClipDetail() {
       });
       if (r.error) throw new Error(r.error);
       setBust(Date.now()); load();
-      setMsg(`New frame from clip (${next + 1}/${frames.length})`);
-    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg(`New frame from clip (${next + 1}/${frames.length})`); setMsgErr(false);
+    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const reopen = async () => {
-    setBusy("reopen"); setMsg(null);
+    setBusy("reopen"); setMsg(null); setMsgErr(false);
     try {
       const r = await api(`/clips/${clip.id}/reopen`, { method: "POST", body: "{}" });
       if (r.error) throw new Error(r.error);
       navigate("/episode");
-    } catch (e: any) { setMsg(`Reopen failed: ${e.message}`); setBusy(null); }
+    } catch (e: any) { setMsg(`Reopen failed: ${e.message}`); setMsgErr(true); setBusy(null); }
   };
 
   const exportDavinci = async () => {
-    setBusy("davinci"); setMsg(null);
+    setBusy("davinci"); setMsg(null); setMsgErr(false);
     try {
       const r = await api(`/clips/${clip.id}/davinci`, { method: "POST", body: "{}" });
       if (r.error) throw new Error(r.error);
-      setMsg(r.path ? `DaVinci project: ${r.path}` : "Exported");
-    } catch (e: any) { setMsg(`DaVinci export failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg(r.path ? `DaVinci project: ${r.path}` : "Exported"); setMsgErr(false);
+    } catch (e: any) { setMsg(`DaVinci export failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const generateContent = async () => {
-    setBusy("content"); setMsg(null);
+    setBusy("content"); setMsg(null); setMsgErr(false);
     try {
       const body = {
         clip: {
@@ -204,16 +206,16 @@ export default function ClipDetail() {
       if (r.error) throw new Error(r.error);
       if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing. Is claude/codex installed?");
       load();
-    } catch (e: any) { setMsg(`Content generation failed: ${e.message}`); } finally { setBusy(null); }
+    } catch (e: any) { setMsg(`Content generation failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const del = async () => {
     if (!window.confirm(`Delete "${clip.title}"? This removes the rendered file too.`)) return;
-    setBusy("delete"); setMsg(null);
+    setBusy("delete"); setMsg(null); setMsgErr(false);
     try {
       await api(`/clips/${clip.id}`, { method: "DELETE" });
       navigate("/");
-    } catch (e: any) { setMsg(`Delete failed: ${e.message}`); setBusy(null); }
+    } catch (e: any) { setMsg(`Delete failed: ${e.message}`); setMsgErr(true); setBusy(null); }
   };
 
   return (
@@ -243,7 +245,7 @@ export default function ClipDetail() {
         </div>
 
         <div className="clip-detail-editor">
-          {msg && <div className="set-note ok" style={{ wordBreak: "break-all" }}>{msg}</div>}
+          {msg && <div className={`set-note ${msgErr ? "err" : "ok"}`} style={{ wordBreak: "break-all" }}>{msg}</div>}
 
           <div className="section">
             <label style={labelStyle}>Title & captions</label>
@@ -348,7 +350,7 @@ export default function ClipDetail() {
                       {clip.generated_titles.map((t, i) => {
                         const clean = t.replace(/^\d+\.\s*/, "");
                         return (
-                          <button key={i} className={`title-option ${title === clean ? "selected" : ""}`} onClick={() => { setTitle(clean); setMsg("Title set. Click save to apply"); }}>
+                          <button key={i} className={`title-option ${title === clean ? "selected" : ""}`} onClick={() => { setTitle(clean); setMsg("Title set. Click save to apply"); setMsgErr(false); }}>
                             {t}
                           </button>
                         );
@@ -403,7 +405,7 @@ export default function ClipDetail() {
           end={clip.end_second}
           caption_style={clip.caption_style}
           onClose={() => setReframing(false)}
-          onDone={() => { setReframing(false); setBust(Date.now()); setMsg("Reframed & re-rendered"); load(); }}
+          onDone={() => { setReframing(false); setBust(Date.now()); setMsg("Reframed & re-rendered"); setMsgErr(false); load(); }}
         />
       )}
     </div>

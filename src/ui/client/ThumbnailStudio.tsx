@@ -21,6 +21,7 @@ export default function ThumbnailStudio() {
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgErr, setMsgErr] = useState(false);
   const [bust, setBust] = useState(1);
   const [editingTemplate, setEditingTemplate] = useState(false);
 
@@ -29,17 +30,17 @@ export default function ThumbnailStudio() {
   }
 
   const browse = async () => {
-    setBusy("browse"); setMsg(null);
+    setBusy("browse"); setMsg(null); setMsgErr(false);
     try {
       const r = await api("/browse-file");
       if (r.file_path) setVideo({ path: r.file_path, name: r.filename || basename(r.file_path) });
     } catch (e: any) {
-      if (e.message !== "cancelled") setMsg(`Browse failed: ${e.message}`);
+      if (e.message !== "cancelled") { setMsg(`Browse failed: ${e.message}`); setMsgErr(true); }
     } finally { setBusy(null); }
   };
 
   const uploadFile = async (f: File) => {
-    setBusy("upload"); setMsg(null);
+    setBusy("upload"); setMsg(null); setMsgErr(false);
     try {
       const fd = new FormData();
       fd.append("file", f);
@@ -48,16 +49,16 @@ export default function ThumbnailStudio() {
       if (isImage(f.name)) {
         setSelFrame({ path: r.file_path });
         setPreview(null);
-        setMsg("Image set as the thumbnail background");
+        setMsg("Image set as the thumbnail background"); setMsgErr(false);
       } else {
         setVideo({ path: r.file_path, name: f.name });
       }
-    } catch (e: any) { setMsg(`Upload failed: ${e.message}`); } finally { setBusy(null); }
+    } catch (e: any) { setMsg(`Upload failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const loadOptions = async () => {
-    if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); return; }
-    setBusy("options"); setMsg(null);
+    if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); setMsgErr(true); return; }
+    setBusy("options"); setMsg(null); setMsgErr(false);
     try {
       const r = await api("/thumbnail-studio/options", {
         method: "POST",
@@ -72,13 +73,14 @@ export default function ThumbnailStudio() {
       setFrameOpts(r.frames || []);
       setBust(Date.now());
       if ((r.frames || []).length) setSelFrame({ path: r.frames[0].path, info: r.frames[0] });
-      if (!(r.texts || []).length && !(r.frames || []).length) setMsg("No options. Is the AI CLI installed? Pick a video for frame options.");
-    } catch (e: any) { setMsg(`Options failed: ${e.message}`); } finally { setBusy(null); }
+      if (!(r.texts || []).length && !(r.frames || []).length) { setMsg("No options. Is the AI CLI installed? Pick a video for frame options."); setMsgErr(true); }
+      else if (r.warning) { setMsg(r.warning); setMsgErr(true); }
+    } catch (e: any) { setMsg(`Options failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const render = async () => {
-    if (!selFrame) { setMsg("Select a frame or upload an image first"); return; }
-    setBusy("render"); setMsg(null);
+    if (!selFrame) { setMsg("Select a frame or upload an image first"); setMsgErr(true); return; }
+    setBusy("render"); setMsg(null); setMsgErr(false);
     try {
       const r = await api("/thumbnail-studio/render", {
         method: "POST",
@@ -93,18 +95,18 @@ export default function ThumbnailStudio() {
       if (!r.path) throw new Error("no thumbnail produced");
       setPreview(r.path);
       setBust(Date.now());
-      setMsg("Thumbnail generated");
-    } catch (e: any) { setMsg(`Generate failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg("Thumbnail generated"); setMsgErr(false);
+    } catch (e: any) { setMsg(`Generate failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   // Pull a different frame from the source (cycles the ranked candidates) and
   // re-render — same one-click flow as Regenerate, but swaps the background frame.
   const newFrame = async () => {
-    setBusy("newframe"); setMsg(null);
+    setBusy("newframe"); setMsg(null); setMsgErr(false);
     try {
       let frames = frameOpts;
       if (!frames.length) {
-        if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); return; }
+        if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); setMsgErr(true); return; }
         const r = await api("/thumbnail-studio/options", {
           method: "POST",
           body: JSON.stringify({
@@ -118,7 +120,7 @@ export default function ThumbnailStudio() {
         setFrameOpts(frames);
         if ((r.texts || []).length) setTextOpts(r.texts);
       }
-      if (!frames.length) { setMsg("No frames found. Pick a video source first."); return; }
+      if (!frames.length) { setMsg("No frames found. Pick a video source first."); setMsgErr(true); return; }
       const curIdx = frames.findIndex((f: any) => f.path === selFrame?.path);
       const next = ((curIdx < 0 ? frameIdx : curIdx) + 1) % frames.length;
       setFrameIdx(next);
@@ -131,8 +133,8 @@ export default function ThumbnailStudio() {
       if (!r.path) throw new Error("no thumbnail produced");
       setPreview(r.path);
       setBust(Date.now());
-      setMsg(`New frame from source (${next + 1}/${frames.length})`);
-    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); } finally { setBusy(null); }
+      setMsg(`New frame from source (${next + 1}/${frames.length})`); setMsgErr(false);
+    } catch (e: any) { setMsg(`New frame failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   return (
@@ -170,7 +172,7 @@ export default function ThumbnailStudio() {
         </div>
       </div>
 
-      {msg && <div className="set-note ok" style={{ wordBreak: "break-word" }}>{msg}</div>}
+      {msg && <div className={`set-note ${msgErr ? "err" : "ok"}`} style={{ wordBreak: "break-word" }}>{msg}</div>}
 
       <div className="section">
         <label style={labelStyle}>Thumbnail</label>
