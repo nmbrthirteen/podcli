@@ -3,7 +3,7 @@
 # the native install saves. --engine whisper-py remains a dev/source-only option
 # via backend/requirements.txt.
 opencv-python-headless>=4.8.1.78
-numpy>=1.24.0
+numpy>=2.5.1
 # Audio-event detection (YAMNet laughter/reaction channel) runs on ONNX Runtime —
 # no torch/TF, so it stays on the hermetic native path.
 onnxruntime>=1.27.0
