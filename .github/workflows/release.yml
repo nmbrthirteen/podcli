@@ -54,7 +54,7 @@ jobs:
           OUT="podcli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
           go build -trimpath -ldflags "-s -w" -o "../${OUT}" .
           echo "ASSET=${OUT}" >> "$GITHUB_ENV"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
@@ -92,7 +92,7 @@ jobs:
           OUT="whisper-cli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
           cp "$SRC" "$OUT"
           echo "ASSET=$OUT" >> "$GITHUB_ENV"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
@@ -110,7 +110,7 @@ jobs:
           npm ci
           sh scripts/build-studio.sh dist/studio
           tar -czf studio-bundle.tar.gz -C dist/studio .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: studio-bundle.tar.gz
           path: studio-bundle.tar.gz
@@ -139,7 +139,7 @@ jobs:
           OUT="remotion-bundle-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
           tar -czf "$OUT" -C dist/remotion-bundle .
           echo "ASSET=$OUT" >> "$GITHUB_ENV"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
