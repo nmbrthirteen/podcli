@@ -39,7 +39,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@remotion/bundler": "^4.0.441",
     "@remotion/cli": "^4.0.441",
-    "@remotion/renderer": "^4.0.441",
+    "@remotion/renderer": "^4.0.488",
     "dotenv": "^16.4.7",
     "express": "^4.21.0",
     "lucide-react": "^1.23.0",
