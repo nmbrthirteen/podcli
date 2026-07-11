@@ -11,5 +11,5 @@ Pillow>=10.0.0
 questionary>=2.1.1
 python-dotenv>=1.2.2
 yt-dlp>=2025.6.30
-google-api-python-client>=2.0.1
+google-api-python-client>=2.198.0
 google-auth-oauthlib>=1.4.0
