@@ -1,5 +1,5 @@
 # Transcription
-openai-whisper>=20231117
+openai-whisper>=20250625
 
 # Speaker diarization (optional — only needed if you enable local speaker detection)
 # Most users don't need this: Claude handles speaker identification via MCP,
