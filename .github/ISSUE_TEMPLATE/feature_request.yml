@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest something podcli should do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that podcli makes hard or can't do yet?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: How you picture it working.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you've tried
+      description: Workarounds or other tools you're using for this now.
