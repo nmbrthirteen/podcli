@@ -1,0 +1,45 @@
+name: Bug report
+description: Something broke or behaved wrong.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: A clear repro gets it fixed faster. Thanks.
+  - type: input
+    id: version
+    attributes:
+      label: podcli version
+      description: Output of `podcli --version`.
+      placeholder: e.g. 2.4.5
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      description: Paste any error output.
+      render: shell

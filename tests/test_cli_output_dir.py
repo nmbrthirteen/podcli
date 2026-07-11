@@ -22,7 +22,9 @@ class CliOutputDirTests(unittest.TestCase):
             explicit_output_dir=None,
         )
 
-        self.assertEqual(output_dir, "/Users/nik/Downloads/clips/deeptech-show")
+        self.assertEqual(
+            output_dir, os.path.join("/Users/nik/Downloads", "clips", "deeptech-show")
+        )
 
     def test_resolve_output_dir_uses_configured_root_with_preset_subfolder(self):
         output_dir = cli_mod._resolve_output_dir(
@@ -32,7 +34,9 @@ class CliOutputDirTests(unittest.TestCase):
             explicit_output_dir=None,
         )
 
-        self.assertEqual(output_dir, "/Users/nik/Downloads/renders/deeptech-show")
+        self.assertEqual(
+            output_dir, os.path.join("/Users/nik/Downloads/renders", "deeptech-show")
+        )
 
     def test_resolve_output_dir_keeps_explicit_output_exact(self):
         output_dir = cli_mod._resolve_output_dir(

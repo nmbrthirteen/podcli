@@ -35,6 +35,7 @@ def write_prompt_file(prompt: str, suffix: str = ".txt") -> str:
     """
     with tempfile.NamedTemporaryFile(
         mode="w",
+        encoding="utf-8",
         suffix=suffix,
         delete=False,
         dir=_tmp_dir(),

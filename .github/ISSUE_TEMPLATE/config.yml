@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Docs
+    url: https://podcli.com/docs
+    about: Setup, CLI reference, and the studio guide.
+  - name: Report a security issue
+    url: https://github.com/nmbrthirteen/podcli/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.

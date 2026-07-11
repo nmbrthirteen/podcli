@@ -333,6 +333,7 @@ class AICliDiscoveryTests(unittest.TestCase):
                 found = cs._find_cli("claude", [os.path.join(tmp, "claude")])
             self.assertEqual(found, shim)
 
+    @unittest.skipIf(os.name == "nt", "POSIX executable discovery; Windows uses .cmd/.exe shims")
     def test_find_cli_uses_home_bin(self):
         with tempfile.TemporaryDirectory() as home:
             bin_dir = os.path.join(home, "bin")
@@ -345,6 +346,7 @@ class AICliDiscoveryTests(unittest.TestCase):
                     found = cs._find_cli("claude", [])
             self.assertEqual(found, cli)
 
+    @unittest.skipIf(os.name == "nt", "POSIX executable discovery; Windows uses .cmd/.exe shims")
     def test_npmrc_prefix_is_searched(self):
         with tempfile.TemporaryDirectory() as home:
             prefix = os.path.join(home, "npm-prefix")
