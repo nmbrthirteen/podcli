@@ -12,4 +12,4 @@ questionary>=2.0.0
 python-dotenv>=1.2.2
 yt-dlp>=2025.6.30
 google-api-python-client>=2.0.1
-google-auth-oauthlib>=1.0.0
+google-auth-oauthlib>=1.4.0
