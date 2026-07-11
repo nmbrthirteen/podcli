@@ -19,7 +19,7 @@ onnxruntime>=1.16.0
 Pillow>=10.0.0
 
 # CLI interactive prompts
-questionary>=2.0.0
+questionary>=2.1.1
 
 # Utilities
 python-dotenv>=1.2.2
