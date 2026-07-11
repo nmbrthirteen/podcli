@@ -36,6 +36,7 @@ class ThumbnailHtmlTests(unittest.TestCase):
         self.assertLessEqual(len(line2), 24)
         self.assertNotIn("EVERYONE", f"{line1} {line2}")
 
+    @unittest.skipIf(os.name == "nt", "POSIX node paths; Windows node discovery differs")
     def test_build_remotion_screenshot_command(self):
         script_suffix = os.path.join("backend", "scripts", "remotion_screenshot.cjs")
         renderer_suffix = os.path.join("node_modules", "@remotion", "renderer", "package.json")
@@ -67,6 +68,7 @@ class ThumbnailHtmlTests(unittest.TestCase):
             ],
         )
 
+    @unittest.skipIf(os.name == "nt", "POSIX binary paths; Windows playwright discovery differs")
     def test_playwright_cli_candidates_prefers_local_then_global_then_npx(self):
         local_suffix = os.path.join("node_modules", ".bin", "playwright")
 

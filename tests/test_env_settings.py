@@ -86,6 +86,7 @@ class EnvSettingsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             env_settings.set_setting("BOGUS_KEY", "x")
 
+    @unittest.skipIf(os.name == "nt", "Unix file modes are not enforced on Windows")
     def test_mode_is_600(self):
         env_settings.set_setting("HF_TOKEN", "hf_x")
         self.assertEqual(oct(os.stat(self.env).st_mode & 0o777), "0o600")
