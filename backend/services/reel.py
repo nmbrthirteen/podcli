@@ -57,13 +57,13 @@ class ReelSession:
     def save(self) -> str:
         path = session_path(self.session_id)
         data = asdict(self)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         return path
 
     @classmethod
     def load(cls, session_id: str) -> "ReelSession":
-        with open(session_path(session_id)) as f:
+        with open(session_path(session_id), encoding="utf-8") as f:
             data = json.load(f)
         data["moments"] = [Moment(**m) for m in data.get("moments", [])]
         return cls(**data)
@@ -249,8 +249,10 @@ def build_reel(session: ReelSession, progress_callback: Optional[Callable] = Non
 
     reel = os.path.join(session.out_dir, "highlights_reel.mp4")
     lst = os.path.join(session.out_dir, "_concat.txt")
-    with open(lst, "w") as f:
-        f.write("".join(f"file '{os.path.abspath(x)}'\n" for x in files))
+    with open(lst, "w", encoding="utf-8") as f:
+        for x in files:
+            p = os.path.abspath(x).replace("\\", "/")
+            f.write(f"file '{p}'\n")
     r = proc_run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lst,
                   "-c", "copy", reel, "-loglevel", "error"], timeout=300, check=False)
     if r.returncode != 0:
@@ -271,7 +273,7 @@ def list_sessions() -> list[dict]:
             continue
         path = os.path.join(d, name)
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError):
             continue

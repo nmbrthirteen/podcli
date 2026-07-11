@@ -44,7 +44,7 @@ def is_authorized() -> bool:
 def _write_token(creds) -> None:
     # 0o600: the file holds a long-lived refresh token — keep it owner-only.
     fd = os.open(_TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
 
 

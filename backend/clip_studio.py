@@ -58,7 +58,7 @@ BRAND_DEFAULTS = {
 
 def _load_brand() -> dict:
     try:
-        with open(BRAND_PATH) as f:
+        with open(BRAND_PATH, encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
@@ -66,7 +66,7 @@ def _load_brand() -> dict:
 
 def _save_brand(data: dict):
     os.makedirs(os.path.dirname(BRAND_PATH), exist_ok=True)
-    with open(BRAND_PATH, "w") as f:
+    with open(BRAND_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
 

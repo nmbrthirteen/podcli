@@ -47,7 +47,7 @@ _class_index: dict[str, list[int]] = {}
 
 def _load_class_index() -> dict[str, list[int]]:
     names: dict[int, str] = {}
-    with open(_CLASS_MAP_PATH, newline="") as f:
+    with open(_CLASS_MAP_PATH, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
         next(reader)  # header: index,mid,display_name
         for row in reader:
