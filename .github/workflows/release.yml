@@ -127,8 +127,16 @@ jobs:
           # unverified tarball would compile straight into a release asset.
           echo "${FFMPEG_SHA256}  ffmpeg.tar.xz" | shasum -a 256 -c -
           tar xf ffmpeg.tar.xz && cd "ffmpeg-${FFMPEG_VERSION}"
+          # --disable-autodetect, then opt in by name. Without it configure absorbs
+          # whatever happens to sit on the build machine: the runner has Homebrew
+          # X11/xcb, so ffmpeg linked /opt/homebrew dylibs and would not have run
+          # on a user's Mac. VideoToolbox has to come back explicitly — encoder.py
+          # picks h264_videotoolbox on macOS, and losing it would cost more than
+          # Rosetta ever did.
           PKG_CONFIG_PATH="$deps/lib/pkgconfig" ./configure \
+            --disable-autodetect \
             --enable-gpl --enable-libx264 \
+            --enable-videotoolbox --enable-audiotoolbox --enable-zlib \
             --pkg-config-flags=--static \
             --extra-cflags="-I$deps/include" --extra-ldflags="-L$deps/lib" \
             --disable-shared --enable-static \
@@ -149,7 +157,13 @@ jobs:
               echo "$b links a non-system library:"; otool -L "$b"; exit 1
             fi
           done
-          ./ffmpeg-darwin-arm64 -hide_banner -encoders | grep -q libx264
+          # h264_videotoolbox is what encoder.py reaches for on macOS. A build that
+          # quietly lost it would fall back to libx264 and be slower than the
+          # Rosetta binary this job exists to replace, so treat its absence as a
+          # failed build rather than a working one.
+          for enc in libx264 h264_videotoolbox; do
+            ./ffmpeg-darwin-arm64 -hide_banner -encoders | grep -q "$enc" || { echo "missing encoder: $enc"; exit 1; }
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: ffmpeg-darwin-arm64
