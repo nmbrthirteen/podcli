@@ -38,6 +38,7 @@ function hashSrcDir() {
     }
   }
   walk(srcDir);
+  hash.update(fs.readFileSync(path.join(__dirname, "webpack-override.mjs")));
   return hash.digest("hex");
 }
 

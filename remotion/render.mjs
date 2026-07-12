@@ -73,6 +73,10 @@ function hashSrcDir() {
   }
 
   walk(srcDir);
+  // The bundle is a product of the webpack config too, so a change to the
+  // override has to invalidate the cache, or a warm cache keeps serving a
+  // bundle built under the old one.
+  hash.update(fs.readFileSync(path.join(__dirname, "webpack-override.mjs")));
   return hash.digest("hex");
 }
 
