@@ -19,6 +19,7 @@
 
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
+import { webpackOverride } from "./webpack-override.mjs";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -97,6 +98,7 @@ async function getCachedBundle() {
   const bundleLocation = await bundle({
     entryPoint: ENTRY_POINT,
     outDir: CACHE_DIR,
+    webpackOverride,
   });
 
   // Save hash

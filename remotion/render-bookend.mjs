@@ -15,6 +15,7 @@
  */
 
 import { bundle } from "@remotion/bundler";
+import { webpackOverride } from "./webpack-override.mjs";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import path from "path";
 import fs from "fs";
@@ -49,7 +50,7 @@ function parseArgs() {
 async function getBundle() {
   // Reuse podcli's cached bundle if present; otherwise build fresh.
   if (fs.existsSync(path.join(CACHE_DIR, "index.html"))) return CACHE_DIR;
-  return await bundle({ entryPoint: ENTRY_POINT, outDir: CACHE_DIR });
+  return await bundle({ entryPoint: ENTRY_POINT, outDir: CACHE_DIR, webpackOverride });
 }
 
 async function main() {

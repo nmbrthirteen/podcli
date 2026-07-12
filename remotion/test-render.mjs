@@ -11,6 +11,7 @@
  */
 
 import { bundle } from "@remotion/bundler";
+import { webpackOverride } from "./webpack-override.mjs";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import path from "path";
 import fs from "fs";
@@ -53,7 +54,7 @@ async function getCachedBundle() {
   }
   console.log("Bundling (first run or src changed)...");
   fs.mkdirSync(CACHE_DIR, { recursive: true });
-  const loc = await bundle({ entryPoint: ENTRY_POINT, outDir: CACHE_DIR });
+  const loc = await bundle({ entryPoint: ENTRY_POINT, outDir: CACHE_DIR, webpackOverride });
   fs.writeFileSync(BUNDLE_HASH_FILE, currentHash);
   return loc;
 }
