@@ -10,53 +10,15 @@
  *   node remotion/test-render.mjs subtle
  */
 
-import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
+import { getCachedBundle } from "./bundle-cache.mjs";
 import path from "path";
 import fs from "fs";
-import crypto from "crypto";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const CACHE_ROOT = process.env.PODCLI_CACHE_DIR
-  ? path.resolve(process.env.PODCLI_CACHE_DIR)
-  : path.join(PROJECT_ROOT, "data", "cache");
-const CACHE_DIR = path.join(CACHE_ROOT, "remotion-bundle");
-const BUNDLE_HASH_FILE = path.join(CACHE_DIR, ".hash");
-const ENTRY_POINT = path.join(__dirname, "src", "index.ts");
 
-function hashSrcDir() {
-  const srcDir = path.join(__dirname, "src");
-  const hash = crypto.createHash("md5");
-  function walk(dir) {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (entry.isFile()) hash.update(fs.readFileSync(full));
-    }
-  }
-  walk(srcDir);
-  return hash.digest("hex");
-}
-
-async function getCachedBundle() {
-  const currentHash = hashSrcDir();
-  if (fs.existsSync(BUNDLE_HASH_FILE)) {
-    const cachedHash = fs.readFileSync(BUNDLE_HASH_FILE, "utf-8").trim();
-    if (
-      cachedHash === currentHash &&
-      fs.existsSync(path.join(CACHE_DIR, "index.html"))
-    ) {
-      return CACHE_DIR;
-    }
-  }
-  console.log("Bundling (first run or src changed)...");
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-  const loc = await bundle({ entryPoint: ENTRY_POINT, outDir: CACHE_DIR });
-  fs.writeFileSync(BUNDLE_HASH_FILE, currentHash);
-  return loc;
-}
 
 const styleName = process.argv[2] || "branded";
 
@@ -111,7 +73,7 @@ const inputProps = {
 
 async function main() {
   const t0 = Date.now();
-  const bundleLocation = await getCachedBundle();
+  const bundleLocation = await getCachedBundle({ onBundle: () => console.log("Bundling (first run, or src/config changed)...") });
   const bundleMs = Date.now() - t0;
   console.log(`Bundle: ${bundleMs}ms (${bundleMs < 100 ? "cached" : "fresh"})`);
 

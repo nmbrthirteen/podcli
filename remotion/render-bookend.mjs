@@ -14,25 +14,14 @@
  *     [--bg "#0B0B0F"] [--accent "#FFE000"] [--fps 30] [--width 1080] [--height 1920]
  */
 
-import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
+import { getCachedBundle } from "./bundle-cache.mjs";
 import path from "path";
 import fs from "fs";
 import os from "os";
 import crypto from "crypto";
 import { spawnSync } from "child_process";
-import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.resolve(__dirname, "..");
-// Share the (project-independent) composition bundle with render.mjs via
-// PODCLI_CACHE_DIR so bookends reuse the prewarmed bundle instead of rebuilding
-// into the runtime dir.
-const CACHE_ROOT = process.env.PODCLI_CACHE_DIR
-  ? path.resolve(process.env.PODCLI_CACHE_DIR)
-  : path.join(PROJECT_ROOT, "data", "cache");
-const CACHE_DIR = path.join(CACHE_ROOT, "remotion-bundle");
-const ENTRY_POINT = path.join(__dirname, "src", "index.ts");
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -46,11 +35,6 @@ function parseArgs() {
   return opts;
 }
 
-async function getBundle() {
-  // Reuse podcli's cached bundle if present; otherwise build fresh.
-  if (fs.existsSync(path.join(CACHE_DIR, "index.html"))) return CACHE_DIR;
-  return await bundle({ entryPoint: ENTRY_POINT, outDir: CACHE_DIR });
-}
 
 async function main() {
   const opts = parseArgs();
@@ -76,7 +60,9 @@ async function main() {
     bookendAccent: opts.accent || "#FFE000",
   };
 
-  const bundleLocation = await getBundle();
+  const bundleLocation = await getCachedBundle({
+    onBundle: () => console.log("  Remotion: bundling (first run, or src/config changed)..."),
+  });
   const composition = await selectComposition({ serveUrl: bundleLocation, id: "Bookend", inputProps });
 
   const seed = `${path.resolve(opts.output)}:${process.pid}`;
