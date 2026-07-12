@@ -17,23 +17,13 @@
  *   node remotion/render.mjs --prebundle   # Bundle only, no render
  */
 
-import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
-import { webpackOverride } from "./webpack-override.mjs";
+import { getCachedBundle } from "./bundle-cache.mjs";
 import path from "path";
 import fs from "fs";
 import os from "os";
 import crypto from "crypto";
-import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.resolve(__dirname, "..");
-const CACHE_ROOT = process.env.PODCLI_CACHE_DIR
-  ? path.resolve(process.env.PODCLI_CACHE_DIR)
-  : path.join(PROJECT_ROOT, "data", "cache");
-const CACHE_DIR = path.join(CACHE_ROOT, "remotion-bundle");
-const BUNDLE_HASH_FILE = path.join(CACHE_DIR, ".hash");
-const ENTRY_POINT = path.join(__dirname, "src", "index.ts");
 
 const BOOLEAN_FLAGS = new Set(["prebundle", "keep-overlay"]);
 
@@ -54,61 +44,6 @@ function parseArgs() {
   return opts;
 }
 
-/**
- * Hash the remotion/src/ directory to detect changes.
- */
-function hashSrcDir() {
-  const srcDir = path.join(__dirname, "src");
-  const hash = crypto.createHash("md5");
-
-  function walk(dir) {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (entry.isFile()) {
-        hash.update(fs.readFileSync(full));
-      }
-    }
-  }
-
-  walk(srcDir);
-  // The bundle is a product of the webpack config too, so a change to the
-  // override has to invalidate the cache, or a warm cache keeps serving a
-  // bundle built under the old one.
-  hash.update(fs.readFileSync(path.join(__dirname, "webpack-override.mjs")));
-  return hash.digest("hex");
-}
-
-/**
- * Get or create a cached bundle. Only re-bundles when src/ changes.
- */
-async function getCachedBundle() {
-  const currentHash = hashSrcDir();
-
-  // Check if cached bundle is still valid
-  if (fs.existsSync(BUNDLE_HASH_FILE)) {
-    const cachedHash = fs.readFileSync(BUNDLE_HASH_FILE, "utf-8").trim();
-    const bundleIndex = path.join(CACHE_DIR, "index.html");
-    if (cachedHash === currentHash && fs.existsSync(bundleIndex)) {
-      return CACHE_DIR;
-    }
-  }
-
-  // Bundle fresh
-  console.log("  Remotion: bundling (first run or src changed)...");
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-
-  const bundleLocation = await bundle({
-    entryPoint: ENTRY_POINT,
-    outDir: CACHE_DIR,
-    webpackOverride,
-  });
-
-  // Save hash
-  fs.writeFileSync(BUNDLE_HASH_FILE, currentHash);
-  return bundleLocation;
-}
 
 async function main() {
   const opts = parseArgs();
@@ -116,7 +51,7 @@ async function main() {
   // Prebundle mode — just bundle and exit
   if (opts.prebundle) {
     const t0 = Date.now();
-    const loc = await getCachedBundle();
+    const loc = await getCachedBundle({ onBundle: () => console.log("  Remotion: bundling (first run, or src/config changed)...") });
     console.log(`Remotion bundle ready at ${loc} (${Date.now() - t0}ms)`);
     return;
   }
@@ -137,7 +72,7 @@ async function main() {
 
   // Get cached bundle first (needed to copy assets into it)
   const t0 = Date.now();
-  const bundleLocation = await getCachedBundle();
+  const bundleLocation = await getCachedBundle({ onBundle: () => console.log("  Remotion: bundling (first run, or src/config changed)...") });
   const bundleMs = Date.now() - t0;
   if (bundleMs > 1000) {
     console.log(`  bundled in ${(bundleMs / 1000).toFixed(1)}s`);
