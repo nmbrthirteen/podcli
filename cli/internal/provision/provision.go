@@ -259,14 +259,11 @@ type ffArchive struct {
 	Bins []string
 }
 
-// Static ffmpeg sources are not yet pinned by checksum (upstream "latest" URLs);
-// they get our own pinned builds once podcli hosts releases.
+// Static ffmpeg sources are not yet pinned by checksum (upstream "latest" URLs).
+// darwin/arm64 is absent on purpose: evermeet.cx only builds x86_64, so Apple
+// Silicon is served by our own release asset (see releaseFFmpeg).
 var ffmpegSpecs = map[string][]ffArchive{
 	"darwin/amd64": {
-		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip", Bins: []string{"ffmpeg"}},
-		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip", Bins: []string{"ffprobe"}},
-	},
-	"darwin/arm64": {
 		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip", Bins: []string{"ffmpeg"}},
 		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip", Bins: []string{"ffprobe"}},
 	},
@@ -434,9 +431,10 @@ func verifyReleaseAsset(assets map[string]string, assetName, path string) error 
 
 func EnsureWhisperCpp() (string, error) {
 	bin := WhisperCLIBin()
-	if have(bin) {
+	if nativeBin(bin) {
 		return bin, nil
 	}
+	os.Remove(bin)
 	name := fmt.Sprintf("whisper-cli-%s-%s%s", runtime.GOOS, runtime.GOARCH, paths.ExeSuffix())
 	assets, err := latestReleaseAssets()
 	if err != nil {
@@ -465,18 +463,25 @@ func FFmpegBin() string {
 	return filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg"+paths.ExeSuffix())
 }
 
+func FFprobeBin() string {
+	return filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffprobe"+paths.ExeSuffix())
+}
+
 func EnsureFFmpeg() (string, error) {
 	bin := FFmpegBin()
-	if have(bin) {
+	if nativeBin(bin) && nativeBin(FFprobeBin()) {
 		return bin, nil
-	}
-	specs, ok := ffmpegSpecs[runtime.GOOS+"/"+runtime.GOARCH]
-	if !ok {
-		return "", fmt.Errorf("no ffmpeg build for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	dir := filepath.Join(paths.RuntimeDir(), "ffmpeg")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
+	}
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		return bin, releaseFFmpeg()
+	}
+	specs, ok := ffmpegSpecs[runtime.GOOS+"/"+runtime.GOARCH]
+	if !ok {
+		return "", fmt.Errorf("no ffmpeg build for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	for _, a := range specs {
 		sum := sha256.Sum256([]byte(a.URL))
@@ -494,6 +499,32 @@ func EnsureFFmpeg() (string, error) {
 		return "", fmt.Errorf("ffmpeg missing after extraction in %s", dir)
 	}
 	return bin, nil
+}
+
+// Apple Silicon builds ship with the release, checksum-verified like whisper-cli.
+// No upstream publishes an arm64 macOS static, so ffmpeg used to arrive as an
+// x86_64 binary that ran under Rosetta at roughly a third of native encode speed.
+func releaseFFmpeg() error {
+	assets, err := latestReleaseAssets()
+	if err != nil {
+		return err
+	}
+	for tool, bin := range map[string]string{"ffmpeg": FFmpegBin(), "ffprobe": FFprobeBin()} {
+		name := fmt.Sprintf("%s-%s-%s", tool, runtime.GOOS, runtime.GOARCH)
+		url, ok := assets[name]
+		if !ok {
+			return fmt.Errorf("asset %s not in latest release", name)
+		}
+		os.Remove(bin)
+		if err := fetch(url, bin, tool); err != nil {
+			return err
+		}
+		if err := verifyReleaseAsset(assets, name, bin); err != nil {
+			return err
+		}
+		os.Chmod(bin, 0o755)
+	}
+	return nil
 }
 
 func extractBins(archive string, bins []string, dest string) error {
@@ -611,7 +642,7 @@ func PythonBin() string {
 }
 
 func pythonHealthy(bin string) bool {
-	if !have(bin) {
+	if !nativeBin(bin) {
 		return false
 	}
 	root := pythonRoot(bin)
