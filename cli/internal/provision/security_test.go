@@ -40,6 +40,12 @@ func TestSymlinkTargetInside(t *testing.T) {
 		{"escape via dotdot", "/tmp/dest/link", "../../etc/passwd", false},
 		{"absolute", "/tmp/dest/link", "/etc/passwd", false},
 		{"deep escape", "/tmp/dest/a/b/link", "../../../outside", false},
+		// Rooted targets must be refused on every host, not just the ones where
+		// filepath.IsAbs happens to recognise them. On Windows it calls
+		// "/etc/passwd" relative, which used to let these through.
+		{"backslash rooted", "/tmp/dest/link", `\Windows\System32`, false},
+		{"drive absolute", "/tmp/dest/link", "C:/Windows/System32", false},
+		{"drive relative", "/tmp/dest/link", "C:evil", false},
 	}
 	for _, c := range cases {
 		if got := symlinkTargetInside(c.linkPath, c.linkname, root); got != c.ok {

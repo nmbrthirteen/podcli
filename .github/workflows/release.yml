@@ -97,6 +97,66 @@ jobs:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
 
+  # Apple Silicon only. Linux and Windows already get correct native builds from
+  # the static sources the provisioner uses; macOS has no upstream arm64 static,
+  # and the URL we pointed at serves x86_64 to every Mac, so ffmpeg ran under
+  # Rosetta at roughly a third of native encode speed.
+  ffmpeg-darwin:
+    runs-on: macos-14
+    env:
+      FFMPEG_VERSION: '7.1'
+      FFMPEG_SHA256: 40973d44970dbc83ef302b0609f2e74982be2d85916dd2ee7472d30678a7abe6
+      X264_COMMIT: b35605ace3ddf7c1a5d67a2eb553f034aef41d55 # stable as of 2026-07-12
+    steps:
+      - name: Build ffmpeg (arm64, static libx264)
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install --quiet nasm pkg-config
+          deps="$GITHUB_WORKSPACE/deps"
+          # Pin x264 by commit: "stable" moves, and whatever it points at ends up
+          # inside a binary we hand to users. Static-only because Homebrew's prefix
+          # carries libx264.dylib next to the .a and ld prefers the dylib, which
+          # would bake a Homebrew path into a binary shipped to machines with no
+          # Homebrew.
+          git clone -q https://code.videolan.org/videolan/x264.git
+          git -C x264 checkout -q "$X264_COMMIT"
+          (cd x264 && ./configure --prefix="$deps" --enable-static --enable-pic --disable-cli && make -j"$(sysctl -n hw.ncpu)" && make install)
+          curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o ffmpeg.tar.xz
+          # ffmpeg.org publishes no checksum file, so pin the digest here: an
+          # unverified tarball would compile straight into a release asset.
+          echo "${FFMPEG_SHA256}  ffmpeg.tar.xz" | shasum -a 256 -c -
+          tar xf ffmpeg.tar.xz && cd "ffmpeg-${FFMPEG_VERSION}"
+          PKG_CONFIG_PATH="$deps/lib/pkgconfig" ./configure \
+            --enable-gpl --enable-libx264 \
+            --pkg-config-flags=--static \
+            --extra-cflags="-I$deps/include" --extra-ldflags="-L$deps/lib" \
+            --disable-shared --enable-static \
+            --disable-doc --disable-debug --disable-ffplay
+          make -j"$(sysctl -n hw.ncpu)" ffmpeg ffprobe
+          cd ..
+          cp "ffmpeg-${FFMPEG_VERSION}/ffmpeg" ffmpeg-darwin-arm64
+          cp "ffmpeg-${FFMPEG_VERSION}/ffprobe" ffprobe-darwin-arm64
+      - name: Verify the binaries are native and self-contained
+        shell: bash
+        run: |
+          set -euo pipefail
+          for b in ffmpeg-darwin-arm64 ffprobe-darwin-arm64; do
+            # lipo, not `file | grep arm64`: that also matches a universal binary
+            # carrying an x86_64 slice, which is what we are trying to stop shipping.
+            [ "$(lipo -archs "$b")" = "arm64" ] || { echo "$b is not arm64-only: $(lipo -archs "$b")"; exit 1; }
+            if otool -L "$b" | tail -n +2 | grep -qv -e '/usr/lib/' -e '/System/'; then
+              echo "$b links a non-system library:"; otool -L "$b"; exit 1
+            fi
+          done
+          ./ffmpeg-darwin-arm64 -hide_banner -encoders | grep -q libx264
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-darwin-arm64
+          path: |
+            ffmpeg-darwin-arm64
+            ffprobe-darwin-arm64
+
   studio:
     runs-on: ubuntu-latest
     steps:
@@ -145,7 +205,7 @@ jobs:
           path: ${{ env.ASSET }}
 
   release:
-    needs: [build, whisper, studio, remotion]
+    needs: [build, whisper, studio, remotion, ffmpeg-darwin]
     runs-on: ubuntu-latest
     permissions:
       contents: write
