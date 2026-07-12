@@ -7,16 +7,17 @@ src="$here/../../../backend"
 dest="$here/files"
 rm -rf "$dest"
 mkdir -p "$dest"
-# tar, not rsync: Git Bash on Windows has no rsync, and this runs wherever
-# `go generate` does. Excluding venv up front also beats copying it and
-# deleting it after.
-tar -cf - -C "$src" \
-  --exclude='*__pycache__*' \
-  --exclude='*.pyc' \
-  --exclude='./venv' \
-  --exclude='./.venv' \
-  --exclude='./requirements.txt' \
-  --exclude='./models/res10_300x300_ssd_iter_140000.caffemodel' \
-  --exclude='./models/deploy.prototxt' \
-  . | tar -xf - -C "$dest"
+# Plain cp: this runs wherever `go generate` does, and on Windows Git Bash has
+# no rsync while its tar reads the leading "D:" of an absolute path as a remote
+# host. Skip venv before copying rather than deleting it afterwards.
+for entry in "$src"/*; do
+  case "${entry##*/}" in
+    venv | .venv | requirements.txt) continue ;;
+  esac
+  cp -R "$entry" "$dest"/
+done
+rm -f "$dest/models/res10_300x300_ssd_iter_140000.caffemodel" \
+  "$dest/models/deploy.prototxt"
+find "$dest" -name '__pycache__' -type d -prune -exec rm -rf {} +
+find "$dest" -name '*.pyc' -delete
 echo "synced backend -> $dest"

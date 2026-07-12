@@ -522,7 +522,9 @@ func releaseFFmpeg() error {
 		if err := verifyReleaseAsset(assets, name, bin); err != nil {
 			return err
 		}
-		os.Chmod(bin, 0o755)
+		if err := os.Chmod(bin, 0o755); err != nil {
+			return fmt.Errorf("chmod %s: %w", bin, err)
+		}
 	}
 	return nil
 }
