@@ -20,6 +20,10 @@ jobs:
         with:
           go-version: '1.23'
           cache: false # stdlib-only module: no go.sum to key a cache on
+      - name: Sync embedded backend + PodStack commands
+        working-directory: cli
+        shell: bash # go:generate shells out to `sh sync.sh`, which needs sh on PATH
+        run: go generate ./... # files/ and commands/ are generated, not committed; go:embed fails without them
       - name: Build
         working-directory: cli
         run: go build ./...
