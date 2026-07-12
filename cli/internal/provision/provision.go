@@ -217,11 +217,30 @@ func downloadOnce(url, tmp, label string) (bool, error) {
 // zip-slip defense, since the path guard alone only validates the link's own
 // location, not where it points.
 func symlinkTargetInside(linkPath, linkname, root string) bool {
-	if filepath.IsAbs(linkname) {
+	if rootedAnywhere(linkname) {
 		return false
 	}
 	resolved := filepath.Clean(filepath.Join(filepath.Dir(linkPath), linkname))
 	return strings.HasPrefix(resolved+string(os.PathSeparator), root)
+}
+
+// rootedAnywhere reports whether p is rooted on any host, not merely this one.
+// Archive members carry POSIX paths while filepath.IsAbs answers for the running
+// OS: on Windows it calls "/etc/passwd" relative, so a rooted symlink target
+// would pass the guard and then resolve against the drive root.
+func rootedAnywhere(p string) bool {
+	if p == "" {
+		return false
+	}
+	if filepath.IsAbs(p) || p[0] == '/' || p[0] == '\\' {
+		return true
+	}
+	// "C:/x", and drive-relative "C:x", both leave the destination on Windows.
+	if len(p) >= 2 && p[1] == ':' {
+		c := p[0] | 0x20
+		return c >= 'a' && c <= 'z'
+	}
+	return false
 }
 
 // ParseChecksums parses sha256sum-style "<hex>  <name>" lines into a name->hash
