@@ -97,6 +97,104 @@ jobs:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
 
+  # macOS is built from source: no upstream publishes a current arm64 static, and
+  # the "latest" URL we used to point at served an x86_64 build to every Apple
+  # Silicon machine, so ffmpeg ran under Rosetta.
+  ffmpeg-darwin:
+    runs-on: macos-14
+    env:
+      FFMPEG_TAG: n7.1
+    steps:
+      - name: Build ffmpeg (arm64, static libx264)
+        shell: bash
+        run: |
+          brew install --quiet nasm pkg-config
+          deps="$GITHUB_WORKSPACE/deps"
+          # Build x264 static-only. Homebrew's prefix carries libx264.dylib next to
+          # the .a and ld prefers the dylib, which bakes a Homebrew path into a
+          # binary we ship to machines that have no Homebrew.
+          git clone -q --depth 1 -b stable https://code.videolan.org/videolan/x264.git
+          (cd x264 && ./configure --prefix="$deps" --enable-static --enable-pic --disable-cli && make -j"$(sysctl -n hw.ncpu)" && make install)
+          curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_TAG#n}.tar.xz" -o ffmpeg.tar.xz
+          tar xf ffmpeg.tar.xz && cd "ffmpeg-${FFMPEG_TAG#n}"
+          PKG_CONFIG_PATH="$deps/lib/pkgconfig" ./configure \
+            --enable-gpl --enable-libx264 \
+            --pkg-config-flags=--static \
+            --extra-cflags="-I$deps/include" --extra-ldflags="-L$deps/lib" \
+            --disable-shared --enable-static \
+            --disable-doc --disable-debug --disable-ffplay
+          make -j"$(sysctl -n hw.ncpu)" ffmpeg ffprobe
+          cd ..
+          cp "ffmpeg-${FFMPEG_TAG#n}/ffmpeg" ffmpeg-darwin-arm64
+          cp "ffmpeg-${FFMPEG_TAG#n}/ffprobe" ffprobe-darwin-arm64
+      - name: Verify the binaries are native and self-contained
+        shell: bash
+        run: |
+          for b in ffmpeg-darwin-arm64 ffprobe-darwin-arm64; do
+            file "$b" | grep -q arm64 || { echo "$b is not arm64"; exit 1; }
+            if otool -L "$b" | tail -n +2 | grep -qv -e '/usr/lib/' -e '/System/'; then
+              echo "$b links a non-system library:"; otool -L "$b"; exit 1
+            fi
+          done
+          ./ffmpeg-darwin-arm64 -hide_banner -encoders | grep -q libx264
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-darwin-arm64
+          path: |
+            ffmpeg-darwin-arm64
+            ffprobe-darwin-arm64
+
+  # Linux/Windows repackage BtbN's GPL statics, pinned to a tag. Extraction is
+  # arch-independent, so one runner produces every non-macOS asset.
+  ffmpeg-prebuilt:
+    runs-on: ubuntu-latest
+    env:
+      BTBN_TAG: autobuild-2026-07-11-13-13
+    steps:
+      - name: Fetch and stage ffmpeg/ffprobe
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/$BTBN_TAG"
+          assets=$(curl -fsSL "$api" | jq -r '.assets[].browser_download_url')
+          stage() { # <btbn-slug> <goos> <goarch> <ext>
+            url=$(printf '%s\n' "$assets" | grep -E -- "-$1-gpl\.(tar\.xz|zip)$" | head -1)
+            [ -n "$url" ] || { echo "no $1 build in $BTBN_TAG"; exit 1; }
+            rm -rf work && mkdir work && cd work
+            curl -fsSL "$url" -o archive
+            case "$url" in
+              *.zip) unzip -q archive ;;
+              *)     tar xf archive ;;
+            esac
+            for tool in ffmpeg ffprobe; do
+              src=$(find . -type f -name "$tool$4" | head -1)
+              [ -n "$src" ] || { echo "$tool missing in $1"; exit 1; }
+              install -m 0755 "$src" "../$tool-$2-$3$4"
+            done
+            cd ..
+          }
+          stage linux64    linux   amd64 ""
+          stage linuxarm64 linux   arm64 ""
+          stage win64      windows amd64 ".exe"
+          rm -rf work
+      - name: Verify each binary matches the arch it claims
+        shell: bash
+        run: |
+          set -eu
+          file ffmpeg-linux-amd64      | grep -q x86-64  || exit 1
+          file ffmpeg-linux-arm64      | grep -q aarch64 || exit 1
+          file ffmpeg-windows-amd64.exe | grep -q "x86-64" || exit 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-prebuilt
+          path: |
+            ffmpeg-linux-amd64
+            ffprobe-linux-amd64
+            ffmpeg-linux-arm64
+            ffprobe-linux-arm64
+            ffmpeg-windows-amd64.exe
+            ffprobe-windows-amd64.exe
+
   studio:
     runs-on: ubuntu-latest
     steps:
@@ -145,7 +243,7 @@ jobs:
           path: ${{ env.ASSET }}
 
   release:
-    needs: [build, whisper, studio, remotion]
+    needs: [build, whisper, studio, remotion, ffmpeg-darwin, ffmpeg-prebuilt]
     runs-on: ubuntu-latest
     permissions:
       contents: write

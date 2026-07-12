@@ -3,7 +3,6 @@ package provision
 
 import (
 	"archive/tar"
-	"archive/zip"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -254,33 +253,6 @@ func sha256file(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-type ffArchive struct {
-	URL  string
-	Bins []string
-}
-
-// Static ffmpeg sources are not yet pinned by checksum (upstream "latest" URLs);
-// they get our own pinned builds once podcli hosts releases.
-var ffmpegSpecs = map[string][]ffArchive{
-	"darwin/amd64": {
-		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip", Bins: []string{"ffmpeg"}},
-		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip", Bins: []string{"ffprobe"}},
-	},
-	"darwin/arm64": {
-		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip", Bins: []string{"ffmpeg"}},
-		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip", Bins: []string{"ffprobe"}},
-	},
-	"linux/amd64": {
-		{URL: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz", Bins: []string{"ffmpeg", "ffprobe"}},
-	},
-	"linux/arm64": {
-		{URL: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz", Bins: []string{"ffmpeg", "ffprobe"}},
-	},
-	"windows/amd64": {
-		{URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip", Bins: []string{"ffmpeg.exe", "ffprobe.exe"}},
-	},
-}
-
 const podcliRepo = "nmbrthirteen/podcli"
 
 func WhisperCLIBin() string {
@@ -434,9 +406,10 @@ func verifyReleaseAsset(assets map[string]string, assetName, path string) error 
 
 func EnsureWhisperCpp() (string, error) {
 	bin := WhisperCLIBin()
-	if have(bin) {
+	if nativeBin(bin) {
 		return bin, nil
 	}
+	os.Remove(bin)
 	name := fmt.Sprintf("whisper-cli-%s-%s%s", runtime.GOOS, runtime.GOARCH, paths.ExeSuffix())
 	assets, err := latestReleaseAssets()
 	if err != nil {
@@ -465,134 +438,43 @@ func FFmpegBin() string {
 	return filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffmpeg"+paths.ExeSuffix())
 }
 
+func FFprobeBin() string {
+	return filepath.Join(paths.RuntimeDir(), "ffmpeg", "ffprobe"+paths.ExeSuffix())
+}
+
+// ffmpeg and ffprobe are published as podcli release assets, per platform, so a
+// user only ever downloads from a source we checksum. Upstream "latest" URLs
+// used to serve them, and the macOS one shipped an x86_64 build to every Apple
+// Silicon machine.
 func EnsureFFmpeg() (string, error) {
-	bin := FFmpegBin()
-	if have(bin) {
-		return bin, nil
+	if nativeBin(FFmpegBin()) && nativeBin(FFprobeBin()) {
+		return FFmpegBin(), nil
 	}
-	specs, ok := ffmpegSpecs[runtime.GOOS+"/"+runtime.GOARCH]
-	if !ok {
-		return "", fmt.Errorf("no ffmpeg build for %s/%s", runtime.GOOS, runtime.GOARCH)
-	}
-	dir := filepath.Join(paths.RuntimeDir(), "ffmpeg")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(paths.RuntimeDir(), "ffmpeg"), 0o755); err != nil {
 		return "", err
 	}
-	for _, a := range specs {
-		sum := sha256.Sum256([]byte(a.URL))
-		archive := filepath.Join(os.TempDir(), "podcli-ff-"+hex.EncodeToString(sum[:8]))
-		if err := fetch(a.URL, archive, "ffmpeg-archive"); err != nil {
+	assets, err := latestReleaseAssets()
+	if err != nil {
+		return "", err
+	}
+	for tool, bin := range map[string]string{"ffmpeg": FFmpegBin(), "ffprobe": FFprobeBin()} {
+		name := fmt.Sprintf("%s-%s-%s%s", tool, runtime.GOOS, runtime.GOARCH, paths.ExeSuffix())
+		url, ok := assets[name]
+		if !ok {
+			return "", fmt.Errorf("asset %s not in latest release", name)
+		}
+		os.Remove(bin)
+		if err := fetch(url, bin, tool); err != nil {
 			return "", err
 		}
-		err := extractBins(archive, a.Bins, dir)
-		os.Remove(archive)
-		if err != nil {
+		if err := verifyReleaseAsset(assets, name, bin); err != nil {
 			return "", err
 		}
-	}
-	if !have(bin) {
-		return "", fmt.Errorf("ffmpeg missing after extraction in %s", dir)
-	}
-	return bin, nil
-}
-
-func extractBins(archive string, bins []string, dest string) error {
-	f, err := os.Open(archive)
-	if err != nil {
-		return err
-	}
-	magic := make([]byte, 6)
-	io.ReadFull(f, magic)
-	f.Close()
-	switch {
-	case magic[0] == 'P' && magic[1] == 'K':
-		return extractZip(archive, bins, dest)
-	case magic[0] == 0xFD && string(magic[1:6]) == "7zXZ\x00":
-		return extractTarXz(archive, bins, dest)
-	default:
-		return fmt.Errorf("unrecognized archive format")
-	}
-}
-
-func wantSet(bins []string) map[string]bool {
-	m := make(map[string]bool, len(bins))
-	for _, b := range bins {
-		m[b] = true
-	}
-	return m
-}
-
-func extractZip(archive string, bins []string, dest string) error {
-	zr, err := zip.OpenReader(archive)
-	if err != nil {
-		return err
-	}
-	defer zr.Close()
-	want := wantSet(bins)
-	for _, zf := range zr.File {
-		if zf.FileInfo().IsDir() || !want[filepath.Base(zf.Name)] {
-			continue
-		}
-		rc, err := zf.Open()
-		if err != nil {
-			return err
-		}
-		err = writeBin(rc, filepath.Join(dest, filepath.Base(zf.Name)))
-		rc.Close()
-		if err != nil {
-			return err
+		if runtime.GOOS != "windows" {
+			os.Chmod(bin, 0o755)
 		}
 	}
-	return nil
-}
-
-func extractTarXz(archive string, bins []string, dest string) error {
-	tmp, err := os.MkdirTemp("", "podcli-ffx-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmp)
-	listing, err := exec.Command("tar", "-tf", archive).Output()
-	if err != nil {
-		return fmt.Errorf("tar list (is tar installed?): %w", err)
-	}
-	for _, name := range strings.Split(string(listing), "\n") {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		clean := filepath.Clean(name)
-		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
-			return fmt.Errorf("refusing archive with unsafe path: %q", name)
-		}
-	}
-	cmd := exec.Command("tar", "-xf", archive, "-C", tmp)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("tar extract (is tar installed?): %w", err)
-	}
-	want := wantSet(bins)
-	return filepath.WalkDir(tmp, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !want[filepath.Base(p)] {
-			return err
-		}
-		in, err := os.Open(p)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-		return writeBin(in, filepath.Join(dest, filepath.Base(p)))
-	})
-}
-
-func writeBin(r io.Reader, dest string) error {
-	out, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, r)
-	return err
+	return FFmpegBin(), nil
 }
 
 var pyTriples = map[string]string{
@@ -611,7 +493,7 @@ func PythonBin() string {
 }
 
 func pythonHealthy(bin string) bool {
-	if !have(bin) {
+	if !nativeBin(bin) {
 		return false
 	}
 	root := pythonRoot(bin)
