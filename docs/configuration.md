@@ -12,11 +12,12 @@ Copy `.env.example` to `.env`, or export these in your shell. `setup.sh` copies 
 | `PODCLI_QUALITY` | `high` | Render quality profile |
 | `PODCLI_NO_UPDATE` | unset | Set to `1` to skip the update check. Same as `podcli config set update.auto off` |
 | `PODCLI_LOG_LEVEL` | `info` | Logging verbosity |
-| `PORT` | `3847` | Web studio port |
+| `PODCLI_PORT` | `3847` | Web studio port. `PORT` also works |
 | `HF_TOKEN` | unset | Hugging Face token, required for speaker diarization |
 | `PODCLI_ENV_FILE` | `./.env` | Path to an alternate `.env` |
 | `PODCLI_BACKEND` | resolved | Override the Python backend directory |
-| `PODCLI_PYTHON` | resolved | Override the Python interpreter |
+| `PODCLI_PYTHON` | resolved | Override the Python interpreter. The launcher exports the resolved path as `PYTHON_PATH` for internal use |
+| `PODCLI_TRANSITION_AUTOFIX_PASSES` | auto | Transition QA/autofix passes. Runs only on reframes that can produce hard cuts. Set a number to force it, `0` disables; the renderer caps it at 2 |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | Override the FFmpeg binaries |
 
 Installed builds provision their own Python, Node, FFmpeg, and whisper.cpp, so the
@@ -80,8 +81,9 @@ The time offset field (default `-1s`) shifts every timestamp to sync with the au
 engine reads them for voice rules and title formulas, and checks the episode database
 so it does not resuggest a moment you already published.
 
-PodStack ships 13 starter templates covering brand identity, voice and tone, the
-episode database, shorts criteria, title formulas, description templates, thumbnail
-guides, topics, workflow, and quick reference. Fill them in with your show's details.
+`podcli knowledge init` creates the 14 starter templates covering brand identity,
+voice and tone, the episode database, shorts criteria, title formulas, description
+templates, thumbnail guides, topics, workflow, quick reference, and cross-episode
+learnings. Fill them in with your show's details.
 
 Edit them in the studio under Knowledge, or through the `knowledge_base` MCP tool.

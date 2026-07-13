@@ -6,14 +6,36 @@ import { fileURLToPath } from "url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(root, p), "utf8");
 
-function countTools(dir) {
-  let n = 0;
+function tsSources(dir, acc = []) {
   for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
     const rel = join(dir, entry.name);
-    if (entry.isDirectory()) n += countTools(rel);
-    else if (entry.name.endsWith(".ts")) n += (read(rel).match(/server\.tool\(/g) || []).length;
+    if (entry.isDirectory()) tsSources(rel, acc);
+    else if (entry.name.endsWith(".ts")) acc.push(read(rel));
   }
-  return n;
+  return acc;
+}
+
+function collectToolNames(sources) {
+  const defs = new Map();
+  const names = [];
+  let registrations = 0;
+  for (const src of sources) {
+    for (const m of src.matchAll(/const\s+(\w+)\s*=\s*\{\s*name:\s*"([^"]+)"/g)) {
+      defs.set(m[1], m[2]);
+    }
+  }
+  for (const src of sources) {
+    for (const m of src.matchAll(/server\.tool\(\s*(?:"([^"]+)"|(\w+)\.name)/g)) {
+      registrations += 1;
+      if (m[1]) names.push(m[1]);
+      else if (defs.has(m[2])) names.push(defs.get(m[2]));
+    }
+  }
+  if (names.length !== registrations) {
+    console.error(`resolved ${names.length} tool names for ${registrations} server.tool( registrations`);
+    process.exit(1);
+  }
+  return names.sort();
 }
 
 const mainTsx = read("src/ui/client/main.tsx");
@@ -28,10 +50,13 @@ try {
   version = JSON.parse(read("package.json")).version || "";
 }
 
+const mcpToolNames = collectToolNames(tsSources("src"));
+
 const manifest = {
   version,
   packageVersion: JSON.parse(read("package.json")).version || "",
-  mcpToolCount: countTools("src"),
+  mcpToolCount: mcpToolNames.length,
+  mcpToolNames,
   studioRouteCount: studioRoutes.length,
   studioRoutes,
 };

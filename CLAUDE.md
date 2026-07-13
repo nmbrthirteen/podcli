@@ -1,19 +1,21 @@
-# podcli + PodStack — AI Podcast Content Studio
+# podcli + PodStack: AI podcast content studio
 
-> Transcribe, clip, and publish — all from one place.
+> Transcribe, clip, and publish from one place.
+
+This file is the primary instruction document. `CLAUDE.podstack.md` (persona and protocols), `AGENTS.podstack.md` (cross-tool usage), and `ETHOS.podstack.md` (content philosophy) build on it; the tables below are the single source of truth.
 
 You have two systems working together:
 
-1. **podcli** — video processing engine (transcription, clip detection, rendering)
-2. **PodStack** — content workflow (titles, descriptions, thumbnails, publishing)
+1. **podcli**: video processing engine (transcription, clip detection, rendering)
+2. **PodStack**: content workflow (titles, descriptions, thumbnails, publishing)
 
 Both share the same knowledge base at `.podcli/knowledge/`.
 
 ---
 
-## Slash Commands (PodStack)
+## Slash commands (PodStack)
 
-| Command | Role | What It Does |
+| Command | Role | What it does |
 |---------|------|-------------|
 | `/plan-episode` | Episode Architect | Pre-recording: designs questions, story arc, and target moments backwards from ideal output |
 | `/process-transcript` | Content Analyst | Ingests transcript → extracts 8-15 moments → scores → categorizes |
@@ -23,25 +25,63 @@ Both share the same knowledge base at `.podcli/knowledge/`.
 | `/review-content` | Brand Guardian | Reviews output against brand voice, quality gates, banned words |
 | `/produce-shorts` | Producer | Full pipeline: transcript → publish-ready package |
 | `/publish-checklist` | Launch Manager | Pre/post-publish optimization checklist |
-| `/retro-episode` | Analyst | Episode performance review + learnings |
+| `/retro-episode` | Analyst | Episode performance review + appends learnings to `.podcli/knowledge/13-learnings.md` |
 
 ---
 
-## MCP Tools (podcli engine)
+## MCP tools (podcli engine)
 
-| Tool | What It Does |
+All 26 tools registered by the MCP server.
+
+**Transcription and input**
+
+| Tool | What it does |
 |------|-------------|
-| `transcribe_podcast` | Transcribe audio/video with Whisper + speaker detection |
-| `suggest_clips` | Submit clip suggestions with duplicate check |
-| `create_clip` | Render a single short-form clip (9:16, captions, audio norm) |
+| `transcribe_podcast` | Transcribe audio/video with Whisper word timestamps + speaker detection |
+| `transcribe_start` | Start transcription as a background job, returns a job_id immediately |
+| `job_status` | Poll any background job (transcription, render, batch export) with long-polling |
+| `set_video` | Set the working video without transcribing |
+| `import_transcript` | Import an external transcript with word-level timestamps, skips Whisper |
+| `parse_transcript` | Parse a speaker-labeled plain text transcript into word-level timestamps |
+
+**Clip workflow**
+
+| Tool | What it does |
+|------|-------------|
+| `get_ui_state` | Read session state (video, transcript, suggestions, settings) and next steps |
+| `suggest_clips` | Submit clip suggestions, assigns clip numbers, pushes them to the web UI |
+| `modify_clip` | Adjust a suggested clip: timing, title, caption style, or delete it |
+| `toggle_clip` | Select or deselect a suggested clip for export |
+| `create_clip` | Render a single clip with burned-in captions and normalized audio |
 | `batch_create_clips` | Render multiple clips in one batch |
-| `knowledge_base` | Read/write `.podcli/knowledge/` context files |
-| `manage_assets` | Register/list logos, intros, outros |
-| `clip_history` | View generated clips, check for duplicates |
+| `manage_reel` | Build a highlights reel: detect once, edit moments, rebuild without re-detecting |
+| `analyze_energy` | Analyze audio energy levels to find high-energy moments |
+
+**Content and configuration**
+
+| Tool | What it does |
+|------|-------------|
+| `knowledge_base` | Read or manage the `.podcli/knowledge/` context files |
+| `manage_assets` | Register and manage reusable assets: logos, intros, outros, music |
+| `clip_history` | View previously created clips to avoid duplicates |
+| `list_outputs` | List rendered clip files with sizes and dates |
+| `update_settings` | Update rendering settings: caption style, crop strategy, logo, outro |
+| `manage_presets` | Save, load, list, or delete rendering presets |
+| `manage_thumbnail_config` | Show, export, import, or reset the thumbnail template |
+
+**Integrations and environment**
+
+| Tool | What it does |
+|------|-------------|
+| `manage_integrations` | List, enable, or disable podcli integrations |
+| `export_to_davinci_resolve` | Export shorts as a DaVinci Resolve FCPXML project |
+| `manage_config` | Manage portable config profiles and legacy path migration |
+| `manage_env` | List, set, or unset global podcli settings stored in `.env` |
+| `ai_cli_status` | Show whether Claude Code / Codex CLIs are available for AI features |
 
 ---
 
-## The Full Pipeline
+## The full pipeline
 
 ```
 /plan-episode  →  Record  →  /produce-shorts  →  Published content
@@ -56,11 +96,11 @@ After publishing: `/retro-episode`
 
 ---
 
-## Knowledge Base
+## Knowledge base
 
-All slash commands read from `.podcli/knowledge/`. This is where your show's brand, voice, and style live.
+All slash commands read from `.podcli/knowledge/`. This is where your show's brand, voice, and style live. 14 files:
 
-| File | What It Contains |
+| File | What it contains |
 |------|-----------------|
 | `00-master-instructions.md` | AI operating system, auto-detection rules |
 | `01-brand-identity.md` | Show name, positioning, hosts, format |
@@ -75,23 +115,24 @@ All slash commands read from `.podcli/knowledge/`. This is where your show's bra
 | `10-internal-processing.md` | Auto-execution rules |
 | `11-inspiration-channels.md` | Reference channels, viral hooks |
 | `12-quick-reference.md` | Copy-paste resources |
+| `13-learnings.md` | Cross-episode learnings, appended by `/retro-episode` |
 
 ---
 
-## Quality Gate (Always Active)
+## Quality gate (always active)
 
 Before outputting ANY content:
 
-1. **Would I click this?** — If no, rewrite
-2. **Does it earn attention in 5 seconds?** — If no, find better hook
-3. **Does it deliver on the promise?** — If no, it's clickbait, fix it
-4. **Is it standalone?** — If context needed, unusable for shorts
-5. **Zero banned words** — Check `02-voice-and-tone.md`
-6. **The Coffee Test** — Sounds like a person, not a press release
+1. **Would I click this?** If no, rewrite
+2. **Does it earn attention in 5 seconds?** If no, find better hook
+3. **Does it deliver on the promise?** If no, it's clickbait, fix it
+4. **Is it standalone?** If context needed, unusable for shorts
+5. **Zero banned words**: check `02-voice-and-tone.md`
+6. **The Coffee Test**: sounds like a person, not a press release
 
 ---
 
-## Auto-Detection
+## Auto-detection
 
 When input is provided without a specific command:
 
@@ -104,19 +145,20 @@ When input is provided without a specific command:
 
 ---
 
-## Project Layout
+## Project layout
 
 ```
-├── CLAUDE.md                     ← You are here
+├── CLAUDE.md                     ← primary instructions (this file)
 ├── .claude/commands/             ← PodStack slash commands
-├── src/                          ← TypeScript (MCP server, Web UI, services)
+├── cli/                          ← Go launcher (install, update, provisioning)
+├── src/                          ← TypeScript (MCP server, web studio, services)
 ├── backend/                      ← Python (Whisper, FFmpeg, captions)
 ├── .podcli/
-│   ├── knowledge/                ← Your show's brand brain (13 .md files)
-│   ├── output/                   ← Rendered clips
-│   ├── history/                  ← Clip tracking
-│   ├── assets/                   ← Logos, intros, outros
-│   ├── cache/                    ← Transcription cache
-│   └── presets/                  ← Saved configs
-└── episodes/                     ← Content packages (PodStack output)
+│   ├── knowledge/                ← your show's brand brain (14 .md files)
+│   ├── history/                  ← clip tracking
+│   ├── assets/                   ← logos, intros, outros
+│   └── presets/                  ← saved configs
+├── data/                         ← runtime data: cache, working files (gitignored)
+├── podcli-clips/                 ← rendered clips (gitignored; PODCLI_OUTPUT overrides)
+└── episodes/                     ← content packages from PodStack (gitignored output)
 ```
