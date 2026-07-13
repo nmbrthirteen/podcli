@@ -53,6 +53,20 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  remotion-bundle:
+    name: Remotion release bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: remotion/package-lock.json
+      - run: sh scripts/build-remotion.sh dist/remotion-bundle
+      - working-directory: dist/remotion-bundle
+        run: node --input-type=module --eval "await Promise.all(['@remotion/bundler', '@remotion/renderer', 'remotion', 'react', 'react-dom'].map((name) => import(name))); import.meta.resolve('@fontsource/dm-sans/400.css')"
+
   docs-drift:
     name: Docs drift check
     runs-on: ubuntu-latest

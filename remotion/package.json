@@ -1,0 +1,13 @@
+{
+  "name": "podcli-remotion-bundle",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fontsource/dm-sans": "5.2.8",
+    "@remotion/bundler": "4.0.488",
+    "@remotion/renderer": "4.0.488",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "remotion": "4.0.488"
+  }
+}

@@ -41,45 +41,33 @@ describe("stderrTail", () => {
 });
 
 describe("terminateProcessTree", () => {
-  const isWindows = process.platform === "win32";
-
   const fakeProc = () => {
     const proc = new EventEmitter() as unknown as ChildProcess;
     Object.assign(proc, { pid: 4242, exitCode: null, signalCode: null, kill: vi.fn() });
     return proc;
   };
 
-  // Windows has no process groups: the tree is killed through proc.kill, while
-  // POSIX signals the negated pid. Assert whichever channel this platform uses.
-  const killSpy = (proc: ChildProcess) =>
-    isWindows ? proc.kill : vi.spyOn(process, "kill").mockReturnValue(true);
-
-  const expectSignal = (spy: unknown, signal: NodeJS.Signals) =>
-    isWindows ? expect(spy).toHaveBeenCalledWith(signal) : expect(spy).toHaveBeenCalledWith(-4242, signal);
-
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it("escalates to SIGKILL when the tree survives SIGTERM", () => {
+  it("escalates a POSIX process group to SIGKILL", () => {
     vi.useFakeTimers();
     const proc = fakeProc();
-    const kill = killSpy(proc);
-    terminateProcessTree(proc, 2000);
+    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+    terminateProcessTree(proc, 2000, { platform: "linux" });
 
-    expectSignal(kill, "SIGTERM");
+    expect(kill).toHaveBeenCalledWith(-4242, "SIGTERM");
     vi.advanceTimersByTime(2000);
-    expectSignal(kill, "SIGKILL");
+    expect(kill).toHaveBeenCalledWith(-4242, "SIGKILL");
   });
 
-  // The pid can be handed to an unrelated process once the child is reaped, and
-  // on POSIX the kill targets the whole group, so a late SIGKILL would take it out.
-  it("cancels the escalation once the process exits", () => {
+  it("cancels POSIX escalation once the process exits", () => {
     vi.useFakeTimers();
     const proc = fakeProc();
-    const kill = killSpy(proc);
-    terminateProcessTree(proc, 2000);
+    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+    terminateProcessTree(proc, 2000, { platform: "linux" });
 
     proc.emit("exit", null, "SIGTERM");
     vi.advanceTimersByTime(10_000);
@@ -87,14 +75,36 @@ describe("terminateProcessTree", () => {
     expect(kill).toHaveBeenCalledTimes(1);
   });
 
-  it("does not schedule a kill for an already-exited process", () => {
+  it("does not signal an already-exited POSIX process group", () => {
     vi.useFakeTimers();
     const proc = fakeProc();
     Object.assign(proc, { exitCode: 0 });
-    const kill = killSpy(proc);
-    terminateProcessTree(proc, 2000);
+    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+    terminateProcessTree(proc, 2000, { platform: "linux" });
 
     vi.advanceTimersByTime(10_000);
-    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("terminates the full Windows process tree", () => {
+    vi.useFakeTimers();
+    const proc = fakeProc();
+    const taskkillProc = new EventEmitter();
+    const spawnProcess = vi.fn().mockReturnValue(taskkillProc);
+    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+
+    terminateProcessTree(proc, 2000, {
+      platform: "win32",
+      spawnProcess: spawnProcess as never,
+    });
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      "taskkill",
+      ["/pid", "4242", "/T", "/F"],
+      { stdio: "ignore", windowsHide: true }
+    );
+    expect(proc.kill).not.toHaveBeenCalled();
+    expect(kill).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

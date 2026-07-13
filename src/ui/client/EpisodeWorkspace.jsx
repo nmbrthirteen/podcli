@@ -30,7 +30,7 @@ import RecentSources from './RecentSources';
 import MomentTrim from './MomentTrim';
 import { useDialog } from './useDialog';
 import { PageHeader } from './Page';
-import { buildPreviewChunks, activePreviewChunk } from './captionChunks';
+import { buildPreviewChunks, activePreviewChunk, selectPreviewWords } from './captionChunks';
 import { findClipResult, resultBoundsKey } from './lib';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -295,21 +295,9 @@ const onKeyActivate = (fn) => (e) => {
       const [logoBroken, setLogoBroken] = useState(false);
       useEffect(() => { setLogoBroken(false); }, [logoPath]);
 
-      // Pull all transcribed words from the active clip (or first N from the
-      // whole transcript). The chunker decides how many show at once.
       const sourcePool = useMemo(() => {
-        if (!transcriptWords || !transcriptWords.length) return null;
-        let pool = transcriptWords;
-        if (activeClip) {
-          pool = transcriptWords.filter(w =>
-            w.end > activeClip.start_second && w.start < activeClip.end_second
-          );
-        }
-        if (!pool.length) return null;
-        const out = pool.slice(0, 80)
-          .map(w => ({ text: (w.word || w.text || '').trim(), start: w.start, end: w.end, speaker: w.speaker }))
-          .filter(w => w.text);
-        return out.length >= 2 ? out : null;
+        const words = selectPreviewWords(transcriptWords, activeClip);
+        return words.length >= 2 ? words : null;
       }, [activeClip, transcriptWords]);
 
       const usingSample = !sourcePool;
