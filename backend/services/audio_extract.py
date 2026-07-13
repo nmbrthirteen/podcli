@@ -22,7 +22,8 @@ def extract_wav_16k_mono(
 
     When wav_path is None a temp file is created; the caller owns cleanup.
     """
-    if wav_path is None:
+    owns_wav = wav_path is None
+    if owns_wav:
         fd, wav_path = tempfile.mkstemp(prefix="podcli_audio_", suffix=".wav")
         os.close(fd)
     cmd = [
@@ -34,7 +35,15 @@ def extract_wav_16k_mono(
         "-ac", "1",
         wav_path,
     ]
-    result = proc_run(cmd, timeout=timeout, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"Audio extraction failed: {(result.stderr or '')[-300:]}")
+    try:
+        result = proc_run(cmd, timeout=timeout, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(f"Audio extraction failed: {(result.stderr or '')[-300:]}")
+    except Exception:
+        if owns_wav:
+            try:
+                os.unlink(wav_path)
+            except OSError:
+                pass
+        raise
     return wav_path

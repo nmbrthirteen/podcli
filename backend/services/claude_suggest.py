@@ -16,6 +16,8 @@ import tempfile
 from typing import Optional, Callable
 
 from config.paths import paths
+from services.audio_analyzer import compute_energy_scores
+from services.audio_events import compute_event_scores
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
@@ -1240,9 +1242,6 @@ def blend_signal_scores(
     if not clips or (not energy_data and not events_data):
         return clips
 
-    from services.audio_analyzer import compute_energy_scores
-    from services.audio_events import compute_event_scores
-
     ranges = [
         {"start": float(c.get("start_second", 0)), "end": float(c.get("end_second", 0))}
         for c in clips
@@ -1259,6 +1258,16 @@ def blend_signal_scores(
         if r_score > 3 and "laughter" not in (clip.get("reasons") or []):
             clip.setdefault("reasons", []).append("laughter")
     return clips
+
+
+def select_clips_with_signal_scores(
+    clips: list[dict],
+    top_n: int,
+    energy_data: list[dict] | None = None,
+    events_data: list[dict] | None = None,
+) -> list[dict]:
+    blended = blend_signal_scores(clips, energy_data=energy_data, events_data=events_data)
+    return _select_top_by_score(blended, top_n)
 
 
 def _bucket_coverage_seconds(existing_clips: list[dict], start: float, end: float) -> float:
