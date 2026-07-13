@@ -1,11 +1,11 @@
 # podcli → Native CLI (codex-style)
 
-> Goal: turn podcli from a git-clone + `setup.sh` + venv/npm hybrid into a **native CLI you install once and that auto-updates** — like `openai/codex`. Users run `npm i -g podcli` (or `bun add -g podcli`) and `podcli process video.mp4` just works, everywhere, with no Python/Node/FFmpeg setup.
+> Goal: turn podcli from a git-clone + `setup.sh` + venv/npm hybrid into a **native CLI you install once and that auto-updates**, like `openai/codex`. Users run the install script (`curl -fsSL https://podcli.com/install.sh | sh`; npm distribution is out because the unscoped `podcli` name is blocked, see RELEASE.md) and `podcli process video.mp4` just works, everywhere, with no Python/Node/FFmpeg setup.
 
 ## North star
 
 ```
-npm i -g podcli            # or: bun add -g podcli
+curl -fsSL https://podcli.com/install.sh | sh
 podcli process pod.mp4 --top 5
   → first run: silently provisions a hermetic runtime (one time)
   → 9:16 clips with burned captions

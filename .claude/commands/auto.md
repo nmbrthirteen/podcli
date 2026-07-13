@@ -61,7 +61,7 @@ Emit a numbered strategy table. Do NOT render yet.
 Proposed strategy for <video-label> (<duration>, <N> speakers):
 
 Inferred format: <talking-head | interview | montage | tutorial | travel | other>
-Inferred tone:   <from voice fingerprint or knowledge/02>
+Inferred tone:   <from voice fingerprint or .podcli/knowledge/02>
 Target count:    <N> clips (from arg, or inferred from content density)
 
 #1  [00:04:22-00:05:01]  39s  S0 "<hook>"

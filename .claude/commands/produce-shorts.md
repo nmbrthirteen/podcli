@@ -20,14 +20,14 @@ triggers:
 ## Before Starting
 
 Read the full knowledge base to understand the show:
-- `knowledge/01-brand-identity.md` — who the show is
-- `knowledge/02-voice-and-tone.md` — voice, banned words
-- `knowledge/03-episodes-database.md` — existing content (dedup)
-- `knowledge/04-shorts-creation-guide.md` — moment criteria
-- `knowledge/05-title-formulas.md` — title spec
-- `knowledge/06-descriptions-template.md` — description templates
-- `knowledge/07-thumbnail-guide.md` — visual specs
-- `knowledge/13-learnings.md` — past retro patterns (what worked, what didn't)
+- `.podcli/knowledge/01-brand-identity.md` — who the show is
+- `.podcli/knowledge/02-voice-and-tone.md` — voice, banned words
+- `.podcli/knowledge/03-episodes-database.md` — existing content (dedup)
+- `.podcli/knowledge/04-shorts-creation-guide.md` — moment criteria
+- `.podcli/knowledge/05-title-formulas.md` — title spec
+- `.podcli/knowledge/06-descriptions-template.md` — description templates
+- `.podcli/knowledge/07-thumbnail-guide.md` — visual specs
+- `.podcli/knowledge/13-learnings.md` — past retro patterns (what worked, what didn't)
 
 ---
 
@@ -214,7 +214,7 @@ Each phase consumes upstream output and passes structured state downstream. Phas
 
 ## Post-Pipeline
 
-1. **Update episode database:** Add to `knowledge/03-episodes-database.md`
+1. **Update episode database:** Add to `.podcli/knowledge/03-episodes-database.md`
 2. **Save package:** Write to `episodes/ep[XX]-[guest]-content-package.md`
 3. **Posting order:** Vary topics, lead with strongest hooks, mix energy levels
 
