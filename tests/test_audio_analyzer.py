@@ -2,7 +2,9 @@
 
 import os
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND_ROOT = os.path.join(ROOT, "backend")
@@ -10,6 +12,7 @@ if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
 from services import audio_analyzer as aa
+from services import audio_extract
 
 
 class ComputeEnergyScoresTests(unittest.TestCase):
@@ -86,8 +89,6 @@ class ComputeEnergyScoresTests(unittest.TestCase):
 
 class ExtractAudioEnergyCommandTests(unittest.TestCase):
     def _run(self, wav_path=None):
-        from unittest import mock
-
         with mock.patch.object(aa, "proc_run", return_value=mock.Mock(returncode=0, stdout="", stderr="")) as mocked, \
              mock.patch.object(aa, "_fallback_energy", return_value=[]):
             aa.extract_audio_energy("/video.mp4", wav_path=wav_path)
@@ -100,8 +101,6 @@ class ExtractAudioEnergyCommandTests(unittest.TestCase):
         self.assertIn("astats=metadata=1:reset=1", af)
 
     def test_uses_shared_wav_when_provided(self):
-        import tempfile
-
         fd, wav = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
         try:
@@ -114,6 +113,26 @@ class ExtractAudioEnergyCommandTests(unittest.TestCase):
     def test_missing_wav_falls_back_to_video(self):
         cmd = self._run(wav_path="/no/such.wav")
         self.assertIn("/video.mp4", cmd)
+
+
+class ExtractWavCleanupTests(unittest.TestCase):
+    def test_failed_extraction_removes_internally_created_wav(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wav_path = os.path.join(tmpdir, "failed.wav")
+            fd = os.open(wav_path, os.O_CREAT | os.O_RDWR)
+            with mock.patch.object(
+                audio_extract.tempfile,
+                "mkstemp",
+                return_value=(fd, wav_path),
+            ), mock.patch.object(
+                audio_extract,
+                "proc_run",
+                return_value=mock.Mock(returncode=1, stderr="ffmpeg failed"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "ffmpeg failed"):
+                    audio_extract.extract_wav_16k_mono("/video.mp4")
+
+            self.assertFalse(os.path.exists(wav_path))
 
 
 if __name__ == "__main__":

@@ -29,6 +29,13 @@ except ImportError:
     pass
 import threading
 import traceback
+from services.audio_analyzer import get_energy_profile
+from services.audio_events import get_event_profile, is_available as audio_events_available
+from services.claude_suggest import (
+    _find_ai_cli_candidates,
+    select_clips_with_signal_scores,
+    suggest_initial_with_claude,
+)
 from version import VERSION
 
 # Serializes event writes so parallel clip workers can't interleave JSON lines.
@@ -583,28 +590,41 @@ def handle_corrections(task_id: str, params: dict):
         emit_result(task_id, "error", error=f"Unknown corrections action: {action}")
 
 
-def _reaction_times_for_suggest(params: dict, segments: list) -> list | None:
-    """Laughter/reaction anchors for the suggestion prompt, if the caller has them."""
-    times = params.get("reaction_times")
-    if times:
-        return [float(t) for t in times]
-
+def _signal_profiles_for_suggest(
+    params: dict,
+    segments: list,
+) -> tuple[list | None, list | None, list | None]:
+    energy_data = params.get("energy_data")
+    events_data = params.get("events_data")
+    reaction_times = params.get("reaction_times")
+    if reaction_times is not None:
+        reaction_times = [float(t) for t in reaction_times]
     video_path = params.get("video_path")
     if not video_path or not os.path.exists(video_path):
-        return None
-    try:
-        from services.audio_events import get_event_profile, is_available
-        if not is_available():
-            return None
-        return get_event_profile(video_path, segments)["reaction_times"]
-    except Exception:
-        return None
+        return energy_data, events_data, reaction_times
+
+    if energy_data is None:
+        try:
+            energy_data = get_energy_profile(video_path, segments)["energy_data"]
+        except Exception:
+            energy_data = None
+
+    if events_data is None or reaction_times is None:
+        try:
+            if audio_events_available():
+                event_profile = get_event_profile(video_path, segments)
+                if events_data is None:
+                    events_data = event_profile["events_data"]
+                if reaction_times is None:
+                    reaction_times = event_profile["reaction_times"]
+        except Exception:
+            pass
+
+    return energy_data, events_data, reaction_times
 
 
 def handle_suggest_clips(task_id: str, params: dict):
     """AI-powered clip suggestion using Claude/Codex and PodStack knowledge base."""
-    from services.claude_suggest import suggest_initial_with_claude, _find_ai_cli_candidates
-
     segments = params.get("segments", [])
     top_n = params.get("top_n", 5)
     existing_clips = params.get("existing_clips", [])
@@ -625,13 +645,15 @@ def handle_suggest_clips(task_id: str, params: dict):
         return
 
     errors: list[str] = []
+    energy_data, events_data, reaction_times = _signal_profiles_for_suggest(params, segments)
+    candidate_top_n = top_n * 2 if energy_data or events_data else top_n
     clips = suggest_initial_with_claude(
         segments=segments,
-        top_n=top_n,
+        top_n=candidate_top_n,
         exclude_clips=existing_clips,
         progress_callback=lambda pct, msg: emit_progress(task_id, "suggesting", pct, msg),
         error_sink=errors,
-        reaction_times=_reaction_times_for_suggest(params, segments),
+        reaction_times=reaction_times,
     )
 
     if clips is None:
@@ -639,6 +661,12 @@ def handle_suggest_clips(task_id: str, params: dict):
         emit_result(task_id, "error", error=detail)
         return
 
+    clips = select_clips_with_signal_scores(
+        clips,
+        top_n=top_n,
+        energy_data=energy_data,
+        events_data=events_data,
+    )
     emit_result(task_id, "success", data={"clips": clips})
 
 
