@@ -30,11 +30,32 @@ func TestLinkPointsToAbsoluteAndRelativeSymlinks(t *testing.T) {
 	}
 }
 
-func TestUninstallTargetsRemoveAllByDefault(t *testing.T) {
+func TestUninstallTargetsKeepUserDataByDefault(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "podcli")
-	got := uninstallTargets(home)
+	got := uninstallTargets(home, false)
+	want := map[string]bool{
+		filepath.Join(home, "bin"):     true,
+		filepath.Join(home, "runtime"): true,
+		filepath.Join(home, "models"):  true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("uninstall targets = %v, want app dirs only", got)
+	}
+	for _, p := range got {
+		if p == home {
+			t.Fatalf("default uninstall must not remove the whole home dir")
+		}
+		if !want[p] {
+			t.Fatalf("unexpected uninstall target %s", p)
+		}
+	}
+}
+
+func TestUninstallTargetsPurgeRemovesHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "podcli")
+	got := uninstallTargets(home, true)
 	if len(got) != 1 || got[0] != home {
-		t.Fatalf("uninstall targets = %v, want only %s", got, home)
+		t.Fatalf("purge targets = %v, want only %s", got, home)
 	}
 }
 

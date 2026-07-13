@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"podcli/internal/paths"
@@ -23,7 +26,7 @@ import (
 
 type model struct {
 	URL    string
-	SHA256 string // empty: verification skipped
+	SHA256 string
 }
 
 var models = map[string]model{
@@ -32,10 +35,12 @@ var models = map[string]model{
 		SHA256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
 	},
 	"tiny.en": {
-		URL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+		URL:    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+		SHA256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
 	},
 	"small": {
-		URL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+		URL:    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+		SHA256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
 	},
 }
 
@@ -85,19 +90,48 @@ func EnsureVADModel() (string, error) {
 
 const maxAttempts = 6
 
+// Fetch downloads url into dest with resume, progress, and stall detection.
+// Exported so self-update reuses the same download path.
+func Fetch(url, dest, label string) error { return fetch(url, dest, label, downloadHTTPClient()) }
+
+// FetchGuarded is Fetch with a caller-supplied redirect allowlist. Self-update
+// passes its GitHub-only allowlist: provisioning also trusts the model and
+// ffmpeg CDNs, and the podcli binary must not be redirectable to any of them.
+func FetchGuarded(url, dest, label string, allowHost func(string) bool) error {
+	return fetch(url, dest, label, guardedHTTPClient(allowHost, 60*time.Second))
+}
+
 // fetch resumes via HTTP Range across transient stalls rather than restarting,
-// writing to dest atomically.
-func fetch(url, dest, label string) error {
+// writing to dest atomically. A per-destination lock file serializes concurrent
+// podcli processes so they don't append to the same .part file.
+func fetch(url, dest, label string, client *http.Client) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
+	unlock, err := acquireLock(dest)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	tmp := dest + ".part"
+	if have(dest) {
+		// Another process finished it while we waited; its .part is gone, but a
+		// resume file from an earlier interrupted attempt may still sit here.
+		os.Remove(tmp)
+		os.Remove(validatorPath(tmp))
+		return nil
+	}
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		done, err := downloadOnce(url, tmp, label)
+		done, err := downloadOnce(url, tmp, label, client)
 		if err == nil && done {
 			lastErr = nil
 			break
+		}
+		if errors.Is(err, ErrUntrustedRedirect) {
+			os.Remove(tmp)
+			os.Remove(validatorPath(tmp))
+			return err
 		}
 		lastErr = err
 		fmt.Fprintf(os.Stderr, "\n  %s interrupted (attempt %d/%d): %v - resuming\n", label, attempt, maxAttempts, err)
@@ -105,18 +139,137 @@ func fetch(url, dest, label string) error {
 	}
 	if lastErr != nil {
 		os.Remove(tmp)
+		os.Remove(validatorPath(tmp))
 		return lastErr
 	}
+	os.Remove(validatorPath(tmp))
 	return os.Rename(tmp, dest)
 }
 
-func download(url, dest, wantSHA, label string) error {
-	if err := fetch(url, dest, label); err != nil {
-		return err
+// downloadPath places transient archives inside the managed dir rather than the
+// world-shared temp dir, where a predictable name could be pre-planted by
+// another local user. The dir persists across runs, so name derives from the
+// source URL: a completed archive is only reused for the exact release it came
+// from, never for the next one published under the same asset name.
+func downloadPath(url, name string) (string, error) {
+	dir := filepath.Join(paths.RuntimeDir(), "downloads")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
 	}
+	sum := sha256.Sum256([]byte(url))
+	return filepath.Join(dir, "podcli-"+hex.EncodeToString(sum[:8])+"-"+name), nil
+}
+
+// removeArchive drops an extracted archive and the sidecars fetch leaves beside
+// it. The downloads dir is persistent, so anything left there outlives the
+// release it belongs to.
+func removeArchive(path string) {
+	os.Remove(path)
+	os.Remove(path + ".part")
+	os.Remove(validatorPath(path + ".part"))
+}
+
+var (
+	lockHeartbeat = 20 * time.Second
+	lockStale     = 2 * time.Minute
+	lockPoll      = time.Second
+	lockWait      = 30 * time.Minute
+	// A sharing violation on Windows clears as soon as the pending delete
+	// completes; anything that outlasts this many polls is a real error.
+	lockTransientRetries = 10
+)
+
+// acquireLock serializes provisioning of one artifact across processes via an
+// O_EXCL sentinel. The holder heartbeats the lock while it works, so a healthy
+// but slow download (ggml-small.bin on a thin link) is never mistaken for a
+// crashed one and stolen mid-flight.
+func acquireLock(dest string) (func(), error) {
+	lock := dest + ".lock"
+	deadline := time.Now().Add(lockWait)
+	transient := 0
+	for {
+		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			fmt.Fprintf(f, "%d", os.Getpid())
+			f.Close()
+			return holdLock(lock), nil
+		}
+		if os.IsExist(err) {
+			transient = 0
+			if dropStaleLock(lock) {
+				continue
+			}
+		} else {
+			// Windows reports a sharing violation rather than "already exists"
+			// while another process's delete of the lock is still pending, so a
+			// racing acquirer must retry instead of treating it as fatal.
+			transient++
+			if transient > lockTransientRetries {
+				return nil, err
+			}
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out waiting for %s (another podcli may be provisioning; delete the file if not)", lock)
+		}
+		time.Sleep(lockPoll)
+	}
+}
+
+// holdLock keeps the lock's mtime fresh until the returned unlock runs.
+func holdLock(lock string) func() {
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(lockHeartbeat)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				now := time.Now()
+				os.Chtimes(lock, now, now)
+			case <-done:
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(done)
+			os.Remove(lock)
+		})
+	}
+}
+
+// dropStaleLock removes a lock whose holder stopped heartbeating, reporting
+// whether it did. Removal is itself serialized by an O_EXCL takeover token:
+// otherwise two processes seeing the same stale lock both remove and recreate
+// it, the second deleting the first's fresh lock, and both then append to the
+// same .part file.
+func dropStaleLock(lock string) bool {
+	token := lock + ".takeover"
+	if fi, err := os.Stat(token); err == nil && time.Since(fi.ModTime()) > lockStale {
+		os.Remove(token) // a process died mid-takeover; retry the takeover next pass
+		return false
+	}
+	f, err := os.OpenFile(token, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return false // another process is taking over; wait for its lock instead
+	}
+	f.Close()
+	defer os.Remove(token)
+	fi, err := os.Stat(lock)
+	if err != nil || time.Since(fi.ModTime()) <= lockStale {
+		return false
+	}
+	return os.Remove(lock) == nil
+}
+
+func download(url, dest, wantSHA, label string) error {
 	if wantSHA == "" {
-		fmt.Fprintf(os.Stderr, "  (no pinned checksum for %s - skipped verification)\n", label)
-		return nil
+		return fmt.Errorf("no pinned checksum for %s - refusing unverified download", label)
+	}
+	if err := fetch(url, dest, label, downloadHTTPClient()); err != nil {
+		return err
 	}
 	got, err := sha256file(dest)
 	if err != nil {
@@ -130,19 +283,16 @@ func download(url, dest, wantSHA, label string) error {
 }
 
 // verifyDownload checks a downloaded archive against an upstream sha256sum-style
-// manifest. Fails closed on a mismatch (removes the file); fails open with a
-// warning when the manifest or its entry can't be fetched, so a transient
-// network issue on the sums file doesn't block provisioning.
+// manifest. Fails closed: a manifest that can't be fetched or has no entry for
+// the asset means the download cannot be trusted.
 func verifyDownload(archive, sumsURL, name string) error {
 	resp, err := downloadHTTPClient().Get(sumsURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  (could not fetch checksums for %s - skipped verification)\n", name)
-		return nil
+		return fmt.Errorf("cannot verify %s: fetching checksums failed: %w", name, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "  (no checksums for %s - skipped verification)\n", name)
-		return nil
+		return fmt.Errorf("cannot verify %s: HTTP %d fetching checksums", name, resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
@@ -150,8 +300,7 @@ func verifyDownload(archive, sumsURL, name string) error {
 	}
 	want := ParseChecksums(data)[name]
 	if want == "" {
-		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s - skipped verification)\n", name)
-		return nil
+		return fmt.Errorf("cannot verify %s: no entry in upstream checksums", name)
 	}
 	got, err := sha256file(archive)
 	if err != nil {
@@ -164,7 +313,9 @@ func verifyDownload(archive, sumsURL, name string) error {
 	return nil
 }
 
-func downloadOnce(url, tmp, label string) (bool, error) {
+func validatorPath(tmp string) string { return tmp + ".validator" }
+
+func downloadOnce(url, tmp, label string, client *http.Client) (bool, error) {
 	var start int64
 	if fi, err := os.Stat(tmp); err == nil {
 		start = fi.Size()
@@ -176,8 +327,13 @@ func downloadOnce(url, tmp, label string) (bool, error) {
 	}
 	if start > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", start))
+		// If-Range makes the server ignore Range when the file changed upstream,
+		// so a resumed .part can't end up stitched from two different builds.
+		if v, err := os.ReadFile(validatorPath(tmp)); err == nil && len(v) > 0 {
+			req.Header.Set("If-Range", strings.TrimSpace(string(v)))
+		}
 	}
-	resp, err := downloadHTTPClient().Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, err
 	}
@@ -187,9 +343,16 @@ func downloadOnce(url, tmp, label string) (bool, error) {
 	case http.StatusRequestedRangeNotSatisfiable:
 		return true, nil // already complete on disk
 	case http.StatusOK:
-		if start > 0 { // server ignored Range — restart cleanly
+		if start > 0 { // server ignored Range or the file changed — restart cleanly
 			os.Truncate(tmp, 0)
 			start = 0
+		}
+		if v := resp.Header.Get("ETag"); v != "" {
+			os.WriteFile(validatorPath(tmp), []byte(v), 0o644)
+		} else if v := resp.Header.Get("Last-Modified"); v != "" {
+			os.WriteFile(validatorPath(tmp), []byte(v), 0o644)
+		} else {
+			os.Remove(validatorPath(tmp))
 		}
 	case http.StatusPartialContent:
 	default:
@@ -202,14 +365,48 @@ func downloadOnce(url, tmp, label string) (bool, error) {
 	}
 	defer out.Close()
 
+	body := newStallGuard(resp.Body, 60*time.Second)
+	defer body.stop()
 	pw := &progress{label: label, total: start + resp.ContentLength, written: start}
-	_, copyErr := io.Copy(io.MultiWriter(out, pw), resp.Body)
+	_, copyErr := io.Copy(io.MultiWriter(out, pw), body)
 	if copyErr != nil {
 		return false, copyErr
 	}
 	pw.done()
 	return true, nil
 }
+
+// stallGuard aborts a body read that stops delivering bytes: the timer closes
+// the connection, which surfaces here as a stall error and triggers the retry
+// loop in fetch.
+type stallGuard struct {
+	body    io.ReadCloser
+	timeout time.Duration
+	timer   *time.Timer
+	stalled atomic.Bool
+}
+
+func newStallGuard(body io.ReadCloser, timeout time.Duration) *stallGuard {
+	g := &stallGuard{body: body, timeout: timeout}
+	g.timer = time.AfterFunc(timeout, func() {
+		g.stalled.Store(true)
+		body.Close()
+	})
+	return g
+}
+
+func (g *stallGuard) Read(p []byte) (int, error) {
+	n, err := g.body.Read(p)
+	if n > 0 {
+		g.timer.Reset(g.timeout)
+	}
+	if err != nil && err != io.EOF && g.stalled.Load() {
+		return n, fmt.Errorf("stalled: no data for %s", g.timeout)
+	}
+	return n, err
+}
+
+func (g *stallGuard) stop() { g.timer.Stop() }
 
 // symlinkTargetInside reports whether a symlink at linkPath pointing to linkname
 // resolves within root (root has a trailing separator). Absolute targets and
@@ -274,26 +471,47 @@ func sha256file(path string) (string, error) {
 }
 
 type ffArchive struct {
-	URL  string
-	Bins []string
+	URL    string
+	SHA256 string
+	Bins   []string
 }
 
-// Static ffmpeg sources are not yet pinned by checksum (upstream "latest" URLs).
+// Pinned, versioned upstream archives, verified by SHA-256 before extraction.
 // darwin/arm64 is absent on purpose: evermeet.cx only builds x86_64, so Apple
 // Silicon is served by our own release asset (see releaseFFmpeg).
 var ffmpegSpecs = map[string][]ffArchive{
 	"darwin/amd64": {
-		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip", Bins: []string{"ffmpeg"}},
-		{URL: "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip", Bins: []string{"ffprobe"}},
+		{
+			URL:    "https://evermeet.cx/ffmpeg/ffmpeg-8.1.2.zip",
+			SHA256: "e91df72a1ee7c26606f90dd2dd4dcccc6a75140ff9ea6fdd50faae828b82ba69",
+			Bins:   []string{"ffmpeg"},
+		},
+		{
+			URL:    "https://evermeet.cx/ffmpeg/ffprobe-8.1.2.zip",
+			SHA256: "399b93f0b9862f69767afa343e90c2f48d7e7958cadbb6deb76a012d0e3b7ce3",
+			Bins:   []string{"ffprobe"},
+		},
 	},
 	"linux/amd64": {
-		{URL: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz", Bins: []string{"ffmpeg", "ffprobe"}},
+		{
+			URL:    "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz",
+			SHA256: "28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5",
+			Bins:   []string{"ffmpeg", "ffprobe"},
+		},
 	},
 	"linux/arm64": {
-		{URL: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz", Bins: []string{"ffmpeg", "ffprobe"}},
+		{
+			URL:    "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-arm64-static.tar.xz",
+			SHA256: "7dbd8e2f47bd83de591b9d6ea70e67d32d9aa97e7d47ae402b60c2fe3fd4d0ab",
+			Bins:   []string{"ffmpeg", "ffprobe"},
+		},
 	},
 	"windows/amd64": {
-		{URL: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip", Bins: []string{"ffmpeg.exe", "ffprobe.exe"}},
+		{
+			URL:    "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-12-13-16/ffmpeg-n8.1.2-22-g94138f6973-win64-gpl-8.1.zip",
+			SHA256: "cb11f1a2628555d1ce3de984ae1dd488a26d85092d23219c574de76efbe2a62e",
+			Bins:   []string{"ffmpeg.exe", "ffprobe.exe"},
+		},
 	},
 }
 
@@ -303,10 +521,40 @@ func WhisperCLIBin() string {
 	return filepath.Join(paths.RuntimeDir(), "whisper", "whisper-cli"+paths.ExeSuffix())
 }
 
-func latestReleaseAssets() (map[string]string, error) {
-	req, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+podcliRepo+"/releases/latest", nil)
+// githubAPIGet fetches a GitHub API URL, authenticating with GITHUB_TOKEN when
+// set so provisioning doesn't burn the 60/hour unauthenticated quota.
+func githubAPIGet(url string) (*http.Response, error) {
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	resp, err := releaseHTTPClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+		resp.Body.Close()
+		return nil, fmt.Errorf("GitHub rate limit (HTTP %d) - retry later or set GITHUB_TOKEN", resp.StatusCode)
+	}
+	return resp, nil
+}
+
+var releaseAssetsOnce sync.Once
+var releaseAssetsMap map[string]string
+var releaseAssetsErr error
+
+// latestReleaseAssets is fetched once per process: setup asks for it per
+// artifact, and unauthenticated GitHub API calls are rate limited.
+func latestReleaseAssets() (map[string]string, error) {
+	releaseAssetsOnce.Do(func() {
+		releaseAssetsMap, releaseAssetsErr = fetchLatestReleaseAssets()
+	})
+	return releaseAssetsMap, releaseAssetsErr
+}
+
+func fetchLatestReleaseAssets() (map[string]string, error) {
+	resp, err := githubAPIGet("https://api.github.com/repos/" + podcliRepo + "/releases/latest")
 	if err != nil {
 		return nil, err
 	}
@@ -352,19 +600,30 @@ func allowedReleaseHost(h string) bool {
 	return strings.HasSuffix(h, ".githubusercontent.com")
 }
 
-func releaseHTTPClient() *http.Client {
+// ErrUntrustedRedirect marks a download diverted off its allowlist. Callers that
+// wrap Fetch in a retry loop must not treat it as a transient failure.
+var ErrUntrustedRedirect = errors.New("refusing redirect to untrusted host")
+
+func guardedHTTPClient(allowHost func(string) bool, headerTimeout time.Duration) *http.Client {
 	return &http.Client{
-		Transport: &http.Transport{ResponseHeaderTimeout: 30 * time.Second},
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			ResponseHeaderTimeout: headerTimeout,
+		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
 			}
-			if !allowedReleaseHost(req.URL.Hostname()) {
-				return fmt.Errorf("refusing redirect to untrusted host %q", req.URL.Hostname())
+			if !allowHost(req.URL.Hostname()) {
+				return fmt.Errorf("%w %q", ErrUntrustedRedirect, req.URL.Hostname())
 			}
 			return nil
 		},
 	}
+}
+
+func releaseHTTPClient() *http.Client {
+	return guardedHTTPClient(allowedReleaseHost, 30*time.Second)
 }
 
 // allowedDownloadHost pins large-binary/model downloads to their known source
@@ -391,18 +650,7 @@ func allowedDownloadHost(h string) bool {
 }
 
 func downloadHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{ResponseHeaderTimeout: 60 * time.Second},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("too many redirects")
-			}
-			if !allowedDownloadHost(req.URL.Hostname()) {
-				return fmt.Errorf("refusing redirect to untrusted host %q", req.URL.Hostname())
-			}
-			return nil
-		},
-	}
+	return guardedHTTPClient(allowedDownloadHost, 60*time.Second)
 }
 
 func httpGetBytes(url string) ([]byte, error) {
@@ -418,24 +666,21 @@ func httpGetBytes(url string) ([]byte, error) {
 }
 
 // verifyReleaseAsset checks the file at path against the release's checksums.txt.
-// It fails closed on a real checksum mismatch, but fails open (with a warning)
-// when checksums.txt or the asset's entry is absent — so a release published
-// before checksum manifests, or a CI hiccup, never bricks an install.
+// Fails closed: checksums.txt is published with every release, so a missing
+// manifest, a failed fetch, or a missing entry all mean the asset can't be
+// trusted.
 func verifyReleaseAsset(assets map[string]string, assetName, path string) error {
 	sumsURL, ok := assets["checksums.txt"]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "  (no checksums.txt in release - skipped verification of %s)\n", assetName)
-		return nil
+		return fmt.Errorf("cannot verify %s: release has no checksums.txt (it is published with every release - retry later)", assetName)
 	}
 	data, err := httpGetBytes(sumsURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  (could not fetch checksums.txt: %v - skipped verification of %s)\n", err, assetName)
-		return nil
+		return fmt.Errorf("cannot verify %s: fetching checksums.txt failed: %w", assetName, err)
 	}
 	want, ok := ParseChecksums(data)[assetName]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s - skipped verification)\n", assetName)
-		return nil
+		return fmt.Errorf("cannot verify %s: no entry in checksums.txt", assetName)
 	}
 	got, err := sha256file(path)
 	if err != nil {
@@ -466,7 +711,7 @@ func EnsureWhisperCpp() (string, error) {
 	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 		return "", err
 	}
-	if err := fetch(url, bin, "whisper-cli"); err != nil {
+	if err := fetch(url, bin, "whisper-cli", downloadHTTPClient()); err != nil {
 		return "", err
 	}
 	if err := verifyReleaseAsset(assets, name, bin); err != nil {
@@ -503,13 +748,15 @@ func EnsureFFmpeg() (string, error) {
 		return "", fmt.Errorf("no ffmpeg build for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	for _, a := range specs {
-		sum := sha256.Sum256([]byte(a.URL))
-		archive := filepath.Join(os.TempDir(), "podcli-ff-"+hex.EncodeToString(sum[:8]))
-		if err := fetch(a.URL, archive, "ffmpeg-archive"); err != nil {
+		archive, err := downloadPath(a.URL, "ffmpeg-archive")
+		if err != nil {
 			return "", err
 		}
-		err := extractBins(archive, a.Bins, dir)
-		os.Remove(archive)
+		if err := download(a.URL, archive, a.SHA256, "ffmpeg-archive"); err != nil {
+			return "", err
+		}
+		err = extractBins(archive, a.Bins, dir)
+		removeArchive(archive)
 		if err != nil {
 			return "", err
 		}
@@ -535,7 +782,7 @@ func releaseFFmpeg() error {
 			return fmt.Errorf("asset %s not in latest release", name)
 		}
 		os.Remove(bin)
-		if err := fetch(url, bin, tool); err != nil {
+		if err := fetch(url, bin, tool, downloadHTTPClient()); err != nil {
 			return err
 		}
 		if err := verifyReleaseAsset(assets, name, bin); err != nil {
@@ -689,9 +936,7 @@ func pythonAssetURL() (url, name, sumsURL string, err error) {
 	if !ok {
 		return "", "", "", fmt.Errorf("no python build for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	req, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest", nil)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := releaseHTTPClient().Do(req)
+	resp, err := githubAPIGet("https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest")
 	if err != nil {
 		return "", "", "", err
 	}
@@ -743,18 +988,21 @@ func EnsurePython(requirements string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		sum := sha256.Sum256([]byte(url))
-		archive := filepath.Join(os.TempDir(), "podcli-py-"+hex.EncodeToString(sum[:8])+".tar.gz")
-		if err := fetch(url, archive, "cpython"); err != nil {
+		archive, err := downloadPath(url, "cpython.tar.gz")
+		if err != nil {
 			return "", err
 		}
-		if sumsURL != "" {
-			if err := verifyDownload(archive, sumsURL, name); err != nil {
-				return "", err
-			}
+		if err := fetch(url, archive, "cpython", downloadHTTPClient()); err != nil {
+			return "", err
+		}
+		if sumsURL == "" {
+			return "", fmt.Errorf("cannot verify %s: release has no SHA256SUMS asset", name)
+		}
+		if err := verifyDownload(archive, sumsURL, name); err != nil {
+			return "", err
 		}
 		err = extractTarGz(archive, paths.RuntimeDir())
-		os.Remove(archive)
+		removeArchive(archive)
 		if err != nil {
 			return "", err
 		}
@@ -901,18 +1149,38 @@ func extractTarGz(archive, dest string) error {
 	return nil
 }
 
+// stderrIsTTY gates \r-style in-place progress: piped to a file or CI log, the
+// carriage returns would pile up as one unreadable line, so non-TTY output gets
+// periodic full lines instead.
+var stderrIsTTY = func() bool {
+	fi, err := os.Stderr.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}()
+
 type progress struct {
 	label    string
 	total    int64
 	written  int64
 	lastPct  int
 	lastTick time.Time
+	lastLine time.Time
 }
 
 func (p *progress) Write(b []byte) (int, error) {
 	n := len(b)
 	p.written += int64(n)
 	now := time.Now()
+	if !stderrIsTTY {
+		if now.Sub(p.lastLine) >= 5*time.Second {
+			p.lastLine = now
+			if p.total > 0 {
+				fmt.Fprintf(os.Stderr, "  fetching %s ... %d%% (%d/%d MB)\n", p.label, int(p.written*100/p.total), p.written>>20, p.total>>20)
+			} else {
+				fmt.Fprintf(os.Stderr, "  fetching %s ... %d MB\n", p.label, p.written>>20)
+			}
+		}
+		return n, nil
+	}
 	if now.Sub(p.lastTick) < 200*time.Millisecond {
 		return n, nil
 	}
@@ -930,5 +1198,9 @@ func (p *progress) Write(b []byte) (int, error) {
 }
 
 func (p *progress) done() {
+	if !stderrIsTTY {
+		fmt.Fprintf(os.Stderr, "  fetching %s ... done (%d MB)\n", p.label, p.written>>20)
+		return
+	}
 	fmt.Fprintf(os.Stderr, "\r  fetching %s ... done (%d MB)%s\n", p.label, p.written>>20, "          ")
 }
