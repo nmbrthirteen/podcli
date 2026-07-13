@@ -53,9 +53,6 @@ func writeBundleStamp(dir, version string) {
 
 func EnsureNode() (string, error) {
 	bin := NodeBin()
-	if have(bin) {
-		return bin, nil
-	}
 	triple, ok := nodeTriples[runtime.GOOS+"/"+runtime.GOARCH]
 	if !ok {
 		return "", fmt.Errorf("no node build for %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -66,15 +63,21 @@ func EnsureNode() (string, error) {
 	}
 	base := fmt.Sprintf("node-v%s-%s", nodeVersion, triple)
 	url := fmt.Sprintf("https://nodejs.org/dist/v%s/%s.%s", nodeVersion, base, ext)
+	sumsURL := fmt.Sprintf("https://nodejs.org/dist/v%s/SHASUMS256.txt", nodeVersion)
+	want, err := downloadChecksum(sumsURL, base+"."+ext)
+	if err != nil {
+		return "", err
+	}
+	key := base + "|" + want
+	if nativeBin(bin) && artifactAt(NodeDir(), key, bin) {
+		return bin, nil
+	}
 	archive, err := downloadPath(url, base+"."+ext)
 	if err != nil {
 		return "", err
 	}
-	if err := fetch(url, archive, "node", downloadHTTPClient()); err != nil {
-		return "", err
-	}
 	defer removeArchive(archive)
-	if err := verifyDownload(archive, fmt.Sprintf("https://nodejs.org/dist/v%s/SHASUMS256.txt", nodeVersion), base+"."+ext); err != nil {
+	if err := download(url, archive, want, "node"); err != nil {
 		return "", err
 	}
 	if err := os.RemoveAll(NodeDir()); err != nil {
@@ -93,6 +96,9 @@ func EnsureNode() (string, error) {
 	}
 	if !have(bin) {
 		return "", fmt.Errorf("node missing after extraction in %s", NodeDir())
+	}
+	if err := writeArtifactState(NodeDir(), key, bin); err != nil {
+		return "", err
 	}
 	return bin, nil
 }

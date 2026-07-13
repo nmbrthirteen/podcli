@@ -7,36 +7,67 @@ type ProgressCallback = (event: ProgressEvent) => void;
 
 const isWindows = process.platform === "win32";
 
-export function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
-  if (proc.pid === undefined) return;
+type ProcessTreeOptions = {
+  platform?: NodeJS.Platform;
+  spawnProcess?: typeof spawn;
+};
+
+function hasExited(proc: ChildProcess): boolean {
+  return proc.exitCode !== null || proc.signalCode !== null;
+}
+
+export function killProcessTree(
+  proc: ChildProcess,
+  signal: NodeJS.Signals,
+  options: ProcessTreeOptions = {}
+): void {
+  if (proc.pid === undefined || hasExited(proc)) return;
+  const platform = options.platform ?? process.platform;
   try {
-    // Negative pid kills the whole group — the child is a detached group
-    // leader, so its ffmpeg/whisper children die with it.
-    if (isWindows) proc.kill(signal);
-    else process.kill(-proc.pid, signal);
-  } catch {
-    // Already exited.
-  }
+    if (platform === "win32") {
+      const taskkill = (options.spawnProcess ?? spawn)(
+        "taskkill",
+        ["/pid", String(proc.pid), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true }
+      );
+      taskkill.once("error", () => undefined);
+    } else process.kill(-proc.pid, signal);
+  } catch {}
 }
 
 const KILL_GRACE_MS = 2000;
 
-// SIGTERM, then SIGKILL if the tree is still up. The escalation is cancelled on
-// exit: the OS can hand the pid to an unrelated process, and killProcessTree
-// signals the whole group (-pid), so a late SIGKILL would take that one out.
-export function terminateProcessTree(proc: ChildProcess, graceMs = KILL_GRACE_MS): void {
-  killProcessTree(proc, "SIGTERM");
-  if (proc.exitCode !== null || proc.signalCode !== null) return;
+export function terminateProcessTree(
+  proc: ChildProcess,
+  graceMs = KILL_GRACE_MS,
+  options: ProcessTreeOptions = {}
+): void {
+  if (hasExited(proc)) return;
+  const platform = options.platform ?? process.platform;
+  if (platform === "win32") {
+    killProcessTree(proc, "SIGKILL", options);
+    return;
+  }
 
   let exited = false;
-  const escalation = setTimeout(() => {
-    if (!exited) killProcessTree(proc, "SIGKILL");
+  let escalation: NodeJS.Timeout | undefined;
+  const onExit = (): void => {
+    exited = true;
+    if (escalation) clearTimeout(escalation);
+  };
+  proc.once("exit", onExit);
+  if (hasExited(proc)) {
+    proc.removeListener("exit", onExit);
+    return;
+  }
+
+  killProcessTree(proc, "SIGTERM", options);
+  if (exited || hasExited(proc)) return;
+
+  escalation = setTimeout(() => {
+    if (!exited && !hasExited(proc)) killProcessTree(proc, "SIGKILL", options);
   }, graceMs);
   escalation.unref();
-  proc.once("exit", () => {
-    exited = true;
-    clearTimeout(escalation);
-  });
 }
 
 // Prefer the last traceback block — that's where the actual failure is —

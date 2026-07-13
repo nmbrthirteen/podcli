@@ -51,6 +51,73 @@ func TestHeldLockIsNotStolenAfterStaleWindow(t *testing.T) {
 	unlock2()
 }
 
+func TestSupersededOwnerCannotHeartbeatOrReleaseReplacement(t *testing.T) {
+	shortLockTimings(t, 400*time.Millisecond, 500*time.Millisecond)
+	dest := filepath.Join(t.TempDir(), "artifact")
+	lock := dest + ".lock"
+
+	unlock, err := acquireLock(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lock, []byte("replacement-owner"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	replacementTime := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(lock, replacementTime, replacementTime); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(3 * lockHeartbeat)
+	info, err := os.Stat(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(replacementTime) {
+		t.Fatalf("superseded owner heartbeated replacement lock: got %v want %v", info.ModTime(), replacementTime)
+	}
+	unlock()
+	got, err := os.ReadFile(lock)
+	if err != nil {
+		t.Fatalf("superseded owner removed replacement lock: %v", err)
+	}
+	if string(got) != "replacement-owner" {
+		t.Fatalf("replacement ownership changed to %q", got)
+	}
+}
+
+func TestLockOwnersReceiveUniqueTokens(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "artifact")
+	lock := dest + ".lock"
+
+	unlock, err := acquireLock(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.ReadFile(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+
+	unlock, err = acquireLock(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+
+	if string(first) == string(second) {
+		t.Fatalf("lock ownership token was reused: %q", first)
+	}
+}
+
 func TestStaleLockTakeoverIsExclusive(t *testing.T) {
 	// Stale window well past the hold time, so a winner's lock is fresh on its
 	// own creation stamp and exclusivity does not hinge on heartbeat scheduling.

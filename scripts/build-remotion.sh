@@ -17,41 +17,9 @@ rm -rf "$out"
 mkdir -p "$out"
 cp -R "$here/remotion" "$out/remotion"
 cp "$here/tsconfig.json" "$out/tsconfig.json" 2>/dev/null || true
-
-# Pin exact versions from the root lockfile so every release ships the tree we
-# test against instead of whatever the caret range resolves to on release day.
-locked() {
-  v=$(cd "$here" && node -p "require('./package-lock.json').packages['node_modules/$1'].version" 2>/dev/null)
-  if [ -z "$v" ] || [ "$v" = "undefined" ]; then
-    echo "build-remotion: $1 not found in package-lock.json" >&2
-    exit 1
-  fi
-  printf '%s' "$v"
-}
-
-remotion_bundler=$(locked "@remotion/bundler")
-remotion_renderer=$(locked "@remotion/renderer")
-remotion_core=$(locked "remotion")
-react=$(locked "react")
-react_dom=$(locked "react-dom")
-dm_sans=$(locked "@fontsource/dm-sans")
-
-cat > "$out/package.json" <<JSON
-{
-  "name": "podcli-remotion-bundle",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@remotion/bundler": "$remotion_bundler",
-    "@remotion/renderer": "$remotion_renderer",
-    "remotion": "$remotion_core",
-    "react": "$react",
-    "react-dom": "$react_dom",
-    "@fontsource/dm-sans": "$dm_sans"
-  }
-}
-JSON
+mv "$out/remotion/package.json" "$out/package.json"
+mv "$out/remotion/package-lock.json" "$out/package-lock.json"
 
 cd "$out"
-npm install --omit=dev --no-audit --no-fund --no-package-lock
+npm ci --omit=dev --no-audit --no-fund
 echo "remotion bundle -> $out"

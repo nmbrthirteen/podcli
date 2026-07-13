@@ -1,6 +1,7 @@
 package provision
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -16,6 +18,61 @@ func TestDownloadRequiresPinnedChecksum(t *testing.T) {
 	err := download("https://example.invalid/x", filepath.Join(t.TempDir(), "x"), "", "x")
 	if err == nil || !strings.Contains(err.Error(), "no pinned checksum") {
 		t.Fatalf("download with empty checksum should hard-error, got %v", err)
+	}
+}
+
+func TestDownloadReplacesExistingChecksumMismatch(t *testing.T) {
+	payload := []byte("verified payload")
+	want := fmt.Sprintf("%x", sha256.Sum256(payload))
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write(payload)
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "model.bin")
+	if err := os.WriteFile(dest, []byte("unverified payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := download(srv.URL, dest, want, "model"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("download retained existing payload: %q", got)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("replacement download hits = %d, want 1", hits.Load())
+	}
+}
+
+func TestArtifactStateRequiresMatchingKeyAndContents(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "tool")
+	if err := os.WriteFile(bin, []byte("verified"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if artifactAt(dir, "release-a", bin) {
+		t.Fatal("artifact without verification state was trusted")
+	}
+	if err := writeArtifactState(dir, "release-a", bin); err != nil {
+		t.Fatal(err)
+	}
+	if !artifactAt(dir, "release-a", bin) {
+		t.Fatal("matching verified artifact was rejected")
+	}
+	if artifactAt(dir, "release-b", bin) {
+		t.Fatal("artifact verified for an older release was trusted")
+	}
+	if err := os.WriteFile(bin, []byte("mutated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if artifactAt(dir, "release-a", bin) {
+		t.Fatal("mutated artifact was trusted")
 	}
 }
 
