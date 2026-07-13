@@ -5,6 +5,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -27,6 +28,11 @@ import (
 type model struct {
 	URL    string
 	SHA256 string
+}
+
+type artifactState struct {
+	Key   string            `json:"key"`
+	Files map[string]string `json:"files"`
 }
 
 var models = map[string]model{
@@ -64,9 +70,6 @@ func have(p string) bool {
 
 func EnsureModel(size string) (string, error) {
 	dest := ModelPath(size)
-	if have(dest) {
-		return dest, nil
-	}
 	m, ok := models[size]
 	if !ok {
 		return "", fmt.Errorf("unknown model size %q (known: base, tiny.en, small)", size)
@@ -79,9 +82,6 @@ func EnsureModel(size string) (string, error) {
 
 func EnsureVADModel() (string, error) {
 	dest := VADModelPath()
-	if have(dest) {
-		return dest, nil
-	}
 	if err := download(vadURL, dest, vadSHA, "silero-vad"); err != nil {
 		return "", err
 	}
@@ -188,11 +188,36 @@ func acquireLock(dest string) (func(), error) {
 	deadline := time.Now().Add(lockWait)
 	transient := 0
 	for {
+		if _, err := os.Stat(lock + ".takeover"); err == nil {
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("timed out waiting for %s (another podcli may be provisioning; delete the file if not)", lock)
+			}
+			time.Sleep(lockPoll)
+			continue
+		}
+		token, err := ownershipToken()
+		if err != nil {
+			return nil, err
+		}
 		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
-			fmt.Fprintf(f, "%d", os.Getpid())
-			f.Close()
-			return holdLock(lock), nil
+			if _, err := f.WriteString(token); err != nil {
+				f.Close()
+				os.Remove(lock)
+				return nil, err
+			}
+			if err := f.Sync(); err != nil {
+				f.Close()
+				os.Remove(lock)
+				return nil, err
+			}
+			if _, err := os.Stat(lock + ".takeover"); err == nil {
+				f.Close()
+				removeOwnedLock(lock, token)
+				time.Sleep(lockPoll)
+				continue
+			}
+			return holdLock(lock, token, f), nil
 		}
 		if os.IsExist(err) {
 			transient = 0
@@ -216,16 +241,17 @@ func acquireLock(dest string) (func(), error) {
 }
 
 // holdLock keeps the lock's mtime fresh until the returned unlock runs.
-func holdLock(lock string) func() {
+func holdLock(lock, token string, f *os.File) func() {
 	done := make(chan struct{})
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		t := time.NewTicker(lockHeartbeat)
 		defer t.Stop()
 		for {
 			select {
 			case <-t.C:
-				now := time.Now()
-				os.Chtimes(lock, now, now)
+				f.WriteAt([]byte(token), 0)
 			case <-done:
 				return
 			}
@@ -235,9 +261,35 @@ func holdLock(lock string) func() {
 	return func() {
 		once.Do(func() {
 			close(done)
-			os.Remove(lock)
+			<-stopped
+			f.Close()
+			removeOwnedLock(lock, token)
 		})
 	}
+}
+
+func ownershipToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func lockOwner(lock string) (string, error) {
+	b, err := os.ReadFile(lock)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+func removeOwnedLock(lock, token string) bool {
+	owner, err := lockOwner(lock)
+	if err != nil || owner != token {
+		return false
+	}
+	return os.Remove(lock) == nil
 }
 
 // dropStaleLock removes a lock whose holder stopped heartbeating, reporting
@@ -248,25 +300,53 @@ func holdLock(lock string) func() {
 func dropStaleLock(lock string) bool {
 	token := lock + ".takeover"
 	if fi, err := os.Stat(token); err == nil && time.Since(fi.ModTime()) > lockStale {
-		os.Remove(token) // a process died mid-takeover; retry the takeover next pass
+		if owner, readErr := lockOwner(token); readErr == nil {
+			removeOwnedLock(token, owner)
+		}
+		return false
+	}
+	takeoverOwner, err := ownershipToken()
+	if err != nil {
 		return false
 	}
 	f, err := os.OpenFile(token, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return false // another process is taking over; wait for its lock instead
 	}
+	if _, err := f.WriteString(takeoverOwner); err != nil {
+		f.Close()
+		removeOwnedLock(token, takeoverOwner)
+		return false
+	}
 	f.Close()
-	defer os.Remove(token)
+	defer removeOwnedLock(token, takeoverOwner)
 	fi, err := os.Stat(lock)
 	if err != nil || time.Since(fi.ModTime()) <= lockStale {
 		return false
 	}
-	return os.Remove(lock) == nil
+	owner, err := lockOwner(lock)
+	if err != nil {
+		return false
+	}
+	fi, err = os.Stat(lock)
+	if err != nil || time.Since(fi.ModTime()) <= lockStale {
+		return false
+	}
+	return removeOwnedLock(lock, owner)
 }
 
 func download(url, dest, wantSHA, label string) error {
 	if wantSHA == "" {
 		return fmt.Errorf("no pinned checksum for %s - refusing unverified download", label)
+	}
+	if have(dest) {
+		got, err := sha256file(dest)
+		if err == nil && strings.EqualFold(got, wantSHA) {
+			return nil
+		}
+		if err := os.Remove(dest); err != nil {
+			return fmt.Errorf("remove unverified %s: %w", label, err)
+		}
 	}
 	if err := fetch(url, dest, label, downloadHTTPClient()); err != nil {
 		return err
@@ -282,25 +362,63 @@ func download(url, dest, wantSHA, label string) error {
 	return nil
 }
 
+func artifactStatePath(dir string) string {
+	return filepath.Join(dir, ".podcli-artifacts")
+}
+
+func artifactAt(dir, key string, files ...string) bool {
+	b, err := os.ReadFile(artifactStatePath(dir))
+	if err != nil {
+		return false
+	}
+	var state artifactState
+	if json.Unmarshal(b, &state) != nil || state.Key != key || len(state.Files) != len(files) {
+		return false
+	}
+	for _, file := range files {
+		rel, err := filepath.Rel(dir, file)
+		if err != nil {
+			return false
+		}
+		got, err := sha256file(file)
+		if err != nil || !strings.EqualFold(got, state.Files[rel]) {
+			return false
+		}
+	}
+	return true
+}
+
+func writeArtifactState(dir, key string, files ...string) error {
+	state := artifactState{Key: key, Files: make(map[string]string, len(files))}
+	for _, file := range files {
+		rel, err := filepath.Rel(dir, file)
+		if err != nil {
+			return err
+		}
+		sum, err := sha256file(file)
+		if err != nil {
+			return err
+		}
+		state.Files[rel] = sum
+	}
+	b, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	tmp := artifactStatePath(dir) + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, artifactStatePath(dir))
+}
+
 // verifyDownload checks a downloaded archive against an upstream sha256sum-style
 // manifest. Fails closed: a manifest that can't be fetched or has no entry for
 // the asset means the download cannot be trusted.
 func verifyDownload(archive, sumsURL, name string) error {
-	resp, err := downloadHTTPClient().Get(sumsURL)
-	if err != nil {
-		return fmt.Errorf("cannot verify %s: fetching checksums failed: %w", name, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("cannot verify %s: HTTP %d fetching checksums", name, resp.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	want, err := downloadChecksum(sumsURL, name)
 	if err != nil {
 		return err
-	}
-	want := ParseChecksums(data)[name]
-	if want == "" {
-		return fmt.Errorf("cannot verify %s: no entry in upstream checksums", name)
 	}
 	got, err := sha256file(archive)
 	if err != nil {
@@ -311,6 +429,26 @@ func verifyDownload(archive, sumsURL, name string) error {
 		return fmt.Errorf("checksum mismatch for %s: got %s want %s", name, got, want)
 	}
 	return nil
+}
+
+func downloadChecksum(sumsURL, name string) (string, error) {
+	resp, err := downloadHTTPClient().Get(sumsURL)
+	if err != nil {
+		return "", fmt.Errorf("cannot verify %s: fetching checksums failed: %w", name, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("cannot verify %s: HTTP %d fetching checksums", name, resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return "", err
+	}
+	want := ParseChecksums(data)[name]
+	if want == "" {
+		return "", fmt.Errorf("cannot verify %s: no entry in upstream checksums", name)
+	}
+	return want, nil
 }
 
 func validatorPath(tmp string) string { return tmp + ".validator" }
@@ -670,17 +808,9 @@ func httpGetBytes(url string) ([]byte, error) {
 // manifest, a failed fetch, or a missing entry all mean the asset can't be
 // trusted.
 func verifyReleaseAsset(assets map[string]string, assetName, path string) error {
-	sumsURL, ok := assets["checksums.txt"]
-	if !ok {
-		return fmt.Errorf("cannot verify %s: release has no checksums.txt (it is published with every release - retry later)", assetName)
-	}
-	data, err := httpGetBytes(sumsURL)
+	want, err := releaseAssetChecksum(assets, assetName)
 	if err != nil {
-		return fmt.Errorf("cannot verify %s: fetching checksums.txt failed: %w", assetName, err)
-	}
-	want, ok := ParseChecksums(data)[assetName]
-	if !ok {
-		return fmt.Errorf("cannot verify %s: no entry in checksums.txt", assetName)
+		return err
 	}
 	got, err := sha256file(path)
 	if err != nil {
@@ -693,12 +823,24 @@ func verifyReleaseAsset(assets map[string]string, assetName, path string) error 
 	return nil
 }
 
+func releaseAssetChecksum(assets map[string]string, assetName string) (string, error) {
+	sumsURL, ok := assets["checksums.txt"]
+	if !ok {
+		return "", fmt.Errorf("cannot verify %s: release has no checksums.txt (it is published with every release - retry later)", assetName)
+	}
+	data, err := httpGetBytes(sumsURL)
+	if err != nil {
+		return "", fmt.Errorf("cannot verify %s: fetching checksums.txt failed: %w", assetName, err)
+	}
+	want, ok := ParseChecksums(data)[assetName]
+	if !ok {
+		return "", fmt.Errorf("cannot verify %s: no entry in checksums.txt", assetName)
+	}
+	return want, nil
+}
+
 func EnsureWhisperCpp() (string, error) {
 	bin := WhisperCLIBin()
-	if nativeBin(bin) {
-		return bin, nil
-	}
-	os.Remove(bin)
 	name := fmt.Sprintf("whisper-cli-%s-%s%s", runtime.GOOS, runtime.GOARCH, paths.ExeSuffix())
 	assets, err := latestReleaseAssets()
 	if err != nil {
@@ -708,17 +850,27 @@ func EnsureWhisperCpp() (string, error) {
 	if !ok {
 		return "", fmt.Errorf("asset %s not in latest release", name)
 	}
+	want, err := releaseAssetChecksum(assets, name)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(bin)
+	key := name + "|" + want
+	if nativeBin(bin) && artifactAt(dir, key, bin) {
+		return bin, nil
+	}
+	os.Remove(bin)
 	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 		return "", err
 	}
-	if err := fetch(url, bin, "whisper-cli", downloadHTTPClient()); err != nil {
-		return "", err
-	}
-	if err := verifyReleaseAsset(assets, name, bin); err != nil {
+	if err := download(url, bin, want, "whisper-cli"); err != nil {
 		return "", err
 	}
 	if runtime.GOOS != "windows" {
 		os.Chmod(bin, 0o755)
+	}
+	if err := writeArtifactState(dir, key, bin); err != nil {
+		return "", err
 	}
 	return bin, nil
 }
@@ -733,19 +885,42 @@ func FFprobeBin() string {
 
 func EnsureFFmpeg() (string, error) {
 	bin := FFmpegBin()
-	if nativeBin(bin) && nativeBin(FFprobeBin()) {
-		return bin, nil
-	}
+	probe := FFprobeBin()
 	dir := filepath.Join(paths.RuntimeDir(), "ffmpeg")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-		return bin, releaseFFmpeg()
+		assets, err := latestReleaseAssets()
+		if err != nil {
+			return "", err
+		}
+		key := ""
+		checksums := map[string]string{}
+		for _, tool := range []string{"ffmpeg", "ffprobe"} {
+			name := fmt.Sprintf("%s-%s-%s", tool, runtime.GOOS, runtime.GOARCH)
+			want, err := releaseAssetChecksum(assets, name)
+			if err != nil {
+				return "", err
+			}
+			checksums[name] = want
+			key += name + "|" + want + "\n"
+		}
+		if nativeBin(bin) && nativeBin(probe) && artifactAt(dir, key, bin, probe) {
+			return bin, nil
+		}
+		return bin, releaseFFmpeg(assets, checksums, key)
 	}
 	specs, ok := ffmpegSpecs[runtime.GOOS+"/"+runtime.GOARCH]
 	if !ok {
 		return "", fmt.Errorf("no ffmpeg build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	key := ""
+	for _, spec := range specs {
+		key += spec.URL + "|" + spec.SHA256 + "\n"
+	}
+	if nativeBin(bin) && nativeBin(probe) && artifactAt(dir, key, bin, probe) {
+		return bin, nil
 	}
 	for _, a := range specs {
 		archive, err := downloadPath(a.URL, "ffmpeg-archive")
@@ -764,17 +939,16 @@ func EnsureFFmpeg() (string, error) {
 	if !have(bin) {
 		return "", fmt.Errorf("ffmpeg missing after extraction in %s", dir)
 	}
+	if err := writeArtifactState(dir, key, bin, probe); err != nil {
+		return "", err
+	}
 	return bin, nil
 }
 
 // Apple Silicon builds ship with the release, checksum-verified like whisper-cli.
 // No upstream publishes an arm64 macOS static, so ffmpeg used to arrive as an
 // x86_64 binary that ran under Rosetta at roughly a third of native encode speed.
-func releaseFFmpeg() error {
-	assets, err := latestReleaseAssets()
-	if err != nil {
-		return err
-	}
+func releaseFFmpeg(assets, checksums map[string]string, key string) error {
 	for tool, bin := range map[string]string{"ffmpeg": FFmpegBin(), "ffprobe": FFprobeBin()} {
 		name := fmt.Sprintf("%s-%s-%s", tool, runtime.GOOS, runtime.GOARCH)
 		url, ok := assets[name]
@@ -782,17 +956,14 @@ func releaseFFmpeg() error {
 			return fmt.Errorf("asset %s not in latest release", name)
 		}
 		os.Remove(bin)
-		if err := fetch(url, bin, tool, downloadHTTPClient()); err != nil {
-			return err
-		}
-		if err := verifyReleaseAsset(assets, name, bin); err != nil {
+		if err := download(url, bin, checksums[name], tool); err != nil {
 			return err
 		}
 		if err := os.Chmod(bin, 0o755); err != nil {
 			return fmt.Errorf("chmod %s: %w", bin, err)
 		}
 	}
-	return nil
+	return writeArtifactState(filepath.Dir(FFmpegBin()), key, FFmpegBin(), FFprobeBin())
 }
 
 func extractBins(archive string, bins []string, dest string) error {
@@ -979,26 +1150,28 @@ func pythonAssetURL() (url, name, sumsURL string, err error) {
 
 func EnsurePython(requirements string) (string, error) {
 	bin := PythonBin()
-	if !pythonHealthy(bin) {
-		root := pythonRoot(bin)
+	url, name, sumsURL, err := pythonAssetURL()
+	if err != nil {
+		return "", err
+	}
+	if sumsURL == "" {
+		return "", fmt.Errorf("cannot verify %s: release has no SHA256SUMS asset", name)
+	}
+	want, err := downloadChecksum(sumsURL, name)
+	if err != nil {
+		return "", err
+	}
+	root := pythonRoot(bin)
+	key := name + "|" + want
+	if !pythonHealthy(bin) || !artifactAt(root, key, bin) {
 		if err := os.RemoveAll(root); err != nil {
 			return "", fmt.Errorf("remove corrupted Python runtime %s: %w (close any running podcli or Python subprocesses)", root, err)
-		}
-		url, name, sumsURL, err := pythonAssetURL()
-		if err != nil {
-			return "", err
 		}
 		archive, err := downloadPath(url, "cpython.tar.gz")
 		if err != nil {
 			return "", err
 		}
-		if err := fetch(url, archive, "cpython", downloadHTTPClient()); err != nil {
-			return "", err
-		}
-		if sumsURL == "" {
-			return "", fmt.Errorf("cannot verify %s: release has no SHA256SUMS asset", name)
-		}
-		if err := verifyDownload(archive, sumsURL, name); err != nil {
+		if err := download(url, archive, want, "cpython"); err != nil {
 			return "", err
 		}
 		err = extractTarGz(archive, paths.RuntimeDir())
@@ -1008,6 +1181,9 @@ func EnsurePython(requirements string) (string, error) {
 		}
 		if !pythonHealthy(bin) {
 			return "", fmt.Errorf("python runtime missing stdlib encodings after extraction")
+		}
+		if err := writeArtifactState(root, key, bin); err != nil {
+			return "", err
 		}
 	}
 	if requirements != "" {

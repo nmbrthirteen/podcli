@@ -23,10 +23,45 @@ export interface PreviewChunkOptions {
   splitTail?: boolean;
 }
 
+export interface TranscriptPreviewWord {
+  word?: string;
+  text?: string;
+  start: number;
+  end: number;
+  speaker?: string | null;
+}
+
+export interface PreviewClipBounds {
+  start_second: number;
+  end_second: number;
+}
+
 const BREAK_GAP_SECONDS = 0.8;
 const GAP_FILL_MAX_SECONDS = 0.4;
 const LAST_CHUNK_HOLD_SECONDS = 1.2;
 const TERMINAL_PUNCTUATION = /[.!?…]["')\]]?$/;
+
+export function selectPreviewWords(
+  transcriptWords: TranscriptPreviewWord[] | null | undefined,
+  activeClip?: PreviewClipBounds | null,
+): PreviewWord[] {
+  if (!transcriptWords?.length) return [];
+
+  const words = activeClip
+    ? transcriptWords.filter(
+        (word) => word.end > activeClip.start_second && word.start < activeClip.end_second,
+      )
+    : transcriptWords;
+
+  return words
+    .map((word) => ({
+      text: (word.word ?? word.text ?? "").trim(),
+      start: word.start,
+      end: word.end,
+      speaker: word.speaker,
+    }))
+    .filter((word) => word.text.length > 0);
+}
 
 function breaksAfter(prev: PreviewWord, next: PreviewWord): boolean {
   return (
@@ -99,5 +134,20 @@ export function activePreviewChunk(
   chunks: PreviewChunk[],
   time: number,
 ): PreviewChunk | undefined {
-  return chunks.find((c) => time >= c.start && time < c.displayEnd);
+  let low = 0;
+  let high = chunks.length - 1;
+
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const chunk = chunks[middle];
+    if (time < chunk.start) {
+      high = middle - 1;
+    } else if (time >= chunk.displayEnd) {
+      low = middle + 1;
+    } else {
+      return chunk;
+    }
+  }
+
+  return undefined;
 }
