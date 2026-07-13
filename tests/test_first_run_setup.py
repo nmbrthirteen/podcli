@@ -101,6 +101,17 @@ class GatingTests(unittest.TestCase):
             f.write("# Knowledge base\n")
         self.assertTrue(kb.is_empty(kb_dir))
 
+    def test_main_does_not_dispatch_requested_command_after_cancellation(self):
+        with mock.patch.object(sys, "argv", ["podcli", "info"]), \
+                mock.patch.object(cli_mod, "_auto_migrate_cli"), \
+                mock.patch.object(cli_mod, "_needs_onboarding", return_value=True), \
+                mock.patch.object(cli_mod, "_first_run_setup", return_value=False) as setup, \
+                mock.patch.object(cli_mod, "cmd_info") as info:
+            cli_mod.main()
+
+        setup.assert_called_once_with()
+        info.assert_not_called()
+
 
 def _answering(confirm, answers, choice):
     """Drive questionary through a wizard run without a terminal."""
@@ -132,14 +143,15 @@ class WizardRunTests(unittest.TestCase):
         for p in patches:
             p.start()
         try:
-            cli_mod._first_run_setup()
+            return cli_mod._first_run_setup()
         finally:
             for p in patches:
                 p.stop()
 
     def test_wizard_writes_answers_and_the_remaining_templates(self):
-        self._run()
+        result = self._run()
 
+        self.assertTrue(result)
         created = sorted(os.listdir(self.kb_dir))
         self.assertEqual(len(created), 14)
 
@@ -153,16 +165,38 @@ class WizardRunTests(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.home.name, ".onboarded")))
 
     def test_declining_marks_it_done_and_writes_nothing(self):
-        self._run(confirm=False)
+        result = self._run(confirm=False)
 
+        self.assertTrue(result)
         self.assertFalse(os.path.isdir(self.kb_dir))
         self.assertTrue(os.path.exists(os.path.join(self.home.name, ".onboarded")))
 
     def test_empty_show_name_writes_nothing(self):
-        self._run(answers=["", "", "", "", "", ""])
+        result = self._run(answers=["", "", "", "", "", ""])
 
+        self.assertTrue(result)
         self.assertFalse(os.path.isdir(self.kb_dir))
         self.assertTrue(os.path.exists(os.path.join(self.home.name, ".onboarded")))
+
+    def test_cancelling_setup_confirmation_returns_false(self):
+        result = self._run(confirm=None)
+
+        self.assertFalse(result)
+        self.assertFalse(os.path.exists(os.path.join(self.home.name, ".onboarded")))
+
+    def test_cancelling_a_setup_question_returns_false(self):
+        result = self._run(answers=[ANSWERS["show_name"], None])
+
+        self.assertFalse(result)
+        self.assertFalse(os.path.isdir(self.kb_dir))
+        self.assertFalse(os.path.exists(os.path.join(self.home.name, ".onboarded")))
+
+    def test_cancelling_next_step_returns_false(self):
+        result = self._run(choice=None)
+
+        self.assertFalse(result)
+        self.assertTrue(os.path.isdir(self.kb_dir))
+        self.assertFalse(os.path.exists(os.path.join(self.home.name, ".onboarded")))
 
 
 if __name__ == "__main__":
