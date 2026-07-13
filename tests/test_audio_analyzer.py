@@ -83,5 +83,38 @@ class ComputeEnergyScoresTests(unittest.TestCase):
         self.assertEqual(len(scores), 1)
 
 
+
+class ExtractAudioEnergyCommandTests(unittest.TestCase):
+    def _run(self, wav_path=None):
+        from unittest import mock
+
+        with mock.patch.object(aa, "proc_run", return_value=mock.Mock(returncode=0, stdout="", stderr="")) as mocked, \
+             mock.patch.object(aa, "_fallback_energy", return_value=[]):
+            aa.extract_audio_energy("/video.mp4", wav_path=wav_path)
+        return mocked.call_args.args[0]
+
+    def test_window_is_pinned_with_asetnsamples(self):
+        cmd = self._run()
+        af = cmd[cmd.index("-af") + 1]
+        self.assertIn("asetnsamples=n=16000", af)
+        self.assertIn("astats=metadata=1:reset=1", af)
+
+    def test_uses_shared_wav_when_provided(self):
+        import tempfile
+
+        fd, wav = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        try:
+            cmd = self._run(wav_path=wav)
+            self.assertIn(wav, cmd)
+            self.assertNotIn("/video.mp4", cmd)
+        finally:
+            os.unlink(wav)
+
+    def test_missing_wav_falls_back_to_video(self):
+        cmd = self._run(wav_path="/no/such.wav")
+        self.assertIn("/video.mp4", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -959,6 +959,27 @@ def _pick_tracking_face(
     return face, side_ok or near_anchor
 
 
+def _face_sample_indices(total_frames: int, fps: float) -> list[int]:
+    """Frame indices for face sampling: every frame for the first 0.5s, every
+    other frame until 1s (to catch a face before gestures), then ~10 fps."""
+    sample_step = max(1, int(fps / 10))
+    dense_end_frame = int(fps * 0.5)
+    semi_dense_end_frame = int(fps * 1.0)
+    semi_dense_step = max(1, sample_step // 2)
+
+    indices = []
+    frame_idx = 0
+    while frame_idx < total_frames:
+        indices.append(frame_idx)
+        if frame_idx < dense_end_frame:
+            frame_idx += 1
+        elif frame_idx < semi_dense_end_frame:
+            frame_idx += semi_dense_step
+        else:
+            frame_idx += sample_step
+    return indices
+
+
 def _track_and_crop(
     input_path: str,
     output_path: str,
@@ -1006,31 +1027,26 @@ def _track_and_crop(
         return None
 
     # ── Dense face sampling (~10 fps, 2× at clip start) ──────────
-    sample_step = max(1, int(fps / 10))
-    # Sample every frame for the first 0.5s, then every other frame
-    # until 1s, to maximise the chance of catching a face before gestures.
-    dense_end_frame = int(fps * 0.5)
-    semi_dense_end_frame = int(fps * 1.0)
-    dense_step = 1
-    semi_dense_step = max(1, sample_step // 2)
+    # grab() advances cheaply, retrieve() decodes only sampled frames — far
+    # cheaper than a cap.set() seek (keyframe re-decode) per sample.
+    sample_indices = _face_sample_indices(total_frames, fps)
     detections = []  # [(time, faces), ...]
 
-    frame_idx = 0
-    while frame_idx < total_frames:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = cap.read()
+    next_pos = 0
+    frame_idx = -1
+    while next_pos < len(sample_indices):
+        if not cap.grab():
+            break
+        frame_idx += 1
+        if frame_idx < sample_indices[next_pos]:
+            continue
+        next_pos += 1
+        ret, frame = cap.retrieve()
         if not ret:
-            frame_idx += sample_step
             continue
         t = frame_idx / fps
         faces = detect_faces(detector, frame, width, height)
         detections.append((t, faces))
-        if frame_idx < dense_end_frame:
-            frame_idx += dense_step
-        elif frame_idx < semi_dense_end_frame:
-            frame_idx += semi_dense_step
-        else:
-            frame_idx += sample_step
 
     cap.release()
 

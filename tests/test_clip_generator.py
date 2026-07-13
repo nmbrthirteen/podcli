@@ -158,5 +158,65 @@ class ClipGeneratorTests(unittest.TestCase):
         self.assertEqual(replace_mock.call_count, 2)
 
 
+
+class TransitionAutofixGatingTests(unittest.TestCase):
+    def test_multi_segment_cut_can_jump(self):
+        self.assertTrue(cg._reframe_can_jump(
+            reframe=True, crop_strategy="face",
+            keep_segments=[{"start": 0, "end": 5}, {"start": 8, "end": 12}],
+        ))
+
+    def test_non_reframe_format_cannot_jump(self):
+        self.assertFalse(cg._reframe_can_jump(reframe=False, crop_strategy="face"))
+
+    def test_single_speaker_follow_cannot_jump(self):
+        words = [{"word": "hi", "speaker": "SPEAKER_00"}, {"word": "there", "speaker": "SPEAKER_00"}]
+        self.assertFalse(cg._reframe_can_jump(
+            reframe=True, crop_strategy="face", clip_words=words,
+        ))
+
+    def test_multiple_speakers_can_jump(self):
+        words = [{"word": "hi", "speaker": "SPEAKER_00"}, {"word": "yeah", "speaker": "SPEAKER_01"}]
+        self.assertTrue(cg._reframe_can_jump(
+            reframe=True, crop_strategy="face", clip_words=words,
+        ))
+
+    def test_split_screen_face_map_can_jump(self):
+        self.assertTrue(cg._reframe_can_jump(
+            reframe=True, crop_strategy="face", face_map={"is_split_screen": True},
+        ))
+
+    def test_speaker_hardcut_can_jump(self):
+        self.assertTrue(cg._reframe_can_jump(reframe=True, crop_strategy="speaker-hardcut"))
+
+    def test_manual_crop_jumps_only_with_multiple_keyframes(self):
+        self.assertFalse(cg._reframe_can_jump(
+            reframe=True, crop_strategy="manual", crop_keyframes=[{"t": 0, "x_pct": 50}],
+        ))
+        self.assertTrue(cg._reframe_can_jump(
+            reframe=True, crop_strategy="manual",
+            crop_keyframes=[{"t": 0, "x_pct": 20}, {"t": 3, "x_pct": 80}],
+        ))
+
+    def test_default_passes_gated_by_jump_potential(self):
+        env = {k: v for k, v in os.environ.items() if k != "PODCLI_TRANSITION_AUTOFIX_PASSES"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(cg._transition_autofix_passes(True), 2)
+            self.assertEqual(cg._transition_autofix_passes(False), 0)
+
+    def test_env_override_wins(self):
+        with mock.patch.dict(os.environ, {"PODCLI_TRANSITION_AUTOFIX_PASSES": "1"}):
+            self.assertEqual(cg._transition_autofix_passes(False), 1)
+            self.assertEqual(cg._transition_autofix_passes(True), 1)
+        with mock.patch.dict(os.environ, {"PODCLI_TRANSITION_AUTOFIX_PASSES": "0"}):
+            self.assertEqual(cg._transition_autofix_passes(True), 0)
+
+    def test_env_override_is_clamped_and_validated(self):
+        with mock.patch.dict(os.environ, {"PODCLI_TRANSITION_AUTOFIX_PASSES": "9"}):
+            self.assertEqual(cg._transition_autofix_passes(False), 2)
+        with mock.patch.dict(os.environ, {"PODCLI_TRANSITION_AUTOFIX_PASSES": "junk"}):
+            self.assertEqual(cg._transition_autofix_passes(True), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

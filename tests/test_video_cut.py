@@ -61,7 +61,7 @@ class CutMultiSegmentTests(unittest.TestCase):
         tmpdir = tempfile.mkdtemp(prefix="podcli-cut-test-")
         out_path = os.path.join(tmpdir, "out.mp4")
 
-        def fake_cut(input_path, out_path, start, end):
+        def fake_cut(input_path, out_path, start, end, allow_stream_copy=True):
             # Create a stub file so cleanup works
             with open(out_path, "w") as f:
                 f.write("stub")
@@ -101,7 +101,7 @@ class CutMultiSegmentTests(unittest.TestCase):
         tmpdir = tempfile.mkdtemp(prefix="podcli-cut-test-")
         out_path = os.path.join(tmpdir, "out.mp4")
 
-        def fake_cut(input_path, out_path, start, end):
+        def fake_cut(input_path, out_path, start, end, allow_stream_copy=True):
             with open(out_path, "w") as f:
                 f.write("stub")
             return out_path
@@ -127,6 +127,75 @@ class ReExportTests(unittest.TestCase):
         from services import video_processor as vp
         self.assertIs(vp.cut_segment, video_cut.cut_segment)
         self.assertIs(vp.cut_multi_segment, video_cut.cut_multi_segment)
+
+
+
+class StreamCopyCutTests(unittest.TestCase):
+    def _run_cut(self, keyframe_stdout, start=10.5, end=15.0):
+        tmpdir = tempfile.mkdtemp(prefix="podcli-cut-test-")
+        out_path = os.path.join(tmpdir, "out.mp4")
+        ffmpeg_cmds = []
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "ffprobe":
+                return mock.Mock(returncode=0, stdout=keyframe_stdout, stderr="")
+            ffmpeg_cmds.append(cmd)
+            with open(out_path, "w") as f:
+                f.write("stub")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        try:
+            with mock.patch.object(video_cut, "proc_run", side_effect=fake_run), \
+                 mock.patch.object(video_cut, "get_media_duration_seconds", return_value=end - start):
+                video_cut.cut_segment("/in.mp4", out_path, start, end)
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        return ffmpeg_cmds
+
+    def test_stream_copies_when_both_boundaries_hit_keyframes(self):
+        cmds = self._run_cut("10.500000\n15.000000\n")
+        self.assertEqual(len(cmds), 1)
+        joined = " ".join(cmds[0])
+        self.assertIn("-c copy", joined)
+        self.assertNotIn("libx264", joined)
+
+    def test_reencodes_when_end_boundary_misses_keyframe(self):
+        cmds = self._run_cut("10.500000\n17.300000\n")
+        self.assertEqual(len(cmds), 1)
+        joined = " ".join(cmds[0])
+        self.assertIn("libx264", joined)
+        self.assertIn("-crf 16", joined)
+
+    def test_multi_segment_parts_never_stream_copy(self):
+        tmpdir = tempfile.mkdtemp(prefix="podcli-cut-test-")
+        out_path = os.path.join(tmpdir, "out.mp4")
+
+        def fake_cut(input_path, part_path, start, end, allow_stream_copy=True):
+            with open(part_path, "w") as f:
+                f.write("stub")
+            return part_path
+
+        try:
+            with mock.patch.object(video_cut, "cut_segment", side_effect=fake_cut) as cs, \
+                 mock.patch.object(video_cut, "proc_run", return_value=_ok()):
+                video_cut.cut_multi_segment(
+                    "/in.mp4", out_path,
+                    [{"start": 0, "end": 5}, {"start": 10, "end": 15}],
+                )
+            for call in cs.call_args_list:
+                self.assertFalse(call.kwargs.get("allow_stream_copy", True))
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_keyframe_probe_tolerance(self):
+        def fake_run(cmd, **kwargs):
+            return mock.Mock(returncode=0, stdout="10.480000\n", stderr="")
+
+        with mock.patch.object(video_cut, "proc_run", side_effect=fake_run):
+            self.assertTrue(video_cut._has_keyframe_near("/in.mp4", 10.5))
+            self.assertFalse(video_cut._has_keyframe_near("/in.mp4", 10.6))
 
 
 if __name__ == "__main__":

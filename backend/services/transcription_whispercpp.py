@@ -146,6 +146,7 @@ def transcribe_file(
     threads: int = 4,
     vad: bool = False,
     vad_model: Optional[str] = None,
+    wav_path: Optional[str] = None,
     **_ignored,
 ) -> dict:
     if not os.path.exists(file_path):
@@ -154,10 +155,13 @@ def transcribe_file(
         raise FileNotFoundError(f"ggml model not found: {model_path}")
 
     tmpdir = tempfile.mkdtemp(prefix="wcpp_")
-    wav = os.path.join(tmpdir, "audio.wav")
     out_base = os.path.join(tmpdir, "out")
     try:
-        _extract_wav(file_path, wav, ffmpeg)
+        if wav_path and os.path.exists(wav_path):
+            wav = wav_path
+        else:
+            wav = os.path.join(tmpdir, "audio.wav")
+            _extract_wav(file_path, wav, ffmpeg)
 
         cmd = [whisper_cli, "-m", model_path, "-f", wav, "-ojf",
                "-of", out_base, "-t", str(threads)]

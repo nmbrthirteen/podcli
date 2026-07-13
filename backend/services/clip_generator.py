@@ -234,6 +234,45 @@ def _apply_local_transition_smoothing(
         return False
 
 
+def _reframe_can_jump(
+    reframe: bool,
+    crop_strategy: str,
+    crop_keyframes: list = None,
+    keep_segments: list = None,
+    face_map: dict = None,
+    clip_words: list = None,
+) -> bool:
+    """Whether this render can contain hard visual jumps worth an autofix pass.
+
+    Multi-segment cuts always join with hard cuts. For reframed layouts, jumps
+    come from camera snaps between subjects: split-screen sources, hard-cut
+    strategies, multi-keyframe manual crops, or multiple speakers driving the
+    tracker. A single-speaker, non-split follow only pans smoothly.
+    """
+    if keep_segments and len(keep_segments) > 1:
+        return True
+    if not reframe:
+        return False
+    if crop_strategy == "manual":
+        return bool(crop_keyframes and len(crop_keyframes) > 1)
+    if crop_strategy == "speaker-hardcut":
+        return True
+    if face_map and face_map.get("is_split_screen"):
+        return True
+    speakers = {w.get("speaker") for w in (clip_words or []) if w.get("speaker")}
+    return len(speakers) > 1
+
+
+def _transition_autofix_passes(jumps_possible: bool) -> int:
+    raw = (os.environ.get("PODCLI_TRANSITION_AUTOFIX_PASSES") or "").strip()
+    if raw:
+        try:
+            return max(0, min(int(raw), 2))
+        except ValueError:
+            pass
+    return 2 if jumps_possible else 0
+
+
 def _auto_fix_transition_jumps(video_path: str, max_passes: int = 1) -> bool:
     """
     Bounded auto-fix for jumpy transitions. Never loops indefinitely.
@@ -922,14 +961,25 @@ def generate_clip(
             os.makedirs(output_dir, exist_ok=True)
             final_path = os.path.join(output_dir, output_filename)
         else:
-            final_path = os.path.join(work_dir, output_filename)
+            fd, final_path = tempfile.mkstemp(
+                prefix=f"{safe_filename(title)}_short_", suffix=".mp4"
+            )
+            os.close(fd)
 
         shutil.copy2(final_video_path, final_path)
 
         # Optional bounded QA/autofix pass for transition jumps.
         # Hard-capped to avoid any infinite rerender loop.
-        max_autofix_passes = int(os.environ.get("PODCLI_TRANSITION_AUTOFIX_PASSES", "2") or "2")
-        max_autofix_passes = max(0, min(max_autofix_passes, 2))
+        max_autofix_passes = _transition_autofix_passes(
+            _reframe_can_jump(
+                reframe=spec.reframe,
+                crop_strategy=crop_strategy,
+                crop_keyframes=crop_keyframes,
+                keep_segments=keep_segments,
+                face_map=face_map,
+                clip_words=crop_words,
+            )
+        )
         if max_autofix_passes > 0:
             if progress_callback:
                 progress_callback(97, "Quality gate: checking transitions...")
@@ -956,11 +1006,17 @@ def generate_clip(
         if length_warning:
             out["warning"] = length_warning
         if keep_caption_overlay and caption_overlay_path and os.path.exists(caption_overlay_path):
-            out["caption_overlay_path"] = caption_overlay_path
-            out["cropped_source_path"] = cropped_path
+            # Copy out of work_dir before cleanup so the returned paths survive.
+            base, _ = os.path.splitext(final_path)
+            persisted_overlay = f"{base}_captions.mov"
+            shutil.copy2(caption_overlay_path, persisted_overlay)
+            out["caption_overlay_path"] = persisted_overlay
+            if os.path.exists(cropped_path):
+                persisted_source = f"{base}_source.mp4"
+                shutil.copy2(cropped_path, persisted_source)
+                out["cropped_source_path"] = persisted_source
         return out
 
     finally:
-        # Clean up temp files (but not if output is in work_dir)
-        if output_dir and os.path.exists(work_dir):
+        if os.path.exists(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)

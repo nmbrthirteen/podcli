@@ -18,6 +18,8 @@ import subprocess
 import sys
 import textwrap
 import time
+from pathlib import Path
+
 from version import VERSION
 
 # Windows streams default to cp1252, which can't encode chars like '→'; podcli is UTF-8.
@@ -47,7 +49,6 @@ if os.path.exists(_env_file):
 os.environ["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
 if sys.platform == "darwin":
     os.environ.setdefault("DYLD_LIBRARY_PATH", "")
-os.environ.setdefault("PODCLI_TRANSITION_AUTOFIX_PASSES", "2")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -315,6 +316,35 @@ def _resolve_output_dir(
     if os.path.basename(normalized_base) == preset_folder:
         return base_output_dir
     return os.path.join(base_output_dir, preset_folder)
+
+
+class _SharedWav:
+    """Lazily extracted 16 kHz mono WAV shared by transcription, energy and
+    reaction analysis so the source video is decoded once per run."""
+
+    def __init__(self, media_path: str):
+        self.media_path = media_path
+        self.path = None
+        import atexit
+        atexit.register(self.cleanup)
+
+    def get(self) -> str | None:
+        if self.path and os.path.exists(self.path):
+            return self.path
+        try:
+            from services.audio_extract import extract_wav_16k_mono
+            self.path = extract_wav_16k_mono(self.media_path)
+        except Exception:
+            self.path = None
+        return self.path
+
+    def cleanup(self) -> None:
+        if self.path and os.path.exists(self.path):
+            try:
+                os.unlink(self.path)
+            except OSError:
+                pass
+        self.path = None
 
 
 def _has_successful_results(results: list) -> bool:
@@ -635,6 +665,7 @@ def cmd_process(args):
     words = []
     segments = []
     result = {}
+    shared_wav = _SharedWav(video_path)
 
     # Saliency profiles (party/action) select on audio/visual signals, not dialogue,
     # so transcribing a long video would be wasted work — skip it entirely.
@@ -725,12 +756,16 @@ def cmd_process(args):
                 _spin_msg[0] = f"{msg} ({pct}%)" if pct < 100 else msg
 
             try:
+                # Only pre-extract the shared wav when the energy step will
+                # reuse it anyway; otherwise let the engine decide (whisper-py
+                # and AssemblyAI decode the source themselves).
                 result = transcribe_file(
                     file_path=video_path,
                     model_size=config.get("whisper_model", "base"),
                     engine=os.environ.get("PODCLI_ENGINE") or None,
                     enable_diarization=not config.get("no_speakers", False),
                     progress_callback=_transcribe_progress,
+                    wav_path=shared_wav.get() if config.get("energy_boost", True) else None,
                 )
             except (RuntimeError, FileNotFoundError, subprocess.CalledProcessError) as e:
                 _spin_stop.set()
@@ -772,18 +807,24 @@ def cmd_process(args):
     # ── Step 2: Analyze audio energy ──
     energy_scores = None
     reaction_scores = None
+    energy_data = None
+    events_data = None
+    reaction_times = None
     if config.get("energy_boost", True):
         print("  [2/4] Analyzing audio energy...")
         try:
-            profile = get_energy_profile(video_path, segments)
+            profile = get_energy_profile(video_path, segments, wav_path=shared_wav.get())
             energy_scores = profile["segment_scores"]
+            energy_data = profile["energy_data"]
             print(f"         {len(profile['peak_times'])} peak moments found")
         except Exception as e:
             print(f"         Skipped (error: {e})")
         if audio_events_available():
             try:
-                reactions = get_event_profile(video_path, segments)
+                reactions = get_event_profile(video_path, segments, wav_path=shared_wav.get())
                 reaction_scores = reactions["segment_scores"]
+                events_data = reactions["events_data"]
+                reaction_times = reactions["reaction_times"]
                 n = len(reactions["reaction_times"])
                 if n:
                     print(f"         {n} laughter/reaction moments found")
@@ -824,6 +865,9 @@ def cmd_process(args):
             segments=segments or None,
             words=words or None,
             progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
+            energy_data=energy_data,
+            events_data=events_data,
+            wav_path=shared_wav.get(),
         )
         if clips:
             print(f"         ✓ {len(clips)} highlights found")
@@ -832,7 +876,9 @@ def cmd_process(args):
             print("         ⚠ No highlights found, falling back to transcript selection")
 
     # Try an AI CLI first (uses PodStack knowledge base for intelligent selection)
-    from services.claude_suggest import suggest_initial_with_claude, _engine_label, _find_ai_cli
+    from services.claude_suggest import (
+        suggest_initial_with_claude, blend_signal_scores, _engine_label, _find_ai_cli,
+    )
 
     ai_path, ai_engine = _find_ai_cli()
     if clips:
@@ -844,8 +890,10 @@ def cmd_process(args):
             segments=segments,
             top_n=top_n,
             progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
+            reaction_times=reaction_times,
         )
         if clips:
+            blend_signal_scores(clips, energy_data=energy_data, events_data=events_data)
             actual_engine = next((c.get("_ai_engine") for c in clips if c.get("_ai_engine")), ai_engine)
             print(f"         ✓ {_engine_label(actual_engine)} selected {len(clips)} clips")
             _save_suggestions_session(cache_hash, top_n, actual_engine, clips, selection_sig)
@@ -873,6 +921,9 @@ def cmd_process(args):
     if not clips:
         print("  No clips found. Try a longer transcript or lower --min-duration.", file=sys.stderr)
         sys.exit(1)
+
+    # Rendering reads the source video directly; the shared wav is done.
+    shared_wav.cleanup()
 
     # ── Step 3.5: Interactive review ──
     clips = _review_clips(clips, segments, energy_scores, config)
@@ -2700,15 +2751,45 @@ def cmd_knowledge(args):
 
     action = getattr(args, "knowledge_action", None) or "list"
 
-    if action == "list":
+    if action == "init":
+        templates_dir = Path(__file__).resolve().parent / "templates" / "knowledge"
+        templates = sorted(templates_dir.glob("*.md"))
+        if not templates:
+            print(f"  {red}✗{reset} No templates found at {templates_dir}", file=sys.stderr)
+            return
+        os.makedirs(kb_dir, exist_ok=True)
+        created, skipped = [], []
+        for tpl in templates:
+            target = os.path.join(kb_dir, tpl.name)
+            if os.path.exists(target):
+                skipped.append(tpl.name)
+                continue
+            shutil.copyfile(tpl, target)
+            created.append(tpl.name)
         print(f"\n  {bold}Knowledge Base{reset}")
         print(f"  {'─' * 45}")
+        for fname in created:
+            print(f"  {green}✓{reset} {fname}")
+        for fname in skipped:
+            print(f"  {gray}• {fname} (exists, kept){reset}")
+        print(f"  {'─' * 45}")
+        print(f"  {gray}{len(created)} created, {len(skipped)} kept in {kb_dir}{reset}")
+        if created:
+            print(f"  {gray}Fill in the [brackets], starting with 01-brand-identity and 02-voice-and-tone,{reset}")
+            print(f"  {gray}or run /bootstrap-knowledge in your agent to draft them from an existing channel.{reset}\n")
+        else:
+            print()
+
+    elif action == "list":
+        print(f"\n  {bold}Knowledge Base{reset}")
+        print(f"  {'─' * 45}")
+        empty_hint = f"  {gray}Empty — run{reset} podcli knowledge init {gray}to create the starter templates{reset}\n"
         if not os.path.isdir(kb_dir):
-            print(f"  {gray}Empty — no knowledge files{reset}\n")
+            print(empty_hint)
             return
         files = sorted(f for f in os.listdir(kb_dir) if f.endswith(".md"))
         if not files:
-            print(f"  {gray}Empty — no knowledge files{reset}\n")
+            print(empty_hint)
             return
         for fname in files:
             fpath = os.path.join(kb_dir, fname)
@@ -3743,6 +3824,7 @@ def main():
     # ── knowledge ──
     kb = sub.add_parser("knowledge", help="Manage knowledge base files")
     kb_sub = kb.add_subparsers(dest="knowledge_action")
+    kb_sub.add_parser("init", help="Create the 14 starter templates (never overwrites)")
     kb_sub.add_parser("list", help="List all knowledge files")
     kb_read = kb_sub.add_parser("read", help="Print a knowledge file")
     kb_read.add_argument("filename", help="File name (e.g. 01-brand-identity)")

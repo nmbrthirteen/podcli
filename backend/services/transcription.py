@@ -58,7 +58,7 @@ def _whispercpp_ready(model_size: str) -> bool:
     return _whispercpp_cli() is not None and os.path.exists(_whispercpp_model(model_size))
 
 
-def _transcribe_with_whispercpp(file_path, model_size, language, progress_callback):
+def _transcribe_with_whispercpp(file_path, model_size, language, progress_callback, wav_path=None):
     from services import transcription_whispercpp as wcpp
 
     if progress_callback:
@@ -80,6 +80,7 @@ def _transcribe_with_whispercpp(file_path, model_size, language, progress_callba
         language=language,
         vad=vad,
         vad_model=os.environ.get("PODCLI_WHISPERCPP_VAD_MODEL") or None,
+        wav_path=wav_path,
     )
     if progress_callback:
         progress_callback(50, "Transcription complete")
@@ -334,6 +335,7 @@ def _attach_speakers_and_faces(
     enable_diarization,
     num_speakers,
     progress_callback,
+    wav_path=None,
 ):
     """Merge speaker diarization + face analysis into a transcribed result.
     Shared by both engines; face analysis (OpenCV) runs even when diarization
@@ -359,17 +361,22 @@ def _attach_speakers_and_faces(
             if progress_callback:
                 progress_callback(55, "Extracting audio for speaker detection...")
 
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                wav_path = tmp.name
+            shared_wav = wav_path if wav_path and os.path.exists(wav_path) else None
+            if shared_wav:
+                diar_wav = shared_wav
+            else:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    diar_wav = tmp.name
 
             try:
-                extract_audio_wav(file_path, wav_path)
+                if not shared_wav:
+                    extract_audio_wav(file_path, diar_wav)
 
                 if progress_callback:
                     progress_callback(60, "Running speaker diarization...")
 
                 speaker_segments = run_diarization(
-                    wav_path,
+                    diar_wav,
                     num_speakers=num_speakers,
                     progress_callback=lambda pct, msg: (
                         progress_callback(60 + int(pct * 0.3), msg) if progress_callback else None
@@ -391,8 +398,8 @@ def _attach_speakers_and_faces(
                         )
 
             finally:
-                if os.path.exists(wav_path):
-                    os.unlink(wav_path)
+                if not shared_wav and os.path.exists(diar_wav):
+                    os.unlink(diar_wav)
 
         except ImportError as e:
             diarization_warning = f"Speaker detection unavailable: {e}"
@@ -447,9 +454,13 @@ def transcribe_file(
     enable_diarization: bool = True,
     num_speakers: Optional[int] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    wav_path: Optional[str] = None,
 ) -> dict:
     """
     Transcribe a video/audio file with word-level timestamps and speaker detection.
+
+    wav_path: optional pre-extracted 16 kHz mono WAV shared across analysis
+    stages — used by whisper.cpp and diarization instead of re-decoding.
 
     Returns:
         {
@@ -496,7 +507,9 @@ def transcribe_file(
                 ) from e
 
     if use_cpp:
-        base = _transcribe_with_whispercpp(file_path, model_size, language, progress_callback)
+        base = _transcribe_with_whispercpp(
+            file_path, model_size, language, progress_callback, wav_path=wav_path
+        )
         base["engine"] = "whispercpp"
         # whisper.cpp is the no-torch path: importing torch for diarization can
         # hard-crash native runtimes. Skip diarization, keep face analysis (OpenCV).
@@ -588,5 +601,6 @@ def transcribe_file(
         "engine": "whisper-py",
     }
     return _attach_speakers_and_faces(
-        file_path, base, enable_diarization, num_speakers, progress_callback
+        file_path, base, enable_diarization, num_speakers, progress_callback,
+        wav_path=wav_path,
     )

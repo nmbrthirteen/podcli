@@ -14,6 +14,7 @@ for extending a clip backwards to the moment that caused the reaction.
 """
 
 import csv
+import os
 import subprocess
 import tempfile
 import wave
@@ -84,9 +85,26 @@ def is_available() -> bool:
     return _ORT_AVAILABLE and _MODEL_PATH.exists()
 
 
-def _read_waveform_16k_mono(video_path: str) -> Optional[np.ndarray]:
-    """Extract audio as a float32 [-1, 1] mono waveform at 16 kHz via ffmpeg."""
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
+def _read_waveform_16k_mono(video_path: str, wav_path: Optional[str] = None) -> Optional[np.ndarray]:
+    """Extract audio as a float32 [-1, 1] mono waveform at 16 kHz via ffmpeg.
+
+    wav_path: optional pre-extracted 16 kHz mono WAV — read directly, no decode.
+    """
+    if wav_path and os.path.exists(wav_path):
+        try:
+            with wave.open(wav_path) as w:
+                frames = w.readframes(w.getnframes())
+        except (wave.Error, OSError):
+            return None
+        if not frames:
+            return None
+        return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+
+    # delete=False + manual unlink: on Windows the open NamedTemporaryFile
+    # handle blocks ffmpeg from writing to the same path.
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    try:
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
             "-vn", "-ar", "16000", "-ac", "1",
@@ -97,12 +115,17 @@ def _read_waveform_16k_mono(video_path: str) -> Optional[np.ndarray]:
             return None
         with wave.open(tmp.name) as w:
             frames = w.readframes(w.getnframes())
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
     if not frames:
         return None
     return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def extract_audio_events(video_path: str) -> list[dict]:
+def extract_audio_events(video_path: str, wav_path: Optional[str] = None) -> list[dict]:
     """
     Run YAMNet over a video's audio and return per-frame reaction probabilities.
 
@@ -114,7 +137,7 @@ def extract_audio_events(video_path: str) -> list[dict]:
     if session is None:
         return []
 
-    waveform = _read_waveform_16k_mono(video_path)
+    waveform = _read_waveform_16k_mono(video_path, wav_path=wav_path)
     if waveform is None or waveform.size == 0:
         return []
 
@@ -201,6 +224,7 @@ def get_event_profile(
     segments: list[dict],
     progress_callback: Optional[Callable] = None,
     reaction_threshold: float = 0.15,
+    wav_path: Optional[str] = None,
 ) -> dict:
     """
     Full pipeline: detect audio events and score all segments.
@@ -215,7 +239,7 @@ def get_event_profile(
     if progress_callback:
         progress_callback(0, "Detecting laughter and reactions...")
 
-    events_data = extract_audio_events(video_path)
+    events_data = extract_audio_events(video_path, wav_path=wav_path)
 
     if progress_callback:
         progress_callback(70, "Scoring segments by reaction...")
