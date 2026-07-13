@@ -7,33 +7,11 @@ import {
 } from "remotion";
 import type { Word, CaptionStyle } from "../types";
 import { captionScale } from "../types";
+import { buildChunks, activeChunkAt } from "../chunks";
 
 interface Props {
   words: Word[];
   style: CaptionStyle;
-}
-
-interface Chunk {
-  words: Word[];
-  start: number;
-  end: number;
-}
-
-function buildChunks(words: Word[], perChunk: number): Chunk[] {
-  const chunks: Chunk[] = [];
-  let i = 0;
-  while (i < words.length) {
-    let end = Math.min(i + perChunk, words.length);
-    if (words.length - end === 1) end = words.length;
-    const slice = words.slice(i, end);
-    chunks.push({
-      words: slice,
-      start: slice[0].start,
-      end: slice[slice.length - 1].end,
-    });
-    i = end;
-  }
-  return chunks;
 }
 
 export const HormoziCaptions: React.FC<Props> = ({ words, style }) => {
@@ -42,10 +20,11 @@ export const HormoziCaptions: React.FC<Props> = ({ words, style }) => {
   const s = captionScale(height);
   const currentTime = frame / fps;
 
-  const chunks = buildChunks(words, style.wordsPerChunk);
-  const activeChunk = chunks.find(
-    (c) => currentTime >= c.start && currentTime < c.end
-  );
+  const chunks = buildChunks(words, {
+    perChunk: style.wordsPerChunk,
+    absorbTail: 1,
+  });
+  const activeChunk = activeChunkAt(chunks, currentTime);
 
   if (!activeChunk) return null;
 
@@ -82,6 +61,9 @@ export const HormoziCaptions: React.FC<Props> = ({ words, style }) => {
           backgroundColor: "rgba(0, 0, 0, 0.8)",
           borderRadius: 16 * s,
           padding: `${14 * s}px ${32 * s}px`,
+          maxWidth: `calc(100% - ${120 * s}px)`,
+          boxSizing: "border-box",
+          overflowWrap: "anywhere",
           textAlign: "center",
           fontFamily: style.fontFamily,
           fontSize: style.fontSize * s,
