@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildPreviewChunks, activePreviewChunk, type PreviewWord } from "./captionChunks";
+import {
+  activePreviewChunk,
+  buildPreviewChunks,
+  selectPreviewWords,
+  type PreviewWord,
+} from "./captionChunks";
 import { buildChunks } from "../../../remotion/src/chunks";
 import type { Word } from "../../../remotion/src/types";
 
@@ -66,5 +71,22 @@ describe("buildPreviewChunks", () => {
   it("caps the last chunk's hold at the clip end", () => {
     const chunks = buildPreviewChunks(words, { wordsPerChunk: 6, absorbTail: 2 }, 5.0);
     expect(chunks[chunks.length - 1].displayEnd).toBeCloseTo(5.0);
+  });
+
+  it("keeps captions active beyond the first 80 transcript words", () => {
+    const transcript = Array.from({ length: 120 }, (_, index) => ({
+      word: `word-${index}`,
+      start: index * 0.5,
+      end: index * 0.5 + 0.4,
+      speaker: "A",
+    }));
+    const source = selectPreviewWords(transcript, {
+      start_second: 0,
+      end_second: 60,
+    });
+    const chunks = buildPreviewChunks(source, { wordsPerChunk: 5, absorbTail: 1 }, 60);
+
+    expect(source).toHaveLength(120);
+    expect(activePreviewChunk(chunks, 50.1)?.words.map((word) => word.text)).toContain("word-100");
   });
 });

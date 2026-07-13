@@ -20,6 +20,8 @@ import textwrap
 import time
 from pathlib import Path
 
+import questionary
+from questionary import Style
 from version import VERSION
 
 # Windows streams default to cp1252, which can't encode chars like '→'; podcli is UTF-8.
@@ -3687,12 +3689,8 @@ Add the cliches your niche is drowning in as you spot them.
 """
 
 
-def _first_run_setup() -> None:
+def _first_run_setup() -> bool:
     """Guided setup on the first interactive run. Skippable, asked once."""
-    import argparse as _ap
-    import questionary
-    from questionary import Style
-
     accent = "\033[38;2;212;135;74m"
     gray = "\033[38;5;245m"
     green = "\033[38;2;74;222;128m"
@@ -3712,7 +3710,7 @@ def _first_run_setup() -> None:
     kb_dir = paths["knowledge"]
     if not kb_is_empty(kb_dir):
         _mark_onboarded()
-        return
+        return True
 
     print()
     print(f"  {bold}Welcome to podcli{reset}")
@@ -3721,11 +3719,11 @@ def _first_run_setup() -> None:
 
     start = questionary.confirm("Set it up now?", default=True, style=qstyle).ask()
     if start is None:
-        return
+        return False
     if not start:
         _mark_onboarded()
         print(f"  {gray}Later: run{reset} podcli knowledge init {gray}and fill in the templates.{reset}\n")
-        return
+        return True
 
     questions = [
         ("show_name", "Show name:"),
@@ -3739,13 +3737,13 @@ def _first_run_setup() -> None:
     for key, prompt in questions:
         value = questionary.text(prompt, style=qstyle).ask()
         if value is None:
-            return
+            return False
         answers[key] = value.strip()
 
     if not answers["show_name"]:
         _mark_onboarded()
         print(f"  {gray}Nothing to save. Run{reset} podcli knowledge init {gray}when you're ready.{reset}\n")
-        return
+        return True
 
     os.makedirs(kb_dir, exist_ok=True)
     for fname, content in (
@@ -3757,7 +3755,7 @@ def _first_run_setup() -> None:
     print(f"\n  {green}✓{reset} 01-brand-identity.md")
     print(f"  {green}✓{reset} 02-voice-and-tone.md")
 
-    cmd_knowledge(_ap.Namespace(knowledge_action="init"))
+    cmd_knowledge(argparse.Namespace(knowledge_action="init"))
 
     nxt = questionary.select(
         "The other 12 files are starter templates. Next:",
@@ -3768,6 +3766,8 @@ def _first_run_setup() -> None:
         style=qstyle,
     ).ask()
 
+    if nxt is None:
+        return False
     if nxt == "bootstrap":
         print(f"\n  {gray}In Claude Code, run:{reset} {accent}/bootstrap-knowledge <channel-url>{reset}")
         print(f"  {gray}It reads the channel and drafts the remaining files for you.{reset}")
@@ -3777,6 +3777,7 @@ def _first_run_setup() -> None:
 
     _mark_onboarded()
     print()
+    return True
 
 
 def main():
@@ -4122,8 +4123,8 @@ def main():
         print_help()
         return
 
-    if _needs_onboarding():
-        _first_run_setup()
+    if _needs_onboarding() and not _first_run_setup():
+        return
 
     if args.command == "process":
         if not getattr(args, "no_banner", False):
