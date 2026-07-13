@@ -7,7 +7,7 @@ const tmp = mkdtempSync(join(tmpdir(), "podcli-kb-test-"));
 process.env.PODCLI_HOME = tmp;
 process.env.PODCLI_DATA = tmp;
 
-const { KnowledgeBase } = await import("./knowledge-base.js");
+const { KnowledgeBase, isFilledIn } = await import("./knowledge-base.js");
 
 describe("KnowledgeBase", () => {
   let kb: InstanceType<typeof KnowledgeBase>;
@@ -18,11 +18,49 @@ describe("KnowledgeBase", () => {
     kb = new KnowledgeBase();
   });
 
-  it("ensureDir creates the directory and seeds a README", async () => {
+  it("ensureDir creates an empty directory", async () => {
     rmSync(join(tmp, "knowledge"), { recursive: true, force: true });
     await kb.ensureDir();
-    expect(existsSync(join(tmp, "knowledge", "README.md"))).toBe(true);
-    expect(readFileSync(join(tmp, "knowledge", "README.md"), "utf-8")).toMatch(/Knowledge Base/);
+    expect(existsSync(join(tmp, "knowledge"))).toBe(true);
+    expect(await kb.listFiles()).toEqual([]);
+  });
+
+  it("initFromTemplates copies the numbered templates and keeps existing files", async () => {
+    const first = await kb.initFromTemplates();
+    expect(first.created).toContain("01-brand-identity.md");
+    expect(first.created).toContain("02-voice-and-tone.md");
+    expect(first.kept).toEqual([]);
+    expect(readFileSync(join(tmp, "knowledge", "01-brand-identity.md"), "utf-8")).toContain("[Show name]");
+
+    await kb.writeFile("01-brand-identity.md", "# Brand identity\nMine, edited");
+    const second = await kb.initFromTemplates();
+    expect(second.created).toEqual([]);
+    expect(second.kept).toEqual(first.created);
+    expect(readFileSync(join(tmp, "knowledge", "01-brand-identity.md"), "utf-8")).toContain("Mine, edited");
+  });
+
+  it("status reports which templates are present and which are filled in", async () => {
+    const empty = await kb.status();
+    expect(empty.templates.length).toBeGreaterThan(0);
+    expect(empty.present).toEqual([]);
+    expect(empty.missing).toEqual(empty.templates);
+
+    await kb.initFromTemplates();
+    const untouched = await kb.status();
+    expect(untouched.present).toEqual(untouched.templates);
+    expect(untouched.filled).toEqual([]);
+
+    await kb.writeFile("01-brand-identity.md", "# Brand identity\n\n- Name: Deep Dive\n- Audience: founders");
+    const edited = await kb.status();
+    expect(edited.filled).toEqual(["01-brand-identity.md"]);
+  });
+
+  it("isFilledIn treats a mostly-bracketed file as a template", () => {
+    const template = "# Voice\n\n- Tone: [tone]\n- Banned: [words]\n- Hook: [hook]\n- Close: [close]";
+    expect(isFilledIn(template, template)).toBe(false);
+    expect(isFilledIn("# Voice\n\n- Tone: [tone]\n- Banned: hype\n- Hook: [hook]\n- Close: [close]", template)).toBe(false);
+    expect(isFilledIn("# Voice\n\n- Tone: blunt\n- Banned: hype\n- Hook: cold open\n- Close: hard cut", template)).toBe(true);
+    expect(isFilledIn("", template)).toBe(false);
   });
 
   it("writeFile auto-appends .md extension if missing", async () => {
@@ -60,8 +98,7 @@ describe("KnowledgeBase", () => {
   });
 
   it("readAll concatenates all files except README", async () => {
-    // ensureDir seeds README
-    await kb.ensureDir();
+    await kb.writeFile("README.md", "# ignore me");
     await kb.writeFile("one.md", "first");
     await kb.writeFile("two.md", "second");
     const all = await kb.readAll();
@@ -72,7 +109,7 @@ describe("KnowledgeBase", () => {
     expect(all).not.toContain("README");
   });
 
-  it("readAll returns empty string when only README exists", async () => {
+  it("readAll returns empty string when the directory is empty", async () => {
     await kb.ensureDir();
     expect(await kb.readAll()).toBe("");
   });

@@ -7,7 +7,7 @@ type ProgressCallback = (event: ProgressEvent) => void;
 
 const isWindows = process.platform === "win32";
 
-function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
+export function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
   if (proc.pid === undefined) return;
   try {
     // Negative pid kills the whole group — the child is a detached group
@@ -17,6 +17,34 @@ function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
   } catch {
     // Already exited.
   }
+}
+
+const KILL_GRACE_MS = 2000;
+
+// SIGTERM, then SIGKILL if the tree is still up. The escalation is cancelled on
+// exit: the OS can hand the pid to an unrelated process, and killProcessTree
+// signals the whole group (-pid), so a late SIGKILL would take that one out.
+export function terminateProcessTree(proc: ChildProcess, graceMs = KILL_GRACE_MS): void {
+  killProcessTree(proc, "SIGTERM");
+  if (proc.exitCode !== null || proc.signalCode !== null) return;
+
+  let exited = false;
+  const escalation = setTimeout(() => {
+    if (!exited) killProcessTree(proc, "SIGKILL");
+  }, graceMs);
+  escalation.unref();
+  proc.once("exit", () => {
+    exited = true;
+    clearTimeout(escalation);
+  });
+}
+
+// Prefer the last traceback block — that's where the actual failure is —
+// and keep a tail long enough to include it.
+export function stderrTail(stderr: string, maxChars = 4000): string {
+  const tb = stderr.lastIndexOf("Traceback (most recent call last):");
+  const tail = tb !== -1 ? stderr.slice(tb) : stderr;
+  return tail.slice(-maxChars);
 }
 
 function parseResultLine<T>(stdout: string): TaskResult<T> | null {
@@ -129,7 +157,7 @@ export class PythonExecutor {
             reject(
               new Error(
                 `No parseable output from Python task. Exit code: ${code}. ` +
-                  `Stdout: ${stdout.slice(-300)}. Stderr: ${stderr.slice(-300)}`
+                  `Stdout: ${stdout.slice(-300)}. Stderr: ${stderrTail(stderr)}`
               )
             );
             return;
@@ -150,8 +178,7 @@ export class PythonExecutor {
       } catch {}
 
       timer = setTimeout(() => {
-        killProcessTree(proc, "SIGTERM");
-        setTimeout(() => killProcessTree(proc, "SIGKILL"), 2000).unref();
+        terminateProcessTree(proc);
         finish(() => reject(new Error(`Task timed out after ${this.timeoutMs / 1000}s`)));
       }, this.timeoutMs);
     });

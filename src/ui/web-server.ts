@@ -30,13 +30,17 @@ import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
-import { PythonExecutor } from "../services/python-executor.js";
+import { PythonExecutor, terminateProcessTree } from "../services/python-executor.js";
 import { TranscriptCache } from "../services/transcript-cache.js";
 import { FileManager } from "../services/file-manager.js";
 import { AssetManager, inferType, safeName } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths, pythonEnv } from "../config/paths.js";
+import { webServerPort } from "../config/server.js";
+import { writeFileAtomicSync } from "../utils/atomic-file.js";
+import { maxClipSeconds, validateClipRange, validateSuggestionRange } from "../utils/clip-validation.js";
+import { advanceProgress, tagSubmittedClip, tagSubmittedClips } from "../utils/clip-results.js";
 import { DEMO_ASSETS_DIR } from "./demo-fixtures.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
@@ -63,7 +67,7 @@ const publicDir = existsSync(join(__dirname, "public", "index.html"))
   : resolve(__dirname, "..", "..", "dist", "ui", "public");
 
 const app = express();
-const PORT = parseInt(process.env.PORT || "3847");
+const PORT = webServerPort;
 const DEMO = process.env.PODCLI_DEMO === "1";
 
 // --- Services ---
@@ -94,9 +98,27 @@ interface JobState {
   result?: unknown;
   error?: string;
   createdAt: number;
+  finishedAt?: number;
+  clip_results?: unknown[];
 }
 
 const jobs = new Map<string, JobState>();
+
+// Sweep terminal jobs so the map doesn't grow forever. Completion isn't
+// stamped at the many done/error sites; the sweeper stamps it on first sight,
+// so a job survives at least one full retention window after finishing.
+const JOB_RETENTION_MS = 30 * 60_000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, job] of jobs) {
+    if (job.status !== "done" && job.status !== "error") continue;
+    if (job.finishedAt === undefined) {
+      job.finishedAt = now;
+    } else if (now - job.finishedAt > JOB_RETENTION_MS) {
+      jobs.delete(id);
+    }
+  }
+}, 60_000).unref();
 
 /** Transcript data stored per file, plus optional face-tracking hints. */
 type ServerTranscript = TranscriptResult & { face_map?: unknown };
@@ -120,6 +142,8 @@ interface UIState {
     logoPath: string;
     outroPath: string;
     introPath: string;
+    cleanFillers: boolean;
+    onboardingDismissed: boolean;
   };
   phase: string;
   results: unknown[];
@@ -154,6 +178,8 @@ function loadPersistedState(): UIState {
           logoPath: saved.settings?.logoPath || "",
           outroPath: saved.settings?.outroPath || "",
           introPath: saved.settings?.introPath || "",
+          cleanFillers: saved.settings?.cleanFillers !== false,
+          onboardingDismissed: !!saved.settings?.onboardingDismissed,
         },
         // Never restore mid-export phases
         phase: ["exporting", "parsing", "suggesting"].includes(saved.phase)
@@ -186,6 +212,8 @@ function loadPersistedState(): UIState {
       logoPath: "",
       outroPath: "",
       introPath: "",
+      cleanFillers: true,
+      onboardingDismissed: false,
     },
     phase: "idle",
     results: [],
@@ -219,7 +247,7 @@ function rememberSource(realPath: string): void {
   if (!VIDEO_SOURCE_EXTS.has(extname(realPath).toLowerCase())) return;
   recentSources = [realPath, ...recentSources.filter((p) => p !== realPath)].slice(0, 40);
   try {
-    writeFileSync(sourcesFile, JSON.stringify(recentSources, null, 2), "utf-8");
+    writeFileAtomicSync(sourcesFile, JSON.stringify(recentSources, null, 2));
   } catch {}
 }
 
@@ -239,7 +267,7 @@ function persistState() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try {
-      writeFileSync(paths.uiState, JSON.stringify(uiState, null, 2));
+      writeFileAtomicSync(paths.uiState, JSON.stringify(uiState, null, 2));
     } catch (err) {
       log.warn("Failed to persist UI state to disk", { err: errMsg(err) });
     }
@@ -642,14 +670,18 @@ app.post("/api/download-video", async (req, res) => {
     "after_move:podcli-filepath:%(filepath)s",
     url,
   ];
-  const proc = spawn(paths.pythonPath, args, { env: pythonEnv() });
+  // Detached so a kill takes out yt-dlp's ffmpeg children with it.
+  const proc = spawn(paths.pythonPath, args, {
+    env: pythonEnv(),
+    detached: process.platform !== "win32",
+  });
 
   let stdout = "";
   let stderr = "";
   let outputFilePath = "";
   let settled = false;
   let responded = false;
-  const timer = setTimeout(() => proc.kill("SIGTERM"), 3600_000);
+  const timer = setTimeout(() => terminateProcessTree(proc), 3600_000);
   const finish = (action: () => void): void => {
     if (settled) return;
     settled = true;
@@ -732,7 +764,7 @@ app.post("/api/download-video", async (req, res) => {
     });
   });
   req.on("close", () => {
-    if (!responded && !settled) proc.kill("SIGTERM");
+    if (!responded && !settled) terminateProcessTree(proc);
   });
   responded = true;
   res.json({ job_id: jobId, status: "running" });
@@ -1191,6 +1223,7 @@ app.post("/api/batch-clips", async (req, res) => {
     transcript_words = [],
     clean_fillers = false,
     keep_caption_overlay = false,
+    format = "vertical",
   } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
@@ -1228,7 +1261,7 @@ app.post("/api/batch-clips", async (req, res) => {
       res.status(400).json({ error: `Clip ${i + 1}: invalid format "${c.format}". Use: vertical, horizontal, square` });
       return;
     }
-    const maxDur = c.format === "horizontal" ? 300 : 180;
+    const maxDur = maxClipSeconds(c.format || format);
     if (dur > maxDur) {
       res.status(400).json({
         error: `Clip ${i + 1}: too long (${Math.round(dur)}s). Max ${maxDur}s.`,
@@ -1277,6 +1310,7 @@ app.post("/api/batch-clips", async (req, res) => {
       {
         video_path,
         clips: enrichedClips,
+        format,
         transcript_words,
         output_dir: paths.output,
         logo_path,
@@ -1287,21 +1321,30 @@ app.post("/api/batch-clips", async (req, res) => {
         face_map: uiState.transcript?.face_map,
       },
       (event) => {
-        job.progress = event.percent;
+        const progress = advanceProgress(job, event.percent);
         job.message = event.message;
         historyRecorder.recordProgress(event);
+        const clipResult = event.clip_result
+          ? tagSubmittedClip(event.clip_result, enrichedClips)
+          : undefined;
+        if (event.stage === "clip_complete" && clipResult) {
+          (job.clip_results ??= []).push(clipResult);
+        }
         broadcastSSE("job-update", {
           jobId,
-          progress: event.percent,
+          progress,
           message: event.message,
+          stage: event.stage,
+          clip_result: clipResult,
         });
       },
     )
     .then(async (result) => {
+      const data = tagSubmittedClips(result.data, enrichedClips);
       job.status = "done";
       job.progress = 100;
       job.message = "Batch complete!";
-      job.result = result.data;
+      job.result = data;
       // Record successful clips to history
       try {
         await historyRecorder.recordRemaining(result.data?.results);
@@ -1311,7 +1354,7 @@ app.post("/api/batch-clips", async (req, res) => {
         });
       }
       setExportState("done", null);
-      broadcastSSE("job-complete", { jobId, result: result.data });
+      broadcastSSE("job-complete", { jobId, result: data });
     })
     .catch((err) => {
       job.status = "error";
@@ -1366,6 +1409,7 @@ app.get("/api/job/:id/stream", (req, res) => {
         message: current.message,
         result: current.result,
         error: current.error,
+        clip_results: current.clip_results,
       })}\n\n`,
     );
 
@@ -1959,16 +2003,35 @@ app.get("/api/history", async (req, res) => {
 // share one history writer (preserves unknown fields like Phase 2 metrics).
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").trim();
 
+const RUN_PY_TIMEOUT_MS = 15 * 60_000;
+
 function runPy(scriptAndArgs: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
+    // Detached so a timeout kill takes out the whole process group (ffmpeg etc.).
     const proc = spawn(paths.pythonPath, scriptAndArgs, {
       env: pythonEnv({ PODCLI_HOME: paths.home, PODCLI_DATA: paths.dataDir }),
+      detached: process.platform !== "win32",
     });
     let stdout = "", stderr = "";
+    let settled = false;
+    const finish = (result: { code: number; stdout: string; stderr: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      terminateProcessTree(proc);
+      finish({
+        code: 1,
+        stdout,
+        stderr: `${stderr}\nTimed out after ${RUN_PY_TIMEOUT_MS / 1000}s`.trim(),
+      });
+    }, RUN_PY_TIMEOUT_MS);
     proc.stdout.on("data", (d) => (stdout += d));
     proc.stderr.on("data", (d) => (stderr += d));
-    proc.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
-    proc.on("error", (e) => resolve({ code: 1, stdout, stderr: String(e) }));
+    proc.on("close", (code) => finish({ code: code ?? 1, stdout, stderr }));
+    proc.on("error", (e) => finish({ code: 1, stdout, stderr: String(e) }));
   });
 }
 
@@ -1989,7 +2052,7 @@ app.patch("/api/clips/:id", async (req, res) => {
   if (DEMO) { res.json({ ok: true }); return; } // fixtures are read-only
   const { title, caption_style, thumbnail_config } = req.body || {};
   const args = ["clips", "edit", req.params.id];
-  if (title != null) args.push("--title", String(title));
+  if (title != null) args.push(`--title=${title}`);
   if (caption_style != null) args.push("--caption-style", String(caption_style));
   if (thumbnail_config != null) args.push("--thumbnail-config", JSON.stringify(thumbnail_config));
   if (args.length === 3) {
@@ -2033,8 +2096,10 @@ app.post("/api/clips/:id/thumbnail", async (req, res) => {
   const tc = clip.thumbnail_config || {};
   // Standalone thumbnail generation — produces variation PNGs, never touches the clip video.
   const outDir = join(paths.output, "thumbnails", String(clip.id));
+  // Free-text values ride behind "--" (positionals) or as --flag=value so a
+  // title starting with "-" can't be parsed as an option.
   const args = [
-    "thumbnails", tc.text || clip.title,
+    "thumbnails",
     "--output", outDir,
     "--variations", "3",
     "--json",
@@ -2044,8 +2109,9 @@ app.post("/api/clips/:id/thumbnail", async (req, res) => {
   ];
   if (tc.image_path) args.push("--photo", String(tc.image_path));
   else if (typeof tc.timestamp === "number") args.push("--timestamp", String(tc.timestamp));
-  if (tc.line1) args.push("--line1", String(tc.line1));
-  if (tc.line2) args.push("--line2", String(tc.line2));
+  if (tc.line1) args.push(`--line1=${tc.line1}`);
+  if (tc.line2) args.push(`--line2=${tc.line2}`);
+  args.push("--", tc.text || clip.title);
   const r = await runCli(args);
   if (r.code !== 0) {
     res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "thumbnail failed" });
@@ -2099,13 +2165,14 @@ app.get("/api/clips/:id/thumbnail/options", async (req, res) => {
   const clamp = (v: any, d: number) => Math.min(Math.max(parseInt(String(v)) || d, 1), 8);
   const outDir = join(paths.output, "thumbnails", String(clip.id), "frames");
   const r = await runCli([
-    "thumbnail-options", tc.text || clip.title,
+    "thumbnail-options",
     "--output", outDir,
     "--video", clip.source_video,
     "--start", String(clip.start_second),
     "--end", String(clip.end_second),
     "--texts", String(clamp(req.query.texts, 6)),
     "--frames", String(clamp(req.query.frames, 6)),
+    "--", tc.text || clip.title,
   ]);
   if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "options failed" }); return; }
   const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
@@ -2132,10 +2199,11 @@ app.post("/api/clips/:id/thumbnail/render", async (req, res) => {
   const outDir = join(paths.output, "thumbnails", String(clip.id));
   await mkdir(outDir, { recursive: true });
   const out = join(outDir, `thumb_${uuidv4().slice(0, 8)}.png`);
-  const args = ["thumbnail-render", tc.text || clip.title, "--frame", resolvedFrame, "--output", out];
-  if (line1) args.push("--line1", String(line1));
-  if (line2) args.push("--line2", String(line2));
+  const args = ["thumbnail-render", "--frame", resolvedFrame, "--output", out];
+  if (line1) args.push(`--line1=${line1}`);
+  if (line2) args.push(`--line2=${line2}`);
   if (frame_info) args.push("--frame-info", JSON.stringify(frame_info));
+  args.push("--", tc.text || clip.title);
   const r = await runCli(args);
   if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "render failed" }); return; }
   const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
@@ -2177,7 +2245,7 @@ app.post("/api/thumbnail-studio/options", async (req, res) => {
   if (!title || !String(title).trim()) { res.status(400).json({ error: "title is required" }); return; }
   const clamp = (v: any, d: number) => Math.min(Math.max(parseInt(String(v)) || d, 1), 8);
   const args = [
-    "thumbnail-options", String(title),
+    "thumbnail-options",
     "--output", join(thumbStudioDir, "frames"),
     "--texts", String(clamp(texts, 6)),
     "--frames", String(clamp(frames, 6)),
@@ -2192,6 +2260,7 @@ app.post("/api/thumbnail-studio/options", async (req, res) => {
     if (start != null && start !== "") args.push("--start", String(Math.max(0, Number(start) || 0)));
     if (end != null && end !== "") args.push("--end", String(Math.max(0, Number(end) || 0)));
   }
+  args.push("--", String(title));
   const r = await runCli(args);
   if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "options failed" }); return; }
   const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
@@ -2212,10 +2281,11 @@ app.post("/api/thumbnail-studio/render", async (req, res) => {
   if (!resolvedFrame) { res.status(400).json({ error: "invalid frame" }); return; }
   await mkdir(thumbStudioDir, { recursive: true });
   const out = join(thumbStudioDir, `thumb_${uuidv4().slice(0, 8)}.png`);
-  const args = ["thumbnail-render", String(title), "--frame", resolvedFrame, "--output", out];
-  if (line1) args.push("--line1", String(line1));
-  if (line2) args.push("--line2", String(line2));
+  const args = ["thumbnail-render", "--frame", resolvedFrame, "--output", out];
+  if (line1) args.push(`--line1=${line1}`);
+  if (line2) args.push(`--line2=${line2}`);
   if (frame_info) args.push("--frame-info", JSON.stringify(frame_info));
+  args.push("--", String(title));
   const r = await runCli(args);
   if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "render failed" }); return; }
   const jsonLine = r.stdout.trim().split("\n").reverse().find((l) => l.trim().startsWith("{"));
@@ -2284,7 +2354,7 @@ app.put("/api/youtube/config", (req, res) => {
     if (client_id !== undefined) yt.client_id = client_id;
     if (client_secret) yt.client_secret = client_secret;
     all.youtube = yt;
-    writeFileSync(paths.integrations, JSON.stringify(all, null, 2) + "\n", "utf-8");
+    writeFileAtomicSync(paths.integrations, JSON.stringify(all, null, 2) + "\n");
     // Holds the OAuth client secret — keep it owner-only (chmod covers the
     // case where the file already existed with looser perms).
     try { chmodSync(paths.integrations, 0o600); } catch { /* best effort */ }
@@ -2518,7 +2588,7 @@ app.post("/api/clips/:id/davinci", async (req, res) => {
     return;
   }
   const cli = join(paths.backendDir, "services", "integrations", "davinci_resolve", "cli.py");
-  const r = await runPy([cli, "--source", clip.output_path, "--title", clip.title]);
+  const r = await runPy([cli, "--source", clip.output_path, `--title=${clip.title}`]);
   if (r.code !== 0) {
     res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "export failed" });
     return;
@@ -2572,7 +2642,7 @@ app.get("/api/corrections", (_req, res) => {
 app.put("/api/corrections", express.json(), (req, res) => {
   try {
     const corrections = req.body || {};
-    writeFileSync(correctionsPath, JSON.stringify(corrections, null, 2));
+    writeFileAtomicSync(correctionsPath, JSON.stringify(corrections, null, 2));
     res.json({ ok: true, corrections });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2591,7 +2661,7 @@ app.post("/api/corrections/add", express.json(), (req, res) => {
       corrections = JSON.parse(readFileSync(correctionsPath, "utf-8"));
     }
     corrections[wrong] = correct;
-    writeFileSync(correctionsPath, JSON.stringify(corrections, null, 2));
+    writeFileAtomicSync(correctionsPath, JSON.stringify(corrections, null, 2));
     res.json({ ok: true, corrections });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2605,7 +2675,7 @@ app.delete("/api/corrections/:wrong", (req, res) => {
       corrections = JSON.parse(readFileSync(correctionsPath, "utf-8"));
     }
     delete corrections[req.params.wrong];
-    writeFileSync(correctionsPath, JSON.stringify(corrections, null, 2));
+    writeFileAtomicSync(correctionsPath, JSON.stringify(corrections, null, 2));
     res.json({ ok: true, corrections });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2624,6 +2694,15 @@ app.get("/api/knowledge", async (_req, res) => {
 
 app.get("/api/knowledge/dir", (_req, res) => {
   res.json({ path: paths.knowledge });
+});
+
+// Must stay ahead of the :filename routes, which would otherwise claim "init".
+app.post("/api/knowledge/init", async (_req, res) => {
+  try {
+    res.json(await knowledgeBase.initFromTemplates());
+  } catch (err: unknown) {
+    res.status(500).json({ error: errMsg(err) });
+  }
 });
 
 // Knowledge file upload (drag & drop .md files) — must be before :filename routes
@@ -2695,6 +2774,39 @@ app.delete("/api/knowledge/:filename", async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- Onboarding readiness ---
+app.get("/api/onboarding", async (_req, res) => {
+  const knowledge = await knowledgeBase
+    .status()
+    .catch(() => ({ templates: [], present: [], filled: [], missing: [] }));
+  const assets = await assetManager.list().catch(() => []);
+  const clips = await clipsHistory.load().catch(() => []);
+
+  let aiCli = false;
+  try {
+    const result = await executor.execute<{ available?: boolean }>("ai_cli_status", {});
+    aiCli = !!result.data?.available;
+  } catch {
+    // A failed probe reads the same as no CLI installed.
+  }
+
+  res.json({
+    knowledge: {
+      total: knowledge.templates.length,
+      present: knowledge.present.length,
+      filled: knowledge.filled,
+      missing: knowledge.missing,
+    },
+    assets: {
+      count: assets.length,
+      branding: assets.some((a) => a.type === "logo" || a.type === "outro"),
+    },
+    aiCli: { available: aiCli },
+    clips: { count: clips.length },
+    dismissed: !!uiState.settings.onboardingDismissed,
+  });
 });
 
 // --- Prompt Builder (shared by /api/generate-prompt and /api/mcp-hints) ---
@@ -2928,7 +3040,11 @@ app.post("/api/claude-suggest", async (req, res) => {
       ...uiState.suggestions.map((s) => ({ start_second: s.start_second, end_second: s.end_second, title: s.title })),
     ];
 
+    // The backend derives laughter/reaction anchors from the audio, so it needs
+    // the source video, not just the segments.
     const params: Record<string, unknown> = { segments: segs, top_n, existing_clips };
+    const suggestVideo = uiState.filePath || uiState.videoPath;
+    if (suggestVideo) params.video_path = suggestVideo;
     if (min_duration) params.min_duration = min_duration;
     if (max_duration) params.max_duration = max_duration;
     const result = await executor.execute<{ clips?: SuggestedClip[] }>(
@@ -3322,26 +3438,111 @@ app.post("/api/ui-state", (req, res) => {
       uiState.settings.outroPath = body.settings.outroPath;
     if (body.settings.introPath !== undefined)
       uiState.settings.introPath = body.settings.introPath;
+    if (body.settings.cleanFillers !== undefined)
+      uiState.settings.cleanFillers = body.settings.cleanFillers !== false;
+    if (body.settings.onboardingDismissed !== undefined)
+      uiState.settings.onboardingDismissed = !!body.settings.onboardingDismissed;
   }
   uiState.lastUpdated = Date.now();
   persistState();
 
-  // Broadcast to UI when changes come from MCP (not from UI itself)
+  // Broadcast to UI when changes come from MCP (not from UI itself).
+  // Send the stored (server-enriched) values, not the raw request body, so
+  // clients see keep_segments etc.; energyData rides along so unrelated syncs
+  // don't wipe computed energy client-side.
   if (source !== "ui") {
     broadcastSSE("state-sync", {
-      ...(body.videoPath !== undefined && { videoPath: body.videoPath }),
-      ...(body.filePath !== undefined && { filePath: body.filePath }),
-      ...(body.suggestions !== undefined && { suggestions: body.suggestions }),
+      ...(body.videoPath !== undefined && { videoPath: uiState.videoPath }),
+      ...(body.filePath !== undefined && { filePath: uiState.filePath }),
+      ...(body.suggestions !== undefined && { suggestions: uiState.suggestions }),
       ...(body.deselectedIndices !== undefined && {
-        deselectedIndices: body.deselectedIndices,
+        deselectedIndices: uiState.deselectedIndices,
       }),
-      ...(body.phase !== undefined && { phase: body.phase }),
-      ...(body.transcript !== undefined && { transcript: body.transcript }),
-      ...(body.settings && { settings: body.settings }),
+      ...(body.phase !== undefined && { phase: uiState.phase }),
+      ...(body.transcript !== undefined && { transcript: uiState.transcript }),
+      ...(body.settings && { settings: uiState.settings }),
+      energyData: uiState.energyData,
     });
   }
 
   res.json({ ok: true });
+});
+
+/**
+ * POST /api/suggestions/modify — mutate one suggestion in-place on the server.
+ * Replaces the read-modify-replace cycle MCP tools used, which lost concurrent
+ * edits between the GET and the wholesale POST.
+ * Body: { action: "update" | "delete" | "toggle", index? | clip_id?, updates?, selected? }
+ */
+app.post("/api/suggestions/modify", (req, res) => {
+  const { action = "update", clip_id, updates, selected } = req.body || {};
+  let index = typeof req.body?.index === "number" ? req.body.index : -1;
+  if (index === -1 && clip_id) {
+    index = uiState.suggestions.findIndex((s) => s.clip_id === clip_id);
+  }
+  if (index < 0 || index >= uiState.suggestions.length) {
+    res.status(404).json({ error: "Clip not found", total: uiState.suggestions.length });
+    return;
+  }
+
+  let clip: SuggestedClip;
+  if (action === "delete") {
+    [clip] = uiState.suggestions.splice(index, 1);
+    uiState.deselectedIndices = uiState.deselectedIndices
+      .filter((i) => i !== index)
+      .map((i) => (i > index ? i - 1 : i));
+  } else if (action === "toggle") {
+    if (typeof selected !== "boolean") {
+      res.status(400).json({ error: "selected must be a boolean for action 'toggle'" });
+      return;
+    }
+    if (selected) {
+      uiState.deselectedIndices = uiState.deselectedIndices.filter((i) => i !== index);
+    } else if (!uiState.deselectedIndices.includes(index)) {
+      uiState.deselectedIndices = [...uiState.deselectedIndices, index];
+    }
+    clip = uiState.suggestions[index];
+  } else if (action === "update") {
+    const upd = updates || {};
+    clip = uiState.suggestions[index];
+    const nextStart = typeof upd.start_second === "number" ? upd.start_second : clip.start_second;
+    const nextEnd = typeof upd.end_second === "number" ? upd.end_second : clip.end_second;
+    const rangeError = validateSuggestionRange(nextStart, nextEnd);
+    if (rangeError) {
+      res.status(400).json({ error: rangeError });
+      return;
+    }
+    if (typeof upd.title === "string") clip.title = upd.title;
+    clip.start_second = nextStart;
+    clip.end_second = nextEnd;
+    if (typeof upd.reasoning === "string") clip.reasoning = upd.reasoning;
+    if (typeof upd.preview_text === "string") clip.preview_text = upd.preview_text;
+    if (typeof upd.suggested_caption_style === "string") {
+      clip.suggested_caption_style = upd.suggested_caption_style;
+    }
+    clip.duration = Math.round((clip.end_second - clip.start_second) * 10) / 10;
+    const fmtTime = (s: number) =>
+      `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
+    clip.timestamp_display = `${fmtTime(clip.start_second)} → ${fmtTime(clip.end_second)}`;
+  } else {
+    res.status(400).json({ error: `Unknown action: ${action}` });
+    return;
+  }
+
+  uiState.lastUpdated = Date.now();
+  persistState();
+  broadcastSSE("state-sync", {
+    suggestions: uiState.suggestions,
+    deselectedIndices: uiState.deselectedIndices,
+    energyData: uiState.energyData,
+  });
+  res.json({
+    ok: true,
+    index,
+    clip,
+    total: uiState.suggestions.length,
+    selectedCount: uiState.suggestions.length - uiState.deselectedIndices.length,
+  });
 });
 
 /**
@@ -3371,6 +3572,13 @@ app.post("/api/mcp/export", async (req, res) => {
   const format =
     req.body.format || uiState.settings.format || "vertical";
   const allowAssFallback = req.body.allow_ass_fallback === true;
+  // An agent that says nothing about fillers gets the studio's toggle, so an
+  // export it triggers matches what the user set up there.
+  const cleanFillers =
+    req.body.clean_fillers !== undefined
+      ? req.body.clean_fillers !== false
+      : uiState.settings.cleanFillers !== false;
+  const keepCaptionOverlay = req.body.keep_caption_overlay === true;
 
   if (!videoPath || !existsSync(videoPath)) {
     res.status(400).json({ error: "Video file not found" });
@@ -3379,6 +3587,14 @@ app.post("/api/mcp/export", async (req, res) => {
   if (!clips.length) {
     res.status(400).json({ error: "No clips to export" });
     return;
+  }
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    const rangeError = validateClipRange(c.start_second, c.end_second, c.format || format);
+    if (rangeError) {
+      res.status(400).json({ error: `Clip ${i + 1}: ${rangeError}` });
+      return;
+    }
   }
 
   await fileManager.ensureDirectories();
@@ -3424,7 +3640,7 @@ app.post("/api/mcp/export", async (req, res) => {
     logoPath,
     outroPath,
     introPath,
-    cleanFillers: req.body.clean_fillers === true,
+    cleanFillers,
   });
 
   // Broadcast to UI so it can track progress
@@ -3444,24 +3660,35 @@ app.post("/api/mcp/export", async (req, res) => {
         logo_path: logoPath,
         outro_path: outroPath,
         intro_path: introPath,
+        clean_fillers: cleanFillers,
+        keep_caption_overlay: keepCaptionOverlay,
         face_map: uiState.transcript?.face_map,
       },
       (event) => {
-        job.progress = event.percent;
+        const progress = advanceProgress(job, event.percent);
         job.message = event.message;
         historyRecorder.recordProgress(event);
+        const clipResult = event.clip_result
+          ? tagSubmittedClip(event.clip_result, styledClips)
+          : undefined;
+        if (event.stage === "clip_complete" && clipResult) {
+          (job.clip_results ??= []).push(clipResult);
+        }
         broadcastSSE("job-update", {
           jobId,
-          progress: event.percent,
+          progress,
           message: event.message,
+          stage: event.stage,
+          clip_result: clipResult,
         });
       },
     )
     .then(async (result) => {
+      const data = tagSubmittedClips(result.data, styledClips);
       job.status = "done";
       job.progress = 100;
       job.message = "Export complete!";
-      job.result = result.data;
+      job.result = data;
       // Record clips to history
       try {
         await historyRecorder.recordRemaining(result.data?.results);
@@ -3471,7 +3698,7 @@ app.post("/api/mcp/export", async (req, res) => {
         });
       }
       setExportState("done", null);
-      broadcastSSE("job-complete", { jobId, result: result.data });
+      broadcastSSE("job-complete", { jobId, result: data });
     })
     .catch((err) => {
       job.status = "error";
@@ -3513,8 +3740,10 @@ async function main() {
 
   // SPA fallback: client-side routes (/, /episode, /clip/:id) resolve to the
   // built index.html. Registered last so it never shadows /api or static assets.
+  // root: the install path can contain a dot segment (a global npm install under
+  // ~/.nvm, say), and sendFile's dotfile rule would 404 the whole app.
   app.get(/^(?!\/api\/).*/, (_req, res) => {
-    res.sendFile(join(publicDir, "index.html"));
+    res.sendFile("index.html", { root: publicDir });
   });
 
   // Bind to loopback by default — the studio serves local files (clips, assets,
@@ -3525,7 +3754,7 @@ async function main() {
   });
   server.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
-      log.error(`Port ${PORT} is already in use — is the studio already running? Set PORT to use another.`);
+      log.error(`Port ${PORT} is already in use — is the studio already running? Set PODCLI_PORT to use another.`);
     } else {
       log.error("Web server failed to start", { err: err.message });
     }

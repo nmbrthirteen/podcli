@@ -1,33 +1,91 @@
-import { readFile, writeFile, readdir, stat, unlink, mkdir } from "fs/promises";
+import { readFile, writeFile, readdir, stat, unlink, mkdir, copyFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { paths } from "../config/paths.js";
 import type { KnowledgeFile } from "../models/index.js";
 
-const DEFAULT_README = `# podcli Knowledge Base
+const templatesDir = join(paths.backendDir, "templates", "knowledge");
 
-Add \`.md\` files here to give the AI context when creating clips.
+// Template blanks look like [Show name]; a markdown link ([text](url)) is not one.
+const PLACEHOLDER = /\[[^\]\n]{1,80}\](?!\()/g;
 
-## Suggested files
+function placeholders(text: string): number {
+  return text.match(PLACEHOLDER)?.length ?? 0;
+}
 
-- \`podcast.md\` — Show name, description, format, episode structure
-- \`hosts.md\` — Host names, speaking styles, roles
-- \`style.md\` — Preferred caption style, logo, crop strategy, colors
-- \`audience.md\` — Target audience, platform preferences (TikTok vs Reels vs Shorts)
-- \`avoid.md\` — Topics, segments, or time ranges to skip
+export function isFilledIn(content: string, template: string): boolean {
+  const body = content.trim();
+  if (!body || body === template.trim()) return false;
+  return placeholders(body) <= placeholders(template) * 0.3;
+}
 
-The MCP server reads all files here before processing requests.
-`;
+export interface KnowledgeStatus {
+  templates: string[];
+  present: string[];
+  filled: string[];
+  missing: string[];
+}
 
 export class KnowledgeBase {
   private dir = paths.knowledge;
 
   async ensureDir() {
-    if (!existsSync(this.dir)) {
-      await mkdir(this.dir, { recursive: true });
-      // Write default README
-      await writeFile(join(this.dir, "README.md"), DEFAULT_README, "utf-8");
+    await mkdir(this.dir, { recursive: true });
+  }
+
+  private async loadTemplates(): Promise<Map<string, string>> {
+    const templates = new Map<string, string>();
+    let names: string[];
+    try {
+      names = (await readdir(templatesDir)).filter((f) => f.endsWith(".md")).sort();
+    } catch {
+      return templates;
     }
+    for (const name of names) {
+      templates.set(name, await readFile(join(templatesDir, name), "utf-8"));
+    }
+    return templates;
+  }
+
+  /** Copy the starter templates in, never overwriting a file the user already has. */
+  async initFromTemplates(): Promise<{ created: string[]; kept: string[] }> {
+    const templates = await this.loadTemplates();
+    if (templates.size === 0) {
+      throw new Error(`No knowledge templates found at ${templatesDir}`);
+    }
+    await this.ensureDir();
+
+    const created: string[] = [];
+    const kept: string[] = [];
+    for (const name of templates.keys()) {
+      const target = join(this.dir, name);
+      if (existsSync(target)) {
+        kept.push(name);
+        continue;
+      }
+      await copyFile(join(templatesDir, name), target);
+      created.push(name);
+    }
+    return { created, kept };
+  }
+
+  async status(): Promise<KnowledgeStatus> {
+    const templates = await this.loadTemplates();
+    const byName = new Map((await this.listFiles()).map((f) => [f.filename, f.content]));
+
+    const present: string[] = [];
+    const filled: string[] = [];
+    const missing: string[] = [];
+    for (const [name, template] of templates) {
+      const content = byName.get(name);
+      if (content === undefined) {
+        missing.push(name);
+        continue;
+      }
+      present.push(name);
+      if (isFilledIn(content, template)) filled.push(name);
+    }
+    return { templates: [...templates.keys()], present, filled, missing };
   }
 
   async listFiles(): Promise<KnowledgeFile[]> {
