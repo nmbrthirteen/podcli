@@ -76,5 +76,48 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(max(w, key=w.get), "transcript_semantic")
 
 
+
+class WaveformFromSharedWavTests(unittest.TestCase):
+    def test_reads_pre_extracted_wav_directly(self):
+        import struct
+        import tempfile
+        import wave as wave_mod
+
+        fd, wav_path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        try:
+            with wave_mod.open(wav_path, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(16000)
+                w.writeframes(struct.pack("<4h", 0, 16384, -16384, 0))
+
+            waveform = ae._read_waveform_16k_mono("/nonexistent.mp4", wav_path=wav_path)
+            self.assertIsNotNone(waveform)
+            self.assertEqual(len(waveform), 4)
+            self.assertAlmostEqual(float(waveform[1]), 0.5, places=3)
+        finally:
+            os.unlink(wav_path)
+
+    def test_missing_wav_falls_back_to_extraction_path(self):
+        from unittest import mock
+
+        with mock.patch.object(ae, "proc_run", return_value=mock.Mock(returncode=1, stderr="")):
+            waveform = ae._read_waveform_16k_mono("/nonexistent.mp4", wav_path="/no/such/file.wav")
+        self.assertIsNone(waveform)
+
+    def test_corrupt_wav_from_ffmpeg_returns_none(self):
+        from unittest import mock
+
+        def fake_run(cmd, **kwargs):
+            # ffmpeg "succeeds" but leaves a WAV that wave.open cannot parse.
+            with open(cmd[cmd.index("wav") + 1], "wb") as f:
+                f.write(b"not a wav")
+            return mock.Mock(returncode=0, stderr="")
+
+        with mock.patch.object(ae, "proc_run", side_effect=fake_run):
+            self.assertIsNone(ae._read_waveform_16k_mono("/nonexistent.mp4"))
+
+
 if __name__ == "__main__":
     unittest.main()

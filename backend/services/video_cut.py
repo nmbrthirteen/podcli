@@ -21,10 +21,14 @@ def cut_segment(
 ) -> str:
     """Extract a single time segment from a video file.
 
-    Uses `-ss` before `-i` with re-encoding for frame-accurate
-    timestamps. The fast preset + CRF 18 is a deliberate quality
-    trade-off: we'll re-encode again in the final pipeline, so this
-    pass prioritizes speed.
+    Always re-encodes with `-ss` before `-i` for frame-accurate timestamps.
+    Stream copy is not an option here: with `-c copy` ffmpeg can only start at
+    the keyframe at-or-before the cut point, so any boundary off the GOP grid
+    silently emits up to a full GOP of earlier content while the duration still
+    checks out, which offsets every burned-in caption. CRF 16 keeps this
+    intermediate visually lossless through the later crop/caption/audio
+    re-encodes; the fast preset holds the speed cost to a few percent
+    over the old CRF 18 pass.
     """
     duration = end_second - start_second
 
@@ -33,7 +37,7 @@ def cut_segment(
         "-ss", str(start_second),
         "-i", input_path,
         "-t", str(duration),
-        "-c:v", "libx264", "-crf", "18", "-preset", "fast", "-profile:v", "high",
+        "-c:v", "libx264", "-crf", "16", "-preset", "fast", "-profile:v", "high",
         "-c:a", "aac", "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",
         output_path,

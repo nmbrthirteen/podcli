@@ -188,5 +188,70 @@ class SliceSegmentsTests(unittest.TestCase):
         self.assertEqual(cs._slice_segments_for_range(segments, 0, 50), [])
 
 
+
+class ReactionAnchorPromptTests(unittest.TestCase):
+    def test_empty_or_none_returns_empty(self):
+        self.assertEqual(cs._format_reaction_anchors(None), "")
+        self.assertEqual(cs._format_reaction_anchors([]), "")
+
+    def test_anchors_are_sorted_deduped_and_formatted(self):
+        block = cs._format_reaction_anchors([120.34, 12.31, 12.34])
+        self.assertIn("AUDIENCE REACTION ANCHORS", block)
+        self.assertIn("12.3s", block)
+        self.assertIn("120.3s", block)
+        self.assertEqual(block.count("12.3s, 120.3s"), 1)  # deduped and ascending
+
+    def test_anchor_count_is_capped(self):
+        import re
+        block = cs._format_reaction_anchors([float(t) for t in range(200)])
+        self.assertEqual(len(re.findall(r"\d+\.\ds", block)), cs.MAX_REACTION_ANCHORS)
+
+
+class BlendSignalScoresTests(unittest.TestCase):
+    def _clips(self):
+        return [
+            {"start_second": 0.0, "end_second": 10.0, "score": 16, "reasons": ["hot_take"]},
+            {"start_second": 100.0, "end_second": 120.0, "score": 12, "reasons": []},
+        ]
+
+    def _events(self):
+        return [
+            {"time": 5.0, "laughter": 0.5, "cheering": 0.0, "screaming": 0.0, "speech": 0.2},
+        ]
+
+    def test_no_signals_is_a_noop(self):
+        clips = self._clips()
+        out = cs.blend_signal_scores(clips, energy_data=None, events_data=None)
+        self.assertEqual(out[0]["score"], 16)
+        self.assertNotIn("signal_boost", out[0])
+
+    def test_reaction_peak_boosts_only_covering_clip(self):
+        clips = cs.blend_signal_scores(self._clips(), events_data=self._events())
+        self.assertGreater(clips[0]["score"], 16)
+        self.assertEqual(clips[1]["score"], 12)
+        self.assertNotIn("signal_boost", clips[1])
+
+    def test_ai_score_stays_primary(self):
+        # Even a maxed-out reaction+energy signal adds at most 3 points.
+        clips = [{"start_second": 0.0, "end_second": 10.0, "score": 12}]
+        events = [{"time": 5.0, "laughter": 1.0, "cheering": 0.0, "screaming": 0.0, "speech": 0.0}]
+        energy = [{"time": float(t), "rms_db": -30.0} for t in range(0, 60)] + [{"time": 5.0, "rms_db": 0.0}]
+        out = cs.blend_signal_scores(clips, energy_data=energy, events_data=events)
+        self.assertLessEqual(out[0]["score"], 15.0)
+
+    def test_deterministic(self):
+        a = cs.blend_signal_scores(self._clips(), events_data=self._events())
+        b = cs.blend_signal_scores(self._clips(), events_data=self._events())
+        self.assertEqual(a, b)
+
+    def test_order_preserved(self):
+        clips = cs.blend_signal_scores(self._clips(), events_data=self._events())
+        self.assertEqual([c["start_second"] for c in clips], [0.0, 100.0])
+
+    def test_strong_laugh_tagged_in_reasons(self):
+        clips = cs.blend_signal_scores(self._clips(), events_data=self._events())
+        self.assertIn("laughter", clips[0]["reasons"])
+
+
 if __name__ == "__main__":
     unittest.main()

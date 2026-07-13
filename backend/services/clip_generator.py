@@ -11,6 +11,7 @@ import tempfile
 import shutil
 import subprocess
 import re
+import threading
 from typing import Optional, Callable
 
 from utils.proc import run as proc_run, ProcError
@@ -232,6 +233,65 @@ def _apply_local_transition_smoothing(
         return result.returncode == 0 and os.path.exists(output_path)
     except Exception:
         return False
+
+
+_output_path_lock = threading.Lock()
+_reserved_output_paths: set[str] = set()
+
+
+def _reserve_output_path(output_dir: str, stem: str, ext: str) -> str:
+    """Claim an output path no other clip in this run can take.
+
+    Titles come from an LLM and are not deduped, so two clips in one batch can
+    share a stem. Rendering both to the same path would interleave the copy and
+    the in-place autofix re-encode into one corrupt file while both report
+    success. Reservations are per-process, so re-rendering a clip in a later run
+    still overwrites its own output instead of piling up suffixes.
+    """
+    with _output_path_lock:
+        candidate = os.path.join(output_dir, f"{stem}{ext}")
+        n = 2
+        while candidate in _reserved_output_paths:
+            candidate = os.path.join(output_dir, f"{stem}-{n}{ext}")
+            n += 1
+        _reserved_output_paths.add(candidate)
+        return candidate
+
+
+def _reframe_can_jump(
+    reframe: bool,
+    crop_strategy: str,
+    crop_keyframes: list = None,
+    keep_segments: list = None,
+) -> bool:
+    """Whether this render can contain hard visual jumps worth an autofix pass.
+
+    The pass is only skipped where a jump is impossible: no reframe at all, a
+    fixed centre crop, or a manual crop held on a single keyframe. Every
+    tracked strategy can snap the crop between subjects, so it gets smoothed.
+    Speaker labels are not consulted: the default whisper.cpp engine skips
+    diarization, so they are absent exactly when face tracking is doing the
+    most snapping.
+    """
+    if keep_segments and len(keep_segments) > 1:
+        return True
+    if not reframe:
+        return False
+    if crop_strategy == "center":
+        return False
+    if crop_strategy == "manual":
+        return bool(crop_keyframes and len(crop_keyframes) > 1)
+    return True
+
+
+def _transition_autofix_passes(jumps_possible: bool) -> int:
+    raw = (os.environ.get("PODCLI_TRANSITION_AUTOFIX_PASSES") or "").strip()
+    if raw:
+        try:
+            return max(0, min(int(raw), 2))
+        except ValueError:
+            pass
+    return 2 if jumps_possible else 0
 
 
 def _auto_fix_transition_jumps(video_path: str, max_passes: int = 1) -> bool:
@@ -916,20 +976,27 @@ def generate_clip(
         if progress_callback:
             progress_callback(95, "Saving final clip...")
 
-        output_filename = f"{safe_filename(title)}_short.mp4"
-
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-            final_path = os.path.join(output_dir, output_filename)
+            final_path = _reserve_output_path(output_dir, f"{safe_filename(title)}_short", ".mp4")
         else:
-            final_path = os.path.join(work_dir, output_filename)
+            fd, final_path = tempfile.mkstemp(
+                prefix=f"{safe_filename(title)}_short_", suffix=".mp4"
+            )
+            os.close(fd)
 
         shutil.copy2(final_video_path, final_path)
 
         # Optional bounded QA/autofix pass for transition jumps.
         # Hard-capped to avoid any infinite rerender loop.
-        max_autofix_passes = int(os.environ.get("PODCLI_TRANSITION_AUTOFIX_PASSES", "2") or "2")
-        max_autofix_passes = max(0, min(max_autofix_passes, 2))
+        max_autofix_passes = _transition_autofix_passes(
+            _reframe_can_jump(
+                reframe=spec.reframe,
+                crop_strategy=crop_strategy,
+                crop_keyframes=crop_keyframes,
+                keep_segments=keep_segments,
+            )
+        )
         if max_autofix_passes > 0:
             if progress_callback:
                 progress_callback(97, "Quality gate: checking transitions...")
@@ -956,11 +1023,17 @@ def generate_clip(
         if length_warning:
             out["warning"] = length_warning
         if keep_caption_overlay and caption_overlay_path and os.path.exists(caption_overlay_path):
-            out["caption_overlay_path"] = caption_overlay_path
-            out["cropped_source_path"] = cropped_path
+            # Copy out of work_dir before cleanup so the returned paths survive.
+            base, _ = os.path.splitext(final_path)
+            persisted_overlay = f"{base}_captions.mov"
+            shutil.copy2(caption_overlay_path, persisted_overlay)
+            out["caption_overlay_path"] = persisted_overlay
+            if os.path.exists(cropped_path):
+                persisted_source = f"{base}_source.mp4"
+                shutil.copy2(cropped_path, persisted_source)
+                out["cropped_source_path"] = persisted_source
         return out
 
     finally:
-        # Clean up temp files (but not if output is in work_dir)
-        if output_dir and os.path.exists(work_dir):
+        if os.path.exists(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)

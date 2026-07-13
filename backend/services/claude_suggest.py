@@ -473,12 +473,31 @@ def _load_existing_shorts(episodes_path: str) -> list[str]:
         return []
 
 
+MAX_REACTION_ANCHORS = 40
+
+
+def _format_reaction_anchors(reaction_times: list[float] | None) -> str:
+    """Prompt block listing detected laughter/reaction peaks as anchor moments."""
+    if not reaction_times:
+        return ""
+    anchors = sorted({round(float(t), 1) for t in reaction_times})[:MAX_REACTION_ANCHORS]
+    times = ", ".join(f"{t:.1f}s" for t in anchors)
+    return (
+        "\nAUDIENCE REACTION ANCHORS (detected laughter/cheering peaks, in seconds):\n"
+        f"{times}\n"
+        "The moment that CAUSED each reaction sits just before its anchor. "
+        "Clips that contain or lead into an anchor are strong candidates — "
+        "prefer them when quality is otherwise equal.\n"
+    )
+
+
 def _build_prompt(
     transcript_text: str,
     segment_count: int,
     duration_min: float,
     top_n: int,
     exclude_clips: list[dict] | None = None,
+    reaction_times: list[float] | None = None,
 ) -> str:
     """Build the prompt for Claude to extract clips.
 
@@ -487,7 +506,8 @@ def _build_prompt(
     """
 
     # Load knowledge base files inline — prioritized by relevance to clip selection
-    kb_context = ""
+    from services.knowledge_base import load_kb_context, warn_missing_context
+
     kb_dir = paths["knowledge"]
     # (filename, max_chars) — higher priority files get more budget
     _kb_files = [
@@ -500,18 +520,9 @@ def _build_prompt(
         ("08-topics-themes.md", 1000),            # topic areas, audience interest map
         ("00-master-instructions.md", 1500),      # quality gate, auto-detection rules
     ]
-    for fname, max_chars in _kb_files:
-        fpath = os.path.join(kb_dir, fname)
-        if os.path.exists(fpath):
-            try:
-                with open(fpath, encoding="utf-8") as f:
-                    content = f.read().strip()
-                # Skip template-only files (uncustomized placeholders)
-                if content.count("[Your Show Name]") > 2 and len(content) < 500:
-                    continue
-                kb_context += f"\n--- {fname} ---\n{content[:max_chars]}\n"
-            except Exception:
-                pass
+    kb_context = load_kb_context(_kb_files, kb_dir)
+    if not kb_context:
+        warn_missing_context("clip scoring")
 
     # Load existing shorts from episode database for duplicate avoidance
     episodes_path = os.path.join(kb_dir, "03-episodes-database.md")
@@ -568,7 +579,7 @@ MOMENT SELECTION (think like a TikTok editor):
 {f"KNOWLEDGE BASE:{kb_context}" if kb_context else ""}
 
 {f"EXISTING SHORTS (avoid duplicating these moments):{chr(10).join('- ' + s for s in existing_shorts)}" if existing_shorts else ""}
-{excluded_ranges}
+{excluded_ranges}{_format_reaction_anchors(reaction_times)}
 
 Score each moment on 4 dimensions (1-5 each):
 - standalone: Makes sense without episode context?
@@ -898,6 +909,7 @@ def suggest_with_claude(
     progress_callback: Optional[Callable[[int, str], None]] = None,
     timeout: int = 900,
     error_sink: Optional[list[str]] = None,
+    reaction_times: list[float] | None = None,
 ) -> Optional[list[dict]]:
     """
     Use an AI CLI (Claude Code or Codex) to extract the best clip moments.
@@ -926,6 +938,7 @@ def suggest_with_claude(
         duration_min,
         top_n,
         exclude_clips=exclude_clips,
+        reaction_times=reaction_times,
     )
 
     # Write prompt to temp file to avoid shell escaping issues.
@@ -1091,6 +1104,7 @@ def suggest_initial_with_claude(
     exclude_clips: list[dict] | None = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
     error_sink: Optional[list[str]] = None,
+    reaction_times: list[float] | None = None,
 ) -> Optional[list[dict]]:
     """
     Initial clip discovery entry point.
@@ -1108,6 +1122,7 @@ def suggest_initial_with_claude(
             progress_callback=progress_callback,
             error_sink=error_sink,
             timeout=180,
+            reaction_times=reaction_times,
         )
 
     start_bound = float(segments[0].get("start", 0))
@@ -1139,6 +1154,7 @@ def suggest_initial_with_claude(
             progress_callback=progress_callback,
             error_sink=error_sink,
             timeout=180,
+            reaction_times=reaction_times,
         )
 
     if progress_callback:
@@ -1169,6 +1185,9 @@ def suggest_initial_with_claude(
             ),
             error_sink=error_sink,
             timeout=90,
+            reaction_times=[
+                t for t in (reaction_times or []) if bucket["start"] <= t <= bucket["end"]
+            ] or None,
         )
         if not bucket_clips:
             continue
@@ -1192,11 +1211,54 @@ def suggest_initial_with_claude(
         ),
         error_sink=error_sink,
         timeout=120,
+        reaction_times=reaction_times,
     )
     if fallback_clips:
         deduped = _dedupe_clips_by_range(deduped + fallback_clips)
 
     return _select_top_by_score(deduped, top_n) if deduped else None
+
+
+REACTION_BLEND_WEIGHT = 0.2
+ENERGY_BLEND_WEIGHT = 0.1
+
+
+def blend_signal_scores(
+    clips: list[dict],
+    energy_data: list[dict] | None = None,
+    events_data: list[dict] | None = None,
+    reaction_weight: float = REACTION_BLEND_WEIGHT,
+    energy_weight: float = ENERGY_BLEND_WEIGHT,
+) -> list[dict]:
+    """Blend per-clip reaction/energy peaks into AI-selected clip scores.
+
+    The AI score (0-20) stays primary: the 0-10 signal scores are added at
+    modest weight (max +3 combined), so laughter or an energy spike breaks
+    ties rather than overruling editorial judgment. Mutates and returns
+    `clips`, preserving their order.
+    """
+    if not clips or (not energy_data and not events_data):
+        return clips
+
+    from services.audio_analyzer import compute_energy_scores
+    from services.audio_events import compute_event_scores
+
+    ranges = [
+        {"start": float(c.get("start_second", 0)), "end": float(c.get("end_second", 0))}
+        for c in clips
+    ]
+    reaction_scores = compute_event_scores(events_data or [], ranges)
+    energy_scores = compute_energy_scores(energy_data or [], ranges)
+
+    for clip, r_score, e_score in zip(clips, reaction_scores, energy_scores):
+        boost = round(reaction_weight * r_score + energy_weight * e_score, 2)
+        if boost <= 0:
+            continue
+        clip["signal_boost"] = boost
+        clip["score"] = round(float(clip.get("score", 0)) + boost, 2)
+        if r_score > 3 and "laughter" not in (clip.get("reasons") or []):
+            clip.setdefault("reasons", []).append("laughter")
+    return clips
 
 
 def _bucket_coverage_seconds(existing_clips: list[dict], start: float, end: float) -> float:
