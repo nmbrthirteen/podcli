@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -91,12 +92,19 @@ const maxAttempts = 6
 
 // Fetch downloads url into dest with resume, progress, and stall detection.
 // Exported so self-update reuses the same download path.
-func Fetch(url, dest, label string) error { return fetch(url, dest, label) }
+func Fetch(url, dest, label string) error { return fetch(url, dest, label, downloadHTTPClient()) }
+
+// FetchGuarded is Fetch with a caller-supplied redirect allowlist. Self-update
+// passes its GitHub-only allowlist: provisioning also trusts the model and
+// ffmpeg CDNs, and the podcli binary must not be redirectable to any of them.
+func FetchGuarded(url, dest, label string, allowHost func(string) bool) error {
+	return fetch(url, dest, label, guardedHTTPClient(allowHost, 60*time.Second))
+}
 
 // fetch resumes via HTTP Range across transient stalls rather than restarting,
 // writing to dest atomically. A per-destination lock file serializes concurrent
 // podcli processes so they don't append to the same .part file.
-func fetch(url, dest, label string) error {
+func fetch(url, dest, label string, client *http.Client) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
@@ -105,16 +113,25 @@ func fetch(url, dest, label string) error {
 		return err
 	}
 	defer unlock()
-	if have(dest) {
-		return nil // another process finished it while we waited
-	}
 	tmp := dest + ".part"
+	if have(dest) {
+		// Another process finished it while we waited; its .part is gone, but a
+		// resume file from an earlier interrupted attempt may still sit here.
+		os.Remove(tmp)
+		os.Remove(validatorPath(tmp))
+		return nil
+	}
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		done, err := downloadOnce(url, tmp, label)
+		done, err := downloadOnce(url, tmp, label, client)
 		if err == nil && done {
 			lastErr = nil
 			break
+		}
+		if errors.Is(err, ErrUntrustedRedirect) {
+			os.Remove(tmp)
+			os.Remove(validatorPath(tmp))
+			return err
 		}
 		lastErr = err
 		fmt.Fprintf(os.Stderr, "\n  %s interrupted (attempt %d/%d): %v - resuming\n", label, attempt, maxAttempts, err)
@@ -131,47 +148,115 @@ func fetch(url, dest, label string) error {
 
 // downloadPath places transient archives inside the managed dir rather than the
 // world-shared temp dir, where a predictable name could be pre-planted by
-// another local user.
-func downloadPath(name string) (string, error) {
+// another local user. The dir persists across runs, so name derives from the
+// source URL: a completed archive is only reused for the exact release it came
+// from, never for the next one published under the same asset name.
+func downloadPath(url, name string) (string, error) {
 	dir := filepath.Join(paths.RuntimeDir(), "downloads")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, name), nil
+	sum := sha256.Sum256([]byte(url))
+	return filepath.Join(dir, "podcli-"+hex.EncodeToString(sum[:8])+"-"+name), nil
 }
 
+// removeArchive drops an extracted archive and the sidecars fetch leaves beside
+// it. The downloads dir is persistent, so anything left there outlives the
+// release it belongs to.
+func removeArchive(path string) {
+	os.Remove(path)
+	os.Remove(path + ".part")
+	os.Remove(validatorPath(path + ".part"))
+}
+
+var (
+	lockHeartbeat = 20 * time.Second
+	lockStale     = 2 * time.Minute
+	lockPoll      = time.Second
+	lockWait      = 30 * time.Minute
+)
+
 // acquireLock serializes provisioning of one artifact across processes via an
-// O_EXCL sentinel. A lock older than an hour is treated as abandoned (crashed
-// process) and taken over.
+// O_EXCL sentinel. The holder heartbeats the lock while it works, so a healthy
+// but slow download (ggml-small.bin on a thin link) is never mistaken for a
+// crashed one and stolen mid-flight.
 func acquireLock(dest string) (func(), error) {
 	lock := dest + ".lock"
-	deadline := time.Now().Add(30 * time.Minute)
+	deadline := time.Now().Add(lockWait)
 	for {
 		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
 			fmt.Fprintf(f, "%d", os.Getpid())
 			f.Close()
-			return func() { os.Remove(lock) }, nil
+			return holdLock(lock), nil
 		}
 		if !os.IsExist(err) {
 			return nil, err
 		}
-		if fi, statErr := os.Stat(lock); statErr == nil && time.Since(fi.ModTime()) > time.Hour {
-			os.Remove(lock)
+		if dropStaleLock(lock) {
 			continue
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("timed out waiting for %s (another podcli may be provisioning; delete the file if not)", lock)
 		}
-		time.Sleep(time.Second)
+		time.Sleep(lockPoll)
 	}
+}
+
+// holdLock keeps the lock's mtime fresh until the returned unlock runs.
+func holdLock(lock string) func() {
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(lockHeartbeat)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				now := time.Now()
+				os.Chtimes(lock, now, now)
+			case <-done:
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(done)
+			os.Remove(lock)
+		})
+	}
+}
+
+// dropStaleLock removes a lock whose holder stopped heartbeating, reporting
+// whether it did. Removal is itself serialized by an O_EXCL takeover token:
+// otherwise two processes seeing the same stale lock both remove and recreate
+// it, the second deleting the first's fresh lock, and both then append to the
+// same .part file.
+func dropStaleLock(lock string) bool {
+	token := lock + ".takeover"
+	if fi, err := os.Stat(token); err == nil && time.Since(fi.ModTime()) > lockStale {
+		os.Remove(token) // a process died mid-takeover; retry the takeover next pass
+		return false
+	}
+	f, err := os.OpenFile(token, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return false // another process is taking over; wait for its lock instead
+	}
+	f.Close()
+	defer os.Remove(token)
+	fi, err := os.Stat(lock)
+	if err != nil || time.Since(fi.ModTime()) <= lockStale {
+		return false
+	}
+	return os.Remove(lock) == nil
 }
 
 func download(url, dest, wantSHA, label string) error {
 	if wantSHA == "" {
 		return fmt.Errorf("no pinned checksum for %s - refusing unverified download", label)
 	}
-	if err := fetch(url, dest, label); err != nil {
+	if err := fetch(url, dest, label, downloadHTTPClient()); err != nil {
 		return err
 	}
 	got, err := sha256file(dest)
@@ -218,7 +303,7 @@ func verifyDownload(archive, sumsURL, name string) error {
 
 func validatorPath(tmp string) string { return tmp + ".validator" }
 
-func downloadOnce(url, tmp, label string) (bool, error) {
+func downloadOnce(url, tmp, label string, client *http.Client) (bool, error) {
 	var start int64
 	if fi, err := os.Stat(tmp); err == nil {
 		start = fi.Size()
@@ -236,7 +321,7 @@ func downloadOnce(url, tmp, label string) (bool, error) {
 			req.Header.Set("If-Range", strings.TrimSpace(string(v)))
 		}
 	}
-	resp, err := downloadHTTPClient().Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, err
 	}
@@ -503,22 +588,30 @@ func allowedReleaseHost(h string) bool {
 	return strings.HasSuffix(h, ".githubusercontent.com")
 }
 
-func releaseHTTPClient() *http.Client {
+// ErrUntrustedRedirect marks a download diverted off its allowlist. Callers that
+// wrap Fetch in a retry loop must not treat it as a transient failure.
+var ErrUntrustedRedirect = errors.New("refusing redirect to untrusted host")
+
+func guardedHTTPClient(allowHost func(string) bool, headerTimeout time.Duration) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
-			ResponseHeaderTimeout: 30 * time.Second,
+			ResponseHeaderTimeout: headerTimeout,
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
 			}
-			if !allowedReleaseHost(req.URL.Hostname()) {
-				return fmt.Errorf("refusing redirect to untrusted host %q", req.URL.Hostname())
+			if !allowHost(req.URL.Hostname()) {
+				return fmt.Errorf("%w %q", ErrUntrustedRedirect, req.URL.Hostname())
 			}
 			return nil
 		},
 	}
+}
+
+func releaseHTTPClient() *http.Client {
+	return guardedHTTPClient(allowedReleaseHost, 30*time.Second)
 }
 
 // allowedDownloadHost pins large-binary/model downloads to their known source
@@ -545,21 +638,7 @@ func allowedDownloadHost(h string) bool {
 }
 
 func downloadHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			ResponseHeaderTimeout: 60 * time.Second,
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("too many redirects")
-			}
-			if !allowedDownloadHost(req.URL.Hostname()) {
-				return fmt.Errorf("refusing redirect to untrusted host %q", req.URL.Hostname())
-			}
-			return nil
-		},
-	}
+	return guardedHTTPClient(allowedDownloadHost, 60*time.Second)
 }
 
 func httpGetBytes(url string) ([]byte, error) {
@@ -620,7 +699,7 @@ func EnsureWhisperCpp() (string, error) {
 	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 		return "", err
 	}
-	if err := fetch(url, bin, "whisper-cli"); err != nil {
+	if err := fetch(url, bin, "whisper-cli", downloadHTTPClient()); err != nil {
 		return "", err
 	}
 	if err := verifyReleaseAsset(assets, name, bin); err != nil {
@@ -657,8 +736,7 @@ func EnsureFFmpeg() (string, error) {
 		return "", fmt.Errorf("no ffmpeg build for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	for _, a := range specs {
-		sum := sha256.Sum256([]byte(a.URL))
-		archive, err := downloadPath("podcli-ff-" + hex.EncodeToString(sum[:8]))
+		archive, err := downloadPath(a.URL, "ffmpeg-archive")
 		if err != nil {
 			return "", err
 		}
@@ -666,7 +744,7 @@ func EnsureFFmpeg() (string, error) {
 			return "", err
 		}
 		err = extractBins(archive, a.Bins, dir)
-		os.Remove(archive)
+		removeArchive(archive)
 		if err != nil {
 			return "", err
 		}
@@ -692,7 +770,7 @@ func releaseFFmpeg() error {
 			return fmt.Errorf("asset %s not in latest release", name)
 		}
 		os.Remove(bin)
-		if err := fetch(url, bin, tool); err != nil {
+		if err := fetch(url, bin, tool, downloadHTTPClient()); err != nil {
 			return err
 		}
 		if err := verifyReleaseAsset(assets, name, bin); err != nil {
@@ -898,12 +976,11 @@ func EnsurePython(requirements string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		sum := sha256.Sum256([]byte(url))
-		archive, err := downloadPath("podcli-py-" + hex.EncodeToString(sum[:8]) + ".tar.gz")
+		archive, err := downloadPath(url, "cpython.tar.gz")
 		if err != nil {
 			return "", err
 		}
-		if err := fetch(url, archive, "cpython"); err != nil {
+		if err := fetch(url, archive, "cpython", downloadHTTPClient()); err != nil {
 			return "", err
 		}
 		if sumsURL == "" {
@@ -913,7 +990,7 @@ func EnsurePython(requirements string) (string, error) {
 			return "", err
 		}
 		err = extractTarGz(archive, paths.RuntimeDir())
-		os.Remove(archive)
+		removeArchive(archive)
 		if err != nil {
 			return "", err
 		}

@@ -113,8 +113,11 @@ def _read_waveform_16k_mono(video_path: str, wav_path: Optional[str] = None) -> 
         result = proc_run(cmd, timeout=600, check=False)
         if result.returncode != 0:
             return None
-        with wave.open(tmp.name) as w:
-            frames = w.readframes(w.getnframes())
+        try:
+            with wave.open(tmp.name) as w:
+                frames = w.readframes(w.getnframes())
+        except (wave.Error, OSError):
+            return None
     finally:
         try:
             os.unlink(tmp.name)

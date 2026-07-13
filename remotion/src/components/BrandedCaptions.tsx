@@ -119,7 +119,7 @@ export const BrandedCaptions: React.FC<Props> = ({
   faceY,
 }) => {
   const frame = useCurrentFrame();
-  const { fps, height } = useVideoConfig();
+  const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
   const currentTime = frame / fps;
   const scaledStyle = { ...style, fontSize: style.fontSize * s };
@@ -128,6 +128,7 @@ export const BrandedCaptions: React.FC<Props> = ({
     perChunk: style.wordsPerChunk,
     maxChars: MAX_CHARS_PER_CHUNK,
     splitTail: true,
+    clipEnd: durationInFrames / fps,
   });
   const activeChunk = activeChunkAt(chunks, currentTime);
 

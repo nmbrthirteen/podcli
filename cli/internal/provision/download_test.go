@@ -117,7 +117,7 @@ func TestDownloadOnceSendsIfRangeAndRestartsOnChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	done, err := downloadOnce(srv.URL, tmp, "test")
+	done, err := downloadOnce(srv.URL, tmp, "test", downloadHTTPClient())
 	if err != nil || !done {
 		t.Fatalf("downloadOnce = %v, %v", done, err)
 	}

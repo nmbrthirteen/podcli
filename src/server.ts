@@ -500,9 +500,8 @@ export function createServer(): McpServer {
       clean_fillers: z
         .boolean()
         .optional()
-        .default(true)
         .describe(
-          "Remove filler words (um, uh, hmm) from captions and compress long silences. Default: true",
+          "Remove filler words (um, uh, hmm) from captions and compress long silences. Defaults to the studio's clean filler words setting (on unless the user turned it off).",
         ),
       transcript_words: z
         .array(
@@ -639,7 +638,9 @@ export function createServer(): McpServer {
               transcript_words: params.transcript_words,
               logo_path: params.logo_path || null,
               outro_path: params.outro_path || null,
-              clean_fillers: params.clean_fillers !== false,
+              ...(params.clean_fillers !== undefined && {
+                clean_fillers: params.clean_fillers,
+              }),
               keep_caption_overlay: params.keep_caption_overlay === true,
             }),
           });
@@ -718,7 +719,7 @@ export function createServer(): McpServer {
             logoPath: (params.logo_path as string) || recipeSettings.logoPath || null,
             outroPath: (params.outro_path as string) || recipeSettings.outroPath || null,
             introPath: recipeSettings.introPath || null,
-            cleanFillers: params.clean_fillers !== false,
+            cleanFillers: params.clean_fillers ?? recipeSettings.cleanFillers ?? true,
             keepSegments: keepSegments ?? undefined,
           });
 
@@ -781,9 +782,8 @@ export function createServer(): McpServer {
       clean_fillers: z
         .boolean()
         .optional()
-        .default(true)
         .describe(
-          "Remove filler words (um, uh, hmm) from captions and compress long silences. Default: true",
+          "Remove filler words (um, uh, hmm) from captions and compress long silences. Defaults to the studio's clean filler words setting (on unless the user turned it off).",
         ),
       transcript_words: z
         .array(
@@ -889,7 +889,9 @@ export function createServer(): McpServer {
               video_path: resolvedVideoPath,
               clips: resolvedClips,
               transcript_words: resolvedTranscriptWords,
-              clean_fillers: params.clean_fillers !== false,
+              ...(params.clean_fillers !== undefined && {
+                clean_fillers: params.clean_fillers,
+              }),
               keep_caption_overlay: params.keep_caption_overlay === true,
             }),
           });

@@ -70,6 +70,7 @@ def _reveal_in_os(path: str) -> None:
 
 from config.paths import paths
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
+from services.knowledge_base import is_empty as kb_is_empty, kb_files
 
 
 def _suggestions_session_path(cache_hash: str) -> str:
@@ -325,17 +326,26 @@ class _SharedWav:
     def __init__(self, media_path: str):
         self.media_path = media_path
         self.path = None
+        self.error = None
+        self._failed = False
         import atexit
         atexit.register(self.cleanup)
 
     def get(self) -> str | None:
         if self.path and os.path.exists(self.path):
             return self.path
+        # A decode that fails slowly (or hangs to the 1800s timeout) would be
+        # retried by each caller, so the failure is remembered too.
+        if self._failed:
+            return None
         try:
             from services.audio_extract import extract_wav_16k_mono
             self.path = extract_wav_16k_mono(self.media_path)
-        except Exception:
+        except Exception as e:
+            self.error = e
             self.path = None
+        if not self.path:
+            self._failed = True
         return self.path
 
     def cleanup(self) -> None:
@@ -647,6 +657,13 @@ def cmd_process(args):
         print("  Mode:    fast draft")
     print(f"  Video:   {os.path.basename(video_path)}")
     print()
+
+    if kb_is_empty():
+        yellow = "\033[38;2;250;204;21m"
+        reset = "\033[0m"
+        print(f"  {yellow}⚠ Knowledge base empty, clips will be scored without your show context.{reset}")
+        print(f"  {yellow}  Run: podcli knowledge init{reset}")
+        print()
 
     # Cache hash for resume — keyed by video size+mtime. Disabled when a custom
     # transcript is supplied, since the hash ignores transcript contents and
@@ -2784,10 +2801,7 @@ def cmd_knowledge(args):
         print(f"\n  {bold}Knowledge Base{reset}")
         print(f"  {'─' * 45}")
         empty_hint = f"  {gray}Empty — run{reset} podcli knowledge init {gray}to create the starter templates{reset}\n"
-        if not os.path.isdir(kb_dir):
-            print(empty_hint)
-            return
-        files = sorted(f for f in os.listdir(kb_dir) if f.endswith(".md"))
+        files = kb_files(kb_dir)
         if not files:
             print(empty_hint)
             return
@@ -3075,7 +3089,7 @@ def cmd_clips(args):
         print(f"\n  {green}✓{reset} Reopened {accent}{str(clip.get('id'))[:8]}{reset}  {bold}{clip.get('title')}{reset}")
         if not transcript:
             print(f"      {gray}Transcript not loaded — re-transcribe in the studio to edit captions.{reset}")
-        print(f"      {gray}Open the studio:{reset} {accent}http://localhost:3847/clip/{clip.get('id')}{reset}\n")
+        print(f"      {gray}Open the studio:{reset} {accent}http://localhost:{_webui_port()}/clip/{clip.get('id')}{reset}\n")
         return
 
 
@@ -3421,9 +3435,7 @@ def print_banner():
     except Exception:
         encoder_label = "CPU"
 
-    # Count knowledge base files
-    kb_path = paths["knowledge"]
-    kb_count = len([f for f in os.listdir(kb_path) if f.endswith(".md")]) if os.path.isdir(kb_path) else 0
+    kb_count = len(kb_files())
 
     gray = "\033[38;5;245m"
     accent = "\033[38;2;212;135;74m"
@@ -3469,7 +3481,8 @@ def print_banner():
     ai_tag = f"{green}✓ {ai_label}{reset}" if ai_path else f"{yellow}✗{reset}"
     speaker_tag = f"{green}✓{reset}" if speakers_ok else f"{yellow}✗{reset}"
     cache_tag = f"{green}{cache_count}{reset}" if cache_count else f"{gray}0{reset}"
-    print(f"  {gray}Encoder {green}{encoder_label}{reset} {gray}· {ai_tag} {gray}· Speakers {speaker_tag} {gray}· Cache {cache_tag}{reset}")
+    kb_tag = f"{green}{kb_count}{reset}" if kb_count else f"{yellow}0{reset}"
+    print(f"  {gray}Encoder {green}{encoder_label}{reset} {gray}· {ai_tag} {gray}· Speakers {speaker_tag} {gray}· Cache {cache_tag} {gray}· Knowledge {kb_tag}{reset}")
 
     # Assets — one line if any
     try:
@@ -3518,6 +3531,9 @@ def print_banner():
         else:
             print(f"  {yellow}⚠ Speaker detection needs a token — run: podcli env set HF_TOKEN <token>{reset}")
 
+    if not kb_count:
+        print(f"  {yellow}⚠ Knowledge base empty, clips get scored without your show context. Run: podcli knowledge init{reset}")
+
     print()
 
 
@@ -3542,7 +3558,8 @@ def print_help():
     print(f"    {accent}assets{reset}  {gray}<action>{reset}      Manage logos, intros, outros")
     print(f"    {accent}presets{reset} {gray}<action>{reset}      Save/load rendering presets")
     print(f"    {accent}thumbnails{reset} {gray}<title>{reset}   Generate thumbnail variations")
-    print(f"    {accent}knowledge{reset} {gray}<action>{reset}    Manage knowledge base (.podcli/knowledge/)")
+    print(f"    {accent}knowledge init{reset}        Create the starter templates for your show")
+    print(f"    {accent}knowledge{reset} {gray}<action>{reset}    list | read | edit | delete knowledge files")
     print(f"    {accent}config{reset} {gray}<action>{reset}        Export/import/migrate config profiles")
     print(f"    {accent}corrections{reset} {gray}<action>{reset}  Fix Whisper misheard words (Boxel→Voxel)")
     print(f"    {accent}cache{reset}  {gray}[clear]{reset}       Show/clear transcription cache")
@@ -3574,15 +3591,189 @@ def print_help():
     print()
     print(f"  {bold}PodStack{reset} {dim}(Claude Code slash commands):{reset}")
     print(f"    {accent}/auto{reset}                  One-verb pipeline: confirm strategy → render clips")
-    print(f"    {accent}/prep-episode{reset}          Full pipeline: transcript → publish-ready")
+    print(f"    {accent}/bootstrap-knowledge{reset}   Draft your knowledge base from an existing channel")
+    print(f"    {accent}/plan-episode{reset}          Design questions and target moments before recording")
+    print(f"    {accent}/produce-shorts{reset}        Full pipeline: transcript → publish-ready")
     print(f"    {accent}/process-transcript{reset}    Extract clip-worthy moments from transcript")
     print(f"    {accent}/generate-titles{reset}       Generate 8 title options with verification")
     print(f"    {accent}/generate-descriptions{reset} Descriptions + hashtags + SEO")
     print(f"    {accent}/plan-thumbnails{reset}       Thumbnail text + layout briefs")
     print(f"    {accent}/review-content{reset}        Brand voice & quality gate check")
     print(f"    {accent}/publish-checklist{reset}     Pre/post-publish checklist")
+    print(f"    {accent}/retro-episode{reset}         Performance review + learnings after publishing")
     print()
     print(f"  {gray}Run {reset}podcli <command> --help{gray} for command-specific options{reset}")
+    print()
+
+
+def _onboarding_marker() -> str:
+    return os.path.join(paths["home"], ".onboarded")
+
+
+def _needs_onboarding() -> bool:
+    if os.environ.get("PODCLI_NO_ONBOARDING"):
+        return False
+    if os.path.exists(_onboarding_marker()):
+        return False
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _mark_onboarded() -> None:
+    marker = _onboarding_marker()
+    os.makedirs(os.path.dirname(marker), exist_ok=True)
+    with open(marker, "w", encoding="utf-8") as f:
+        f.write(VERSION + "\n")
+
+
+def _render_brand_identity(answers: dict) -> str:
+    hosts = [h.strip() for h in answers.get("hosts", "").split(",") if h.strip()]
+    host_lines = "\n".join(f"- {h}" for h in hosts) or "- (add the hosts)"
+    return f"""# Brand identity
+
+## Show
+
+- Name: {answers.get('show_name', '').strip()}
+- Format: {answers.get('format', '').strip()}
+- Language: {answers.get('language', '').strip()}
+
+## Hosts
+
+{host_lines}
+
+## Audience
+
+- Who watches: {answers.get('audience', '').strip()}
+
+## Still to write
+
+- One-line positioning: who the show is for and what they get out of it.
+- The promise: what every episode leaves the viewer with.
+- What this show is not: two or three things it deliberately avoids.
+"""
+
+
+def _render_voice_and_tone(answers: dict) -> str:
+    hosts = [h.strip() for h in answers.get("hosts", "").split(",") if h.strip()]
+    host_phrase = " and ".join(hosts) if hosts else "a host"
+    return f"""# Voice and tone
+
+## Voice fingerprint
+
+{answers.get('show_name', '').strip()} sounds: {answers.get('voice', '').strip()}
+
+Every title, description, and thumbnail line has to sound like {host_phrase} talking, in {answers.get('language', '').strip()}.
+
+## The coffee test
+
+Copy should sound like something a host would say to a friend over coffee. If it reads like marketing, rewrite it.
+
+## Banned words and phrases
+
+Never use these in titles, descriptions, or thumbnails:
+
+- insane, mind-blowing, game-changer
+- you won't believe
+- this changed everything
+
+Add the cliches your niche is drowning in as you spot them.
+
+## Punctuation and style
+
+- Sentence case titles, no all-caps words.
+- Numerals over spelled-out numbers.
+- Emoji: none in titles.
+"""
+
+
+def _first_run_setup() -> None:
+    """Guided setup on the first interactive run. Skippable, asked once."""
+    import argparse as _ap
+    import questionary
+    from questionary import Style
+
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    green = "\033[38;2;74;222;128m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    qstyle = Style([
+        ("qmark", "fg:#d97631 bold"),
+        ("question", "bold"),
+        ("answer", "fg:#4ade80"),
+        ("pointer", "fg:#d97631 bold"),
+        ("highlighted", "fg:#d97631 bold"),
+        ("selected", "fg:#4ade80"),
+        ("instruction", "fg:#a1a1aa"),
+    ])
+
+    kb_dir = paths["knowledge"]
+    if not kb_is_empty(kb_dir):
+        _mark_onboarded()
+        return
+
+    print()
+    print(f"  {bold}Welcome to podcli{reset}")
+    print(f"  {gray}Six questions, then podcli scores clips against your show instead of a generic template.{reset}")
+    print()
+
+    start = questionary.confirm("Set it up now?", default=True, style=qstyle).ask()
+    if start is None:
+        return
+    if not start:
+        _mark_onboarded()
+        print(f"  {gray}Later: run{reset} podcli knowledge init {gray}and fill in the templates.{reset}\n")
+        return
+
+    questions = [
+        ("show_name", "Show name:"),
+        ("hosts", "Host names (comma separated):"),
+        ("audience", "Who watches, in one line:"),
+        ("language", "Main language:"),
+        ("format", "Format (e.g. interview, 60 min, weekly):"),
+        ("voice", "The show's voice in three words:"),
+    ]
+    answers = {}
+    for key, prompt in questions:
+        value = questionary.text(prompt, style=qstyle).ask()
+        if value is None:
+            return
+        answers[key] = value.strip()
+
+    if not answers["show_name"]:
+        _mark_onboarded()
+        print(f"  {gray}Nothing to save. Run{reset} podcli knowledge init {gray}when you're ready.{reset}\n")
+        return
+
+    os.makedirs(kb_dir, exist_ok=True)
+    for fname, content in (
+        ("01-brand-identity.md", _render_brand_identity(answers)),
+        ("02-voice-and-tone.md", _render_voice_and_tone(answers)),
+    ):
+        with open(os.path.join(kb_dir, fname), "w", encoding="utf-8") as f:
+            f.write(content)
+    print(f"\n  {green}✓{reset} 01-brand-identity.md")
+    print(f"  {green}✓{reset} 02-voice-and-tone.md")
+
+    cmd_knowledge(_ap.Namespace(knowledge_action="init"))
+
+    nxt = questionary.select(
+        "The other 12 files are starter templates. Next:",
+        choices=[
+            questionary.Choice("Draft them from an existing channel", value="bootstrap"),
+            questionary.Choice("Fill them in later", value="later"),
+        ],
+        style=qstyle,
+    ).ask()
+
+    if nxt == "bootstrap":
+        print(f"\n  {gray}In Claude Code, run:{reset} {accent}/bootstrap-knowledge <channel-url>{reset}")
+        print(f"  {gray}It reads the channel and drafts the remaining files for you.{reset}")
+    else:
+        print(f"\n  {gray}The files live in{reset} {kb_dir}")
+        print(f"  {gray}Fill in the [brackets] whenever you like. Start with 04-shorts-creation-guide.md.{reset}")
+
+    _mark_onboarded()
     print()
 
 
@@ -3929,6 +4120,9 @@ def main():
         print_help()
         return
 
+    if _needs_onboarding():
+        _first_run_setup()
+
     if args.command == "process":
         if not getattr(args, "no_banner", False):
             print()
@@ -3977,6 +4171,16 @@ def main():
         interactive_menu()
 
 
+def _webui_port() -> int:
+    """Resolve the Studio port the same way the Node server does."""
+    raw = os.environ.get("PODCLI_PORT") or os.environ.get("PORT")
+    try:
+        port = int(raw)
+    except (TypeError, ValueError):
+        return 3847
+    return port if 0 < port <= 65535 else 3847
+
+
 def launch_webui():
     """Launch the Studio web UI server (http://localhost:3847)."""
     import subprocess as sp
@@ -3989,7 +4193,7 @@ def launch_webui():
     reset = "\033[0m"
 
     backend_dir = os.path.dirname(os.path.abspath(__file__))
-    port = os.environ.get("PORT", "3847")
+    port = _webui_port()
     node = os.environ.get("PODCLI_NODE") or _shutil.which("node")
     studio = os.environ.get("PODCLI_STUDIO") or os.path.join(backend_dir, "..", "studio")
     server = os.path.join(studio, "web-server.mjs")
@@ -4605,7 +4809,7 @@ def _interactive_config():
         if action == "webui":
             import webbrowser
 
-            port = os.environ.get("PORT", "3847")
+            port = _webui_port()
             url = f"http://localhost:{port}/config"
             print(f"\n  {gray}Config UI:{reset} {url}")
             print(f"  {dim}Serve the UI first if needed: npm run build && npm run ui:prod{reset}\n")
@@ -4899,7 +5103,7 @@ def _interactive_knowledge():
     ])
 
     kb_dir = paths["knowledge"]
-    files = sorted(f for f in os.listdir(kb_dir) if f.endswith(".md")) if os.path.isdir(kb_dir) else []
+    files = kb_files(kb_dir)
 
     # Show current files
     cmd_knowledge(_ap.Namespace(knowledge_action="list"))
@@ -4911,13 +5115,18 @@ def _interactive_knowledge():
     if files:
         actions.insert(1, questionary.Choice("Read a file", value="read"))
         actions.append(questionary.Choice("Delete a file", value="delete"))
+    else:
+        actions.insert(0, questionary.Choice("Create the 14 starter templates", value="init"))
     actions.append(questionary.Choice("← Back", value="_back"))
 
     action = questionary.select("Knowledge base:", choices=actions, style=qstyle).ask()
     if action is None or action == "_back":
         return
 
-    if action == "read":
+    if action == "init":
+        cmd_knowledge(_ap.Namespace(knowledge_action="init"))
+
+    elif action == "read":
         choice = questionary.select("Which file?", choices=files, style=qstyle).ask()
         if choice:
             cmd_knowledge(_ap.Namespace(knowledge_action="read", filename=choice))

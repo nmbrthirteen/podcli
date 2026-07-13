@@ -11,6 +11,7 @@ import tempfile
 import shutil
 import subprocess
 import re
+import threading
 from typing import Optional, Callable
 
 from utils.proc import run as proc_run, ProcError
@@ -234,33 +235,53 @@ def _apply_local_transition_smoothing(
         return False
 
 
+_output_path_lock = threading.Lock()
+_reserved_output_paths: set[str] = set()
+
+
+def _reserve_output_path(output_dir: str, stem: str, ext: str) -> str:
+    """Claim an output path no other clip in this run can take.
+
+    Titles come from an LLM and are not deduped, so two clips in one batch can
+    share a stem. Rendering both to the same path would interleave the copy and
+    the in-place autofix re-encode into one corrupt file while both report
+    success. Reservations are per-process, so re-rendering a clip in a later run
+    still overwrites its own output instead of piling up suffixes.
+    """
+    with _output_path_lock:
+        candidate = os.path.join(output_dir, f"{stem}{ext}")
+        n = 2
+        while candidate in _reserved_output_paths:
+            candidate = os.path.join(output_dir, f"{stem}-{n}{ext}")
+            n += 1
+        _reserved_output_paths.add(candidate)
+        return candidate
+
+
 def _reframe_can_jump(
     reframe: bool,
     crop_strategy: str,
     crop_keyframes: list = None,
     keep_segments: list = None,
-    face_map: dict = None,
-    clip_words: list = None,
 ) -> bool:
     """Whether this render can contain hard visual jumps worth an autofix pass.
 
-    Multi-segment cuts always join with hard cuts. For reframed layouts, jumps
-    come from camera snaps between subjects: split-screen sources, hard-cut
-    strategies, multi-keyframe manual crops, or multiple speakers driving the
-    tracker. A single-speaker, non-split follow only pans smoothly.
+    The pass is only skipped where a jump is impossible: no reframe at all, a
+    fixed centre crop, or a manual crop held on a single keyframe. Every
+    tracked strategy can snap the crop between subjects, so it gets smoothed.
+    Speaker labels are not consulted: the default whisper.cpp engine skips
+    diarization, so they are absent exactly when face tracking is doing the
+    most snapping.
     """
     if keep_segments and len(keep_segments) > 1:
         return True
     if not reframe:
         return False
+    if crop_strategy == "center":
+        return False
     if crop_strategy == "manual":
         return bool(crop_keyframes and len(crop_keyframes) > 1)
-    if crop_strategy == "speaker-hardcut":
-        return True
-    if face_map and face_map.get("is_split_screen"):
-        return True
-    speakers = {w.get("speaker") for w in (clip_words or []) if w.get("speaker")}
-    return len(speakers) > 1
+    return True
 
 
 def _transition_autofix_passes(jumps_possible: bool) -> int:
@@ -955,11 +976,9 @@ def generate_clip(
         if progress_callback:
             progress_callback(95, "Saving final clip...")
 
-        output_filename = f"{safe_filename(title)}_short.mp4"
-
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-            final_path = os.path.join(output_dir, output_filename)
+            final_path = _reserve_output_path(output_dir, f"{safe_filename(title)}_short", ".mp4")
         else:
             fd, final_path = tempfile.mkstemp(
                 prefix=f"{safe_filename(title)}_short_", suffix=".mp4"
@@ -976,8 +995,6 @@ def generate_clip(
                 crop_strategy=crop_strategy,
                 crop_keyframes=crop_keyframes,
                 keep_segments=keep_segments,
-                face_map=face_map,
-                clip_words=crop_words,
             )
         )
         if max_autofix_passes > 0:

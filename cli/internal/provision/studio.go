@@ -66,14 +66,14 @@ func EnsureNode() (string, error) {
 	}
 	base := fmt.Sprintf("node-v%s-%s", nodeVersion, triple)
 	url := fmt.Sprintf("https://nodejs.org/dist/v%s/%s.%s", nodeVersion, base, ext)
-	archive, err := downloadPath("podcli-" + base + "." + ext)
+	archive, err := downloadPath(url, base+"."+ext)
 	if err != nil {
 		return "", err
 	}
-	if err := fetch(url, archive, "node"); err != nil {
+	if err := fetch(url, archive, "node", downloadHTTPClient()); err != nil {
 		return "", err
 	}
-	defer os.Remove(archive)
+	defer removeArchive(archive)
 	if err := verifyDownload(archive, fmt.Sprintf("https://nodejs.org/dist/v%s/SHASUMS256.txt", nodeVersion), base+"."+ext); err != nil {
 		return "", err
 	}
@@ -117,14 +117,14 @@ func EnsureRemotion(version string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("asset %s not in latest release", name)
 	}
-	archive, err := downloadPath("podcli-" + name)
+	archive, err := downloadPath(url, name)
 	if err != nil {
 		return "", err
 	}
-	if err := fetch(url, archive, "remotion"); err != nil {
+	if err := fetch(url, archive, "remotion", downloadHTTPClient()); err != nil {
 		return "", err
 	}
-	defer os.Remove(archive)
+	defer removeArchive(archive)
 	if err := verifyReleaseAsset(assets, name, archive); err != nil {
 		return "", err
 	}
@@ -188,14 +188,14 @@ func EnsureStudio(version string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("asset studio-bundle.tar.gz not in latest release")
 	}
-	archive, err := downloadPath("podcli-studio-bundle.tar.gz")
+	archive, err := downloadPath(url, "studio-bundle.tar.gz")
 	if err != nil {
 		return "", err
 	}
-	if err := fetch(url, archive, "studio"); err != nil {
+	if err := fetch(url, archive, "studio", downloadHTTPClient()); err != nil {
 		return "", err
 	}
-	defer os.Remove(archive)
+	defer removeArchive(archive)
 	if err := verifyReleaseAsset(assets, "studio-bundle.tar.gz", archive); err != nil {
 		return "", err
 	}

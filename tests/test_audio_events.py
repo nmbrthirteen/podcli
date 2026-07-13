@@ -106,6 +106,18 @@ class WaveformFromSharedWavTests(unittest.TestCase):
             waveform = ae._read_waveform_16k_mono("/nonexistent.mp4", wav_path="/no/such/file.wav")
         self.assertIsNone(waveform)
 
+    def test_corrupt_wav_from_ffmpeg_returns_none(self):
+        from unittest import mock
+
+        def fake_run(cmd, **kwargs):
+            # ffmpeg "succeeds" but leaves a WAV that wave.open cannot parse.
+            with open(cmd[cmd.index("wav") + 1], "wb") as f:
+                f.write(b"not a wav")
+            return mock.Mock(returncode=0, stderr="")
+
+        with mock.patch.object(ae, "proc_run", side_effect=fake_run):
+            self.assertIsNone(ae._read_waveform_16k_mono("/nonexistent.mp4"))
+
 
 if __name__ == "__main__":
     unittest.main()

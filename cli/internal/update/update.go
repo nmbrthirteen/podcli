@@ -303,7 +303,10 @@ func swap(staged, dest string) error {
 	return os.Rename(staged, dest)
 }
 
+// downloadFile reuses provisioning's resumable download, but keeps this path's
+// narrower redirect allowlist: provisioning also trusts the model and ffmpeg
+// CDNs, and nothing outside GitHub may serve the podcli binary.
 func downloadFile(url, dest string) error {
 	os.Remove(dest) // a stale staged binary must not satisfy Fetch's have() check
-	return provision.Fetch(url, dest, "podcli")
+	return provision.FetchGuarded(url, dest, "podcli", allowedHost)
 }

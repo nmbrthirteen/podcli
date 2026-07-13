@@ -12,12 +12,12 @@ Copy `.env.example` to `.env`, or export these in your shell. `setup.sh` copies 
 | `PODCLI_QUALITY` | `high` | Render quality profile |
 | `PODCLI_NO_UPDATE` | unset | Set to `1` to skip the update check. Same as `podcli config set update.auto off` |
 | `PODCLI_LOG_LEVEL` | `info` | Logging verbosity |
-| `PORT` | `3847` | Web studio port |
+| `PODCLI_PORT` | `3847` | Web studio port. `PORT` also works |
 | `HF_TOKEN` | unset | Hugging Face token, required for speaker diarization |
 | `PODCLI_ENV_FILE` | `./.env` | Path to an alternate `.env` |
 | `PODCLI_BACKEND` | resolved | Override the Python backend directory |
 | `PODCLI_PYTHON` | resolved | Override the Python interpreter. The launcher exports the resolved path as `PYTHON_PATH` for internal use |
-| `PODCLI_TRANSITION_AUTOFIX_PASSES` | `2` | Transition QA/autofix passes. `0` disables; the renderer caps it at 2 |
+| `PODCLI_TRANSITION_AUTOFIX_PASSES` | auto | Transition QA/autofix passes. Runs only on reframes that can produce hard cuts. Set a number to force it, `0` disables; the renderer caps it at 2 |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | Override the FFmpeg binaries |
 
 Installed builds provision their own Python, Node, FFmpeg, and whisper.cpp, so the

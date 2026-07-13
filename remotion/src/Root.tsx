@@ -17,7 +17,13 @@ Promise.all([
   document.fonts.load("700 16px 'DM Sans'"),
 ])
   .then(() => document.fonts.ready)
-  .then(() => continueRender(fontsReady));
+  .then(() => continueRender(fontsReady))
+  .catch((err) => {
+    // An unfetchable or unparseable woff2 must degrade to the fallback font. An
+    // uncleared delayRender fails every frame instead, killing the whole render.
+    console.warn("DM Sans failed to load, falling back:", err);
+    continueRender(fontsReady);
+  });
 
 const inputProps = getInputProps() as {
   videoSrc?: string;

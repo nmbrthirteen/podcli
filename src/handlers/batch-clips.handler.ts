@@ -153,13 +153,16 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   let clips: BatchClipSpec[];
   const deselected = state?.deselectedIndices ?? [];
 
+  const batchFormat = input.format || settings.format || "vertical";
+  const cleanFillers = input.clean_fillers ?? settings.cleanFillers ?? true;
+
   const buildClipFromSuggestion = (s: SuggestedClip, num: number): BatchClipSpec => ({
     start_second: s.start_second,
     end_second: s.end_second,
     title: s.title || `clip_${num}`,
     caption_style: s.suggested_caption_style || settings.captionStyle || "hormozi",
     crop_strategy: settings.cropStrategy || "speaker",
-    format: input.format || settings.format || "vertical",
+    format: batchFormat,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
     logo_path: settings.logoPath || null,
@@ -210,7 +213,11 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   }
 
   for (let i = 0; i < clips.length; i++) {
-    const rangeError = validateClipRange(clips[i].start_second, clips[i].end_second, clips[i].format);
+    const rangeError = validateClipRange(
+      clips[i].start_second,
+      clips[i].end_second,
+      clips[i].format || batchFormat,
+    );
     if (rangeError) {
       return JSON.stringify({ error: `Clip ${i + 1}: ${rangeError}` });
     }
@@ -227,8 +234,9 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
         body: JSON.stringify({
           video_path: videoPath,
           clips,
+          format: batchFormat,
           transcript_words: transcriptWords,
-          clean_fillers: input.clean_fillers !== false,
+          clean_fillers: cleanFillers,
           logo_path: settings.logoPath || null,
           outro_path: settings.outroPath || null,
           intro_path: settings.introPath || null,
@@ -257,8 +265,9 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   const result = await executor.execute<BatchClipsResult>("batch_clips", {
     video_path: videoPath,
     clips,
+    format: batchFormat,
     transcript_words: transcriptWords,
-    clean_fillers: input.clean_fillers !== false,
+    clean_fillers: cleanFillers,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
     output_dir: paths.output,
@@ -277,7 +286,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     transcriptWords: transcriptWords,
     defaultCaptionStyle: settings.captionStyle || "hormozi",
     defaultCropStrategy: settings.cropStrategy || "speaker",
-    defaultFormat: input.format || settings.format || "vertical",
+    defaultFormat: batchFormat,
   });
   await history.persistBatchRecipes(data.results, recorded, {
     transcriptWords: transcriptWords,
@@ -285,7 +294,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     logoPath: settings.logoPath || null,
     outroPath: settings.outroPath || null,
     introPath: settings.introPath || null,
-    cleanFillers: input.clean_fillers !== false,
+    cleanFillers,
   });
 
   return JSON.stringify({

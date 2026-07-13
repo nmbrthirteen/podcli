@@ -583,6 +583,24 @@ def handle_corrections(task_id: str, params: dict):
         emit_result(task_id, "error", error=f"Unknown corrections action: {action}")
 
 
+def _reaction_times_for_suggest(params: dict, segments: list) -> list | None:
+    """Laughter/reaction anchors for the suggestion prompt, if the caller has them."""
+    times = params.get("reaction_times")
+    if times:
+        return [float(t) for t in times]
+
+    video_path = params.get("video_path")
+    if not video_path or not os.path.exists(video_path):
+        return None
+    try:
+        from services.audio_events import get_event_profile, is_available
+        if not is_available():
+            return None
+        return get_event_profile(video_path, segments)["reaction_times"]
+    except Exception:
+        return None
+
+
 def handle_suggest_clips(task_id: str, params: dict):
     """AI-powered clip suggestion using Claude/Codex and PodStack knowledge base."""
     from services.claude_suggest import suggest_initial_with_claude, _find_ai_cli_candidates
@@ -613,6 +631,7 @@ def handle_suggest_clips(task_id: str, params: dict):
         exclude_clips=existing_clips,
         progress_callback=lambda pct, msg: emit_progress(task_id, "suggesting", pct, msg),
         error_sink=errors,
+        reaction_times=_reaction_times_for_suggest(params, segments),
     )
 
     if clips is None:

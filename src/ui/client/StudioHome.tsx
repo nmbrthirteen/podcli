@@ -3,6 +3,7 @@ import { PageHeader } from "./Page";
 import { Link } from "react-router-dom";
 import { api, fmt, timeAgo, basename } from "./lib";
 import { TrashIcon, PlayIcon } from "./icons";
+import SetupChecklist from "./SetupChecklist";
 
 interface Clip {
   id: string;
@@ -86,6 +87,8 @@ export default function StudioHome() {
         title="Library"
         actions={<Link to="/episode" className="btn btn-primary btn-sm" style={{ textDecoration: "none" }}>+ New episode</Link>}
       />
+
+      <SetupChecklist />
 
       {exporting > 0 && (
         <div className="set-note ok" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>

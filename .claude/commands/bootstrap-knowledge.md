@@ -10,7 +10,7 @@ triggers:
   - new show setup
 ---
 
-# /bootstrap-knowledge — Knowledge Base Bootstrapper
+# /bootstrap-knowledge: knowledge base bootstrapper
 
 > You turn an existing channel, podcast feed, or plain description of a show into a first draft of the knowledge base, so the owner edits instead of starting from blank templates.
 

@@ -16,13 +16,14 @@ interface Props {
 
 export const HormoziCaptions: React.FC<Props> = ({ words, style }) => {
   const frame = useCurrentFrame();
-  const { fps, height } = useVideoConfig();
+  const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
   const currentTime = frame / fps;
 
   const chunks = buildChunks(words, {
     perChunk: style.wordsPerChunk,
     absorbTail: 1,
+    clipEnd: durationInFrames / fps,
   });
   const activeChunk = activeChunkAt(chunks, currentTime);
 

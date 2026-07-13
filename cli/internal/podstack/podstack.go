@@ -58,19 +58,16 @@ func IsCommand(name string) bool {
 	return false
 }
 
-// installCommands writes the embedded slash-command files into
-// <project>/.claude/commands so the agent can resolve /<cmd>. Existing files are
-// left untouched, so a user's local edits win.
 // warnEmptyKnowledge nudges toward `podcli knowledge init` before a workflow
-// runs against a blank knowledge base. Best-effort: PODCLI_HOME and the
-// platform default cover installed binaries; source checkouts resolve home in
-// the Python layer and are skipped rather than guessed.
+// runs against a blank knowledge base. README.md does not count: the studio
+// writes one into the knowledge dir, and it carries no show context.
 func warnEmptyKnowledge() {
 	kb := filepath.Join(paths.Home(), "knowledge")
 	entries, err := os.ReadDir(kb)
 	if err == nil {
 		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".md") {
+			name := e.Name()
+			if strings.HasSuffix(name, ".md") && !strings.EqualFold(name, "README.md") {
 				return
 			}
 		}
@@ -78,6 +75,9 @@ func warnEmptyKnowledge() {
 	fmt.Fprintf(os.Stderr, "  %sKnowledge base is empty.%s Run %spodcli knowledge init%s first, or %s/bootstrap-knowledge%s in your agent, so the workflow knows your show.\n", colYellow, colReset, colAccent, colReset, colAccent, colReset)
 }
 
+// installCommands writes the embedded slash-command files into
+// <project>/.claude/commands so the agent can resolve /<cmd>. Existing files are
+// left untouched, so a user's local edits win.
 func installCommands(project string) error {
 	dest := filepath.Join(project, ".claude", "commands")
 	if err := os.MkdirAll(dest, 0o755); err != nil {

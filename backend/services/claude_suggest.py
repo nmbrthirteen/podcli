@@ -506,7 +506,8 @@ def _build_prompt(
     """
 
     # Load knowledge base files inline — prioritized by relevance to clip selection
-    kb_context = ""
+    from services.knowledge_base import load_kb_context, warn_missing_context
+
     kb_dir = paths["knowledge"]
     # (filename, max_chars) — higher priority files get more budget
     _kb_files = [
@@ -519,18 +520,9 @@ def _build_prompt(
         ("08-topics-themes.md", 1000),            # topic areas, audience interest map
         ("00-master-instructions.md", 1500),      # quality gate, auto-detection rules
     ]
-    for fname, max_chars in _kb_files:
-        fpath = os.path.join(kb_dir, fname)
-        if os.path.exists(fpath):
-            try:
-                with open(fpath, encoding="utf-8") as f:
-                    content = f.read().strip()
-                # Skip template-only files (uncustomized placeholders)
-                if content.count("[Your Show Name]") > 2 and len(content) < 500:
-                    continue
-                kb_context += f"\n--- {fname} ---\n{content[:max_chars]}\n"
-            except Exception:
-                pass
+    kb_context = load_kb_context(_kb_files, kb_dir)
+    if not kb_context:
+        warn_missing_context("clip scoring")
 
     # Load existing shorts from episode database for duplicate avoidance
     episodes_path = os.path.join(kb_dir, "03-episodes-database.md")

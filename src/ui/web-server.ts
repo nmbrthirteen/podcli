@@ -30,7 +30,7 @@ import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
-import { PythonExecutor, killProcessTree } from "../services/python-executor.js";
+import { PythonExecutor, terminateProcessTree } from "../services/python-executor.js";
 import { TranscriptCache } from "../services/transcript-cache.js";
 import { FileManager } from "../services/file-manager.js";
 import { AssetManager, inferType, safeName } from "../services/asset-manager.js";
@@ -39,7 +39,8 @@ import { KnowledgeBase } from "../services/knowledge-base.js";
 import { paths, pythonEnv } from "../config/paths.js";
 import { webServerPort } from "../config/server.js";
 import { writeFileAtomicSync } from "../utils/atomic-file.js";
-import { validateClipRange, validateSuggestionRange } from "../utils/clip-validation.js";
+import { maxClipSeconds, validateClipRange, validateSuggestionRange } from "../utils/clip-validation.js";
+import { advanceProgress, tagSubmittedClip, tagSubmittedClips } from "../utils/clip-results.js";
 import { DEMO_ASSETS_DIR } from "./demo-fixtures.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
@@ -141,6 +142,8 @@ interface UIState {
     logoPath: string;
     outroPath: string;
     introPath: string;
+    cleanFillers: boolean;
+    onboardingDismissed: boolean;
   };
   phase: string;
   results: unknown[];
@@ -175,6 +178,8 @@ function loadPersistedState(): UIState {
           logoPath: saved.settings?.logoPath || "",
           outroPath: saved.settings?.outroPath || "",
           introPath: saved.settings?.introPath || "",
+          cleanFillers: saved.settings?.cleanFillers !== false,
+          onboardingDismissed: !!saved.settings?.onboardingDismissed,
         },
         // Never restore mid-export phases
         phase: ["exporting", "parsing", "suggesting"].includes(saved.phase)
@@ -207,6 +212,8 @@ function loadPersistedState(): UIState {
       logoPath: "",
       outroPath: "",
       introPath: "",
+      cleanFillers: true,
+      onboardingDismissed: false,
     },
     phase: "idle",
     results: [],
@@ -674,7 +681,7 @@ app.post("/api/download-video", async (req, res) => {
   let outputFilePath = "";
   let settled = false;
   let responded = false;
-  const timer = setTimeout(() => killProcessTree(proc, "SIGTERM"), 3600_000);
+  const timer = setTimeout(() => terminateProcessTree(proc), 3600_000);
   const finish = (action: () => void): void => {
     if (settled) return;
     settled = true;
@@ -757,7 +764,7 @@ app.post("/api/download-video", async (req, res) => {
     });
   });
   req.on("close", () => {
-    if (!responded && !settled) killProcessTree(proc, "SIGTERM");
+    if (!responded && !settled) terminateProcessTree(proc);
   });
   responded = true;
   res.json({ job_id: jobId, status: "running" });
@@ -1216,6 +1223,7 @@ app.post("/api/batch-clips", async (req, res) => {
     transcript_words = [],
     clean_fillers = false,
     keep_caption_overlay = false,
+    format = "vertical",
   } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
@@ -1253,7 +1261,7 @@ app.post("/api/batch-clips", async (req, res) => {
       res.status(400).json({ error: `Clip ${i + 1}: invalid format "${c.format}". Use: vertical, horizontal, square` });
       return;
     }
-    const maxDur = c.format === "horizontal" ? 300 : 180;
+    const maxDur = maxClipSeconds(c.format || format);
     if (dur > maxDur) {
       res.status(400).json({
         error: `Clip ${i + 1}: too long (${Math.round(dur)}s). Max ${maxDur}s.`,
@@ -1302,6 +1310,7 @@ app.post("/api/batch-clips", async (req, res) => {
       {
         video_path,
         clips: enrichedClips,
+        format,
         transcript_words,
         output_dir: paths.output,
         logo_path,
@@ -1312,26 +1321,30 @@ app.post("/api/batch-clips", async (req, res) => {
         face_map: uiState.transcript?.face_map,
       },
       (event) => {
-        job.progress = event.percent;
+        const progress = advanceProgress(job, event.percent);
         job.message = event.message;
         historyRecorder.recordProgress(event);
-        if (event.stage === "clip_complete" && event.clip_result) {
-          (job.clip_results ??= []).push(event.clip_result);
+        const clipResult = event.clip_result
+          ? tagSubmittedClip(event.clip_result, enrichedClips)
+          : undefined;
+        if (event.stage === "clip_complete" && clipResult) {
+          (job.clip_results ??= []).push(clipResult);
         }
         broadcastSSE("job-update", {
           jobId,
-          progress: event.percent,
+          progress,
           message: event.message,
           stage: event.stage,
-          clip_result: event.clip_result,
+          clip_result: clipResult,
         });
       },
     )
     .then(async (result) => {
+      const data = tagSubmittedClips(result.data, enrichedClips);
       job.status = "done";
       job.progress = 100;
       job.message = "Batch complete!";
-      job.result = result.data;
+      job.result = data;
       // Record successful clips to history
       try {
         await historyRecorder.recordRemaining(result.data?.results);
@@ -1341,7 +1354,7 @@ app.post("/api/batch-clips", async (req, res) => {
         });
       }
       setExportState("done", null);
-      broadcastSSE("job-complete", { jobId, result: result.data });
+      broadcastSSE("job-complete", { jobId, result: data });
     })
     .catch((err) => {
       job.status = "error";
@@ -2008,8 +2021,7 @@ function runPy(scriptAndArgs: string[]): Promise<{ code: number; stdout: string;
       resolve(result);
     };
     const timer = setTimeout(() => {
-      killProcessTree(proc, "SIGTERM");
-      setTimeout(() => killProcessTree(proc, "SIGKILL"), 2000).unref();
+      terminateProcessTree(proc);
       finish({
         code: 1,
         stdout,
@@ -2684,6 +2696,15 @@ app.get("/api/knowledge/dir", (_req, res) => {
   res.json({ path: paths.knowledge });
 });
 
+// Must stay ahead of the :filename routes, which would otherwise claim "init".
+app.post("/api/knowledge/init", async (_req, res) => {
+  try {
+    res.json(await knowledgeBase.initFromTemplates());
+  } catch (err: unknown) {
+    res.status(500).json({ error: errMsg(err) });
+  }
+});
+
 // Knowledge file upload (drag & drop .md files) — must be before :filename routes
 const knowledgeUpload = multer({
   storage: multer.diskStorage({
@@ -2753,6 +2774,39 @@ app.delete("/api/knowledge/:filename", async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- Onboarding readiness ---
+app.get("/api/onboarding", async (_req, res) => {
+  const knowledge = await knowledgeBase
+    .status()
+    .catch(() => ({ templates: [], present: [], filled: [], missing: [] }));
+  const assets = await assetManager.list().catch(() => []);
+  const clips = await clipsHistory.load().catch(() => []);
+
+  let aiCli = false;
+  try {
+    const result = await executor.execute<{ available?: boolean }>("ai_cli_status", {});
+    aiCli = !!result.data?.available;
+  } catch {
+    // A failed probe reads the same as no CLI installed.
+  }
+
+  res.json({
+    knowledge: {
+      total: knowledge.templates.length,
+      present: knowledge.present.length,
+      filled: knowledge.filled,
+      missing: knowledge.missing,
+    },
+    assets: {
+      count: assets.length,
+      branding: assets.some((a) => a.type === "logo" || a.type === "outro"),
+    },
+    aiCli: { available: aiCli },
+    clips: { count: clips.length },
+    dismissed: !!uiState.settings.onboardingDismissed,
+  });
 });
 
 // --- Prompt Builder (shared by /api/generate-prompt and /api/mcp-hints) ---
@@ -2986,7 +3040,11 @@ app.post("/api/claude-suggest", async (req, res) => {
       ...uiState.suggestions.map((s) => ({ start_second: s.start_second, end_second: s.end_second, title: s.title })),
     ];
 
+    // The backend derives laughter/reaction anchors from the audio, so it needs
+    // the source video, not just the segments.
     const params: Record<string, unknown> = { segments: segs, top_n, existing_clips };
+    const suggestVideo = uiState.filePath || uiState.videoPath;
+    if (suggestVideo) params.video_path = suggestVideo;
     if (min_duration) params.min_duration = min_duration;
     if (max_duration) params.max_duration = max_duration;
     const result = await executor.execute<{ clips?: SuggestedClip[] }>(
@@ -3380,6 +3438,10 @@ app.post("/api/ui-state", (req, res) => {
       uiState.settings.outroPath = body.settings.outroPath;
     if (body.settings.introPath !== undefined)
       uiState.settings.introPath = body.settings.introPath;
+    if (body.settings.cleanFillers !== undefined)
+      uiState.settings.cleanFillers = body.settings.cleanFillers !== false;
+    if (body.settings.onboardingDismissed !== undefined)
+      uiState.settings.onboardingDismissed = !!body.settings.onboardingDismissed;
   }
   uiState.lastUpdated = Date.now();
   persistState();
@@ -3510,7 +3572,12 @@ app.post("/api/mcp/export", async (req, res) => {
   const format =
     req.body.format || uiState.settings.format || "vertical";
   const allowAssFallback = req.body.allow_ass_fallback === true;
-  const cleanFillers = req.body.clean_fillers !== false;
+  // An agent that says nothing about fillers gets the studio's toggle, so an
+  // export it triggers matches what the user set up there.
+  const cleanFillers =
+    req.body.clean_fillers !== undefined
+      ? req.body.clean_fillers !== false
+      : uiState.settings.cleanFillers !== false;
   const keepCaptionOverlay = req.body.keep_caption_overlay === true;
 
   if (!videoPath || !existsSync(videoPath)) {
@@ -3598,26 +3665,30 @@ app.post("/api/mcp/export", async (req, res) => {
         face_map: uiState.transcript?.face_map,
       },
       (event) => {
-        job.progress = event.percent;
+        const progress = advanceProgress(job, event.percent);
         job.message = event.message;
         historyRecorder.recordProgress(event);
-        if (event.stage === "clip_complete" && event.clip_result) {
-          (job.clip_results ??= []).push(event.clip_result);
+        const clipResult = event.clip_result
+          ? tagSubmittedClip(event.clip_result, styledClips)
+          : undefined;
+        if (event.stage === "clip_complete" && clipResult) {
+          (job.clip_results ??= []).push(clipResult);
         }
         broadcastSSE("job-update", {
           jobId,
-          progress: event.percent,
+          progress,
           message: event.message,
           stage: event.stage,
-          clip_result: event.clip_result,
+          clip_result: clipResult,
         });
       },
     )
     .then(async (result) => {
+      const data = tagSubmittedClips(result.data, styledClips);
       job.status = "done";
       job.progress = 100;
       job.message = "Export complete!";
-      job.result = result.data;
+      job.result = data;
       // Record clips to history
       try {
         await historyRecorder.recordRemaining(result.data?.results);
@@ -3627,7 +3698,7 @@ app.post("/api/mcp/export", async (req, res) => {
         });
       }
       setExportState("done", null);
-      broadcastSSE("job-complete", { jobId, result: result.data });
+      broadcastSSE("job-complete", { jobId, result: data });
     })
     .catch((err) => {
       job.status = "error";
@@ -3669,8 +3740,10 @@ async function main() {
 
   // SPA fallback: client-side routes (/, /episode, /clip/:id) resolve to the
   // built index.html. Registered last so it never shadows /api or static assets.
+  // root: the install path can contain a dot segment (a global npm install under
+  // ~/.nvm, say), and sendFile's dotfile rule would 404 the whole app.
   app.get(/^(?!\/api\/).*/, (_req, res) => {
-    res.sendFile(join(publicDir, "index.html"));
+    res.sendFile("index.html", { root: publicDir });
   });
 
   // Bind to loopback by default — the studio serves local files (clips, assets,

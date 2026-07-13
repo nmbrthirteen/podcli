@@ -12,9 +12,14 @@ export interface ChunkOptions {
   maxChars?: number;
   absorbTail?: number;
   splitTail?: boolean;
+  /** Composition duration in seconds; caps the hold on the last chunk. */
+  clipEnd?: number;
 }
 
 const BREAK_GAP_SECONDS = 0.8;
+// Mirrors CAPTION_GAP_FILL_MAX in backend/services/caption_renderer.py: both
+// renderers must burn the same caption timings.
+const GAP_FILL_MAX_SECONDS = 0.4;
 const LAST_CHUNK_HOLD_SECONDS = 1.2;
 const TERMINAL_PUNCTUATION = /[.!?…]["')\]]?$/;
 
@@ -74,13 +79,17 @@ export function buildChunks(words: Word[], opts: ChunkOptions): Chunk[] {
     i = end;
   }
 
-  // Captions vanishing during inter-chunk pauses reads as flicker, so each
-  // chunk stays up until the next one starts; the last one gets a short hold.
+  // Captions vanishing during inter-chunk pauses reads as flicker, so a chunk
+  // holds until the next one starts. The hold is capped, or a chunk break on a
+  // long silence (a musical sting, dead air) freezes the last sentence on screen
+  // for the whole pause.
   for (let k = 0; k < chunks.length; k++) {
-    chunks[k].displayEnd =
-      k + 1 < chunks.length
-        ? chunks[k + 1].start
-        : chunks[k].end + LAST_CHUNK_HOLD_SECONDS;
+    const next = chunks[k + 1];
+    const hold = next
+      ? Math.min(next.start, chunks[k].end + GAP_FILL_MAX_SECONDS)
+      : chunks[k].end + LAST_CHUNK_HOLD_SECONDS;
+    const capped = opts.clipEnd != null ? Math.min(hold, opts.clipEnd) : hold;
+    chunks[k].displayEnd = Math.max(chunks[k].end, capped);
   }
 
   return chunks;

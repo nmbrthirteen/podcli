@@ -30,6 +30,8 @@ import RecentSources from './RecentSources';
 import MomentTrim from './MomentTrim';
 import { useDialog } from './useDialog';
 import { PageHeader } from './Page';
+import { buildPreviewChunks, activePreviewChunk } from './captionChunks';
+import { findClipResult, resultBoundsKey } from './lib';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
@@ -101,7 +103,7 @@ const onKeyActivate = (fn) => (e) => {
       branded: {
         fontSize: px(100), fontWeight: 700, bottom: PROD_TO_PCT(420),
         lineHeight: 1.2, uppercase: false,
-        wordsPerChunk: 3, maxCharsPerChunk: 18, splitLines: true,
+        wordsPerChunk: 3, maxCharsPerChunk: 18, splitTail: true, splitLines: true,
         color: '#fff', activeColor: '#fff',
         activePill: { background: 'rgba(0,0,0,0.85)', borderRadius: 8, paddingX: 8 },
         chunkBg: null, gradient: true,
@@ -135,33 +137,6 @@ const onKeyActivate = (fn) => (e) => {
       },
     };
 
-    // Mirrors the Remotion renderer: only branded char-limits chunks, the
-    // other styles cut on a fixed word count and absorb short tails.
-    function buildPreviewChunks(words, cfg) {
-      const out = [];
-      let i = 0;
-      while (i < words.length) {
-        let end;
-        if (cfg.maxCharsPerChunk) {
-          end = i;
-          let count = 0;
-          while (end < words.length && end - i < cfg.wordsPerChunk) {
-            const w = words[end].text;
-            const next = count === 0 ? w.length : count + 1 + w.length;
-            if (end > i && next > cfg.maxCharsPerChunk) break;
-            count = next; end++;
-          }
-          if (end === i) end = i + 1;
-          if (words.length - end === 1 && end - i > 2) end -= 1;
-        } else {
-          end = Math.min(i + cfg.wordsPerChunk, words.length);
-          if (words.length - end <= (cfg.absorbTail || 0)) end = words.length;
-        }
-        out.push(words.slice(i, end));
-        i = end;
-      }
-      return out;
-    }
     function splitBrandedLines(chunk) {
       if (chunk.length <= 2) return [chunk, []];
       return [chunk.slice(0, 2), chunk.slice(2)];
@@ -332,7 +307,7 @@ const onKeyActivate = (fn) => (e) => {
         }
         if (!pool.length) return null;
         const out = pool.slice(0, 80)
-          .map(w => ({ text: (w.word || w.text || '').trim(), start: w.start, end: w.end }))
+          .map(w => ({ text: (w.word || w.text || '').trim(), start: w.start, end: w.end, speaker: w.speaker }))
           .filter(w => w.text);
         return out.length >= 2 ? out : null;
       }, [activeClip, transcriptWords]);
@@ -343,28 +318,25 @@ const onKeyActivate = (fn) => (e) => {
         [sourcePool, cfg.sample]
       );
 
-      // Chunk the same way the Remotion renderer does. The active chunk
-      // is what appears on screen; the active word inside it gets the
-      // pill / accent color.
-      const chunks = useMemo(() => buildPreviewChunks(poolWords, cfg), [poolWords, cfg]);
+      const chunks = useMemo(
+        () => buildPreviewChunks(poolWords, cfg, activeClip?.end_second),
+        [poolWords, cfg, activeClip]
+      );
 
-      const [cursor, setCursor] = useState(0); // global word index
+      // Real timings drive the captions off the video clock, the way the renderer
+      // does. Sample words carry no timings, so they cycle on an interval instead.
+      const timed = !usingSample && !!videoUrl;
+      const [cursor, setCursor] = useState(0); // sample mode: global word index
+      const [clock, setClock] = useState(0);
       useEffect(() => {
         setCursor(0);
+        setClock(0);
         if (poolWords.length <= 1) return;
-        if (!usingSample && videoUrl) {
+        if (timed) {
           let raf;
           const step = () => {
             const v = videoRef?.current;
-            if (v) {
-              const t = v.currentTime;
-              let idx = 0;
-              for (let k = 0; k < poolWords.length; k++) {
-                if (poolWords[k].start <= t) idx = k;
-                else break;
-              }
-              setCursor(idx);
-            }
+            if (v) setClock(v.currentTime);
             raf = requestAnimationFrame(step);
           };
           raf = requestAnimationFrame(step);
@@ -373,20 +345,28 @@ const onKeyActivate = (fn) => (e) => {
         const tick = captionStyle === 'karaoke' ? 320 : 420;
         const iv = setInterval(() => setCursor(i => (i + 1) % poolWords.length), tick);
         return () => clearInterval(iv);
-      }, [captionStyle, poolWords, usingSample, videoUrl]);
+      }, [captionStyle, poolWords, timed]);
 
-      // Find which chunk the cursor is currently in, and which word within it.
-      let activeChunkIdx = 0, activeWordInChunk = 0, consumed = 0;
-      for (let ci = 0; ci < chunks.length; ci++) {
-        const len = chunks[ci].length;
-        if (cursor < consumed + len) {
-          activeChunkIdx = ci;
-          activeWordInChunk = cursor - consumed;
-          break;
+      let activeChunk = null, activeWordInChunk = 0;
+      if (timed) {
+        activeChunk = activePreviewChunk(chunks, clock) || null;
+        if (activeChunk) {
+          for (let k = 0; k < activeChunk.words.length; k++) {
+            if (activeChunk.words[k].start <= clock) activeWordInChunk = k;
+            else break;
+          }
         }
-        consumed += len;
+      } else {
+        let consumed = 0;
+        for (const chunk of chunks) {
+          if (cursor < consumed + chunk.words.length) {
+            activeChunk = chunk;
+            activeWordInChunk = cursor - consumed;
+            break;
+          }
+          consumed += chunk.words.length;
+        }
       }
-      const activeChunk = chunks[activeChunkIdx] || [];
 
       return (
        <>
@@ -431,7 +411,7 @@ const onKeyActivate = (fn) => (e) => {
               fontFamily: "'DM Sans', 'Inter', Arial, sans-serif",
             }}>
               <PhoneCaptionBody
-                chunk={activeChunk.map(w => w.text)}
+                chunk={activeChunk ? activeChunk.words.map(w => w.text) : null}
                 activeWordInChunk={activeWordInChunk}
                 cfg={cfg}
               />
@@ -873,7 +853,7 @@ const onKeyActivate = (fn) => (e) => {
           filePath: file?.file_path || '',
           suggestions,
           deselectedIndices: Array.from(deselected),
-          settings: { captionStyle, cropStrategy, format, logoPath, outroPath, introPath },
+          settings: { captionStyle, cropStrategy, format, logoPath, outroPath, introPath, cleanFillers },
           phase,
           results,
           energyData,
@@ -882,7 +862,7 @@ const onKeyActivate = (fn) => (e) => {
         if (key === prevSyncRef.current) return;
         prevSyncRef.current = key;
         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => { });
-      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, format, logoPath, outroPath, introPath, phase, results, energyData]);
+      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, format, logoPath, outroPath, introPath, cleanFillers, phase, results, energyData]);
 
       // Sync transcript separately (large payload)
       const prevTranscriptRef = useRef(null);
@@ -904,8 +884,11 @@ const onKeyActivate = (fn) => (e) => {
         }
       }, [transcriptText]);
 
-      // Per-clip completion rows: clip_index matches the order of selected
-      // clips sent to /batch-clips, which is how results are indexed too.
+      const resultFor = useCallback(
+        (clip, resultIdx) => findClipResult(results, clip, resultIdx),
+        [results],
+      );
+
       const applyClipResult = useCallback((row) => {
         if (!row || typeof row.clip_index !== 'number') return;
         setResults(prev => {
@@ -954,6 +937,7 @@ const onKeyActivate = (fn) => (e) => {
             if (d.settings.logoPath !== undefined) setLogoPath(d.settings.logoPath);
             if (d.settings.outroPath !== undefined) setOutroPath(d.settings.outroPath);
             if (d.settings.introPath !== undefined) setIntroPath(d.settings.introPath);
+            if (d.settings.cleanFillers !== undefined) setCleanFillers(d.settings.cleanFillers !== false);
           }
           // Mark initialized after first state restoration so sync useEffects don't overwrite with defaults
           if (sseEvent.type === 'state') {
@@ -1177,9 +1161,10 @@ const onKeyActivate = (fn) => (e) => {
         if (batchStream?.status === 'error') { setError('Export failed: ' + batchStream.error); setPhase('review'); setBatchJobId(null); }
       }, [batchStream?.status]);
 
+      const retryClipRef = useRef(null);
       const retryClip = async (idx) => {
         const sc = suggestions.filter((_, i) => !deselected.has(i));
-        const c = sc[idx]; setRetryIdx(idx); setRetryJobId(null);
+        const c = sc[idx]; retryClipRef.current = c; setRetryIdx(idx); setRetryJobId(null);
         const vp = file?.file_path || videoPath.trim();
         const data = await api('/create-clip', {
           method: 'POST', body: JSON.stringify({
@@ -1193,10 +1178,22 @@ const onKeyActivate = (fn) => (e) => {
       };
 
       useEffect(() => {
-        if (retryStream?.status === 'done') {
-          setResults(prev => { const n = [...prev]; n[retryIdx] = { ...retryStream.result, status: 'success' }; return n; });
-          setRetryIdx(null); setRetryJobId(null);
-        }
+        if (retryStream?.status !== 'done') return;
+        const c = retryClipRef.current;
+        const row = {
+          ...retryStream.result,
+          status: 'success',
+          ...(c && { source_start_second: c.start_second, source_end_second: c.end_second }),
+        };
+        setResults(prev => {
+          const key = resultBoundsKey(row);
+          const found = key ? prev.findIndex(r => resultBoundsKey(r) === key) : -1;
+          const at = found >= 0 ? found : typeof retryIdx === 'number' ? retryIdx : prev.length;
+          const next = [...prev];
+          next[at] = row;
+          return next;
+        });
+        setRetryIdx(null); setRetryJobId(null);
       }, [retryStream?.status]);
 
       const toggleClip = (i) => setDeselected(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
@@ -1206,8 +1203,13 @@ const onKeyActivate = (fn) => (e) => {
       useEffect(() => {
         const onKey = (e) => {
           if (e.metaKey || e.ctrlKey || e.altKey) return;
-          const t = e.target;
-          if (t instanceof Element && t.closest('input, textarea, select, button, a, [role="button"], [role="checkbox"], [role="switch"], [role="tab"], [contenteditable="true"]')) return;
+          const t = e.target instanceof Element ? e.target : null;
+          if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+          // Reviewing a clip means focusing its row, so the row is the one control
+          // these keys must still reach. Anything else that activates on the same
+          // key would fire twice.
+          const control = t?.closest('button, a, [role="button"], [role="checkbox"], [role="switch"], [role="tab"], [role="menuitem"]');
+          if (control && !control.hasAttribute('data-clip-row')) return;
           if (editingClip !== null || previewFile) return;
           if (!suggestions.length) return;
           const key = e.key.toLowerCase();
@@ -1370,22 +1372,18 @@ const onKeyActivate = (fn) => (e) => {
       const sourceIsUrl = isHttpUrl(videoPath);
       const selectedClips = suggestions.filter((_, i) => !deselected.has(i));
       const exportStats = phase === 'done' ? {
-        total: selectedClips.length,
+        total: results.length || selectedClips.length,
         ok: results.filter(r => r?.status === 'success').length,
         failed: results.filter(r => r?.status === 'error').length,
       } : null;
 
-      const getExportStatus = (resultIdx) => {
+      // Clips render in parallel and report as they finish, so a clip is only
+      // exported once its own row has arrived. Anything else is still in the queue.
+      const getExportStatus = (clip, resultIdx) => {
         if (phase !== 'exporting') return null;
-        const r = results[resultIdx];
+        const r = resultFor(clip, resultIdx);
         if (r) return r.status === 'error' ? 'failed' : 'exported';
-        if (!batchStream) return null;
-        const total = selectedClips.length; if (!total) return null;
-        const pct = batchStream.progress || 0;
-        const done = Math.max(results.filter(Boolean).length, Math.floor(pct / (100 / total)));
-        if (resultIdx < done) return 'exported';
-        if (resultIdx === done && pct < 100) return 'rendering';
-        return 'pending';
+        return batchStream ? 'pending' : null;
       };
 
       const handleVideoDrop = (e) => {
@@ -1906,19 +1904,20 @@ const onKeyActivate = (fn) => (e) => {
                   {suggestions.map((clip, i) => {
                     const off = deselected.has(i);
                     const resultIdx = [...suggestions.keys()].filter(k => !deselected.has(k)).indexOf(i);
-                    const r = results[resultIdx];
+                    const r = resultFor(clip, resultIdx);
                     const outputFile = r?.output_path?.split('/').pop();
                     const failed = r?.status === 'error';
                     const isRetryingThis = retryIdx === resultIdx;
-                    const exportStatus = !off ? getExportStatus(resultIdx) : null;
+                    const exportStatus = !off ? getExportStatus(clip, resultIdx) : null;
                     const isSelected = activeClipIdx === i && !previewSrc;
 
                     return (
-                      <div key={i}
-                        className={`clip-item ${off && phase === 'review' ? 'dimmed' : ''} ${exportStatus === 'rendering' ? 'active-clip' : ''} ${phase === 'suggesting' ? 'clip-reveal' : ''} ${isSelected ? 'selected' : ''}`}
+                      <div key={i} data-clip-row
+                        className={`clip-item ${off && phase === 'review' ? 'dimmed' : ''} ${phase === 'suggesting' ? 'clip-reveal' : ''} ${isSelected ? 'selected' : ''}`}
                         role="button" tabIndex={0} aria-label={`Preview clip: ${clip.title}`}
                         onClick={() => onClipClick(i)}
-                        onKeyDown={onKeyActivate(() => onClipClick(i))}>
+                        onFocus={e => { if (e.target === e.currentTarget) onClipClick(i); }}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onClipClick(i); } }}>
 
                         {phase === 'review' && (
                           <div className={`checkbox ${!off ? 'checked' : ''}`}
@@ -1951,7 +1950,6 @@ const onKeyActivate = (fn) => (e) => {
                             {r && !failed && <span> {'\u00B7'} {r.file_size_mb}MB</span>}
                             {r && !failed && r.warning && <span className="warn"> {'\u00B7'} {r.warning}</span>}
                             {failed && <span className="err"> {'\u00B7'} {r.error?.slice(0, 60)}</span>}
-                            {exportStatus === 'rendering' && <span style={{ color: 'var(--accent)' }}> {'\u00B7'} rendering{'\u2026'}</span>}
                           </div>
                         </div>
 

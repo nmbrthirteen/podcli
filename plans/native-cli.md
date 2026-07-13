@@ -38,8 +38,8 @@ You can't fold PyTorch + Chromium + FFmpeg into one static binary. So we **packa
 | **Transcription** | **whisper.cpp** replaces `openai-whisper`/PyTorch. GGUF models. Metal on Apple Silicon, CUDA/CPU elsewhere. ~145MB vs ~2GB. |
 | **Bundle model** | Tiny launcher; **first run provisions the full core stack** (download-once, like today's `setup.sh` but automatic + cross-platform). |
 | **Storage** | **Global** managed dir for runtimes + model cache (`%LOCALAPPDATA%\podcli` / `~/Library/Application Support/podcli` / `~/.local/share/podcli`). **Per-project** `.podcli/` (knowledge, output, history) stays in cwd — podcli stays project-scoped like git. |
-| **Distribution** | **npm + bun only.** Thin wrapper package fetches the platform binary on install (codex-style). **No code signing, no brew/winget/curl\|sh/.exe.** |
-| **Auto-update** | On launch: fast (~250ms, short-timeout) check against GitHub Releases. Newer → update then load. Offline/slow → proceed on current version (never blocks). Self-replace the managed binary in `~/.podcli/bin/`; if that's impossible, print the matching upgrade command (`npm i -g podcli` / `bun add -g podcli`). |
+| **Distribution** | **Install script** (`curl -fsSL https://podcli.com/install.sh \| sh`, `irm https://podcli.com/install.ps1 \| iex`) fetching the platform binary from GitHub Releases. npm is out: the unscoped `podcli` name is blocked (see RELEASE.md). Code signing is not in place yet. |
+| **Auto-update** | On launch: fast (~250ms, short-timeout) check against GitHub Releases, cached for 24h. Newer → update then load. Offline/slow → proceed on current version (never blocks). Self-replace the managed binary in the managed `bin/`; if that's impossible, print the matching install-script command. |
 | **Update opt-out** | Persistent off switch: `podcli config set update.auto off` + `PODCLI_NO_UPDATE=1`. When off: no checks, runs installed version. `podcli update` still works on demand. |
 | **AI features** | API key preferred → AI-CLI fallback → core works without. If a key is set, call the Claude/OpenAI API directly (self-contained); else shell to installed Claude/Codex CLI (today's behavior); else the video pipeline still works and AI features print how to enable them. |
 | **Platforms** | macOS arm64, macOS x64, Linux x64, Linux arm64, Windows x64. |
@@ -98,11 +98,11 @@ Clean seam: `backend/services/transcription.py::transcribe_file()` returns a fix
 - Remove `openai-whisper` from `requirements.txt`; confirm captions (karaoke/Hormozi/subtle) still render correctly.
 
 ### Phase 2 — Distribution + self-update (→ first installable release)
-- CI matrix builds the Go launcher for all **5 targets**.
-- **npm + bun wrapper package**: `postinstall` downloads the platform binary into `~/.podcli/bin/`; `bin` shim execs it. Publish to npm (bun consumes the same registry).
-- GitHub Release per version carries: the 5 binaries + a **version manifest** pinning required runtime versions (so an update knows what to re-provision).
-- Self-update: fast on-launch check, atomic self-replace of the managed binary, npm/bun fallback message, `PODCLI_NO_UPDATE` + `config set update.auto off`, `podcli update`, keep-previous-binary for `podcli rollback`.
-- **Ship.** `npm i -g podcli` → `podcli process` works hermetic on all 5 platforms and auto-updates. ← *this is the MVP gate.*
+- CI matrix builds the Go launcher for all **4 targets** (darwin-arm64, linux-amd64, linux-arm64, windows-amd64).
+- **Install script** resolves the latest release and drops the platform binary into the managed `bin/`, adding it to PATH.
+- GitHub Release per version carries: the 4 launchers, the runtime assets (whisper-cli, ffmpeg, studio and remotion bundles), and `checksums.txt` covering every asset.
+- Self-update: fast on-launch check, atomic self-replace of the managed binary, install-script fallback message, `PODCLI_NO_UPDATE` + `config set update.auto off`, `podcli update`, keep-previous-binary for `podcli rollback`.
+- **Ship.** Install script → `podcli process` works hermetic on all 4 platforms and auto-updates. ← *this is the MVP gate.*
 
 ### Phase 3 — Lazy tiers + studio
 - Demote OpenCV face-crop to lazy (center-crop default offline; fetch opencv on first smart crop — the center-crop fallback already exists at `cli.py:621`).

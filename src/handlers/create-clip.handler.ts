@@ -192,7 +192,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     transcript_words: transcriptWords,
     title,
     output_dir: paths.output,
-    clean_fillers: input.clean_fillers !== false,
+    clean_fillers: input.clean_fillers ?? settings.cleanFillers ?? true,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
     logo_path: logoPath,

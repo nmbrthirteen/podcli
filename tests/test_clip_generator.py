@@ -1,8 +1,11 @@
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 
@@ -169,24 +172,16 @@ class TransitionAutofixGatingTests(unittest.TestCase):
     def test_non_reframe_format_cannot_jump(self):
         self.assertFalse(cg._reframe_can_jump(reframe=False, crop_strategy="face"))
 
-    def test_single_speaker_follow_cannot_jump(self):
-        words = [{"word": "hi", "speaker": "SPEAKER_00"}, {"word": "there", "speaker": "SPEAKER_00"}]
-        self.assertFalse(cg._reframe_can_jump(
-            reframe=True, crop_strategy="face", clip_words=words,
-        ))
+    def test_center_crop_cannot_jump(self):
+        self.assertFalse(cg._reframe_can_jump(reframe=True, crop_strategy="center"))
 
-    def test_multiple_speakers_can_jump(self):
-        words = [{"word": "hi", "speaker": "SPEAKER_00"}, {"word": "yeah", "speaker": "SPEAKER_01"}]
-        self.assertTrue(cg._reframe_can_jump(
-            reframe=True, crop_strategy="face", clip_words=words,
-        ))
+    def test_face_follow_can_jump_without_speaker_labels(self):
+        # whisper.cpp (the default engine) skips diarization, so the tracker
+        # still snaps between faces with every word unlabeled.
+        self.assertTrue(cg._reframe_can_jump(reframe=True, crop_strategy="face"))
 
-    def test_split_screen_face_map_can_jump(self):
-        self.assertTrue(cg._reframe_can_jump(
-            reframe=True, crop_strategy="face", face_map={"is_split_screen": True},
-        ))
-
-    def test_speaker_hardcut_can_jump(self):
+    def test_speaker_strategies_can_jump(self):
+        self.assertTrue(cg._reframe_can_jump(reframe=True, crop_strategy="speaker"))
         self.assertTrue(cg._reframe_can_jump(reframe=True, crop_strategy="speaker-hardcut"))
 
     def test_manual_crop_jumps_only_with_multiple_keyframes(self):
@@ -197,6 +192,14 @@ class TransitionAutofixGatingTests(unittest.TestCase):
             reframe=True, crop_strategy="manual",
             crop_keyframes=[{"t": 0, "x_pct": 20}, {"t": 3, "x_pct": 80}],
         ))
+
+    def test_default_engine_face_crop_runs_autofix(self):
+        env = {k: v for k, v in os.environ.items() if k != "PODCLI_TRANSITION_AUTOFIX_PASSES"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            passes = cg._transition_autofix_passes(
+                cg._reframe_can_jump(reframe=True, crop_strategy="face", crop_keyframes=None)
+            )
+        self.assertEqual(passes, 2)
 
     def test_default_passes_gated_by_jump_potential(self):
         env = {k: v for k, v in os.environ.items() if k != "PODCLI_TRANSITION_AUTOFIX_PASSES"}
@@ -216,6 +219,49 @@ class TransitionAutofixGatingTests(unittest.TestCase):
             self.assertEqual(cg._transition_autofix_passes(False), 2)
         with mock.patch.dict(os.environ, {"PODCLI_TRANSITION_AUTOFIX_PASSES": "junk"}):
             self.assertEqual(cg._transition_autofix_passes(True), 2)
+
+
+class OutputPathReservationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="podcli-output-test-")
+        cg._reserved_output_paths.clear()
+        self.addCleanup(cg._reserved_output_paths.clear)
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+
+    def test_duplicate_title_gets_a_suffix(self):
+        first = cg._reserve_output_path(self.tmpdir, "same_title_short", ".mp4")
+        second = cg._reserve_output_path(self.tmpdir, "same_title_short", ".mp4")
+        third = cg._reserve_output_path(self.tmpdir, "same_title_short", ".mp4")
+        self.assertEqual(os.path.basename(first), "same_title_short.mp4")
+        self.assertEqual(os.path.basename(second), "same_title_short-2.mp4")
+        self.assertEqual(os.path.basename(third), "same_title_short-3.mp4")
+
+    def test_concurrent_renders_of_one_title_never_share_a_file(self):
+        barrier = threading.Barrier(8)
+
+        def render(i):
+            barrier.wait()
+            path = cg._reserve_output_path(self.tmpdir, "duplicate_short", ".mp4")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"clip-{i}")
+            return path
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            paths = list(pool.map(render, range(8)))
+
+        self.assertEqual(len(set(paths)), 8)
+        contents = []
+        for p in paths:
+            self.assertTrue(os.path.exists(p))
+            with open(p, encoding="utf-8") as f:
+                contents.append(f.read())
+        self.assertEqual(len(set(contents)), 8)
+
+    def test_sidecar_paths_inherit_the_unique_stem(self):
+        cg._reserve_output_path(self.tmpdir, "same_title_short", ".mp4")
+        second = cg._reserve_output_path(self.tmpdir, "same_title_short", ".mp4")
+        base, _ = os.path.splitext(second)
+        self.assertTrue(base.endswith("same_title_short-2"))
 
 
 if __name__ == "__main__":
