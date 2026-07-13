@@ -186,6 +186,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
+          cache: ''
       - name: Build studio bundle
         run: |
           npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
@@ -216,6 +217,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
+          cache: ''
       - name: Build remotion bundle
         shell: bash
         run: |
