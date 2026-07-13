@@ -5,6 +5,7 @@ import { paths } from "../config/paths.js";
 import type { ClipResult, CreateClipInput, SuggestedClip, UIState } from "../models/index.js";
 import { childLogger } from "../utils/logger.js";
 import { sliceTranscript } from "../utils/transcript.js";
+import { validateClipRange } from "../utils/clip-validation.js";
 
 const log = childLogger("create-clip");
 const executor = new PythonExecutor();
@@ -175,6 +176,10 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     return JSON.stringify({
       error: "start_second and end_second are required (use clip_number to reference a suggestion)",
     });
+  }
+  const rangeError = validateClipRange(startSecond, endSecond, format);
+  if (rangeError) {
+    return JSON.stringify({ error: rangeError });
   }
 
   const result = await executor.execute<ClipResult>("create_clip", {

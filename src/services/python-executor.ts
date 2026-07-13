@@ -7,7 +7,7 @@ type ProgressCallback = (event: ProgressEvent) => void;
 
 const isWindows = process.platform === "win32";
 
-function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
+export function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
   if (proc.pid === undefined) return;
   try {
     // Negative pid kills the whole group — the child is a detached group
@@ -17,6 +17,14 @@ function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
   } catch {
     // Already exited.
   }
+}
+
+// Prefer the last traceback block — that's where the actual failure is —
+// and keep a tail long enough to include it.
+export function stderrTail(stderr: string, maxChars = 4000): string {
+  const tb = stderr.lastIndexOf("Traceback (most recent call last):");
+  const tail = tb !== -1 ? stderr.slice(tb) : stderr;
+  return tail.slice(-maxChars);
 }
 
 function parseResultLine<T>(stdout: string): TaskResult<T> | null {
@@ -129,7 +137,7 @@ export class PythonExecutor {
             reject(
               new Error(
                 `No parseable output from Python task. Exit code: ${code}. ` +
-                  `Stdout: ${stdout.slice(-300)}. Stderr: ${stderr.slice(-300)}`
+                  `Stdout: ${stdout.slice(-300)}. Stderr: ${stderrTail(stderr)}`
               )
             );
             return;

@@ -29,10 +29,11 @@ import { AssetManager, inferType } from "./services/asset-manager.js";
 import { ClipsHistory } from "./services/clips-history.js";
 import { TranscriptCache } from "./services/transcript-cache.js";
 import { paths } from "./config/paths.js";
+import { webServerUrl } from "./config/server.js";
 import { childLogger } from "./utils/logger.js";
 import { mcpError } from "./utils/errors.js";
 import { podcliVersion } from "./version.js";
-import type { BatchClipsResult, Format, UIState, WordTimestamp } from "./models/index.js";
+import type { Format, SuggestedClip, UIState, WordTimestamp } from "./models/index.js";
 
 const log = childLogger("server");
 
@@ -44,7 +45,7 @@ const transcriptCache = new TranscriptCache();
 
 async function uiPing(body: Record<string, unknown>): Promise<void> {
   try {
-    await fetch("http://localhost:3847/api/ui-state", {
+    await fetch(`${webServerUrl}/api/ui-state`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -75,6 +76,19 @@ async function withKnowledge(result: string): Promise<string> {
 /** Append a workflow next-step hint to a tool result. */
 function withNextStep(result: string, nextStep: string): string {
   return `${result}\n\n---\n[Next Step] ${nextStep}`;
+}
+
+// Fallback transcript views (no packed markdown available) can be 500KB+ for a
+// long episode; cap what goes into a tool response.
+const TRANSCRIPT_FALLBACK_CAP = 50_000;
+
+function capTranscriptText(text: string): string {
+  if (text.length <= TRANSCRIPT_FALLBACK_CAP) return text;
+  return (
+    text.slice(0, TRANSCRIPT_FALLBACK_CAP) +
+    `\n\n[Transcript truncated: showing the first ${TRANSCRIPT_FALLBACK_CAP} of ${text.length} characters. ` +
+    "Use parse_transcript or transcribe_podcast to generate the packed view for full coverage.]"
+  );
 }
 
 /**
@@ -138,7 +152,7 @@ interface ImportTranscriptResult extends ApiError {
 
 async function readUIState(): Promise<ServerUIState | null> {
   try {
-    const res = await fetch("http://localhost:3847/api/ui-state");
+    const res = await fetch(`${webServerUrl}/api/ui-state`);
     if (!res.ok) return null;
     return (await res.json()) as ServerUIState;
   } catch (err) {
@@ -249,8 +263,10 @@ export function createServer(): McpServer {
       enable_diarization: z
         .boolean()
         .optional()
-        .default(true)
-        .describe("Enable speaker detection (who is speaking). Default: true"),
+        .default(false)
+        .describe(
+          "Set true for speaker labels (who is speaking). Works where torch is available (whisper-py engine); slower. Default: false",
+        ),
       num_speakers: z
         .number()
         .optional()
@@ -321,7 +337,7 @@ export function createServer(): McpServer {
         .default("base"),
       language: z.string().optional(),
       engine: z.enum(["whisper-py", "whispercpp", "assemblyai"]).optional(),
-      enable_diarization: z.boolean().optional().default(true),
+      enable_diarization: z.boolean().optional().default(false),
       num_speakers: z.number().optional(),
     },
     async (input) => {
@@ -481,6 +497,13 @@ export function createServer(): McpServer {
         .describe(
           "Allow ASS caption fallback if Remotion rendering fails (default: false)",
         ),
+      clean_fillers: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe(
+          "Remove filler words (um, uh, hmm) from captions and compress long silences. Default: true",
+        ),
       transcript_words: z
         .array(
           z.object({
@@ -595,7 +618,7 @@ export function createServer(): McpServer {
         let usedWebServer = false;
         let finalResult = "";
         try {
-          const webRes = await fetch("http://localhost:3847/api/mcp/export", {
+          const webRes = await fetch(`${webServerUrl}/api/mcp/export`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -616,6 +639,7 @@ export function createServer(): McpServer {
               transcript_words: params.transcript_words,
               logo_path: params.logo_path || null,
               outro_path: params.outro_path || null,
+              clean_fillers: params.clean_fillers !== false,
               keep_caption_overlay: params.keep_caption_overlay === true,
             }),
           });
@@ -625,12 +649,16 @@ export function createServer(): McpServer {
 
             // Poll the job until completion (1 hour max)
             const deadline = Date.now() + 3600_000;
+            let lostJob = false;
             while (Date.now() < deadline) {
               await new Promise((r) => setTimeout(r, 2000));
               const pollRes = await fetch(
-                `http://localhost:3847/api/job/${jobId}`,
+                `${webServerUrl}/api/job/${jobId}`,
               );
-              if (!pollRes.ok) break;
+              if (!pollRes.ok) {
+                lostJob = true;
+                break;
+              }
               const job = (await pollRes.json()) as WebJob;
               if (job.status === "done") {
                 usedWebServer = true;
@@ -642,7 +670,11 @@ export function createServer(): McpServer {
               }
             }
             if (!usedWebServer) {
-              throw new Error("Clip creation timed out after 1 hour");
+              throw new Error(
+                lostJob
+                  ? `Lost track of render job ${jobId}: the web server stopped reporting it (it may have restarted). Check list_outputs for results.`
+                  : "Clip creation timed out after 1 hour",
+              );
             }
           }
         } catch (webErr: unknown) {
@@ -686,7 +718,7 @@ export function createServer(): McpServer {
             logoPath: (params.logo_path as string) || recipeSettings.logoPath || null,
             outroPath: (params.outro_path as string) || recipeSettings.outroPath || null,
             introPath: recipeSettings.introPath || null,
-            cleanFillers: true,
+            cleanFillers: params.clean_fillers !== false,
             keepSegments: keepSegments ?? undefined,
           });
 
@@ -745,6 +777,13 @@ export function createServer(): McpServer {
         .optional()
         .describe(
           "Keep ProRes 4444 alpha caption overlays for DaVinci Resolve export (batch-level default; per-clip overrides).",
+        ),
+      clean_fillers: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe(
+          "Remove filler words (um, uh, hmm) from captions and compress long silences. Default: true",
         ),
       transcript_words: z
         .array(
@@ -843,13 +882,15 @@ export function createServer(): McpServer {
         let usedWebServer = false;
         let finalResult: string = "";
         try {
-          const webRes = await fetch("http://localhost:3847/api/mcp/export", {
+          const webRes = await fetch(`${webServerUrl}/api/mcp/export`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               video_path: resolvedVideoPath,
               clips: resolvedClips,
               transcript_words: resolvedTranscriptWords,
+              clean_fillers: params.clean_fillers !== false,
+              keep_caption_overlay: params.keep_caption_overlay === true,
             }),
           });
           if (webRes.ok) {
@@ -876,12 +917,16 @@ export function createServer(): McpServer {
 
             // Sync path — poll internally until completion (1 hour max)
             const deadline = Date.now() + 3600_000;
+            let lostJob = false;
             while (Date.now() < deadline) {
               await new Promise((r) => setTimeout(r, 2000));
               const pollRes = await fetch(
-                `http://localhost:3847/api/job/${jobId}`,
+                `${webServerUrl}/api/job/${jobId}`,
               );
-              if (!pollRes.ok) break;
+              if (!pollRes.ok) {
+                lostJob = true;
+                break;
+              }
               const job = (await pollRes.json()) as WebJob;
               if (job.status === "done") {
                 usedWebServer = true;
@@ -893,7 +938,11 @@ export function createServer(): McpServer {
               }
             }
             if (!usedWebServer) {
-              throw new Error("Batch clip creation timed out after 1 hour");
+              throw new Error(
+                lostJob
+                  ? `Lost track of batch job ${jobId}: the web server stopped reporting it (it may have restarted). Check list_outputs for partial results.`
+                  : "Batch clip creation timed out after 1 hour",
+              );
             }
           }
         } catch (webErr: unknown) {
@@ -910,32 +959,12 @@ export function createServer(): McpServer {
         if (!usedWebServer) {
           await uiPing({ phase: "exporting" });
 
-          const batchParams = {
+          // handleBatchClips records history + recipes itself.
+          finalResult = await handleBatchClips({
             ...params,
             video_path: resolvedVideoPath || params.video_path,
             clips: resolvedClips || params.clips,
             transcript_words: resolvedTranscriptWords || params.transcript_words,
-          };
-          finalResult = await handleBatchClips(batchParams);
-          const parsed = JSON.parse(finalResult) as BatchClipsResult;
-          const uiState = await readUIState().catch(() => null);
-          const settings = uiState?.settings ?? {};
-
-          const recorded = await history.recordBatchResults(parsed.results, {
-            sourceVideo: (batchParams.video_path as string) || "",
-            transcriptWords: batchParams.transcript_words as WordTimestamp[] | undefined,
-          });
-          await history.persistBatchRecipes(parsed.results, recorded, {
-            transcriptWords: batchParams.transcript_words as WordTimestamp[] | undefined,
-            clipSpecs: (batchParams.clips || []) as Array<{
-              start_second: number;
-              end_second: number;
-              keep_segments?: Array<{ start: number; end: number }>;
-            }>,
-            logoPath: settings.logoPath || null,
-            outroPath: settings.outroPath || null,
-            introPath: settings.introPath || null,
-            cleanFillers: true,
           });
 
           await uiPing({ phase: "done" });
@@ -1345,7 +1374,7 @@ export function createServer(): McpServer {
     },
     async ({ include_transcript }) => {
       try {
-        const res = await fetch("http://localhost:3847/api/ui-state");
+        const res = await fetch(`${webServerUrl}/api/ui-state`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const state = (await res.json()) as ServerUIState;
 
@@ -1409,22 +1438,24 @@ export function createServer(): McpServer {
           } else if (state.transcript) {
             const segments = state.transcript.segments || [];
             if (segments.length) {
-              lines.push("");
-              lines.push("=== TRANSCRIPT ===");
+              const segLines: string[] = [];
               for (const seg of segments) {
                 const speaker = seg.speaker || "?";
                 const start = Math.floor(seg.start || 0);
                 const end = Math.floor(seg.end || 0);
                 const text = seg.text || "";
-                lines.push(`[${start}s-${end}s] ${speaker}: ${text}`);
+                segLines.push(`[${start}s-${end}s] ${speaker}: ${text}`);
               }
+              lines.push("");
+              lines.push("=== TRANSCRIPT ===");
+              lines.push(capTranscriptText(segLines.join("\n")));
             }
           } else if (state.rawTranscriptText) {
             lines.push("");
             lines.push(
               "=== RAW TRANSCRIPT (not yet parsed — use this to analyze and suggest clips) ===",
             );
-            lines.push(state.rawTranscriptText);
+            lines.push(capTranscriptText(state.rawTranscriptText));
           }
         }
 
@@ -1501,70 +1532,7 @@ export function createServer(): McpServer {
     },
     async ({ clip_number, clip_id, index, action, updates }) => {
       try {
-        // 1. Read current UI state
-        const res = await fetch("http://localhost:3847/api/ui-state");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const state = (await res.json()) as ServerUIState;
-        const suggestions = state.suggestions ?? [];
-
-        if (!suggestions.length) {
-          return {
-            content: [
-              { type: "text" as const, text: "No suggestions in UI state." },
-            ],
-          };
-        }
-
-        // 2. Find target clip (clip_number is 1-based)
-        let targetIdx = -1;
-        if (clip_number !== undefined) {
-          targetIdx = clip_number - 1;
-        } else if (clip_id) {
-          targetIdx = suggestions.findIndex((s) => s.clip_id === clip_id);
-        } else if (index !== undefined) {
-          targetIdx = index;
-        }
-
-        if (targetIdx < 0 || targetIdx >= suggestions.length) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Clip not found. Use get_ui_state to see available clips.`,
-              },
-            ],
-          };
-        }
-
-        // --- DELETE ---
-        if (action === "delete") {
-          const removed = suggestions[targetIdx];
-          suggestions.splice(targetIdx, 1);
-          // Adjust deselectedIndices: remove the deleted index, shift higher ones down
-          const deselected: number[] = state.deselectedIndices || [];
-          const adjusted = deselected
-            .filter((i: number) => i !== targetIdx)
-            .map((i: number) => (i > targetIdx ? i - 1 : i));
-
-          await fetch("http://localhost:3847/api/ui-state", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ suggestions, deselectedIndices: adjusted }),
-          });
-
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Deleted clip #${targetIdx + 1}: "${removed.title}". ${suggestions.length} clips remaining.`,
-              },
-            ],
-          };
-        }
-
-        // --- UPDATE ---
-        const upd = updates || {};
-        if (Object.keys(upd).length === 0) {
+        if (action !== "delete" && Object.keys(updates || {}).length === 0) {
           return {
             content: [
               {
@@ -1574,38 +1542,54 @@ export function createServer(): McpServer {
             ],
           };
         }
-        const clip = suggestions[targetIdx];
-        if (upd.title !== undefined) clip.title = upd.title;
-        if (upd.start_second !== undefined)
-          clip.start_second = upd.start_second;
-        if (upd.end_second !== undefined) clip.end_second = upd.end_second;
-        if (upd.reasoning !== undefined) clip.reasoning = upd.reasoning;
-        if (upd.preview_text !== undefined)
-          clip.preview_text = upd.preview_text;
-        if (upd.suggested_caption_style !== undefined)
-          clip.suggested_caption_style = upd.suggested_caption_style;
 
-        // Recalculate derived fields
-        clip.duration =
-          Math.round((clip.end_second - clip.start_second) * 10) / 10;
-        const fmtTime = (s: number) =>
-          `${Math.floor(s / 60)}:${Math.floor(s % 60)
-            .toString()
-            .padStart(2, "0")}`;
-        clip.timestamp_display = `${fmtTime(clip.start_second)} → ${fmtTime(clip.end_second)}`;
+        // Mutate server-side so concurrent edits aren't lost to a wholesale
+        // state replace (clip_number is 1-based).
+        const body: Record<string, unknown> = { action, updates };
+        if (clip_number !== undefined) body.index = clip_number - 1;
+        else if (clip_id) body.clip_id = clip_id;
+        else if (index !== undefined) body.index = index;
 
-        suggestions[targetIdx] = clip;
-        await fetch("http://localhost:3847/api/ui-state", {
+        const res = await fetch(`${webServerUrl}/api/suggestions/modify`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ suggestions }),
+          body: JSON.stringify(body),
         });
+        const data = (await res.json()) as ApiError & {
+          index: number;
+          clip: SuggestedClip;
+          total: number;
+        };
+        if (!res.ok || data.error) {
+          if (res.status === 404) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: "Clip not found. Use get_ui_state to see available clips.",
+                },
+              ],
+            };
+          }
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+
+        if (action === "delete") {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Deleted clip #${data.index + 1}: "${data.clip.title}". ${data.total} clips remaining.`,
+              },
+            ],
+          };
+        }
 
         return {
           content: [
             {
               type: "text" as const,
-              text: `Updated clip #${targetIdx + 1}: "${clip.title}" (${clip.start_second}s–${clip.end_second}s, ${clip.duration}s)`,
+              text: `Updated clip #${data.index + 1}: "${data.clip.title}" (${data.clip.start_second}s–${data.clip.end_second}s, ${data.clip.duration}s)`,
             },
           ],
         };
@@ -1652,54 +1636,43 @@ export function createServer(): McpServer {
     },
     async ({ clip_number, clip_id, index, selected }) => {
       try {
-        const res = await fetch("http://localhost:3847/api/ui-state");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const state = (await res.json()) as ServerUIState;
-        const suggestions = state.suggestions ?? [];
-        const deselected: number[] = state.deselectedIndices ?? [];
+        // Mutate server-side so concurrent edits aren't lost to a wholesale
+        // state replace (clip_number is 1-based).
+        const body: Record<string, unknown> = { action: "toggle", selected };
+        if (clip_number !== undefined) body.index = clip_number - 1;
+        else if (clip_id) body.clip_id = clip_id;
+        else if (index !== undefined) body.index = index;
 
-        // Find target index (clip_number is 1-based)
-        let targetIdx = -1;
-        if (clip_number !== undefined) {
-          targetIdx = clip_number - 1;
-        } else if (clip_id) {
-          targetIdx = suggestions.findIndex((s) => s.clip_id === clip_id);
-        } else if (index !== undefined) {
-          targetIdx = index;
-        }
-
-        if (targetIdx < 0 || targetIdx >= suggestions.length) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: "Clip not found. Use get_ui_state to see available clips.",
-              },
-            ],
-          };
-        }
-
-        let updated: number[];
-        if (selected) {
-          updated = deselected.filter((i: number) => i !== targetIdx);
-        } else {
-          updated = deselected.includes(targetIdx)
-            ? deselected
-            : [...deselected, targetIdx];
-        }
-
-        await fetch("http://localhost:3847/api/ui-state", {
+        const res = await fetch(`${webServerUrl}/api/suggestions/modify`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deselectedIndices: updated }),
+          body: JSON.stringify(body),
         });
+        const data = (await res.json()) as ApiError & {
+          index: number;
+          clip: SuggestedClip;
+          total: number;
+          selectedCount: number;
+        };
+        if (!res.ok || data.error) {
+          if (res.status === 404) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: "Clip not found. Use get_ui_state to see available clips.",
+                },
+              ],
+            };
+          }
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
 
-        const clip = suggestions[targetIdx];
         return {
           content: [
             {
               type: "text" as const,
-              text: `Clip #${targetIdx + 1} "${clip.title}" is now ${selected ? "selected" : "deselected"}. (${suggestions.length - updated.length}/${suggestions.length} selected)`,
+              text: `Clip #${data.index + 1} "${data.clip.title}" is now ${selected ? "selected" : "deselected"}. (${data.selectedCount}/${data.total} selected)`,
             },
           ],
         };
@@ -1780,7 +1753,7 @@ export function createServer(): McpServer {
           };
         }
 
-        await fetch("http://localhost:3847/api/ui-state", {
+        await fetch(`${webServerUrl}/api/ui-state`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ settings }),
@@ -1824,7 +1797,7 @@ export function createServer(): McpServer {
     {},
     async () => {
       try {
-        const res = await fetch("http://localhost:3847/api/outputs");
+        const res = await fetch(`${webServerUrl}/api/outputs`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const clips = (await res.json()) as OutputClip[];
 
@@ -1909,7 +1882,7 @@ export function createServer(): McpServer {
           };
         }
 
-        const res = await fetch("http://localhost:3847/api/presets", {
+        const res = await fetch(`${webServerUrl}/api/presets`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action, name, config }),
@@ -1951,7 +1924,7 @@ export function createServer(): McpServer {
           if (data.config.outro_path)
             settings.outroPath = data.config.outro_path;
           if (Object.keys(settings).length) {
-            await fetch("http://localhost:3847/api/ui-state", {
+            await fetch(`${webServerUrl}/api/ui-state`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ settings }),
@@ -2021,7 +1994,7 @@ export function createServer(): McpServer {
         if ((action === "export" || action === "import") && !filePath) {
           return mcpError(`'path' is required for action '${action}'.`);
         }
-        const base = "http://localhost:3847/api/thumbnail-config";
+        const base = `${webServerUrl}/api/thumbnail-config`;
         if (action === "show") {
           const res = await fetch(base);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2082,7 +2055,7 @@ export function createServer(): McpServer {
 
         // If no video_path, read from UI state
         if (!vPath || !segs) {
-          const stateRes = await fetch("http://localhost:3847/api/ui-state");
+          const stateRes = await fetch(`${webServerUrl}/api/ui-state`);
           if (stateRes.ok) {
             const state = (await stateRes.json()) as ServerUIState;
             if (!vPath) vPath = state.videoPath || state.filePath;
@@ -2118,7 +2091,7 @@ export function createServer(): McpServer {
           };
         }
 
-        const res = await fetch("http://localhost:3847/api/analyze-energy", {
+        const res = await fetch(`${webServerUrl}/api/analyze-energy`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ video_path: vPath, segments: segs }),
@@ -2222,7 +2195,7 @@ export function createServer(): McpServer {
     },
     async (params) => {
       try {
-        const res = await fetch("http://localhost:3847/api/reel", {
+        const res = await fetch(`${webServerUrl}/api/reel`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(params),
@@ -2273,7 +2246,7 @@ export function createServer(): McpServer {
     async ({ file_path }) => {
       try {
         // Validate via select-file endpoint
-        const selectRes = await fetch("http://localhost:3847/api/select-file", {
+        const selectRes = await fetch(`${webServerUrl}/api/select-file`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ file_path }),
@@ -2293,7 +2266,7 @@ export function createServer(): McpServer {
         const fileInfo = (await selectRes.json()) as FileInfo;
 
         // Push to UI state
-        await fetch("http://localhost:3847/api/ui-state", {
+        await fetch(`${webServerUrl}/api/ui-state`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ videoPath: file_path, filePath: file_path }),
@@ -2366,7 +2339,7 @@ export function createServer(): McpServer {
     },
     async ({ file_path, transcript }) => {
       try {
-        const res = await fetch("http://localhost:3847/api/import-transcript", {
+        const res = await fetch(`${webServerUrl}/api/import-transcript`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ file_path, transcript }),
@@ -2386,7 +2359,7 @@ export function createServer(): McpServer {
         const result = (await res.json()) as ImportTranscriptResult;
 
         // Push transcript to UI state
-        await fetch("http://localhost:3847/api/ui-state", {
+        await fetch(`${webServerUrl}/api/ui-state`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -2449,7 +2422,7 @@ export function createServer(): McpServer {
     },
     async ({ file_path, raw_text, total_duration, time_adjust }) => {
       try {
-        const res = await fetch("http://localhost:3847/api/parse-transcript", {
+        const res = await fetch(`${webServerUrl}/api/parse-transcript`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -2474,7 +2447,7 @@ export function createServer(): McpServer {
         const result = (await res.json()) as ImportTranscriptResult;
 
         // Push parsed transcript to UI state
-        await fetch("http://localhost:3847/api/ui-state", {
+        await fetch(`${webServerUrl}/api/ui-state`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -2575,7 +2548,7 @@ export function createServer(): McpServer {
               "- Use modify_clip to adjust timing before export",
               "- Use toggle_clip to select/deselect clips",
               "- Use update_settings to change the default caption style or crop strategy",
-              "- The user can review and adjust clips in the Web UI at http://localhost:3847",
+              `- The user can review and adjust clips in the Web UI at ${webServerUrl}`,
             ].join("\n"),
           },
         },

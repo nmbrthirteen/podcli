@@ -1,8 +1,9 @@
-import { readFile, writeFile, mkdir, rm, rename } from "fs/promises";
+import { readFile, writeFile, mkdir, rm } from "fs/promises";
 import { existsSync } from "fs";
 import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
 import { paths } from "../config/paths.js";
+import { writeFileAtomic } from "../utils/atomic-file.js";
 import { sliceTranscript, sliceWords } from "../utils/transcript.js";
 import { isDemoMode, demoClips } from "../ui/demo-fixtures.js";
 import type { BatchClipsResult, ClipHistoryEntry, Format, WordTimestamp } from "../models/index.js";
@@ -60,16 +61,7 @@ export class ClipsHistory {
   private async save(entries: ClipHistoryEntry[]): Promise<void> {
     if (isDemoMode()) return; // demo fixtures are read-only; never persist to clips.json
     await this.ensureDir();
-    // Write to a temp file and atomically rename so a crash or a concurrent
-    // reader never sees a half-written clips.json.
-    const tmp = `${this.historyPath}.${process.pid}.${uuidv4().slice(0, 8)}.tmp`;
-    try {
-      await writeFile(tmp, JSON.stringify(entries, null, 2), "utf-8");
-      await rename(tmp, this.historyPath);
-    } catch (err) {
-      await rm(tmp, { force: true }).catch(() => {});
-      throw err;
-    }
+    await writeFileAtomic(this.historyPath, JSON.stringify(entries, null, 2));
   }
 
   // Run load → mutate → save as one critical section, queued behind any
