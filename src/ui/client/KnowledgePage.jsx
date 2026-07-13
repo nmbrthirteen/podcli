@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { PageHeader } from "./Page";
 import { Trash2 } from 'lucide-react';
 import { api, upload } from './lib';
+import CopyButton from './CopyButton';
+
+const BOOTSTRAP_COMMAND = 'podcli bootstrap-knowledge <channel-url>';
 
 export default function KnowledgePage() {
       const [files, setFiles] = useState([]);
@@ -12,6 +15,8 @@ export default function KnowledgePage() {
       const [toast, setToast] = useState(null);
       const [newName, setNewName] = useState('');
       const [kbDir, setKbDir] = useState('');
+      const [creating, setCreating] = useState(false);
+      const [created, setCreated] = useState(null);
 
       const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
 
@@ -67,6 +72,16 @@ export default function KnowledgePage() {
         } catch (e) { showToast(`Create failed: ${e.message}`); }
       };
 
+      const createStarterFiles = async () => {
+        setCreating(true);
+        try {
+          const r = await api('/knowledge/init', { method: 'POST' });
+          setCreated(r.created || []);
+          await loadFiles();
+        } catch (e) { showToast(`Create failed: ${e.message}`); }
+        finally { setCreating(false); }
+      };
+
       const uploadFiles = async (fileList, label) => {
         const fd = new FormData();
         for (const f of fileList) {
@@ -114,6 +129,12 @@ export default function KnowledgePage() {
             <input type="file" accept=".md,.txt" multiple onChange={handleFileInput} />
           </div>
 
+          {created?.length > 0 && (
+            <div className="set-note ok" style={{ marginBottom: 16 }}>
+              Created {created.length} files. Fill in <strong>01-brand-identity.md</strong> and <strong>02-voice-and-tone.md</strong> first: the clip scorer reads those two on every run.
+            </div>
+          )}
+
           {realFiles.length > 0 ? (
             <div className="file-grid">
               {realFiles.map(f => (
@@ -130,8 +151,21 @@ export default function KnowledgePage() {
               ))}
             </div>
           ) : (
-            <div className="empty-state">
-              No knowledge files yet. Drop .md files above or create one below.
+            <div className="section card" style={{ marginTop: 16 }}>
+              <div className="section-label">Start here</div>
+              <div className="meta" style={{ marginBottom: 14 }}>
+                podcli reads 14 numbered files when it picks clips and writes titles. Create the starter set, then fill in the [brackets].
+              </div>
+              <button className="btn btn-primary" onClick={createStarterFiles} disabled={creating}>
+                {creating ? <div className="spinner sm" /> : 'Create starter templates'}
+              </button>
+              <div className="code-block">
+                <div className="code-block-head">
+                  <span>or draft them from a channel you already run</span>
+                  <CopyButton className="btn btn-ghost btn-sm" style={{ padding: '3px 10px' }} text={BOOTSTRAP_COMMAND} />
+                </div>
+                <pre>{BOOTSTRAP_COMMAND}</pre>
+              </div>
             </div>
           )}
 
