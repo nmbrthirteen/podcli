@@ -27,10 +27,15 @@ import {
 import CopyButton from './CopyButton';
 import AssetPicker from './AssetPicker';
 import RecentSources from './RecentSources';
+import MomentTrim from './MomentTrim';
+import { useDialog } from './useDialog';
 import { PageHeader } from './Page';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
+const onKeyActivate = (fn) => (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); fn(e); }
+};
     const api = async (path, opts = {}) => {
       const res = await fetch(`/api${path}`, { headers: { 'Content-Type': 'application/json', ...opts.headers }, ...opts });
       let body = null;
@@ -105,7 +110,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       hormozi: {
         fontSize: px(90), fontWeight: 800, bottom: PROD_TO_PCT(400),
         lineHeight: 1.2, uppercase: true,
-        wordsPerChunk: 3, maxCharsPerChunk: 22, splitLines: false,
+        wordsPerChunk: 3, absorbTail: 1, splitLines: false,
         color: '#fff', activeColor: '#ffff00',
         activePill: null,
         chunkBg: { background: 'rgba(0,0,0,0.8)', borderRadius: 5, paddingX: 10, paddingY: 5 },
@@ -115,7 +120,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       karaoke: {
         fontSize: px(80), fontWeight: 600, bottom: PROD_TO_PCT(400),
         lineHeight: 1.25, uppercase: false,
-        wordsPerChunk: 5, maxCharsPerChunk: 28, splitLines: false,
+        wordsPerChunk: 5, absorbTail: 1, splitLines: false,
         color: 'rgba(255,255,255,0.4)', activeColor: '#fff',
         activePill: null, chunkBg: null, gradient: false,
         sample: ['the', 'secret', 'to', 'building', 'something'],
@@ -123,26 +128,35 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       subtle: {
         fontSize: px(64), fontWeight: 400, bottom: PROD_TO_PCT(200),
         lineHeight: 1.3, uppercase: false,
-        wordsPerChunk: 6, maxCharsPerChunk: 36, splitLines: false,
+        wordsPerChunk: 6, absorbTail: 2, splitLines: false,
         color: 'rgba(255,255,255,0.95)', activeColor: 'rgba(255,255,255,0.95)',
         activePill: null, chunkBg: null, gradient: false,
         sample: ['the', 'secret', 'to', 'building', 'something', 'people'],
       },
     };
 
-    function buildPreviewChunks(words, perChunk, maxChars) {
+    // Mirrors the Remotion renderer: only branded char-limits chunks, the
+    // other styles cut on a fixed word count and absorb short tails.
+    function buildPreviewChunks(words, cfg) {
       const out = [];
       let i = 0;
       while (i < words.length) {
-        let end = i, count = 0;
-        while (end < words.length && end - i < perChunk) {
-          const w = words[end];
-          const next = count === 0 ? w.length : count + 1 + w.length;
-          if (end > i && maxChars && next > maxChars) break;
-          count = next; end++;
+        let end;
+        if (cfg.maxCharsPerChunk) {
+          end = i;
+          let count = 0;
+          while (end < words.length && end - i < cfg.wordsPerChunk) {
+            const w = words[end].text;
+            const next = count === 0 ? w.length : count + 1 + w.length;
+            if (end > i && next > cfg.maxCharsPerChunk) break;
+            count = next; end++;
+          }
+          if (end === i) end = i + 1;
+          if (words.length - end === 1 && end - i > 2) end -= 1;
+        } else {
+          end = Math.min(i + cfg.wordsPerChunk, words.length);
+          if (words.length - end <= (cfg.absorbTail || 0)) end = words.length;
         }
-        if (end === i) end = i + 1;
-        if (words.length - end === 1 && end - i > 2) end -= 1;
         out.push(words.slice(i, end));
         i = end;
       }
@@ -301,7 +315,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       return <div style={{ whiteSpace: 'normal' }}>{inner}</div>;
     }
 
-    function LivePhonePreview({ videoUrl, videoRef, captionStyle, activeClip, transcriptWords, logoPath, previewSrc, showTikTokFrame, onToggleFrame }) {
+    function LivePhonePreview({ videoUrl, videoRef, captionStyle, activeClip, transcriptWords, logoPath, previewSrc, showTikTokFrame, onToggleFrame, clipEnded, onReplay }) {
       const cfg = STYLE_CONFIGS[captionStyle] || STYLE_CONFIGS.branded;
       const [logoBroken, setLogoBroken] = useState(false);
       useEffect(() => { setLogoBroken(false); }, [logoPath]);
@@ -317,29 +331,49 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           );
         }
         if (!pool.length) return null;
-        const out = pool.slice(0, 80).map(w => (w.word || w.text || '').trim()).filter(Boolean);
+        const out = pool.slice(0, 80)
+          .map(w => ({ text: (w.word || w.text || '').trim(), start: w.start, end: w.end }))
+          .filter(w => w.text);
         return out.length >= 2 ? out : null;
       }, [activeClip, transcriptWords]);
 
       const usingSample = !sourcePool;
-      const poolWords = sourcePool || cfg.sample;
+      const poolWords = useMemo(
+        () => sourcePool || cfg.sample.map(text => ({ text, start: 0, end: 0 })),
+        [sourcePool, cfg.sample]
+      );
 
       // Chunk the same way the Remotion renderer does. The active chunk
       // is what appears on screen; the active word inside it gets the
       // pill / accent color.
-      const chunks = useMemo(
-        () => buildPreviewChunks(poolWords, cfg.wordsPerChunk, cfg.maxCharsPerChunk),
-        [poolWords, cfg.wordsPerChunk, cfg.maxCharsPerChunk]
-      );
+      const chunks = useMemo(() => buildPreviewChunks(poolWords, cfg), [poolWords, cfg]);
 
       const [cursor, setCursor] = useState(0); // global word index
       useEffect(() => {
         setCursor(0);
         if (poolWords.length <= 1) return;
+        if (!usingSample && videoUrl) {
+          let raf;
+          const step = () => {
+            const v = videoRef?.current;
+            if (v) {
+              const t = v.currentTime;
+              let idx = 0;
+              for (let k = 0; k < poolWords.length; k++) {
+                if (poolWords[k].start <= t) idx = k;
+                else break;
+              }
+              setCursor(idx);
+            }
+            raf = requestAnimationFrame(step);
+          };
+          raf = requestAnimationFrame(step);
+          return () => cancelAnimationFrame(raf);
+        }
         const tick = captionStyle === 'karaoke' ? 320 : 420;
         const iv = setInterval(() => setCursor(i => (i + 1) % poolWords.length), tick);
         return () => clearInterval(iv);
-      }, [captionStyle, poolWords.length, poolWords[0]]);
+      }, [captionStyle, poolWords, usingSample, videoUrl]);
 
       // Find which chunk the cursor is currently in, and which word within it.
       let activeChunkIdx = 0, activeWordInChunk = 0, consumed = 0;
@@ -369,9 +403,22 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
             </div>
           )}
           {videoUrl && cfg.gradient && <div className="phone-gradient" />}
+          {videoUrl && clipEnded && (
+            <button onClick={onReplay} aria-label="Replay clip"
+              style={{
+                position: 'absolute', inset: 0, margin: 'auto', width: 48, height: 48,
+                borderRadius: '50%', background: 'rgba(0,0,0,0.65)',
+                border: '1px solid rgba(255,255,255,0.35)', color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', zIndex: 6,
+              }}>
+              <RotateCcw size={18} />
+            </button>
+          )}
           {videoUrl && captionStyle === 'branded' && logoPath && !logoBroken && (
             <div className="phone-logo">
               <img src={`/api/stream-source?path=${encodeURIComponent(logoPath)}`}
+                alt="Logo"
                 onError={() => setLogoBroken(true)}
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
             </div>
@@ -384,7 +431,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
               fontFamily: "'DM Sans', 'Inter', Arial, sans-serif",
             }}>
               <PhoneCaptionBody
-                chunk={activeChunk}
+                chunk={activeChunk.map(w => w.text)}
                 activeWordInChunk={activeWordInChunk}
                 cfg={cfg}
               />
@@ -471,7 +518,10 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
 
       return (
         <div className="mcp-hints">
-          <div className="mcp-hints-header" style={{ cursor: 'pointer' }} onClick={() => setCollapsed(!collapsed)}>
+          <div className="mcp-hints-header" style={{ cursor: 'pointer' }}
+            role="button" tabIndex={0} aria-expanded={!collapsed}
+            onClick={() => setCollapsed(!collapsed)}
+            onKeyDown={onKeyActivate(() => setCollapsed(v => !v))}>
             <div className="mcp-hints-icon">AI</div>
             <div className="mcp-hints-title">MCP prompts</div>
             <div className="mcp-hints-subtitle">
@@ -577,6 +627,26 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       // Clip editing
       const [editingClip, setEditingClip] = useState(null); // index
       const [editForm, setEditForm] = useState({ title: '', start: 0, end: 0 });
+      const [editDuration, setEditDuration] = useState(0);
+      const editDialogRef = useDialog(editingClip !== null, () => setEditingClip(null));
+      const previewDialogRef = useDialog(!!previewFile, () => setPreviewFile(null));
+
+      // Transcript export menu
+      const [exportMenuOpen, setExportMenuOpen] = useState(false);
+      const exportMenuRef = useRef(null);
+      useEffect(() => {
+        if (!exportMenuOpen) return;
+        const onDown = (e) => {
+          if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) setExportMenuOpen(false);
+        };
+        const onKey = (e) => { if (e.key === 'Escape') setExportMenuOpen(false); };
+        document.addEventListener('mousedown', onDown);
+        document.addEventListener('keydown', onKey);
+        return () => {
+          document.removeEventListener('mousedown', onDown);
+          document.removeEventListener('keydown', onKey);
+        };
+      }, [exportMenuOpen]);
 
       // Energy analysis
       const [energyData, setEnergyData] = useState({}); // clip_id → { peak, avg, level }
@@ -666,15 +736,20 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       };
 
       // Clip editing
-      const openClipEdit = (idx, e) => {
-        e.stopPropagation();
+      const openClipEdit = (idx) => {
         const clip = suggestions[idx];
+        if (!clip) return;
         setEditingClip(idx);
         setEditForm({ title: clip.title, start: clip.start_second, end: clip.end_second });
       };
 
+      const clampEditTime = (v) => {
+        const n = Number.isFinite(v) ? Math.max(0, v) : 0;
+        return editDuration ? Math.min(n, editDuration) : n;
+      };
+
       const saveClipEdit = () => {
-        if (editingClip === null) return;
+        if (editingClip === null || editForm.end <= editForm.start) return;
         setSuggestions(prev => {
           const next = [...prev];
           next[editingClip] = { ...next[editingClip], title: editForm.title, start_second: editForm.start, end_second: editForm.end, duration: Math.round(editForm.end - editForm.start), segments: undefined };
@@ -829,6 +904,19 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         }
       }, [transcriptText]);
 
+      // Per-clip completion rows: clip_index matches the order of selected
+      // clips sent to /batch-clips, which is how results are indexed too.
+      const applyClipResult = useCallback((row) => {
+        if (!row || typeof row.clip_index !== 'number') return;
+        setResults(prev => {
+          const cur = prev[row.clip_index];
+          if (cur && cur.status === row.status && cur.output_path === row.output_path) return prev;
+          const next = [...prev];
+          next[row.clip_index] = row;
+          return next;
+        });
+      }, []);
+
       // React to SSE events from MCP
       const lastHandledTsRef = useRef(0);
       useEffect(() => {
@@ -838,8 +926,14 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         if (sseEvent.type === 'state-sync' || sseEvent.type === 'state') {
           const d = sseEvent.data;
           if (d.suggestions) {
+            const sameClips = suggestions.length === d.suggestions.length &&
+              d.suggestions.every((c, i) => {
+                const p = suggestions[i];
+                return p && p.id === c.id && p.start_second === c.start_second && p.end_second === c.end_second;
+              });
             setSuggestions(d.suggestions);
-            setEnergyData(sseEvent.type === 'state' && d.energyData ? d.energyData : {});
+            if (d.energyData !== undefined) setEnergyData(d.energyData || {});
+            else if (!sameClips) setEnergyData({});
           }
           if (d.deselectedIndices !== undefined) setDeselected(new Set(d.deselectedIndices));
           else if (d.suggestions && !d.deselectedIndices) setDeselected(new Set());
@@ -868,6 +962,8 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
         } else if (sseEvent.type === 'export-started') {
           setBatchJobId(sseEvent.data.jobId);
           setPhase('exporting');
+        } else if (sseEvent.type === 'job-update') {
+          if (sseEvent.data.clip_result) applyClipResult(sseEvent.data.clip_result);
         } else if (sseEvent.type === 'job-complete') {
           if (phase === 'exporting' || sseEvent.data.result?.results) {
             setPhase('done');
@@ -881,15 +977,18 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
             setBatchJobId(null);
           }
         }
-        // phase/transcript are read above; the ts-guard makes re-runs on their
-        // change a no-op, so depending on them just keeps the reads fresh.
-      }, [sseEvent, phase, transcript]);
+        // phase/transcript/suggestions are read above; the ts-guard makes re-runs
+        // on their change a no-op, so depending on them just keeps the reads fresh.
+      }, [sseEvent, phase, transcript, suggestions, applyClipResult]);
 
       // Preview panel state
       const videoRef = useRef();
       const [activeClipIdx, setActiveClipIdx] = useState(null);
       const [previewSrc, setPreviewSrc] = useState(null); // null=source, string=rendered clip filename
       const [settingsFlash, setSettingsFlash] = useState(null);
+      const [clipEnded, setClipEnded] = useState(false);
+
+      const activeClip = activeClipIdx !== null ? suggestions[activeClipIdx] : null;
 
       // Video source URL
       const videoUrl = previewSrc
@@ -898,18 +997,39 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           ? `/api/stream-source?path=${encodeURIComponent(videoPath)}`
           : null;
 
-      // Seek to clip when active clip changes (and showing source)
+      // Seek to clip when active clip changes (and showing source), pause at
+      // its end boundary so the preview doesn't run into the rest of the episode
       useEffect(() => {
+        setClipEnded(false);
         if (activeClipIdx === null || previewSrc) return;
-        const clip = suggestions[activeClipIdx];
-        if (!clip || !videoRef.current) return;
+        const v = videoRef.current;
+        if (!activeClip || !v) return;
         const seek = () => {
-          videoRef.current.currentTime = clip.start_second;
-          videoRef.current.play().catch(() => { });
+          v.currentTime = activeClip.start_second;
+          v.play().catch(() => { });
         };
-        if (videoRef.current.readyState >= 1) seek();
-        else videoRef.current.addEventListener('loadedmetadata', seek, { once: true });
-      }, [activeClipIdx, previewSrc]);
+        if (v.readyState >= 1) seek();
+        else v.addEventListener('loadedmetadata', seek, { once: true });
+        const onTime = () => {
+          if (v.currentTime >= activeClip.end_second) {
+            v.pause();
+            setClipEnded(true);
+          }
+        };
+        v.addEventListener('timeupdate', onTime);
+        return () => {
+          v.removeEventListener('loadedmetadata', seek);
+          v.removeEventListener('timeupdate', onTime);
+        };
+      }, [activeClipIdx, previewSrc, activeClip?.start_second, activeClip?.end_second]);
+
+      const replayClip = () => {
+        const v = videoRef.current;
+        if (!v || !activeClip) return;
+        v.currentTime = activeClip.start_second;
+        setClipEnded(false);
+        v.play().catch(() => { });
+      };
 
       // Flash settings when they change
       const flashSetting = (key) => {
@@ -1045,6 +1165,14 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       };
 
       useEffect(() => {
+        if (!batchStream) return;
+        const rows = Array.isArray(batchStream.clip_results)
+          ? batchStream.clip_results
+          : batchStream.clip_result ? [batchStream.clip_result] : [];
+        rows.forEach(applyClipResult);
+      }, [batchStream, applyClipResult]);
+
+      useEffect(() => {
         if (batchStream?.status === 'done') { setPhase('done'); setResults(batchStream.result?.results || []); setBatchJobId(null); }
         if (batchStream?.status === 'error') { setError('Export failed: ' + batchStream.error); setPhase('review'); setBatchJobId(null); }
       }, [batchStream?.status]);
@@ -1073,6 +1201,38 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
 
       const toggleClip = (i) => setDeselected(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
       const selectedCount = suggestions.length - deselected.size;
+
+      // Keyboard shortcuts: j/k move clip selection, space toggles include, e edits
+      useEffect(() => {
+        const onKey = (e) => {
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          const t = e.target;
+          if (t instanceof Element && t.closest('input, textarea, select, button, a, [role="button"], [role="checkbox"], [role="switch"], [role="tab"], [contenteditable="true"]')) return;
+          if (editingClip !== null || previewFile) return;
+          if (!suggestions.length) return;
+          const key = e.key.toLowerCase();
+          if (key === 'j' || key === 'k') {
+            e.preventDefault();
+            setPreviewSrc(null);
+            setActiveClipIdx(prev => {
+              const cur = prev === null ? -1 : prev;
+              return key === 'j'
+                ? Math.min(cur + 1, suggestions.length - 1)
+                : Math.max(cur - 1, 0);
+            });
+          } else if (key === ' ') {
+            if (phase !== 'review' || activeClipIdx === null) return;
+            e.preventDefault();
+            toggleClip(activeClipIdx);
+          } else if (key === 'e') {
+            if (phase !== 'review' || activeClipIdx === null) return;
+            e.preventDefault();
+            openClipEdit(activeClipIdx);
+          }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [suggestions, phase, activeClipIdx, editingClip, previewFile]);
       const buildLocalPrompt = () => {
         const parts = [];
         const hasTranscriptReady = transcript || transcriptText.trim();
@@ -1216,10 +1376,13 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       } : null;
 
       const getExportStatus = (resultIdx) => {
-        if (phase !== 'exporting' || !batchStream) return null;
+        if (phase !== 'exporting') return null;
+        const r = results[resultIdx];
+        if (r) return r.status === 'error' ? 'failed' : 'exported';
+        if (!batchStream) return null;
         const total = selectedClips.length; if (!total) return null;
         const pct = batchStream.progress || 0;
-        const done = Math.floor(pct / (100 / total));
+        const done = Math.max(results.filter(Boolean).length, Math.floor(pct / (100 / total)));
         if (resultIdx < done) return 'exported';
         if (resultIdx === done && pct < 100) return 'rendering';
         return 'pending';
@@ -1233,8 +1396,6 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
       const handleTranscriptDrop = (e) => { e.preventDefault(); setTranscriptDragOver(false); const files = e.dataTransfer?.files; if (!files?.length) return; const f = files[0]; setTranscriptFileName(f.name); const reader = new FileReader(); reader.onload = (ev) => setTranscriptText(ev.target.result); reader.readAsText(f); };
       const handleTranscriptFileSelect = (e) => { const f = e.target.files?.[0]; if (!f) return; setTranscriptFileName(f.name); const reader = new FileReader(); reader.onload = (ev) => setTranscriptText(ev.target.result); reader.readAsText(f); };
       const preventDef = (e) => e.preventDefault();
-
-      const activeClip = activeClipIdx !== null ? suggestions[activeClipIdx] : null;
 
       return (
         <div className="app">
@@ -1336,9 +1497,13 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
               {/* Transcript */}
               <div className="section card">
                 <div className="section-label">Transcript</div>
-                <div className="tabs">
-                  <div className={`tab ${transcriptMode === 'import' ? 'active' : ''}`} onClick={() => setTranscriptMode('import')}>Paste transcript</div>
-                  <div className={`tab ${transcriptMode === 'whisper' ? 'active' : ''}`} onClick={() => setTranscriptMode('whisper')}>Auto</div>
+                <div className="tabs" role="tablist" aria-label="Transcript source">
+                  {[['import', 'Paste transcript'], ['whisper', 'Auto']].map(([mode, label]) => (
+                    <div key={mode} className={`tab ${transcriptMode === mode ? 'active' : ''}`}
+                      role="tab" tabIndex={0} aria-selected={transcriptMode === mode}
+                      onClick={() => setTranscriptMode(mode)}
+                      onKeyDown={onKeyActivate(() => setTranscriptMode(mode))}>{label}</div>
+                  ))}
                 </div>
                 {transcriptMode === 'import' && (
                   <div className="fade-in">
@@ -1513,7 +1678,9 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                 {/* Advanced Settings */}
                 <div style={{ marginTop: 14 }}>
                   <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: '0.8px', color: 'var(--text2)', textTransform: 'uppercase' }}
-                    onClick={() => setAdvancedOpen(!advancedOpen)}>
+                    role="button" tabIndex={0} aria-expanded={advancedOpen}
+                    onClick={() => setAdvancedOpen(!advancedOpen)}
+                    onKeyDown={onKeyActivate(() => setAdvancedOpen(v => !v))}>
                     <span style={{ transition: 'transform 0.15s', transform: advancedOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-flex' }}><ChevronRight size={12} /></span>
                     Advanced
                   </div>
@@ -1548,11 +1715,17 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                       </div>
                       <div className="toggle-row" style={{ gridColumn: '1 / -1' }}>
                         <span className="toggle-label">Clean filler words (um, uh, hmm)</span>
-                        <div className={`toggle ${cleanFillers ? 'on' : ''}`} onClick={() => setCleanFillers(!cleanFillers)} />
+                        <div className={`toggle ${cleanFillers ? 'on' : ''}`} role="switch" tabIndex={0}
+                          aria-checked={cleanFillers} aria-label="Clean filler words"
+                          onClick={() => setCleanFillers(!cleanFillers)}
+                          onKeyDown={onKeyActivate(() => setCleanFillers(v => !v))} />
                       </div>
                       <div className="toggle-row" style={{ gridColumn: '1 / -1', paddingTop: 0 }}>
                         <span className="toggle-label">Energy boost (normalize loud moments)</span>
-                        <div className={`toggle ${energyBoost ? 'on' : ''}`} onClick={() => setEnergyBoost(!energyBoost)} />
+                        <div className={`toggle ${energyBoost ? 'on' : ''}`} role="switch" tabIndex={0}
+                          aria-checked={energyBoost} aria-label="Energy boost"
+                          onClick={() => setEnergyBoost(!energyBoost)}
+                          onKeyDown={onKeyActivate(() => setEnergyBoost(v => !v))} />
                       </div>
                     </div>
                   )}
@@ -1561,7 +1734,10 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
 
               {/* Word Corrections */}
               <div className="section">
-                <div className="section-label" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setCorrectionsOpen(!correctionsOpen)}>
+                <div className="section-label" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                  role="button" tabIndex={0} aria-expanded={correctionsOpen}
+                  onClick={() => setCorrectionsOpen(!correctionsOpen)}
+                  onKeyDown={onKeyActivate(() => setCorrectionsOpen(v => !v))}>
                   <span style={{ transition: 'transform 0.15s', transform: correctionsOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-flex' }}><ChevronRight size={12} /></span>
                   Word Corrections
                   {Object.keys(corrections).length > 0 && (
@@ -1686,6 +1862,16 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                         : phase === 'review' ? `Clips \u00B7 ${selectedCount} selected` : 'Clips'}
                     </div>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      {phase === 'review' && (
+                        <>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setDeselected(new Set())} disabled={deselected.size === 0}>
+                            Select all
+                          </button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setDeselected(new Set(suggestions.keys()))} disabled={selectedCount === 0}>
+                            Select none
+                          </button>
+                        </>
+                      )}
                       {phase === 'review' && videoPath && (
                         <button className="btn btn-ghost btn-sm" onClick={analyzeEnergy} disabled={analyzingEnergy || suggestions.length === 0} title="Analyze audio energy levels">
                           {analyzingEnergy ? <><div className="spinner sm" /> Analyzing…</> : <><Activity size={14} /> Energy</>}
@@ -1697,18 +1883,21 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                         </button>
                       )}
                       {transcript && (phase === 'review' || phase === 'done') && (
-                        <div style={{ position: 'relative' }}>
-                          <button className="btn btn-ghost btn-sm overflow-menu-btn" onClick={e => { const m = e.currentTarget.nextElementSibling; m.style.display = m.style.display === 'block' ? 'none' : 'block'; }} style={{ padding: '6px 10px', fontSize: 14, color: 'var(--text3)', lineHeight: 1 }}>
+                        <div style={{ position: 'relative' }} ref={exportMenuRef}>
+                          <button className="btn btn-ghost btn-sm overflow-menu-btn" aria-label="More actions" aria-haspopup="menu" aria-expanded={exportMenuOpen}
+                            onClick={() => setExportMenuOpen(v => !v)} style={{ padding: '6px 10px', fontSize: 14, color: 'var(--text3)', lineHeight: 1 }}>
                             {'\u22EF'}
                           </button>
-                          <div className="overflow-menu" style={{ display: 'none' }}>
-                            <div className="overflow-menu-label">Export transcript</div>
-                            {['SRT', 'VTT', 'JSON'].map(fmt => (
-                              <button key={fmt} className="overflow-menu-item" onClick={e => { window.open(`/api/export-transcript?format=${fmt.toLowerCase()}`, '_blank'); e.currentTarget.closest('.overflow-menu').style.display = 'none'; }}>
-                                {fmt}
-                              </button>
-                            ))}
-                          </div>
+                          {exportMenuOpen && (
+                            <div className="overflow-menu" role="menu">
+                              <div className="overflow-menu-label">Export transcript</div>
+                              {['SRT', 'VTT', 'JSON'].map(fmt => (
+                                <button key={fmt} role="menuitem" className="overflow-menu-item" onClick={() => { window.open(`/api/export-transcript?format=${fmt.toLowerCase()}`, '_blank'); setExportMenuOpen(false); }}>
+                                  {fmt}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1727,16 +1916,23 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                     return (
                       <div key={i}
                         className={`clip-item ${off && phase === 'review' ? 'dimmed' : ''} ${exportStatus === 'rendering' ? 'active-clip' : ''} ${phase === 'suggesting' ? 'clip-reveal' : ''} ${isSelected ? 'selected' : ''}`}
-                        onClick={() => onClipClick(i)}>
+                        role="button" tabIndex={0} aria-label={`Preview clip: ${clip.title}`}
+                        onClick={() => onClipClick(i)}
+                        onKeyDown={onKeyActivate(() => onClipClick(i))}>
 
                         {phase === 'review' && (
-                          <div className={`checkbox ${!off ? 'checked' : ''}`} onClick={(e) => { e.stopPropagation(); toggleClip(i); }}>
+                          <div className={`checkbox ${!off ? 'checked' : ''}`}
+                            role="checkbox" tabIndex={0} aria-checked={!off} aria-label={`Include ${clip.title} in export`}
+                            onClick={(e) => { e.stopPropagation(); toggleClip(i); }}
+                            onKeyDown={onKeyActivate(() => toggleClip(i))}>
                             {!off && <CheckIcon />}
                           </div>
                         )}
 
                         {phase === 'exporting' && !off && exportStatus && (
-                          <div className={`clip-status ${exportStatus}`}>{exportStatus === 'exported' && <CheckSmall />}</div>
+                          exportStatus === 'failed'
+                            ? <div className="status-dot fail"><X size={11} /></div>
+                            : <div className={`clip-status ${exportStatus}`}>{exportStatus === 'exported' && <CheckSmall />}</div>
                         )}
 
                         {phase === 'done' && !off && r && (
@@ -1760,7 +1956,7 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                         </div>
 
                         {phase === 'review' && (
-                          <button className="btn btn-ghost btn-sm clip-edit-btn" onClick={(e) => openClipEdit(i, e)} title="Edit clip"><Pencil size={13} /></button>
+                          <button className="btn btn-ghost btn-sm clip-edit-btn" onClick={(e) => { e.stopPropagation(); openClipEdit(i); }} title="Edit clip"><Pencil size={13} /></button>
                         )}
 
                         {phase === 'done' && !off && r && !failed && outputFile && (
@@ -1855,7 +2051,9 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
               {clipHistory.length > 0 && (
                 <div className="section" style={{ marginTop: 16 }}>
                   <div className="section-label" style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                    onClick={() => setHistoryOpen(!historyOpen)}>
+                    role="button" tabIndex={0} aria-expanded={historyOpen}
+                    onClick={() => setHistoryOpen(!historyOpen)}
+                    onKeyDown={onKeyActivate(() => setHistoryOpen(v => !v))}>
                     <span>History ({clipHistory.length})</span>
                     <span className="hint-xs" style={{ transition: 'transform 0.2s', transform: historyOpen ? 'rotate(180deg)' : 'rotate(0)' }}><ChevronDown size={12} /></span>
                   </div>
@@ -1868,7 +2066,9 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                         const fname = c.output_path?.split('/').pop() || c.title;
                         return (
                           <div key={c.id || i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--surface)', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer' }}
-                            onClick={() => { const f = c.output_path?.split('/').pop(); if (f) setPreviewSrc(f); }}>
+                            role="button" tabIndex={0} aria-label={`Preview ${c.title || fname}`}
+                            onClick={() => { const f = c.output_path?.split('/').pop(); if (f) setPreviewSrc(f); }}
+                            onKeyDown={onKeyActivate(() => { const f = c.output_path?.split('/').pop(); if (f) setPreviewSrc(f); })}>
                             <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--green)', flexShrink: 0 }} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || fname}</div>
@@ -1928,6 +2128,8 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
                     previewSrc={previewSrc}
                     showTikTokFrame={showTikTokFrame}
                     onToggleFrame={() => setShowTikTokFrame(v => !v)}
+                    clipEnded={clipEnded}
+                    onReplay={replayClip}
                   />
                 )}
                 <SpecRecap
@@ -1946,30 +2148,46 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           {/* Clip Edit Modal */}
           {editingClip !== null && suggestions[editingClip] && createPortal(
             <div className="clip-edit-overlay" onClick={() => setEditingClip(null)}>
-              <div className="clip-edit-panel" onClick={e => e.stopPropagation()}>
+              <div ref={editDialogRef} className="clip-edit-panel" role="dialog" aria-modal="true"
+                aria-label={`Edit clip ${editingClip + 1}`} tabIndex={-1} onClick={e => e.stopPropagation()}>
                 <h3>Edit clip #{editingClip + 1}</h3>
                 <div className="edit-field">
                   <label>Title</label>
                   <input type="text" value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
                     onKeyDown={e => { if (e.key === 'Enter') saveClipEdit(); }} autoFocus />
                 </div>
+                {videoPath && !sourceIsUrl && (
+                  <div className="edit-field">
+                    <label>Trim</label>
+                    <MomentTrim
+                      src={`/api/stream-source?path=${encodeURIComponent(videoPath)}`}
+                      start={editForm.start}
+                      end={editForm.end}
+                      onCommit={(s, e2) => setEditForm(f => ({ ...f, start: clampEditTime(s), end: clampEditTime(e2) }))}
+                      onDuration={setEditDuration}
+                    />
+                  </div>
+                )}
                 <div className="edit-field">
                   <label>Time range</label>
                   <div className="time-row">
                     <div>
-                      <input type="number" step="0.5" value={editForm.start} onChange={e => setEditForm(f => ({ ...f, start: parseFloat(e.target.value) || 0 }))}
-                        style={{ textAlign: 'center' }} />
+                      <input type="number" step="0.5" min="0" max={editDuration || undefined} value={editForm.start}
+                        onChange={e => setEditForm(f => ({ ...f, start: clampEditTime(parseFloat(e.target.value)) }))}
+                        aria-label="Start time in seconds" style={{ textAlign: 'center' }} />
                       <div className="hint-xs" style={{ textAlign: 'center', marginTop: 2 }}>{fmt(editForm.start)}</div>
                     </div>
                     <div className="arrow"><ArrowRight size={14} /></div>
                     <div>
-                      <input type="number" step="0.5" value={editForm.end} onChange={e => setEditForm(f => ({ ...f, end: parseFloat(e.target.value) || 0 }))}
-                        style={{ textAlign: 'center' }} />
+                      <input type="number" step="0.5" min="0" max={editDuration || undefined} value={editForm.end}
+                        onChange={e => setEditForm(f => ({ ...f, end: clampEditTime(parseFloat(e.target.value)) }))}
+                        aria-label="End time in seconds" style={{ textAlign: 'center' }} />
                       <div className="hint-xs" style={{ textAlign: 'center', marginTop: 2 }}>{fmt(editForm.end)}</div>
                     </div>
                   </div>
                   <div className="hint" style={{ marginTop: 6, textAlign: 'center' }}>
                     Duration: {Math.round(editForm.end - editForm.start)}s
+                    {editForm.end <= editForm.start && <span style={{ color: 'var(--red)' }}> {'·'} end must be after start</span>}
                   </div>
                 </div>
                 <div className="clip-edit-actions">
@@ -1984,7 +2202,8 @@ const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
           {/* Modal (mobile fallback) */}
           {previewFile && createPortal(
             <div className="modal-overlay" onClick={() => setPreviewFile(null)}>
-              <div className="modal-body" onClick={e => e.stopPropagation()}>
+              <div ref={previewDialogRef} className="modal-body" role="dialog" aria-modal="true"
+                aria-label="Clip preview" tabIndex={-1} onClick={e => e.stopPropagation()}>
                 <video src={`/api/preview/${previewFile}`} controls autoPlay />
                 <div style={{ textAlign: 'center', marginTop: 12 }}>
                   <button className="btn btn-ghost btn-sm" onClick={() => setPreviewFile(null)}>Close</button>
