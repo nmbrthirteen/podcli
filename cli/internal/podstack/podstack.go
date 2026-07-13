@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+
+	"podcli/internal/paths"
 )
 
 //go:generate sh sync.sh
@@ -59,6 +61,23 @@ func IsCommand(name string) bool {
 // installCommands writes the embedded slash-command files into
 // <project>/.claude/commands so the agent can resolve /<cmd>. Existing files are
 // left untouched, so a user's local edits win.
+// warnEmptyKnowledge nudges toward `podcli knowledge init` before a workflow
+// runs against a blank knowledge base. Best-effort: PODCLI_HOME and the
+// platform default cover installed binaries; source checkouts resolve home in
+// the Python layer and are skipped rather than guessed.
+func warnEmptyKnowledge() {
+	kb := filepath.Join(paths.Home(), "knowledge")
+	entries, err := os.ReadDir(kb)
+	if err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".md") {
+				return
+			}
+		}
+	}
+	fmt.Fprintf(os.Stderr, "  %sKnowledge base is empty.%s Run %spodcli knowledge init%s first, or %s/bootstrap-knowledge%s in your agent, so the workflow knows your show.\n", colYellow, colReset, colAccent, colReset, colAccent, colReset)
+}
+
 func installCommands(project string) error {
 	dest := filepath.Join(project, ".claude", "commands")
 	if err := os.MkdirAll(dest, 0o755); err != nil {
@@ -121,6 +140,7 @@ func Run(cmd string, args []string) int {
 	if err := installCommands(project); err != nil {
 		fmt.Fprintf(os.Stderr, "  %swarning:%s could not install slash commands: %v\n", colYellow, colReset, err)
 	}
+	warnEmptyKnowledge()
 
 	prompt := "/" + cmd
 	if len(promptArgs) > 0 {
