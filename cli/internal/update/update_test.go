@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"podcli/internal/config"
 )
 
 func TestSwapReplacesBinary(t *testing.T) {
@@ -44,6 +47,21 @@ func TestNewer(t *testing.T) {
 		if got := newer(c.remote, c.current); got != c.want {
 			t.Errorf("newer(%q, %q) = %v, want %v", c.remote, c.current, got, c.want)
 		}
+	}
+}
+
+func TestUpdateCheckCache(t *testing.T) {
+	t.Setenv("PODCLI_HOME", t.TempDir())
+	if _, ok := config.CachedUpdateCheck(24 * time.Hour); ok {
+		t.Fatal("fresh config should have no cached check")
+	}
+	config.RecordUpdateCheck("9.9.9")
+	tag, ok := config.CachedUpdateCheck(24 * time.Hour)
+	if !ok || tag != "9.9.9" {
+		t.Fatalf("cached check = %q, %v; want 9.9.9 within 24h", tag, ok)
+	}
+	if _, ok := config.CachedUpdateCheck(0); ok {
+		t.Fatal("expired cache should force a re-check")
 	}
 }
 
