@@ -73,6 +73,13 @@ from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_M
 from services.knowledge_base import is_empty as kb_is_empty, kb_files
 
 
+def _parse_json_transcript(raw_text):
+    data = json.loads(raw_text)
+    if isinstance(data, list):
+        return data, [], {}
+    return data.get("words", []), data.get("segments", []), data
+
+
 def _suggestions_session_path(cache_hash: str) -> str:
     return os.path.join(paths["home"], "sessions", f"clips-{cache_hash}.json")
 
@@ -716,12 +723,7 @@ def cmd_process(args):
 
         # Detect format
         if raw_text.strip().startswith("{") or raw_text.strip().startswith("["):
-            data = json.loads(raw_text)
-            if isinstance(data, list):
-                words = data
-            else:
-                words = data.get("words", [])
-                segments = data.get("segments", [])
+            words, segments, result = _parse_json_transcript(raw_text)
             print(f"         JSON transcript: {len(words)} words")
         else:
             parsed = parse_speaker_transcript(
