@@ -18,6 +18,7 @@ export const CACHE_DIR = path.join(CACHE_ROOT, "remotion-bundle");
 const HASH_FILE = path.join(CACHE_DIR, ".hash");
 const LOCK_DIR = `${CACHE_DIR}.lock`;
 const LOCK_STALE_MS = 5 * 60 * 1000;
+const LOCK_HEARTBEAT_MS = Math.floor(LOCK_STALE_MS / 3);
 const ENTRY_POINT = path.join(__dirname, "src", "index.ts");
 
 /**
@@ -57,28 +58,76 @@ function cacheIsValid(want) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function removeStaleLock() {
+  try {
+    const entries = fs.readdirSync(LOCK_DIR, { withFileTypes: true });
+    if (entries.length === 0) {
+      if (Date.now() - fs.statSync(LOCK_DIR).mtimeMs > LOCK_STALE_MS) {
+        fs.rmdirSync(LOCK_DIR);
+        return true;
+      }
+      return false;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const tokenPath = path.join(LOCK_DIR, entry.name);
+      if (Date.now() - fs.statSync(tokenPath).mtimeMs > LOCK_STALE_MS) {
+        fs.rmSync(tokenPath, { force: true });
+      }
+    }
+    fs.rmdirSync(LOCK_DIR);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function acquireLock() {
+  const token = `${process.pid}-${crypto.randomUUID()}`;
   for (;;) {
     try {
       fs.mkdirSync(LOCK_DIR);
-      return;
+      const tokenPath = path.join(LOCK_DIR, token);
+      try {
+        fs.writeFileSync(tokenPath, token, { flag: "wx" });
+      } catch (err) {
+        try {
+          fs.rmdirSync(LOCK_DIR);
+        } catch {}
+        throw err;
+      }
+      const lock = { token, tokenPath, heartbeat: undefined };
+      lock.heartbeat = setInterval(() => {
+        try {
+          const now = new Date();
+          fs.utimesSync(tokenPath, now, now);
+        } catch {
+          clearInterval(lock.heartbeat);
+        }
+      }, LOCK_HEARTBEAT_MS);
+      lock.heartbeat.unref();
+      return lock;
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
     }
-    try {
-      if (Date.now() - fs.statSync(LOCK_DIR).mtimeMs > LOCK_STALE_MS) {
-        fs.rmdirSync(LOCK_DIR);
-        continue;
-      }
-    } catch {}
+    if (removeStaleLock()) continue;
     await sleep(500);
   }
 }
 
-function releaseLock() {
+function releaseLock(lock) {
+  clearInterval(lock.heartbeat);
+  try {
+    fs.rmSync(lock.tokenPath, { force: true });
+  } catch {}
   try {
     fs.rmdirSync(LOCK_DIR);
   } catch {}
+}
+
+function ownsLock(lock) {
+  return fs.existsSync(lock.tokenPath);
 }
 
 export async function getCachedBundle({ onBundle } = {}) {
@@ -86,14 +135,14 @@ export async function getCachedBundle({ onBundle } = {}) {
   if (cacheIsValid(want)) return CACHE_DIR;
 
   fs.mkdirSync(CACHE_ROOT, { recursive: true });
-  await acquireLock();
+  const lock = await acquireLock();
   try {
     if (cacheIsValid(want)) return CACHE_DIR;
 
     onBundle?.();
     // Bundle into a scratch dir and swap it in whole, so a crash mid-bundle
     // never leaves CACHE_DIR half-written.
-    const staging = `${CACHE_DIR}.tmp-${process.pid}`;
+    const staging = `${CACHE_DIR}.tmp-${lock.token}`;
     fs.rmSync(staging, { recursive: true, force: true });
     try {
       await bundle({
@@ -101,6 +150,9 @@ export async function getCachedBundle({ onBundle } = {}) {
         outDir: staging,
         webpackOverride,
       });
+      if (!ownsLock(lock)) {
+        throw new Error("Bundle cache lock ownership lost");
+      }
       fs.writeFileSync(path.join(staging, ".hash"), want);
       fs.rmSync(CACHE_DIR, { recursive: true, force: true });
       fs.renameSync(staging, CACHE_DIR);
@@ -109,6 +161,6 @@ export async function getCachedBundle({ onBundle } = {}) {
     }
     return CACHE_DIR;
   } finally {
-    releaseLock();
+    releaseLock(lock);
   }
 }
