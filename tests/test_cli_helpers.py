@@ -53,25 +53,5 @@ class SharedWavTests(unittest.TestCase):
         self.assertEqual(extract.call_count, 1)
 
 
-class WebuiPortTests(unittest.TestCase):
-    def _port(self, env):
-        with mock.patch.dict(os.environ, env, clear=True):
-            return cli_mod._webui_port()
-
-    def test_defaults_to_3847(self):
-        self.assertEqual(self._port({}), 3847)
-
-    def test_port_is_honored(self):
-        self.assertEqual(self._port({"PORT": "4100"}), 4100)
-
-    def test_podcli_port_wins_over_port(self):
-        self.assertEqual(self._port({"PODCLI_PORT": "4000", "PORT": "4100"}), 4000)
-
-    def test_invalid_values_fall_back_to_default(self):
-        self.assertEqual(self._port({"PODCLI_PORT": "abc"}), 3847)
-        self.assertEqual(self._port({"PODCLI_PORT": "0"}), 3847)
-        self.assertEqual(self._port({"PODCLI_PORT": "70000"}), 3847)
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -269,6 +269,10 @@ func setup(args []string) int {
 			refresh = true
 		}
 	}
+	// setup is the one path that may re-provision, so it is the one path allowed to ask
+	// upstream what the current build is. Every other command trusts the local artifact
+	// state and stays offline-capable.
+	provision.VerifyRemote = true
 	fmt.Printf("Provisioning into %s\n", paths.Home())
 	// Extracted from the binary, so it costs nothing and can't fail on a bad network.
 	// First, so an interrupted or offline setup still leaves a backend matching this

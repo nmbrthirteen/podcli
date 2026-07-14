@@ -252,6 +252,12 @@ class BlendSignalScoresTests(unittest.TestCase):
         clips = cs.blend_signal_scores(self._clips(), events_data=self._events())
         self.assertIn("laughter", clips[0]["reasons"])
 
+    def test_crowd_cheer_is_not_tagged_as_laughter(self):
+        events = [{"time": 5.0, "laughter": 0.0, "cheering": 0.5, "screaming": 0.0, "speech": 0.2}]
+        clips = cs.blend_signal_scores(self._clips(), events_data=events)
+        self.assertIn("cheering", clips[0]["reasons"])
+        self.assertNotIn("laughter", clips[0]["reasons"])
+
 
 if __name__ == "__main__":
     unittest.main()

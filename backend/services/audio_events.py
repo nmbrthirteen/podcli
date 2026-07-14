@@ -13,6 +13,8 @@ it anti-correlates with speech at the frame level, which makes it a reliable anc
 for extending a clip backwards to the moment that caused the reaction.
 """
 
+from __future__ import annotations
+
 import csv
 import os
 import subprocess
@@ -21,15 +23,16 @@ import wave
 from pathlib import Path
 from typing import Optional, Callable
 
-import numpy as np
-
 from utils.proc import run as proc_run
 
+# Guarded together: on a partial runtime, reaction detection turns itself off rather
+# than taking down every other backend task with an import error.
 try:
+    import numpy as np
     import onnxruntime as ort
-    _ORT_AVAILABLE = True
+    _RUNTIME_AVAILABLE = True
 except ImportError:
-    _ORT_AVAILABLE = False
+    _RUNTIME_AVAILABLE = False
 
 _MODELS_DIR = Path(__file__).resolve().parents[1] / "models"
 _MODEL_PATH = _MODELS_DIR / "yamnet.onnx"
@@ -41,6 +44,9 @@ _LAUGHTER_KEYS = ("laugh", "giggle", "chuckle", "snicker", "chortle")
 _CHEER_NAMES = ("Cheering", "Applause", "Whoop")
 _SCREAM_NAMES = ("Screaming",)
 _SPEECH_NAMES = ("Speech",)
+
+_REACTION_CHANNELS = ("laughter", "cheering", "screaming")
+REACTION_THRESHOLD = 0.15
 
 _session = None
 _class_index: dict[str, list[int]] = {}
@@ -70,7 +76,7 @@ def _load_class_index() -> dict[str, list[int]]:
 
 def _get_session():
     global _session, _class_index
-    if not _ORT_AVAILABLE or not _MODEL_PATH.exists():
+    if not _RUNTIME_AVAILABLE or not _MODEL_PATH.exists():
         return None
     if _session is None:
         _session = ort.InferenceSession(
@@ -81,8 +87,8 @@ def _get_session():
 
 
 def is_available() -> bool:
-    """True if onnxruntime and the YAMNet model are both present."""
-    return _ORT_AVAILABLE and _MODEL_PATH.exists()
+    """True if onnxruntime, numpy and the YAMNet model are all present."""
+    return _RUNTIME_AVAILABLE and _MODEL_PATH.exists()
 
 
 def _read_waveform_16k_mono(video_path: str, wav_path: Optional[str] = None) -> Optional[np.ndarray]:
@@ -189,7 +195,27 @@ def extract_audio_events(video_path: str, wav_path: Optional[str] = None) -> lis
 
 def _reaction_level(event: dict) -> float:
     """Combined reaction strength for one frame: the loudest reaction channel."""
-    return max(event["laughter"], event["cheering"], event["screaming"])
+    return max(event[channel] for channel in _REACTION_CHANNELS)
+
+
+def reaction_times(
+    events_data: list[dict],
+    threshold: float = REACTION_THRESHOLD,
+) -> list[float]:
+    """Timestamps of frames whose reaction level clears `threshold`."""
+    return [e["time"] for e in events_data if _reaction_level(e) >= threshold]
+
+
+def dominant_reaction(events_data: list[dict], start: float, end: float) -> Optional[str]:
+    """Name of the strongest reaction channel in [start, end]: laughter, cheering
+    or screaming. None if nothing reacted in that range."""
+    frames = [e for e in events_data if start <= e["time"] <= end]
+    if not frames:
+        return None
+    peak = max(frames, key=_reaction_level)
+    if _reaction_level(peak) <= 0:
+        return None
+    return max(_REACTION_CHANNELS, key=lambda channel: peak[channel])
 
 
 def compute_event_scores(
@@ -226,7 +252,7 @@ def get_event_profile(
     video_path: str,
     segments: list[dict],
     progress_callback: Optional[Callable] = None,
-    reaction_threshold: float = 0.15,
+    reaction_threshold: float = REACTION_THRESHOLD,
     wav_path: Optional[str] = None,
 ) -> dict:
     """
@@ -249,15 +275,11 @@ def get_event_profile(
 
     segment_scores = compute_event_scores(events_data, segments)
 
-    reaction_times = [
-        e["time"] for e in events_data if _reaction_level(e) >= reaction_threshold
-    ]
-
     if progress_callback:
         progress_callback(100, "Reaction analysis complete")
 
     return {
         "events_data": events_data,
         "segment_scores": segment_scores,
-        "reaction_times": reaction_times,
+        "reaction_times": reaction_times(events_data, reaction_threshold),
     }
