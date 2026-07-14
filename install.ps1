@@ -53,7 +53,7 @@ if ($Uninstall) {
   if ($Purge) {
     $targets = @($homeDir)
   } else {
-    $targets = @($binDir, (Join-Path $homeDir 'runtime'), (Join-Path $homeDir 'models'), (Join-Path $homeDir 'tools'))
+    $targets = @($binDir, (Join-Path $homeDir 'runtime'), (Join-Path $homeDir 'models'))
   }
   foreach ($p in $targets) {
     if (Test-Path $p) {

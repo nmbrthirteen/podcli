@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+
+	"podcli/internal/paths"
 )
 
 //go:generate sh sync.sh
@@ -54,6 +56,23 @@ func IsCommand(name string) bool {
 		}
 	}
 	return false
+}
+
+// warnEmptyKnowledge nudges toward `podcli knowledge init` before a workflow
+// runs against a blank knowledge base. README.md does not count: the studio
+// writes one into the knowledge dir, and it carries no show context.
+func warnEmptyKnowledge() {
+	kb := filepath.Join(paths.Home(), "knowledge")
+	entries, err := os.ReadDir(kb)
+	if err == nil {
+		for _, e := range entries {
+			name := e.Name()
+			if strings.HasSuffix(name, ".md") && !strings.EqualFold(name, "README.md") {
+				return
+			}
+		}
+	}
+	fmt.Fprintf(os.Stderr, "  %sKnowledge base is empty.%s Run %spodcli knowledge init%s first, or %s/bootstrap-knowledge%s in your agent, so the workflow knows your show.\n", colYellow, colReset, colAccent, colReset, colAccent, colReset)
 }
 
 // installCommands writes the embedded slash-command files into
@@ -121,6 +140,7 @@ func Run(cmd string, args []string) int {
 	if err := installCommands(project); err != nil {
 		fmt.Fprintf(os.Stderr, "  %swarning:%s could not install slash commands: %v\n", colYellow, colReset, err)
 	}
+	warnEmptyKnowledge()
 
 	prompt := "/" + cmd
 	if len(promptArgs) > 0 {

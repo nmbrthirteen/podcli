@@ -79,7 +79,10 @@ func allowedHost(h string) bool {
 
 func guardedClient() *http.Client {
 	return &http.Client{
-		Transport: &http.Transport{ResponseHeaderTimeout: 30 * time.Second},
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			ResponseHeaderTimeout: 30 * time.Second,
+		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
@@ -133,19 +136,37 @@ func newer(remote, current string) bool {
 	return false
 }
 
+const checkInterval = 24 * time.Hour
+
 // NotifyIfOutdated prints a one-line notice when a newer release exists. Fast,
-// silent on any error, and respects the off-switch.
+// silent on any error, respects the off-switch, and hits the network at most
+// once per day (result cached in config.json).
 func NotifyIfOutdated(current string) {
 	if !config.AutoUpdate() {
 		return
 	}
-	tag, err := latestTag(1500 * time.Millisecond)
-	if err != nil {
-		return
+	tag, ok := config.CachedUpdateCheck(checkInterval)
+	if !ok {
+		var err error
+		tag, err = latestTag(1500 * time.Millisecond)
+		if err != nil {
+			return
+		}
+		config.RecordUpdateCheck(tag)
 	}
 	if newer(tag, current) {
 		fmt.Fprintf(os.Stderr, "  podcli %s available (you have %s) - run `podcli update`\n", tag, current)
 	}
+}
+
+// CleanupOldBinary removes the podcli.exe.old a Windows self-update leaves
+// behind (the running exe can't be deleted during the swap). Best-effort: the
+// file stays locked while the previous binary is still exiting.
+func CleanupOldBinary() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	os.Remove(managedBin() + ".old")
 }
 
 func Run(current string) int {
@@ -154,6 +175,7 @@ func Run(current string) int {
 		fmt.Fprintf(os.Stderr, "podcli: update check failed: %v\n", err)
 		return 1
 	}
+	config.RecordUpdateCheck(tag)
 	if !newer(tag, current) {
 		fmt.Printf("podcli %s is up to date.\n", current)
 		return 0
@@ -228,20 +250,16 @@ func apply(tag string) error {
 }
 
 // verifyStaged checks the downloaded binary against the release's checksums.txt.
-// Fails closed on a mismatch; fails open (warning) only when checksums.txt is
-// absent, so an older release without a manifest still updates.
+// Fails closed: updates always target the latest release, and checksums.txt is
+// published with every release, so its absence means the binary can't be trusted.
 func verifyStaged(tag, staged string) error {
 	resp, err := guardedClient().Get(checksumsURL(tag))
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot verify update: fetching checksums.txt failed: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		fmt.Fprintln(os.Stderr, "  (no checksums.txt in release - skipped verification)")
-		return nil
-	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d fetching checksums.txt", resp.StatusCode)
+		return fmt.Errorf("cannot verify update: HTTP %d fetching checksums.txt (it is published with every release - retry later)", resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -249,8 +267,7 @@ func verifyStaged(tag, staged string) error {
 	}
 	want, ok := provision.ParseChecksums(data)[assetName()]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "  (no checksum entry for %s - skipped verification)\n", assetName())
-		return nil
+		return fmt.Errorf("cannot verify update: no entry for %s in checksums.txt", assetName())
 	}
 	got, err := provision.Sha256File(staged)
 	if err != nil {
@@ -286,25 +303,10 @@ func swap(staged, dest string) error {
 	return os.Rename(staged, dest)
 }
 
+// downloadFile reuses provisioning's resumable download, but keeps this path's
+// narrower redirect allowlist: provisioning also trusts the model and ffmpeg
+// CDNs, and nothing outside GitHub may serve the podcli binary.
 func downloadFile(url, dest string) error {
-	resp, err := guardedClient().Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
-	}
-	tmp := dest + ".part"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(f, resp.Body)
-	f.Close()
-	if err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, dest)
+	os.Remove(dest) // a stale staged binary must not satisfy Fetch's have() check
+	return provision.FetchGuarded(url, dest, "podcli", allowedHost)
 }
