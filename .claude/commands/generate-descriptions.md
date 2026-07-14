@@ -19,9 +19,9 @@ triggers:
 ## Before Starting
 
 Read:
-- `.podcli/knowledge/06-descriptions-template.md` — templates, hashtag library, SEO keywords
-- `.podcli/knowledge/01-brand-identity.md` — show name, hosts, links
-- `.podcli/knowledge/02-voice-and-tone.md` — voice and banned words
+- `06-descriptions-template.md` — templates, hashtag library, SEO keywords
+- `01-brand-identity.md` — show name, hosts, links
+- `02-voice-and-tone.md` — voice and banned words
 
 ---
 
