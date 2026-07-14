@@ -21,7 +21,7 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
 
 1. **Read, don't watch.** Reason about clips from the packed markdown view — not raw segments, not frame dumps.
 2. **Strategy first, render after.** Propose the cut list and WAIT for user confirmation before calling `batch_create_clips`.
-3. **Knowledge base is context, not template.** If `.podcli/knowledge/` exists, read it for brand voice and format preferences. If not, infer from the content itself.
+3. **Knowledge base is context, not template.** If `` exists, read it for brand voice and format preferences. If not, infer from the content itself.
 4. **Never silently render.** Every clip that ships must appear in the proposal the user approved.
 
 ---
@@ -48,7 +48,7 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
    - Loop: call `transcribe_status(job_id, wait_seconds: 30)`. Between calls, emit ONE terse line to the user like `"Progress: 47% — pyannote diarization"`. Keep it to one line per poll — no repeat prose. Exit the loop when `done: true`.
    - If `status: "error"`, stop and report the error.
 3. Read the packed transcript: `get_ui_state(include_transcript: true)`. This returns a compact phrase-grouped view with speakers, silence gaps, and energy peaks.
-4. If `.podcli/knowledge/` exists, read `01-brand-identity.md`, `02-voice-and-tone.md`, and `04-shorts-creation-guide.md` for show context. Skip silently if missing — `/auto` works on any content.
+4. If `` exists, read `01-brand-identity.md`, `02-voice-and-tone.md`, and `04-shorts-creation-guide.md` for show context. Skip silently if missing — `/auto` works on any content.
 5. Call `clip_history` to see what's already been shipped for this episode. Avoid duplicates in the proposal.
 
 **Fallback**: if `transcribe_start` returns an error about the Web UI not running, tell the user and offer either (a) run `npm run ui` in another terminal then retry, or (b) fall back to the synchronous `transcribe_podcast` (no live progress, works silently).
@@ -61,7 +61,7 @@ Emit a numbered strategy table. Do NOT render yet.
 Proposed strategy for <video-label> (<duration>, <N> speakers):
 
 Inferred format: <talking-head | interview | montage | tutorial | travel | other>
-Inferred tone:   <from voice fingerprint or .podcli/knowledge/02>
+Inferred tone:   <from voice fingerprint or 02-voice-and-tone.md>
 Target count:    <N> clips (from arg, or inferred from content density)
 
 #1  [00:04:22-00:05:01]  39s  S0 "<hook>"

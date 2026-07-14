@@ -18,7 +18,7 @@ triggers:
 
 ## Before starting
 
-1. If `.podcli/knowledge/` has no files, run `podcli knowledge init` first so all 14 templates exist.
+1. If `` has no files, run `podcli knowledge init` first so all 14 templates exist.
 2. Ask for whichever of these the user has not provided:
    - Channel or podcast URL (YouTube channel, Spotify show, RSS feed)
    - Or a few sentences about the show if nothing is published yet
