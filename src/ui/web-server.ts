@@ -2928,7 +2928,12 @@ app.post("/api/claude-suggest", async (req, res) => {
       ...uiState.suggestions.map((s) => ({ start_second: s.start_second, end_second: s.end_second, title: s.title })),
     ];
 
-    const params: Record<string, unknown> = { segments: segs, top_n, existing_clips };
+    const params: Record<string, unknown> = {
+      segments: segs,
+      top_n,
+      existing_clips,
+      video_path: uiState.videoPath || undefined,
+    };
     if (min_duration) params.min_duration = min_duration;
     if (max_duration) params.max_duration = max_duration;
     const result = await executor.execute<{ clips?: SuggestedClip[] }>(

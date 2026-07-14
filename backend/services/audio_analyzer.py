@@ -6,6 +6,7 @@ then identifies energy peaks (loud moments, laughs, emphasis).
 Used by the clip suggestor to boost scores for high-energy segments.
 """
 
+import os
 import subprocess
 import json
 import re
@@ -14,22 +15,32 @@ from typing import Optional, Callable
 from utils.proc import run as proc_run
 
 
+_ANALYSIS_RATE = 16000
+
+
 def extract_audio_energy(
     video_path: str,
     window_sec: float = 1.0,
+    wav_path: str = None,
 ) -> list[dict]:
     """
-    Extract per-second RMS energy levels from a video's audio track.
+    Extract per-window RMS energy levels from a video's audio track.
 
     Returns list of {time, rms, peak} dicts, one per window.
+    wav_path: optional pre-extracted 16 kHz mono WAV — skips decoding the
+    video again when the orchestration layer already extracted the audio.
     """
-    # Use ffmpeg astats filter on audio only (-vn skips video decoding,
-    # which is the main bottleneck on long podcasts).
+    input_path = wav_path if wav_path and os.path.exists(wav_path) else video_path
+    # astats' reset counts filter frames, not seconds, so pin the frame size
+    # to exactly one window with asetnsamples and reset every frame.
+    # (-vn skips video decoding, the main bottleneck on long podcasts.)
+    window_samples = max(1, int(_ANALYSIS_RATE * window_sec))
     cmd = [
         "ffmpeg",
-        "-i", video_path,
+        "-i", input_path,
         "-vn",
-        "-af", f"astats=metadata=1:reset={int(1/window_sec)},"
+        "-af", f"aresample={_ANALYSIS_RATE},asetnsamples=n={window_samples},"
+               f"astats=metadata=1:reset=1,"
                f"ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
         "-f", "null", "-",
     ]
@@ -59,7 +70,7 @@ def extract_audio_energy(
 
     if not energy_data:
         # Fallback: use volumedetect for a simpler analysis
-        return _fallback_energy(video_path)
+        return _fallback_energy(input_path)
 
     return energy_data
 
@@ -167,6 +178,7 @@ def get_energy_profile(
     video_path: str,
     segments: list[dict],
     progress_callback: Optional[Callable] = None,
+    wav_path: str = None,
 ) -> dict:
     """
     Full pipeline: extract energy data and score all segments.
@@ -176,7 +188,7 @@ def get_energy_profile(
     if progress_callback:
         progress_callback(0, "Analyzing audio energy...")
 
-    energy_data = extract_audio_energy(video_path)
+    energy_data = extract_audio_energy(video_path, wav_path=wav_path)
 
     if progress_callback:
         progress_callback(70, "Scoring segments by energy...")
