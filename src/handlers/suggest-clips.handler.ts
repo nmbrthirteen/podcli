@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from "crypto";
+import { validateSuggestionRange } from "../utils/clip-validation.js";
 
 export const suggestClipsToolDef = {
   name: "suggest_clips",
@@ -101,6 +102,14 @@ export interface SuggestClipsInput {
 
 export async function handleSuggestClips(input: SuggestClipsInput): Promise<string> {
   const suggestions = input.suggestions;
+
+  for (let i = 0; i < suggestions.length; i++) {
+    const s = suggestions[i];
+    const rangeError = validateSuggestionRange(s.start_second, s.end_second);
+    if (rangeError) {
+      throw new Error(`Suggestion ${i + 1} ("${s.title}"): ${rangeError}`);
+    }
+  }
 
   // Validate and enrich suggestions
   const enriched = suggestions.map((s, i) => {

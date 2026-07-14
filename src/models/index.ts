@@ -123,6 +123,7 @@ export interface UIState {
     logoPath?: string;
     outroPath?: string;
     introPath?: string;
+    cleanFillers?: boolean;
   };
   phase?: string;
   lastUpdated?: number;
@@ -187,6 +188,9 @@ export interface BatchClipsResult {
     output_path?: string;
     start_second?: number;
     end_second?: number;
+    /** Bounds of the clip as submitted; the renderer may trim start_second. */
+    source_start_second?: number;
+    source_end_second?: number;
     caption_style?: string;
     crop_strategy?: string;
     format?: Format;

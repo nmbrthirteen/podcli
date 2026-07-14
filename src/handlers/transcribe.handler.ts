@@ -1,6 +1,7 @@
 import { basename } from "path";
 import { PythonExecutor } from "../services/python-executor.js";
 import { TranscriptCache } from "../services/transcript-cache.js";
+import { webServerUrl } from "../config/server.js";
 import type { TranscriptResult } from "../models/index.js";
 
 const executor = new PythonExecutor();
@@ -19,7 +20,8 @@ export const transcribeToolDef = {
   name: "transcribe_podcast",
   description:
     "STEP 1 — Transcribe a podcast video/audio file. This is typically the first tool you call.\n\n" +
-    "What it does: Uses Whisper AI for word-level timestamps + pyannote for speaker detection (who said what).\n" +
+    "What it does: Uses Whisper AI for word-level timestamps. Speaker detection (who said what) is off by " +
+    "default; pass enable_diarization=true to add speaker labels where torch/pyannote is available (whisper-py engine).\n" +
     "Returns: Lightweight metadata only — duration, language, word/segment counts, speaker summary, and " +
     "packed_ready flag. The actual transcript body is NOT returned here (it would be 500KB+ for a typical " +
     "episode). Read the content via get_ui_state(include_transcript: true) which returns a compact " +
@@ -54,8 +56,9 @@ export const transcribeToolDef = {
       enable_diarization: {
         type: "boolean",
         description:
-          "Enable speaker detection (who is speaking). Requires pyannote.audio. Default: true",
-        default: true,
+          "Set true for speaker labels (who is speaking). Works where torch/pyannote.audio is available " +
+          "(whisper-py engine); slower. Default: false",
+        default: false,
       },
       num_speakers: {
         type: "number",
@@ -73,7 +76,7 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const modelSize = input.model_size ?? "base";
   const engine = input.engine;
   const language = input.language;
-  const enableDiarization = input.enable_diarization !== false; // default true
+  const enableDiarization = input.enable_diarization === true;
   const numSpeakers = input.num_speakers;
 
   // Check cache first
@@ -150,7 +153,7 @@ export const transcribeStartToolDef = {
     "Use this instead of transcribe_podcast for long files so you can narrate progress " +
     "to the user while it runs (a 60-min episode takes 15–25 min).\n\n" +
     "Flow: call transcribe_start(file_path) → emit status text to user → " +
-    "call transcribe_status(job_id, wait_seconds: 30) in a loop until done → " +
+    "call job_status(job_id, wait_seconds: 30) in a loop until done → " +
     "then read the packed transcript via get_ui_state(include_transcript: true).\n\n" +
     "Requires the Web UI to be running (npm run ui). Returns { job_id, cached, status, estimate_minutes }.",
   inputSchema: {
@@ -167,7 +170,7 @@ export const transcribeStartToolDef = {
         type: "string",
         enum: ["whisper-py", "whispercpp", "assemblyai"],
       },
-      enable_diarization: { type: "boolean", default: true },
+      enable_diarization: { type: "boolean", default: false },
       num_speakers: { type: "number" },
     },
     required: ["file_path"],
@@ -176,7 +179,7 @@ export const transcribeStartToolDef = {
 
 export async function handleTranscribeStart(input: TranscribeInput): Promise<string> {
   try {
-    const res = await fetch("http://localhost:3847/api/transcribe", {
+    const res = await fetch(`${webServerUrl}/api/transcribe`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -184,7 +187,7 @@ export async function handleTranscribeStart(input: TranscribeInput): Promise<str
         model_size: input.model_size ?? "base",
         engine: input.engine,
         language: input.language,
-        enable_diarization: input.enable_diarization !== false,
+        enable_diarization: input.enable_diarization === true,
         num_speakers: input.num_speakers,
       }),
     });
@@ -259,7 +262,7 @@ export async function handleJobStatus(input: {
 
   try {
     while (true) {
-      const res = await fetch(`http://localhost:3847/api/job/${input.job_id}`);
+      const res = await fetch(`${webServerUrl}/api/job/${input.job_id}`);
       if (res.status === 404) {
         return JSON.stringify({ error: `Job ${input.job_id} not found` });
       }
