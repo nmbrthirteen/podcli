@@ -18,11 +18,11 @@ triggers:
 
 ## Before Starting
 
-Read the knowledge base:
-- `.podcli/knowledge/05-title-formulas.md` — title patterns, shapes, rules, banned words
-- `.podcli/knowledge/02-voice-and-tone.md` — voice fingerprint, The Coffee Test
-- `.podcli/knowledge/01-brand-identity.md` — show positioning
-- `.podcli/knowledge/13-learnings.md` — past title patterns that worked / didn't
+Read the knowledge base with the `knowledge_base` MCP tool:
+- `05-title-formulas.md` — title patterns, shapes, rules, banned words
+- `02-voice-and-tone.md` — voice fingerprint, The Coffee Test
+- `01-brand-identity.md` — show positioning
+- `13-learnings.md` — past title patterns that worked / didn't
 
 ---
 
@@ -79,7 +79,7 @@ For EVERY title:
 | **For Whom Test** | Can you name who would stop scrolling? |
 | **Payoff Check** | Does the clip deliver what the title promises? |
 | **Hook Alignment** | Is the core tension visible in first 3 seconds? |
-| **Banned Words** | Zero banned words from `.podcli/knowledge/02-voice-and-tone.md` |
+| **Banned Words** | Zero banned words from `02-voice-and-tone.md` |
 | **Length** | Under 70 characters. Main keyword in first 3 words. |
 
 ### Step 7: Flag Top 2 and Output
@@ -93,7 +93,7 @@ For EVERY title:
 - **5-11 words**. One clear idea per title.
 
 ### Four Default Shapes
-(Check `.podcli/knowledge/05-title-formulas.md` for show-specific shapes)
+(Check `05-title-formulas.md` for show-specific shapes)
 
 | Shape | Pattern | Example |
 |-------|---------|---------|
