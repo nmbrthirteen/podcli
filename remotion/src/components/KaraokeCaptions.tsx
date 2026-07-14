@@ -2,33 +2,11 @@ import React from "react";
 import { useCurrentFrame, useVideoConfig } from "remotion";
 import type { Word, CaptionStyle } from "../types";
 import { captionScale } from "../types";
+import { buildChunks, activeChunkAt } from "../chunks";
 
 interface Props {
   words: Word[];
   style: CaptionStyle;
-}
-
-interface Chunk {
-  words: Word[];
-  start: number;
-  end: number;
-}
-
-function buildChunks(words: Word[], perChunk: number): Chunk[] {
-  const chunks: Chunk[] = [];
-  let i = 0;
-  while (i < words.length) {
-    let end = Math.min(i + perChunk, words.length);
-    if (words.length - end === 1) end = words.length;
-    const slice = words.slice(i, end);
-    chunks.push({
-      words: slice,
-      start: slice[0].start,
-      end: slice[slice.length - 1].end,
-    });
-    i = end;
-  }
-  return chunks;
 }
 
 function splitIntoLines(words: Word[]): [Word[], Word[]] {
@@ -88,14 +66,16 @@ const KaraokeLine: React.FC<{
 
 export const KaraokeCaptions: React.FC<Props> = ({ words, style }) => {
   const frame = useCurrentFrame();
-  const { fps, height } = useVideoConfig();
+  const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
   const currentTime = frame / fps;
 
-  const chunks = buildChunks(words, style.wordsPerChunk);
-  const activeChunk = chunks.find(
-    (c) => currentTime >= c.start && currentTime < c.end
-  );
+  const chunks = buildChunks(words, {
+    perChunk: style.wordsPerChunk,
+    absorbTail: 1,
+    clipEnd: durationInFrames / fps,
+  });
+  const activeChunk = activeChunkAt(chunks, currentTime);
 
   if (!activeChunk) return null;
 

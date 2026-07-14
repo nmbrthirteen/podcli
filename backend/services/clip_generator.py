@@ -520,11 +520,17 @@ def _render_with_remotion(
     # Prepare words JSON (adjust timestamps by offset)
     adjusted_words = []
     for w in words:
-        adjusted_words.append({
+        adjusted = {
             "word": w.get("word", ""),
             "start": round(w["start"] - time_offset, 3),
             "end": round(w["end"] - time_offset, 3),
-        })
+        }
+        # The chunker starts a new caption card on a speaker change. Dropping the
+        # field here left that rule dead in the render while the studio preview,
+        # which keeps it, chunked the same words differently.
+        if w.get("speaker") is not None:
+            adjusted["speaker"] = w["speaker"]
+        adjusted_words.append(adjusted)
 
     # Extract face Y positions so captions can avoid overlapping faces
     # Probe video dimensions

@@ -100,10 +100,18 @@ async function main() {
   await new Promise((resolve) => assetServer.listen(0, "127.0.0.1", resolve));
   const assetPort = assetServer.address().port;
 
-  // Ensure the asset server is closed on any exit path
+  // Ensure the asset server is closed and the overlay temp file removed on any exit path
+  let captionOverlay;
   const closeAssetServer = () => { try { assetServer.close(); } catch {} };
-  process.on("SIGINT", () => { closeAssetServer(); process.exit(1); });
-  process.on("SIGTERM", () => { closeAssetServer(); process.exit(1); });
+  const cleanupOnSignal = () => {
+    closeAssetServer();
+    if (captionOverlay && !opts["keep-overlay"]) {
+      try { fs.unlinkSync(captionOverlay); } catch {}
+    }
+    process.exit(1);
+  };
+  process.on("SIGINT", cleanupOnSignal);
+  process.on("SIGTERM", cleanupOnSignal);
 
   const videoSrc = `http://127.0.0.1:${assetPort}/clip.mp4`;
   const logoSrc = opts.logo ? `http://127.0.0.1:${assetPort}/logo.png` : undefined;
@@ -159,7 +167,6 @@ async function main() {
 
     const cpus = os.cpus().length;
     const concurrency = Math.max(2, Math.min(cpus, 8));
-    let captionOverlay;
     if (opts["keep-overlay"]) {
       const outBase = opts.output.replace(/\.[^.]+$/, "");
       captionOverlay = `${outBase}_captions.mov`;
