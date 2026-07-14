@@ -3468,6 +3468,15 @@ app.post("/api/ui-state", (req, res) => {
   res.json({ ok: true });
 });
 
+// Mirrors clipKey() in the studio client: energy scores are keyed by clip
+// identity, not by position, so they survive a suggestion being spliced out.
+function dropEnergy(clip: SuggestedClip): void {
+  const key =
+    clip.clip_id ||
+    `${clip.start_second.toFixed(2)}:${clip.end_second.toFixed(2)}`;
+  delete uiState.energyData[key];
+}
+
 /**
  * POST /api/suggestions/modify — mutate one suggestion in-place on the server.
  * Replaces the read-modify-replace cycle MCP tools used, which lost concurrent
@@ -3491,6 +3500,7 @@ app.post("/api/suggestions/modify", (req, res) => {
     uiState.deselectedIndices = uiState.deselectedIndices
       .filter((i) => i !== index)
       .map((i) => (i > index ? i - 1 : i));
+    dropEnergy(clip);
   } else if (action === "toggle") {
     if (typeof selected !== "boolean") {
       res.status(400).json({ error: "selected must be a boolean for action 'toggle'" });
@@ -3512,6 +3522,8 @@ app.post("/api/suggestions/modify", (req, res) => {
       res.status(400).json({ error: rangeError });
       return;
     }
+    // The energy score was measured over the old range.
+    if (nextStart !== clip.start_second || nextEnd !== clip.end_second) dropEnergy(clip);
     if (typeof upd.title === "string") clip.title = upd.title;
     clip.start_second = nextStart;
     clip.end_second = nextEnd;
