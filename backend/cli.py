@@ -3184,16 +3184,16 @@ def cmd_cache(args):
 
     if action == "clear":
         count = 0
-        if os.path.isdir(cache_dir):
-            for fname in os.listdir(cache_dir):
+        for directory in (
+            cache_dir,
+            os.path.join(cache_dir, "transcripts"),
+            os.path.join(cache_dir, "signals"),
+        ):
+            if not os.path.isdir(directory):
+                continue
+            for fname in os.listdir(directory):
                 if fname.endswith(".json"):
-                    os.unlink(os.path.join(cache_dir, fname))
-                    count += 1
-        transcripts_dir = os.path.join(cache_dir, "transcripts")
-        if os.path.isdir(transcripts_dir):
-            for fname in os.listdir(transcripts_dir):
-                if fname.endswith(".json"):
-                    os.unlink(os.path.join(transcripts_dir, fname))
+                    os.unlink(os.path.join(directory, fname))
                     count += 1
         if count:
             print(f"\n  {green}✓{reset} Cleared {count} cached transcription(s)")

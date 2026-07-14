@@ -29,13 +29,6 @@ except ImportError:
     pass
 import threading
 import traceback
-from services.audio_analyzer import get_energy_profile
-from services.audio_events import get_event_profile, is_available as audio_events_available
-from services.claude_suggest import (
-    _find_ai_cli_candidates,
-    select_clips_with_signal_scores,
-    suggest_initial_with_claude,
-)
 from version import VERSION
 
 # Serializes event writes so parallel clip workers can't interleave JSON lines.
@@ -113,25 +106,28 @@ def handle_transcribe(task_id: str, params: dict):
         # Apply word corrections (Whisper misheard proper nouns)
         apply_corrections(result.get("words", []), result.get("segments", []))
 
+        energy_data = None
+        try:
+            from services.audio_analyzer import extract_audio_energy
+            energy_data = extract_audio_energy(file_path, wav_path=shared_wav)
+        except Exception:
+            pass  # energy is a nice-to-have
+
+        events_data = None
+        try:
+            from services.audio_events import extract_audio_events
+            events_data = extract_audio_events(file_path, wav_path=shared_wav)
+        except Exception:
+            pass  # reactions are a nice-to-have
+
+        # Cached so clip suggestion reuses these instead of decoding the source again.
+        from services.signal_cache import save_signals
+        save_signals(file_path, energy_data=energy_data, events_data=events_data)
+
         # Auto-pack: emit compact LLM-readable markdown alongside raw JSON.
         # Pulls energy data so the packed view includes peak moments for clip reasoning.
         try:
-            from services.audio_analyzer import extract_audio_energy
-
             cache_hash = compute_cache_hash(file_path) + engine_cache_suffix(result.get("engine") or engine)
-            energy_data = None
-            try:
-                energy_data = extract_audio_energy(file_path, wav_path=shared_wav)
-            except Exception:
-                pass  # energy is a nice-to-have
-
-            events_data = None
-            try:
-                from services.audio_events import extract_audio_events
-                events_data = extract_audio_events(file_path, wav_path=shared_wav)
-            except Exception:
-                pass  # reactions are a nice-to-have
-
             packed_path, packed_md = write_packed(
                 result,
                 cache_hash,
@@ -590,41 +586,102 @@ def handle_corrections(task_id: str, params: dict):
         emit_result(task_id, "error", error=f"Unknown corrections action: {action}")
 
 
+def _extract_signals(
+    task_id: str,
+    video_path: str,
+    want_energy: bool,
+    want_events: bool,
+) -> tuple[list | None, list | None]:
+    """Decode the source once and derive whichever profiles aren't cached yet."""
+    from services.audio_events import is_available as audio_events_available
+
+    want_events = want_events and audio_events_available()
+    if not want_energy and not want_events:
+        return None, None
+
+    wav_path = None
+    try:
+        from services.audio_extract import extract_wav_16k_mono
+        emit_progress(task_id, "suggesting", 2, "Extracting audio...")
+        wav_path = extract_wav_16k_mono(video_path)
+    except Exception:
+        wav_path = None
+
+    energy_data = None
+    events_data = None
+    try:
+        if want_energy:
+            emit_progress(task_id, "suggesting", 5, "Analyzing audio energy...")
+            try:
+                from services.audio_analyzer import extract_audio_energy
+                energy_data = extract_audio_energy(video_path, wav_path=wav_path)
+            except Exception:
+                pass  # energy is a nice-to-have
+        if want_events:
+            emit_progress(task_id, "suggesting", 15, "Detecting laughter and reactions...")
+            try:
+                from services.audio_events import extract_audio_events
+                events_data = extract_audio_events(video_path, wav_path=wav_path)
+            except Exception:
+                pass  # reactions are a nice-to-have
+    finally:
+        if wav_path and os.path.exists(wav_path):
+            try:
+                os.unlink(wav_path)
+            except OSError:
+                pass
+
+    return energy_data, events_data
+
+
 def _signal_profiles_for_suggest(
+    task_id: str,
     params: dict,
-    segments: list,
 ) -> tuple[list | None, list | None, list | None]:
+    """Energy and reaction profiles for the suggester: caller-supplied first, then
+    what transcription cached for this video, and only then a fresh analysis."""
+    from services.audio_events import reaction_times as reaction_times_from_events
+    from services.signal_cache import load_signals, save_signals
+
     energy_data = params.get("energy_data")
     events_data = params.get("events_data")
-    reaction_times = params.get("reaction_times")
-    if reaction_times is not None:
-        reaction_times = [float(t) for t in reaction_times]
+    anchors = params.get("reaction_times")
+    if anchors is not None:
+        anchors = [float(t) for t in anchors]
+
     video_path = params.get("video_path")
-    if not video_path or not os.path.exists(video_path):
-        return energy_data, events_data, reaction_times
+    if video_path and os.path.exists(video_path) and (energy_data is None or events_data is None):
+        cached = load_signals(video_path)
+        if energy_data is None:
+            energy_data = cached.get("energy_data")
+        if events_data is None:
+            events_data = cached.get("events_data")
 
-    if energy_data is None:
-        try:
-            energy_data = get_energy_profile(video_path, segments)["energy_data"]
-        except Exception:
-            energy_data = None
+        if energy_data is None or events_data is None:
+            fresh_energy, fresh_events = _extract_signals(
+                task_id,
+                video_path,
+                want_energy=energy_data is None,
+                want_events=events_data is None,
+            )
+            save_signals(video_path, energy_data=fresh_energy, events_data=fresh_events)
+            energy_data = energy_data if energy_data is not None else fresh_energy
+            events_data = events_data if events_data is not None else fresh_events
 
-    if events_data is None or reaction_times is None:
-        try:
-            if audio_events_available():
-                event_profile = get_event_profile(video_path, segments)
-                if events_data is None:
-                    events_data = event_profile["events_data"]
-                if reaction_times is None:
-                    reaction_times = event_profile["reaction_times"]
-        except Exception:
-            pass
+    if anchors is None and events_data:
+        anchors = reaction_times_from_events(events_data)
 
-    return energy_data, events_data, reaction_times
+    return energy_data, events_data, anchors
 
 
 def handle_suggest_clips(task_id: str, params: dict):
     """AI-powered clip suggestion using Claude/Codex and PodStack knowledge base."""
+    from services.claude_suggest import (
+        _find_ai_cli_candidates,
+        select_clips_with_signal_scores,
+        suggest_initial_with_claude,
+    )
+
     segments = params.get("segments", [])
     top_n = params.get("top_n", 5)
     existing_clips = params.get("existing_clips", [])
@@ -645,7 +702,7 @@ def handle_suggest_clips(task_id: str, params: dict):
         return
 
     errors: list[str] = []
-    energy_data, events_data, reaction_times = _signal_profiles_for_suggest(params, segments)
+    energy_data, events_data, reaction_times = _signal_profiles_for_suggest(task_id, params)
     candidate_top_n = top_n * 2 if energy_data or events_data else top_n
     clips = suggest_initial_with_claude(
         segments=segments,
