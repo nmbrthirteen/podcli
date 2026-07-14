@@ -18,13 +18,13 @@ triggers:
 
 ## Before Starting
 
-Read the knowledge base to understand this show's brand, voice, and existing content:
-- `.podcli/knowledge/01-brand-identity.md` — who the show is, positioning
-- `.podcli/knowledge/02-voice-and-tone.md` — voice fingerprint, banned words
-- `.podcli/knowledge/03-episodes-database.md` — existing episodes (avoid duplicates)
-- `.podcli/knowledge/04-shorts-creation-guide.md` — moment selection criteria
-- `.podcli/knowledge/05-title-formulas.md` — title patterns
-- `.podcli/knowledge/13-learnings.md` — patterns from past retros
+Read the knowledge base with the `knowledge_base` MCP tool to understand this show's brand, voice, and existing content:
+- `01-brand-identity.md` — who the show is, positioning
+- `02-voice-and-tone.md` — voice fingerprint, banned words
+- `03-episodes-database.md` — existing episodes (avoid duplicates)
+- `04-shorts-creation-guide.md` — moment selection criteria
+- `05-title-formulas.md` — title patterns
+- `13-learnings.md` — patterns from past retros
 
 ---
 
@@ -102,7 +102,7 @@ For every flagged moment, score on four dimensions (1-5 each):
 
 ### Phase 5: Check for Duplicates
 
-Read `.podcli/knowledge/03-episodes-database.md` and verify no selected moments overlap with existing shorts.
+Read `03-episodes-database.md` and verify no selected moments overlap with existing shorts.
 
 ### Phase 6: Extract Keywords
 
@@ -173,7 +173,7 @@ For every moment included:
 - [ ] Hook lands in first 3 seconds
 - [ ] Single focused idea, fully delivered
 - [ ] Would share this clip independently
-- [ ] No banned words (check `.podcli/knowledge/02-voice-and-tone.md`)
+- [ ] No banned words (check `02-voice-and-tone.md`)
 - [ ] Titles match the show's voice
 - [ ] Thumbnail text is 4-6 words max, two-line format
 

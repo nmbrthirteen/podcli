@@ -71,6 +71,7 @@ def _reveal_in_os(path: str) -> None:
 
 
 from config.paths import paths
+from config.server import DEFAULT_PORT, resolve_web_server_port, web_server_url
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 from services.knowledge_base import is_empty as kb_is_empty, kb_files
 
@@ -3091,7 +3092,7 @@ def cmd_clips(args):
         print(f"\n  {green}✓{reset} Reopened {accent}{str(clip.get('id'))[:8]}{reset}  {bold}{clip.get('title')}{reset}")
         if not transcript:
             print(f"      {gray}Transcript not loaded — re-transcribe in the studio to edit captions.{reset}")
-        print(f"      {gray}Open the studio:{reset} {accent}http://localhost:{_webui_port()}/clip/{clip.get('id')}{reset}\n")
+        print(f"      {gray}Open the studio:{reset} {accent}{web_server_url()}/clip/{clip.get('id')}{reset}\n")
         return
 
 
@@ -3280,16 +3281,16 @@ def cmd_cache(args):
 
     if action == "clear":
         count = 0
-        if os.path.isdir(cache_dir):
-            for fname in os.listdir(cache_dir):
+        for directory in (
+            cache_dir,
+            os.path.join(cache_dir, "transcripts"),
+            os.path.join(cache_dir, "signals"),
+        ):
+            if not os.path.isdir(directory):
+                continue
+            for fname in os.listdir(directory):
                 if fname.endswith(".json"):
-                    os.unlink(os.path.join(cache_dir, fname))
-                    count += 1
-        transcripts_dir = os.path.join(cache_dir, "transcripts")
-        if os.path.isdir(transcripts_dir):
-            for fname in os.listdir(transcripts_dir):
-                if fname.endswith(".json"):
-                    os.unlink(os.path.join(transcripts_dir, fname))
+                    os.unlink(os.path.join(directory, fname))
                     count += 1
         if count:
             print(f"\n  {green}✓{reset} Cleared {count} cached transcription(s)")
@@ -3882,7 +3883,7 @@ def main():
                         help="Save handle/platforms/outro-title/accent/bg as the default brand and exit")
 
     # ── ui (Studio web dashboard) ──
-    sub.add_parser("ui", aliases=["webui"], help="Open the Studio web UI (http://localhost:3847)")
+    sub.add_parser("ui", aliases=["webui"], help=f"Open the Studio web UI (http://localhost:{DEFAULT_PORT})")
 
     # ── presets ──
     pre = sub.add_parser("presets", help="Manage presets")
@@ -4183,18 +4184,8 @@ def main():
         interactive_menu()
 
 
-def _webui_port() -> int:
-    """Resolve the Studio port the same way the Node server does."""
-    raw = os.environ.get("PODCLI_PORT") or os.environ.get("PORT")
-    try:
-        port = int(raw)
-    except (TypeError, ValueError):
-        return 3847
-    return port if 0 < port <= 65535 else 3847
-
-
 def launch_webui():
-    """Launch the Studio web UI server (http://localhost:3847)."""
+    """Launch the Studio web UI server (PODCLI_PORT, PORT, else 3847)."""
     import subprocess as sp
     import shutil as _shutil
 
@@ -4205,7 +4196,7 @@ def launch_webui():
     reset = "\033[0m"
 
     backend_dir = os.path.dirname(os.path.abspath(__file__))
-    port = _webui_port()
+    port = resolve_web_server_port()
     node = os.environ.get("PODCLI_NODE") or _shutil.which("node")
     studio = os.environ.get("PODCLI_STUDIO") or os.path.join(backend_dir, "..", "studio")
     server = os.path.join(studio, "web-server.mjs")
@@ -4216,6 +4207,8 @@ def launch_webui():
         # same Python backend + ffmpeg via the env below.
         env = {
             **os.environ,
+            # Pin both: an inherited PODCLI_PORT outranks PORT in the studio's resolver.
+            "PODCLI_PORT": str(port),
             "PORT": str(port),
             "PODCLI_BACKEND": backend_dir,
             "PYTHON_PATH": sys.executable,
@@ -4821,8 +4814,7 @@ def _interactive_config():
         if action == "webui":
             import webbrowser
 
-            port = _webui_port()
-            url = f"http://localhost:{port}/config"
+            url = f"{web_server_url()}/config"
             print(f"\n  {gray}Config UI:{reset} {url}")
             print(f"  {dim}Serve the UI first if needed: npm run build && npm run ui:prod{reset}\n")
             webbrowser.open(url)

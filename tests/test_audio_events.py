@@ -56,6 +56,26 @@ class ComputeEventScoresTests(unittest.TestCase):
         self.assertEqual(scores[0], 0.0)
 
 
+class DominantReactionTests(unittest.TestCase):
+    def test_names_the_loudest_channel_in_range(self):
+        events = [_event(3, laughter=0.2, cheering=0.8)]
+        self.assertEqual(ae.dominant_reaction(events, 0, 10), "cheering")
+
+    def test_ignores_frames_outside_the_range(self):
+        events = [_event(30, laughter=0.9)]
+        self.assertIsNone(ae.dominant_reaction(events, 0, 10))
+
+    def test_speech_only_range_has_no_reaction(self):
+        events = [_event(3, speech=1.0)]
+        self.assertIsNone(ae.dominant_reaction(events, 0, 10))
+
+
+class ReactionTimesTests(unittest.TestCase):
+    def test_only_frames_above_threshold(self):
+        events = [_event(1, laughter=0.05), _event(2, cheering=0.4)]
+        self.assertEqual(ae.reaction_times(events), [2])
+
+
 class ProfileTests(unittest.TestCase):
     def test_default_is_podcast_and_llm_sourced(self):
         p = profiles.get_profile(None)
