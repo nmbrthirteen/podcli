@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { fmt, fmtMs, findClipResult } from "./lib";
+import {
+  fmt,
+  fmtMs,
+  findClipResult,
+  buildEnergyMap,
+  clipKey,
+  dropEnergy,
+  clampClipIndex,
+} from "./lib";
 
 describe("fmt", () => {
   it("formats sub-hour timestamps as m:ss", () => {
@@ -66,5 +74,74 @@ describe("findClipResult", () => {
       { status: "success", output_path: "/out/a.mp4", source_start_second: 10.001, source_end_second: 40 },
     ];
     expect(findClipResult(results, clips[0], 0)?.output_path).toBe("/out/a.mp4");
+  });
+});
+
+describe("buildEnergyMap", () => {
+  const clips = [
+    { clip_id: "c1", start_second: 10, end_second: 40 },
+    { clip_id: "c2", start_second: 120, end_second: 165 },
+    { clip_id: "c3", start_second: 640, end_second: 700 },
+    { clip_id: "c4", start_second: 900, end_second: 940 },
+  ];
+
+  it("scores each clip on its own identity", () => {
+    const map = buildEnergyMap([8.2, 5, 2.5, 7], clips);
+    expect(map.c1).toEqual({ score: 8.2, level: "high" });
+    expect(map.c2).toEqual({ score: 5, level: "medium" });
+    expect(map.c3).toEqual({ score: 2.5, level: "low" });
+  });
+
+  // Keyed by position, deleting clip #2 slid every score up one row and left the
+  // last row showing a badge for a clip that no longer existed.
+  it("keeps scores on their clips after an agent deletes one", () => {
+    const map = buildEnergyMap([8.2, 5, 2.5, 7], clips);
+    const remaining = clips.filter((c) => c.clip_id !== "c2");
+    expect(remaining.map((c) => map[clipKey(c)]?.score)).toEqual([8.2, 2.5, 7]);
+    expect(Object.keys(map).filter((k) => !remaining.some((c) => clipKey(c) === k))).toEqual(["c2"]);
+  });
+
+  it("keeps scores on their clips after a range edit shifts a later clip", () => {
+    const map = buildEnergyMap([8.2, 5, 2.5, 7], clips);
+    const edited = { ...clips[1], start_second: 118, end_second: 170 };
+    const after = [clips[0], edited, clips[2], clips[3]];
+    expect(dropEnergy(map, clips[1])[clipKey(edited)]).toBeUndefined();
+    expect(after.map((c) => map[clipKey(c)]?.score)).toEqual([8.2, 5, 2.5, 7]);
+  });
+
+  // A session persisted before suggestions carried a clip_id.
+  it("falls back to bounds when a clip has no id", () => {
+    const legacy = [
+      { start_second: 10, end_second: 40 },
+      { start_second: 120, end_second: 165 },
+    ];
+    const map = buildEnergyMap([9, 3], legacy);
+    expect(map[clipKey(legacy[0])].score).toBe(9);
+    expect(map[clipKey(legacy[1])].score).toBe(3);
+  });
+
+  it("ignores scores with no clip and clips with no score", () => {
+    expect(buildEnergyMap([7, null, 4], clips.slice(0, 2))).toEqual({
+      c1: { score: 7, level: "high" },
+    });
+  });
+});
+
+describe("clampClipIndex", () => {
+  // j/k left the cursor past the end when an agent deleted the last clip, so
+  // space deselected an index no row owned and the header count lied.
+  it("pulls the cursor back onto the last row when the list shrinks", () => {
+    expect(clampClipIndex(4, 4)).toBe(3);
+    expect(clampClipIndex(9, 1)).toBe(0);
+  });
+
+  it("leaves an in-range cursor alone", () => {
+    expect(clampClipIndex(2, 5)).toBe(2);
+    expect(clampClipIndex(0, 1)).toBe(0);
+  });
+
+  it("clears the cursor when there are no clips", () => {
+    expect(clampClipIndex(0, 0)).toBeNull();
+    expect(clampClipIndex(null, 5)).toBeNull();
   });
 });

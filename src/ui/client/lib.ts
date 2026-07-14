@@ -102,6 +102,58 @@ interface ClipResultRow {
   [key: string]: unknown;
 }
 
+interface ClipIdentity {
+  clip_id?: string;
+  start_second?: number;
+  end_second?: number;
+}
+
+// A suggestion's position shifts whenever an agent deletes or inserts a clip, so
+// anything the studio computes per clip is keyed by identity instead. Sessions
+// persisted before clips carried a clip_id fall back to their bounds, which also
+// makes a re-timed clip drop its stale score.
+export const clipKey = (clip: ClipIdentity): string =>
+  clip.clip_id || clipBoundsKey(clip.start_second, clip.end_second) || "";
+
+type EnergyLevel = "high" | "medium" | "low";
+interface EnergyEntry {
+  score: number;
+  level: EnergyLevel;
+}
+
+const energyLevel = (score: number): EnergyLevel =>
+  score >= 7 ? "high" : score >= 4 ? "medium" : "low";
+
+/** Maps the backend's positional segment scores onto the clips they were measured for. */
+export function buildEnergyMap(
+  scores: unknown[],
+  clips: ClipIdentity[],
+): Record<string, EnergyEntry> {
+  const map: Record<string, EnergyEntry> = {};
+  scores.forEach((score, i) => {
+    const clip = clips[i];
+    if (!clip || typeof score !== "number") return;
+    const key = clipKey(clip);
+    if (key) map[key] = { score, level: energyLevel(score) };
+  });
+  return map;
+}
+
+export function dropEnergy(
+  map: Record<string, EnergyEntry>,
+  clip: ClipIdentity,
+): Record<string, EnergyEntry> {
+  const key = clipKey(clip);
+  if (!key || !(key in map)) return map;
+  const next = { ...map };
+  delete next[key];
+  return next;
+}
+
+/** Keeps the keyboard cursor on a row that exists after the clip list changes. */
+export const clampClipIndex = (idx: number | null, length: number): number | null =>
+  idx === null || length === 0 ? null : Math.min(idx, length - 1);
+
 /**
  * The result for `clip`, or undefined if it has not been rendered. Rows written
  * before the server stamped bounds (a restored session) carry no key, so they
