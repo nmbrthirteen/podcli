@@ -63,7 +63,9 @@ podcli config migrate             # apply
 ## Transcript format
 
 podcli auto-transcribes with Whisper, and it accepts an existing transcript with
-`--transcript`. Drag-drop `.txt`, `.srt`, and `.vtt` work in the studio.
+`--transcript`: `.txt`, `.srt`, `.vtt`, and `.json` are detected by content. The
+same formats drag-drop into the studio. When the video was transcribed before,
+`--transcript` reuses the cached face map so speaker framing survives the swap.
 
 ```
 Speaker Name (00:00)

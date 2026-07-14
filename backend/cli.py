@@ -76,6 +76,25 @@ from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_M
 from services.knowledge_base import is_empty as kb_is_empty, kb_files
 
 
+def _parse_json_transcript(raw_text):
+    data = json.loads(raw_text)
+    if isinstance(data, list):
+        return data, [], {}
+    return data.get("words", []), data.get("segments", []), data
+
+
+def _cached_face_map(video_path: str):
+    """Face maps are keyed by video content, not by transcript, so an imported
+    transcript can still borrow the map from an earlier run on the same file."""
+    try:
+        from services.transcript_packer import load_cached_transcript_for_video
+
+        cached = load_cached_transcript_for_video(video_path)
+    except Exception:
+        return None
+    return (cached or {}).get("face_map")
+
+
 def _suggestions_session_path(cache_hash: str) -> str:
     return os.path.join(paths["home"], "sessions", f"clips-{cache_hash}.json")
 
@@ -501,7 +520,7 @@ def cmd_reel(args):
 def cmd_process(args):
     """Full auto pipeline: transcribe → suggest → export."""
     from services.clip_generator import generate_clip
-    from services.transcript_parser import parse_speaker_transcript
+    from services.transcript_parser import detect_and_parse
     from services.audio_analyzer import get_energy_profile
     from services.audio_events import get_event_profile, is_available as audio_events_available
     from services.encoder import get_encoder_info
@@ -719,15 +738,10 @@ def cmd_process(args):
 
         # Detect format
         if raw_text.strip().startswith("{") or raw_text.strip().startswith("["):
-            data = json.loads(raw_text)
-            if isinstance(data, list):
-                words = data
-            else:
-                words = data.get("words", [])
-                segments = data.get("segments", [])
+            words, segments, result = _parse_json_transcript(raw_text)
             print(f"         JSON transcript: {len(words)} words")
         else:
-            parsed = parse_speaker_transcript(
+            parsed = detect_and_parse(
                 raw_text,
                 time_adjust=config.get("time_adjust", 0),
             )
@@ -736,7 +750,17 @@ def cmd_process(args):
                 sys.exit(1)
             words = parsed["words"]
             segments = parsed["segments"]
-            print(f"         Parsed: {len(segments)} segments, {len(words)} words")
+            result = parsed
+            fmt = parsed.get("format", "speaker")
+            print(f"         Parsed {fmt}: {len(segments)} segments, {len(words)} words")
+
+        if not result.get("face_map"):
+            cached_face_map = _cached_face_map(video_path)
+            if cached_face_map:
+                result["face_map"] = cached_face_map
+                print("         Reusing cached face map (speaker framing preserved)")
+            else:
+                print("         No cached face map, crop falls back to per-clip face tracking")
     elif not skip_transcript:
         # Check cache first
         cached = load_cached_transcript_for_video(video_path)
@@ -3569,7 +3593,7 @@ def print_help():
     print(f"    {accent}info{reset}                 Show system info (encoder, codecs)")
     print()
     print(f"  {bold}Process options:{reset}")
-    print(f"    {green}-t{reset}, {green}--transcript{reset} {gray}<file>{reset}   Use existing transcript (.txt/.json)")
+    print(f"    {green}-t{reset}, {green}--transcript{reset} {gray}<file>{reset}   Use existing transcript (.srt/.vtt/.txt/.json)")
     print(f"    {green}-n{reset}, {green}--top{reset} {gray}<N>{reset}            Export top N clips {dim}(default: 5){reset}")
     print(f"    {green}-o{reset}, {green}--output{reset} {gray}<dir>{reset}        Output directory {dim}(default: ./clips){reset}")
     print(f"    {green}-p{reset}, {green}--preset{reset} {gray}<name>{reset}       Load a saved preset")
@@ -3803,7 +3827,7 @@ def main():
     # ── process ──
     proc = sub.add_parser("process", help="Process a video into clips")
     proc.add_argument("video", nargs="?", default=None, help="Path to podcast video file (optional if preset has video_path)")
-    proc.add_argument("-t", "--transcript", help="Path to transcript file (.txt or .json)")
+    proc.add_argument("-t", "--transcript", help="Path to transcript file (.srt, .vtt, .txt, or .json)")
     proc.add_argument("-n", "--top", type=int, help="Number of top clips to export (default: 5)")
     proc.add_argument("-o", "--output", help="Output directory (default: ./clips)")
     proc.add_argument("-p", "--preset", help="Load a saved preset")
