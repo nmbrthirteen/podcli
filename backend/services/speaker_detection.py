@@ -235,8 +235,9 @@ def assign_speakers_to_words(
     """
     Assign speaker labels to individual words.
 
-    Uses the midpoint of each word's timestamp to determine
-    which speaker segment it falls within.
+    Picks the speaker whose diarization segment overlaps the word the most —
+    at turn boundaries several segments can touch a word, and the first
+    match is often the previous speaker trailing off.
     """
     if not speaker_segments:
         for w in words:
@@ -244,16 +245,21 @@ def assign_speakers_to_words(
         return words
 
     for w in words:
-        midpoint = (w["start"] + w["end"]) / 2
-
-        # Find which speaker segment contains this midpoint
-        assigned = None
+        speaker_overlap = {}
         for sp in speaker_segments:
-            if sp["start"] <= midpoint <= sp["end"]:
-                assigned = sp["speaker"]
-                break
+            overlap = min(w["end"], sp["end"]) - max(w["start"], sp["start"])
+            if overlap > 0:
+                speaker_overlap[sp["speaker"]] = speaker_overlap.get(sp["speaker"], 0) + overlap
 
-        w["speaker"] = assigned
+        if speaker_overlap:
+            w["speaker"] = max(speaker_overlap, key=speaker_overlap.get)
+        else:
+            # Zero-length or gap words: fall back to midpoint containment.
+            midpoint = (w["start"] + w["end"]) / 2
+            w["speaker"] = next(
+                (sp["speaker"] for sp in speaker_segments if sp["start"] <= midpoint <= sp["end"]),
+                None,
+            )
 
     return words
 

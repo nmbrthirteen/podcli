@@ -19,8 +19,8 @@ triggers:
 ## Before Starting
 
 Read:
-- `knowledge/07-thumbnail-guide.md` — layouts, colors, typography, examples
-- `knowledge/01-brand-identity.md` — brand positioning and visual identity
+- `07-thumbnail-guide.md` — layouts, colors, typography, examples
+- `01-brand-identity.md` — brand positioning and visual identity
 
 ---
 
@@ -34,7 +34,7 @@ Read:
 - **Max:** 4-6 words total across both lines
 - **Feel:** Conversational, would-actually-say-this
 
-**Layout elements** (customize per `knowledge/07-thumbnail-guide.md`):
+**Layout elements** (customize per `07-thumbnail-guide.md`):
 - Border/frame treatment
 - Dark or branded background
 - Guest photo placement
@@ -59,7 +59,7 @@ For each moment/clip:
 What is the single most compelling image or concept?
 
 ### Step 2: Write Two-Line Text
-- **Podcast version:** Based on show style from `knowledge/07-thumbnail-guide.md`
+- **Podcast version:** Based on show style from `07-thumbnail-guide.md`
 - **Shorts version:** ALL CAPS, urgent, Line 2 = payoff
 
 ### Step 3: Specify Layout

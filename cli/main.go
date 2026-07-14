@@ -22,6 +22,7 @@ import (
 
 func main() {
 	os.Setenv("PODCLI_VERSION", Version)
+	update.CleanupOldBinary()
 	args := os.Args[1:]
 	if len(args) == 0 {
 		os.Exit(runEngine(args)) // backend's branded interactive menu
@@ -107,7 +108,9 @@ func refreshStudioBundles() {
 func ensureRuntime() error {
 	if _, ok := engine.BackendRoot(); !ok {
 		fmt.Fprintln(os.Stderr, "First run - setting up podcli (one-time download)...")
-		setup(nil)
+		if setup(nil) != 0 {
+			return fmt.Errorf("first-run setup failed (see errors above) - run `podcli setup` to retry")
+		}
 	} else if err := refreshBackend(); err != nil {
 		return err
 	}
@@ -266,6 +269,10 @@ func setup(args []string) int {
 			refresh = true
 		}
 	}
+	// setup is the one path that may re-provision, so it is the one path allowed to ask
+	// upstream what the current build is. Every other command trusts the local artifact
+	// state and stays offline-capable.
+	provision.VerifyRemote = true
 	fmt.Printf("Provisioning into %s\n", paths.Home())
 	// Extracted from the binary, so it costs nothing and can't fail on a bad network.
 	// First, so an interrupted or offline setup still leaves a backend matching this
@@ -411,7 +418,7 @@ func mcpInstall() int {
 }
 
 func uninstall(args []string) int {
-	yes, dryRun := false, false
+	yes, dryRun, purge := false, false, false
 	for _, a := range args {
 		switch a {
 		case "--yes", "-y":
@@ -419,7 +426,7 @@ func uninstall(args []string) int {
 		case "--dry-run":
 			dryRun = true
 		case "--purge":
-			// Kept for compatibility; uninstall already removes everything.
+			purge = true
 		case "--help", "-h":
 			printUninstallHelp()
 			return 0
@@ -436,11 +443,16 @@ func uninstall(args []string) int {
 	if !pathContains(paths.BinDir(), self) {
 		self = ""
 	}
-	targets := uninstallTargets(home)
+	targets := uninstallTargets(home, purge)
 	links := podcliLinks(managed, self)
 
 	fmt.Println("podcli uninstall")
-	fmt.Printf("  This will remove podcli and all managed data under: %s\n", home)
+	if purge {
+		fmt.Printf("  This will remove podcli and all managed data under: %s\n", home)
+	} else {
+		fmt.Printf("  This will remove podcli app files under: %s\n", home)
+		fmt.Println("  User data (config, knowledge, presets, assets, history, cache) is kept - pass --purge to remove it too.")
+	}
 	for _, p := range targets {
 		fmt.Printf("  remove: %s\n", p)
 	}
@@ -488,12 +500,26 @@ func uninstall(args []string) int {
 		fmt.Fprintf(os.Stderr, "  note: the running binary is still in use and was left in place: %s\n", self)
 		fmt.Fprintln(os.Stderr, "        Delete it after this command exits, or run the installer script with --uninstall.")
 	}
-	fmt.Println("Done - podcli app files were removed.")
+	if purge {
+		fmt.Println("Done - podcli and all managed data were removed.")
+	} else {
+		fmt.Println("Done - podcli app files were removed (user data kept).")
+	}
 	return 0
 }
 
-func uninstallTargets(home string) []string {
-	return []string{home}
+// uninstallTargets lists what uninstall removes. By default only the app dirs
+// go; user data (config.json, knowledge, presets, assets, history, cache) sits
+// directly under home and survives unless --purge removes the whole dir.
+func uninstallTargets(home string, purge bool) []string {
+	if purge {
+		return []string{home}
+	}
+	return []string{
+		filepath.Join(home, "bin"),
+		filepath.Join(home, "runtime"),
+		filepath.Join(home, "models"),
+	}
 }
 
 func podcliLinks(managed, self string) []string {
@@ -598,12 +624,13 @@ func confirm(prompt string) bool {
 func printUninstallHelp() {
 	fmt.Println(`Usage: podcli uninstall [--yes] [--dry-run] [--purge]
 
-Removes podcli's managed folder, user data, and installer-created links.
+Removes podcli's app files (bin, runtime, models) and installer-created links.
+User data (config, knowledge, presets, assets, history, cache) is kept.
 
 Options:
   -y, --yes     Do not prompt for confirmation
   --dry-run     Show what would be removed without deleting anything
-  --purge       Kept for compatibility; uninstall already removes everything`)
+  --purge       Also remove user data (deletes the entire podcli folder)`)
 }
 
 // backendStamp annotates an unmanaged or out-of-date backend, the drift the

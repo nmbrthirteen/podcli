@@ -12,41 +12,23 @@ Style: BrandedNormal,Arial,80,&H00FFFFFF,&H00FFFFFF,&H90000000,&H00000000,-1,0,0
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 1,0:00:00.00,0:00:01.05,BrandedNormal,,0,0,0,,{\an5\pos(320,1380)}The
+Dialogue: 1,0:00:00.00,0:00:01.05,BrandedNormal,,0,0,0,,{\an5\pos(520,1380)}james
+Dialogue: 1,0:00:00.00,0:00:01.05,BrandedNormal,,0,0,0,,{\an5\pos(740,1380)}webb
 Dialogue: 0,0:00:00.00,0:00:00.34,BrandedNormal,,0,0,0,,{\an7\pos(240,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 145 0 b 153 0 160 7 160 15 l 160 85 b 160 93 153 100 145 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
-Dialogue: 1,0:00:00.00,0:00:00.34,BrandedNormal,,0,0,0,,{\an5\pos(320,1380)}The
-Dialogue: 1,0:00:00.00,0:00:00.34,BrandedNormal,,0,0,0,,{\an5\pos(520,1380)}james
-Dialogue: 1,0:00:00.00,0:00:00.34,BrandedNormal,,0,0,0,,{\an5\pos(740,1380)}webb
 Dialogue: 0,0:00:00.34,0:00:00.72,BrandedNormal,,0,0,0,,{\an7\pos(400,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 225 0 b 233 0 240 7 240 15 l 240 85 b 240 93 233 100 225 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
-Dialogue: 1,0:00:00.34,0:00:00.72,BrandedNormal,,0,0,0,,{\an5\pos(320,1380)}The
-Dialogue: 1,0:00:00.34,0:00:00.72,BrandedNormal,,0,0,0,,{\an5\pos(520,1380)}james
-Dialogue: 1,0:00:00.34,0:00:00.72,BrandedNormal,,0,0,0,,{\an5\pos(740,1380)}webb
 Dialogue: 0,0:00:00.72,0:00:01.05,BrandedNormal,,0,0,0,,{\an7\pos(640,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 185 0 b 193 0 200 7 200 15 l 200 85 b 200 93 193 100 185 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
-Dialogue: 1,0:00:00.72,0:00:01.05,BrandedNormal,,0,0,0,,{\an5\pos(320,1380)}The
-Dialogue: 1,0:00:00.72,0:00:01.05,BrandedNormal,,0,0,0,,{\an5\pos(520,1380)}james
-Dialogue: 1,0:00:00.72,0:00:01.05,BrandedNormal,,0,0,0,,{\an5\pos(740,1380)}webb
+Dialogue: 1,0:00:01.05,0:00:02.40,BrandedNormal,,0,0,0,,{\an5\pos(360,1380)}Telescope
+Dialogue: 1,0:00:01.05,0:00:02.40,BrandedNormal,,0,0,0,,{\an5\pos(660,1380)}cost
+Dialogue: 1,0:00:01.05,0:00:02.40,BrandedNormal,,0,0,0,,{\an5\pos(840,1380)}$10
 Dialogue: 0,0:00:01.05,0:00:01.62,BrandedNormal,,0,0,0,,{\an7\pos(160,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 385 0 b 393 0 400 7 400 15 l 400 85 b 400 93 393 100 385 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
-Dialogue: 1,0:00:01.05,0:00:01.62,BrandedNormal,,0,0,0,,{\an5\pos(360,1380)}Telescope
-Dialogue: 1,0:00:01.05,0:00:01.62,BrandedNormal,,0,0,0,,{\an5\pos(660,1380)}cost
-Dialogue: 1,0:00:01.05,0:00:01.62,BrandedNormal,,0,0,0,,{\an5\pos(840,1380)}$10
 Dialogue: 0,0:00:01.62,0:00:01.95,BrandedNormal,,0,0,0,,{\an7\pos(560,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 185 0 b 193 0 200 7 200 15 l 200 85 b 200 93 193 100 185 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
-Dialogue: 1,0:00:01.62,0:00:01.95,BrandedNormal,,0,0,0,,{\an5\pos(360,1380)}Telescope
-Dialogue: 1,0:00:01.62,0:00:01.95,BrandedNormal,,0,0,0,,{\an5\pos(660,1380)}cost
-Dialogue: 1,0:00:01.62,0:00:01.95,BrandedNormal,,0,0,0,,{\an5\pos(840,1380)}$10
 Dialogue: 0,0:00:01.95,0:00:02.40,BrandedNormal,,0,0,0,,{\an7\pos(760,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 145 0 b 153 0 160 7 160 15 l 160 85 b 160 93 153 100 145 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
-Dialogue: 1,0:00:01.95,0:00:02.40,BrandedNormal,,0,0,0,,{\an5\pos(360,1380)}Telescope
-Dialogue: 1,0:00:01.95,0:00:02.40,BrandedNormal,,0,0,0,,{\an5\pos(660,1380)}cost
-Dialogue: 1,0:00:01.95,0:00:02.40,BrandedNormal,,0,0,0,,{\an5\pos(840,1380)}$10
-Dialogue: 0,0:00:02.40,0:00:03.10,BrandedNormal,,0,0,0,,{\an7\pos(120,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 345 0 b 353 0 360 7 360 15 l 360 85 b 360 93 353 100 345 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
-Dialogue: 1,0:00:02.40,0:00:03.10,BrandedNormal,,0,0,0,,{\an5\pos(300,1380)}Billion.
-Dialogue: 1,0:00:02.40,0:00:03.10,BrandedNormal,,0,0,0,,{\an5\pos(620,1380)}wasn't
-Dialogue: 1,0:00:02.40,0:00:03.10,BrandedNormal,,0,0,0,,{\an5\pos(860,1380)}that
-Dialogue: 0,0:00:03.10,0:00:03.55,BrandedNormal,,0,0,0,,{\an7\pos(480,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 265 0 b 273 0 280 7 280 15 l 280 85 b 280 93 273 100 265 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
-Dialogue: 1,0:00:03.10,0:00:03.55,BrandedNormal,,0,0,0,,{\an5\pos(300,1380)}Billion.
-Dialogue: 1,0:00:03.10,0:00:03.55,BrandedNormal,,0,0,0,,{\an5\pos(620,1380)}wasn't
-Dialogue: 1,0:00:03.10,0:00:03.55,BrandedNormal,,0,0,0,,{\an5\pos(860,1380)}that
-Dialogue: 0,0:00:03.55,0:00:03.60,BrandedNormal,,0,0,0,,{\an7\pos(760,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 185 0 b 193 0 200 7 200 15 l 200 85 b 200 93 193 100 185 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
-Dialogue: 1,0:00:03.55,0:00:03.60,BrandedNormal,,0,0,0,,{\an5\pos(300,1380)}Billion.
-Dialogue: 1,0:00:03.55,0:00:03.60,BrandedNormal,,0,0,0,,{\an5\pos(620,1380)}wasn't
-Dialogue: 1,0:00:03.55,0:00:03.60,BrandedNormal,,0,0,0,,{\an5\pos(860,1380)}that
-Dialogue: 0,0:00:03.55,0:00:04.20,BrandedNormal,,0,0,0,,{\an7\pos(320,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 425 0 b 433 0 440 7 440 15 l 440 85 b 440 93 433 100 425 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
-Dialogue: 1,0:00:03.55,0:00:04.20,BrandedNormal,,0,0,0,,{\an5\pos(540,1380)}Expensive?
+Dialogue: 1,0:00:02.40,0:00:03.10,BrandedNormal,,0,0,0,,{\an5\pos(540,1380)}Billion.
+Dialogue: 0,0:00:02.40,0:00:03.10,BrandedNormal,,0,0,0,,{\an7\pos(360,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 345 0 b 353 0 360 7 360 15 l 360 85 b 360 93 353 100 345 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 1,0:00:03.10,0:00:04.20,BrandedNormal,,0,0,0,,{\an5\pos(220,1380)}Wasn't
+Dialogue: 1,0:00:03.10,0:00:04.20,BrandedNormal,,0,0,0,,{\an5\pos(460,1380)}that
+Dialogue: 1,0:00:03.10,0:00:04.20,BrandedNormal,,0,0,0,,{\an5\pos(780,1380)}expensive?
+Dialogue: 0,0:00:03.10,0:00:03.55,BrandedNormal,,0,0,0,,{\an7\pos(80,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 265 0 b 273 0 280 7 280 15 l 280 85 b 280 93 273 100 265 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 0,0:00:03.55,0:00:03.65,BrandedNormal,,0,0,0,,{\an7\pos(360,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 185 0 b 193 0 200 7 200 15 l 200 85 b 200 93 193 100 185 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}
+Dialogue: 0,0:00:03.55,0:00:04.20,BrandedNormal,,0,0,0,,{\an7\pos(560,1330)\p1\c&H00000000&\bord0\shad0\1a&HFF&\t(0,80,\1a&H30&)}m 15 0 l 425 0 b 433 0 440 7 440 15 l 440 85 b 440 93 433 100 425 100 l 15 100 b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0{\p0}

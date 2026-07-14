@@ -12,8 +12,8 @@ import tempfile
 import threading
 from typing import Optional, Callable
 
-from config.paths import paths
 from services.claude_suggest import _engine_label, _find_ai_cli_candidates, _run_ai_command
+from services.knowledge_base import load_kb_context as kb_load_context, warn_missing_context
 
 
 CONTENT_KB_FILES = [
@@ -25,22 +25,14 @@ CONTENT_KB_FILES = [
 ]
 
 
-def load_kb_context(files: Optional[list[tuple[str, int]]] = None) -> str:
+def load_kb_context(
+    files: Optional[list[tuple[str, int]]] = None,
+    task: str = "content generation",
+) -> str:
     """Load PodStack knowledge base files as inline prompt context."""
-    kb_dir = paths["knowledge"]
-    kb_context = ""
-    for fname, max_chars in files if files is not None else CONTENT_KB_FILES:
-        fpath = os.path.join(kb_dir, fname)
-        if os.path.exists(fpath):
-            try:
-                with open(fpath, encoding="utf-8") as kf:
-                    content = kf.read().strip()
-                # Skip uncustomized templates
-                if content.count("[Your Show Name]") > 2 and len(content) < 500:
-                    continue
-                kb_context += f"\n--- {fname} ---\n{content[:max_chars]}\n"
-            except Exception:
-                pass
+    kb_context = kb_load_context(files if files is not None else CONTENT_KB_FILES)
+    if not kb_context:
+        warn_missing_context(task)
     return kb_context
 
 
@@ -278,7 +270,7 @@ def generate_clip_content(
     if progress_callback:
         progress_callback(0, f"Generating content via {label}...")
 
-    kb_context = load_kb_context()
+    kb_context = load_kb_context(task="title and description generation")
 
     # Extract transcript text for this clip's time range
     clip_start = clip.get("start_second", 0)

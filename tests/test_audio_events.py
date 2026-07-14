@@ -56,6 +56,26 @@ class ComputeEventScoresTests(unittest.TestCase):
         self.assertEqual(scores[0], 0.0)
 
 
+class DominantReactionTests(unittest.TestCase):
+    def test_names_the_loudest_channel_in_range(self):
+        events = [_event(3, laughter=0.2, cheering=0.8)]
+        self.assertEqual(ae.dominant_reaction(events, 0, 10), "cheering")
+
+    def test_ignores_frames_outside_the_range(self):
+        events = [_event(30, laughter=0.9)]
+        self.assertIsNone(ae.dominant_reaction(events, 0, 10))
+
+    def test_speech_only_range_has_no_reaction(self):
+        events = [_event(3, speech=1.0)]
+        self.assertIsNone(ae.dominant_reaction(events, 0, 10))
+
+
+class ReactionTimesTests(unittest.TestCase):
+    def test_only_frames_above_threshold(self):
+        events = [_event(1, laughter=0.05), _event(2, cheering=0.4)]
+        self.assertEqual(ae.reaction_times(events), [2])
+
+
 class ProfileTests(unittest.TestCase):
     def test_default_is_podcast_and_llm_sourced(self):
         p = profiles.get_profile(None)
@@ -74,6 +94,49 @@ class ProfileTests(unittest.TestCase):
     def test_podcast_weights_are_transcript_dominant(self):
         w = profiles.get_profile("podcast").channel_weights
         self.assertEqual(max(w, key=w.get), "transcript_semantic")
+
+
+
+class WaveformFromSharedWavTests(unittest.TestCase):
+    def test_reads_pre_extracted_wav_directly(self):
+        import struct
+        import tempfile
+        import wave as wave_mod
+
+        fd, wav_path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        try:
+            with wave_mod.open(wav_path, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(16000)
+                w.writeframes(struct.pack("<4h", 0, 16384, -16384, 0))
+
+            waveform = ae._read_waveform_16k_mono("/nonexistent.mp4", wav_path=wav_path)
+            self.assertIsNotNone(waveform)
+            self.assertEqual(len(waveform), 4)
+            self.assertAlmostEqual(float(waveform[1]), 0.5, places=3)
+        finally:
+            os.unlink(wav_path)
+
+    def test_missing_wav_falls_back_to_extraction_path(self):
+        from unittest import mock
+
+        with mock.patch.object(ae, "proc_run", return_value=mock.Mock(returncode=1, stderr="")):
+            waveform = ae._read_waveform_16k_mono("/nonexistent.mp4", wav_path="/no/such/file.wav")
+        self.assertIsNone(waveform)
+
+    def test_corrupt_wav_from_ffmpeg_returns_none(self):
+        from unittest import mock
+
+        def fake_run(cmd, **kwargs):
+            # ffmpeg "succeeds" but leaves a WAV that wave.open cannot parse.
+            with open(cmd[cmd.index("wav") + 1], "wb") as f:
+                f.write(b"not a wav")
+            return mock.Mock(returncode=0, stderr="")
+
+        with mock.patch.object(ae, "proc_run", side_effect=fake_run):
+            self.assertIsNone(ae._read_waveform_16k_mono("/nonexistent.mp4"))
 
 
 if __name__ == "__main__":
