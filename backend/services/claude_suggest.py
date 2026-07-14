@@ -17,7 +17,7 @@ from typing import Optional, Callable
 
 from config.paths import paths
 from services.audio_analyzer import compute_energy_scores
-from services.audio_events import compute_event_scores
+from services.audio_events import compute_event_scores, dominant_reaction
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
@@ -1249,14 +1249,16 @@ def blend_signal_scores(
     reaction_scores = compute_event_scores(events_data or [], ranges)
     energy_scores = compute_energy_scores(energy_data or [], ranges)
 
-    for clip, r_score, e_score in zip(clips, reaction_scores, energy_scores):
+    for clip, rng, r_score, e_score in zip(clips, ranges, reaction_scores, energy_scores):
         boost = round(reaction_weight * r_score + energy_weight * e_score, 2)
         if boost <= 0:
             continue
         clip["signal_boost"] = boost
         clip["score"] = round(float(clip.get("score", 0)) + boost, 2)
-        if r_score > 3 and "laughter" not in (clip.get("reasons") or []):
-            clip.setdefault("reasons", []).append("laughter")
+        if r_score > 3:
+            label = dominant_reaction(events_data or [], rng["start"], rng["end"]) or "reaction"
+            if label not in (clip.get("reasons") or []):
+                clip.setdefault("reasons", []).append(label)
     return clips
 
 
