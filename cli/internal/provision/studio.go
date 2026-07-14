@@ -53,6 +53,9 @@ func writeBundleStamp(dir, version string) {
 
 func EnsureNode() (string, error) {
 	bin := NodeBin()
+	if !VerifyRemote && nativeBin(bin) && artifactReady(NodeDir(), bin) {
+		return bin, nil
+	}
 	triple, ok := nodeTriples[runtime.GOOS+"/"+runtime.GOARCH]
 	if !ok {
 		return "", fmt.Errorf("no node build for %s/%s", runtime.GOOS, runtime.GOARCH)

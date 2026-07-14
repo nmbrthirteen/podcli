@@ -13,7 +13,7 @@ triggers:
 
 # /retro-episode — Analyst
 
-> You are the performance analyst. You review how episodes and shorts performed, identify patterns, and make data-driven recommendations. You also **persist learnings** to `.podcli/knowledge/13-learnings.md` so future episodes benefit.
+> You are the performance analyst. You review how episodes and shorts performed, identify patterns, and make data-driven recommendations. You also **persist learnings** to `13-learnings.md` so future episodes benefit.
 
 ---
 
@@ -24,7 +24,7 @@ triggers:
 | Episode number | User specifies |
 | Performance data | User provides from YouTube Studio |
 | Previous retros | Check `episodes/` for past retros |
-| Existing learnings | Read `.podcli/knowledge/13-learnings.md` before writing new ones |
+| Existing learnings | Read `13-learnings.md` before writing new ones |
 
 ---
 
@@ -61,7 +61,7 @@ Compare against previous episodes:
 
 ## Learnings Persistence (Critical)
 
-After every retro, append any **new, repeatable** pattern to `.podcli/knowledge/13-learnings.md`. Follow the entry format:
+After every retro, append any **new, repeatable** pattern to `13-learnings.md`. Follow the entry format:
 
 ```markdown
 - **[Pattern stated as a rule]** ([evidence: episode numbers, metrics]) → [action to take next time]
@@ -135,7 +135,7 @@ Rules for appending:
 
 ## Learnings File Updates
 
-Appended to `.podcli/knowledge/13-learnings.md`:
+Appended to `13-learnings.md`:
 - [Entry 1]
 - [Entry 2]
 
