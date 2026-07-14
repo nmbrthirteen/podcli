@@ -43,6 +43,20 @@ const log = childLogger("server");
  */
 const transcriptCache = new TranscriptCache();
 
+/**
+ * Only a studio that isn't listening may be retried inline. A render that
+ * started and then failed, timed out, or went missing must surface — retrying it
+ * would render the same clips twice.
+ */
+function studioUnreachable(err: unknown, label: string): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (!msg.includes("ECONNREFUSED") && !msg.includes("fetch failed")) return false;
+  log.warn(
+    `Studio not reachable at ${webServerUrl}. Running ${label} inline without live progress. If the studio listens on another port, set PODCLI_PORT for this MCP server too.`,
+  );
+  return true;
+}
+
 async function uiPing(body: Record<string, unknown>): Promise<void> {
   try {
     await fetch(`${webServerUrl}/api/ui-state`, {
@@ -679,14 +693,7 @@ export function createServer(): McpServer {
             }
           }
         } catch (webErr: unknown) {
-          const webMsg =
-            webErr instanceof Error ? webErr.message : String(webErr);
-          if (
-            !webMsg.includes("ECONNREFUSED") &&
-            !webMsg.includes("fetch failed")
-          ) {
-            // Unexpected error — still try direct fallback
-          }
+          if (!studioUnreachable(webErr, "create_clip")) throw webErr;
         }
 
         if (!usedWebServer) {
@@ -948,14 +955,7 @@ export function createServer(): McpServer {
             }
           }
         } catch (webErr: unknown) {
-          const webMsg =
-            webErr instanceof Error ? webErr.message : String(webErr);
-          if (
-            !webMsg.includes("ECONNREFUSED") &&
-            !webMsg.includes("fetch failed")
-          ) {
-            // Unexpected error — still try fallback
-          }
+          if (!studioUnreachable(webErr, "batch_create_clips")) throw webErr;
         }
 
         if (!usedWebServer) {
