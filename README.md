@@ -96,7 +96,7 @@ Clips land in `podcli-clips/` in the directory you ran it from, so each show kee
 
 If you are weighing podcli against the cloud clippers, this is the difference:
 
-- Runs locally. Transcription and rendering happen on your machine, so episodes never upload.
+- Runs locally. Transcription and rendering happen on your machine by default, so episodes stay there. Only the optional cloud engine (AssemblyAI) and publishing to YouTube send anything out.
 - Free and open source under AGPL-3.0. Exports are unlimited, full quality, and watermark-free.
 - Agent-native. 26 MCP tools let Claude Code or Codex drive the whole flow, transcription through publishing.
 - A knowledge base keeps titles, captions, and descriptions in your show's voice, and stops the engine from resuggesting moments you already published.
