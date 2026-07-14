@@ -3687,8 +3687,18 @@ Add the cliches your niche is drowning in as you spot them.
 """
 
 
+def _wizard_ask(question, on_eof=None):
+    """questionary turns Ctrl-C into None itself, but lets Ctrl-D escape as EOFError."""
+    try:
+        return question.ask()
+    except EOFError:
+        return on_eof
+
+
 def _first_run_setup() -> bool:
-    """Guided setup on the first interactive run. Skippable, asked once."""
+    """Guided setup on the first interactive run. Skippable, asked once.
+    False means the user cancelled: nothing is saved and the caller must not
+    treat the run as a success."""
     accent = "\033[38;2;212;135;74m"
     gray = "\033[38;5;245m"
     green = "\033[38;2;74;222;128m"
@@ -3715,7 +3725,7 @@ def _first_run_setup() -> bool:
     print(f"  {gray}Six questions, then podcli scores clips against your show instead of a generic template.{reset}")
     print()
 
-    start = questionary.confirm("Set it up now?", default=True, style=qstyle).ask()
+    start = _wizard_ask(questionary.confirm("Set it up now?", default=True, style=qstyle), on_eof=False)
     if start is None:
         return False
     if not start:
@@ -3733,7 +3743,7 @@ def _first_run_setup() -> bool:
     ]
     answers = {}
     for key, prompt in questions:
-        value = questionary.text(prompt, style=qstyle).ask()
+        value = _wizard_ask(questionary.text(prompt, style=qstyle))
         if value is None:
             return False
         answers[key] = value.strip()
@@ -3755,14 +3765,14 @@ def _first_run_setup() -> bool:
 
     cmd_knowledge(argparse.Namespace(knowledge_action="init"))
 
-    nxt = questionary.select(
+    nxt = _wizard_ask(questionary.select(
         "The other 12 files are starter templates. Next:",
         choices=[
             questionary.Choice("Draft them from an existing channel", value="bootstrap"),
             questionary.Choice("Fill them in later", value="later"),
         ],
         style=qstyle,
-    ).ask()
+    ))
 
     if nxt is None:
         return False
@@ -4122,7 +4132,8 @@ def main():
         return
 
     if _needs_onboarding() and not _first_run_setup():
-        return
+        print("  Setup cancelled. Your command did not run.", file=sys.stderr)
+        sys.exit(130)
 
     if args.command == "process":
         if not getattr(args, "no_banner", False):
