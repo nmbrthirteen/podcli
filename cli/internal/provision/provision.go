@@ -211,13 +211,16 @@ func acquireLock(dest string) (func(), error) {
 				os.Remove(lock)
 				return nil, err
 			}
+			if err := f.Close(); err != nil {
+				os.Remove(lock)
+				return nil, err
+			}
 			if _, err := os.Stat(lock + ".takeover"); err == nil {
-				f.Close()
 				removeOwnedLock(lock, token)
 				time.Sleep(lockPoll)
 				continue
 			}
-			return holdLock(lock, token, f), nil
+			return holdLock(lock, token), nil
 		}
 		if os.IsExist(err) {
 			transient = 0
@@ -241,7 +244,7 @@ func acquireLock(dest string) (func(), error) {
 }
 
 // holdLock keeps the lock's mtime fresh until the returned unlock runs.
-func holdLock(lock, token string, f *os.File) func() {
+func holdLock(lock, token string) func() {
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	go func() {
@@ -251,7 +254,25 @@ func holdLock(lock, token string, f *os.File) func() {
 		for {
 			select {
 			case <-t.C:
-				f.WriteAt([]byte(token), 0)
+				f, err := os.OpenFile(lock, os.O_RDWR, 0)
+				if err != nil {
+					return
+				}
+				owner := make([]byte, len(token))
+				n, readErr := f.ReadAt(owner, 0)
+				if readErr != nil && readErr != io.EOF {
+					f.Close()
+					return
+				}
+				if string(owner[:n]) != token {
+					f.Close()
+					return
+				}
+				if _, err := f.WriteAt([]byte(token), 0); err != nil {
+					f.Close()
+					return
+				}
+				f.Close()
 			case <-done:
 				return
 			}
@@ -262,7 +283,6 @@ func holdLock(lock, token string, f *os.File) func() {
 		once.Do(func() {
 			close(done)
 			<-stopped
-			f.Close()
 			removeOwnedLock(lock, token)
 		})
 	}
