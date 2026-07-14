@@ -3,6 +3,8 @@ import { PythonExecutor } from "../services/python-executor.js";
 import { FileManager } from "../services/file-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import { paths } from "../config/paths.js";
+import { webServerUrl } from "../config/server.js";
+import { validateClipRange } from "../utils/clip-validation.js";
 import { childLogger } from "../utils/logger.js";
 import type {
   BatchClipsInput,
@@ -34,6 +36,8 @@ export const batchClipsToolDef = {
     "EASIEST: pass export_selected=true to export all selected clips in one go.\n" +
     "Alternative: pass clip_numbers=[1, 3, 5] for specific ones.\n" +
     "Everything (video, timestamps, settings) auto-loads from session state.\n\n" +
+    "Pass exactly one of clips, clip_numbers, or export_selected. If several are given, " +
+    "an explicit clips array wins, then export_selected, then clip_numbers.\n\n" +
     "Each clip gets: 9:16 vertical crop, burned-in captions, normalized audio, H.264 MP4.",
   inputSchema: {
     type: "object" as const,
@@ -149,13 +153,16 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   let clips: BatchClipSpec[];
   const deselected = state?.deselectedIndices ?? [];
 
+  const batchFormat = input.format || settings.format || "vertical";
+  const cleanFillers = input.clean_fillers ?? settings.cleanFillers ?? true;
+
   const buildClipFromSuggestion = (s: SuggestedClip, num: number): BatchClipSpec => ({
     start_second: s.start_second,
     end_second: s.end_second,
     title: s.title || `clip_${num}`,
     caption_style: s.suggested_caption_style || settings.captionStyle || "hormozi",
     crop_strategy: settings.cropStrategy || "speaker",
-    format: input.format || settings.format || "vertical",
+    format: batchFormat,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
     logo_path: settings.logoPath || null,
@@ -205,19 +212,31 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     clips = clips.map((c) => ({ ...c, keep_caption_overlay: c.keep_caption_overlay ?? true }));
   }
 
+  for (let i = 0; i < clips.length; i++) {
+    const rangeError = validateClipRange(
+      clips[i].start_second,
+      clips[i].end_second,
+      clips[i].format || batchFormat,
+    );
+    if (rangeError) {
+      return JSON.stringify({ error: `Clip ${i + 1}: ${rangeError}` });
+    }
+  }
+
   // Async path — route through Web UI so caller can poll job_status for
   // live progress during a multi-minute render. Falls back to sync if the
   // UI isn't running.
   if (input.async_mode) {
     try {
-      const res = await fetch("http://localhost:3847/api/batch-clips", {
+      const res = await fetch(`${webServerUrl}/api/batch-clips`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           video_path: videoPath,
           clips,
+          format: batchFormat,
           transcript_words: transcriptWords,
-          clean_fillers: input.clean_fillers !== false,
+          clean_fillers: cleanFillers,
           logo_path: settings.logoPath || null,
           outro_path: settings.outroPath || null,
           intro_path: settings.introPath || null,
@@ -246,8 +265,9 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   const result = await executor.execute<BatchClipsResult>("batch_clips", {
     video_path: videoPath,
     clips,
+    format: batchFormat,
     transcript_words: transcriptWords,
-    clean_fillers: input.clean_fillers !== false,
+    clean_fillers: cleanFillers,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
     output_dir: paths.output,
@@ -266,7 +286,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     transcriptWords: transcriptWords,
     defaultCaptionStyle: settings.captionStyle || "hormozi",
     defaultCropStrategy: settings.cropStrategy || "speaker",
-    defaultFormat: input.format || settings.format || "vertical",
+    defaultFormat: batchFormat,
   });
   await history.persistBatchRecipes(data.results, recorded, {
     transcriptWords: transcriptWords,
@@ -274,7 +294,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     logoPath: settings.logoPath || null,
     outroPath: settings.outroPath || null,
     introPath: settings.introPath || null,
-    cleanFillers: input.clean_fillers !== false,
+    cleanFillers,
   });
 
   return JSON.stringify({

@@ -230,6 +230,9 @@ def detect_highlights(
     words: Optional[list[dict]] = None,
     reaction_threshold: float = 0.06,
     progress_callback: Optional[Callable] = None,
+    energy_data: Optional[list[dict]] = None,
+    events_data: Optional[list[dict]] = None,
+    wav_path: Optional[str] = None,
 ) -> list[dict]:
     """
     Generate highlight clips from a video's fused signal curve.
@@ -239,21 +242,26 @@ def detect_highlights(
     preferred over `segments`. Without any transcript, boundaries snap to audio lulls.
     `reaction_threshold` is the laughter/cheer level that counts as a reaction — low
     (~0.06) for conversational chuckles, higher for loud belly-laughs/crowds.
+    `energy_data`/`events_data` accept the profiles the orchestration layer already
+    computed so the source audio isn't decoded again; `wav_path` is a pre-extracted
+    16 kHz mono WAV used when extraction is still needed.
     Returns clip dicts compatible with the render pipeline:
     {title, start_second, end_second, duration, score, reasons, preview}.
     """
     profile = get_profile(profile_name)
     snap_units = sentences_from_words(words) if words else segments
 
-    if progress_callback:
-        progress_callback(10, "Analyzing audio energy...")
-    energy_data = extract_audio_energy(video_path)
-
-    events_data = []
-    if audio_events_available():
+    if energy_data is None:
         if progress_callback:
-            progress_callback(40, "Detecting laughter and reactions...")
-        events_data = extract_audio_events(video_path)
+            progress_callback(10, "Analyzing audio energy...")
+        energy_data = extract_audio_energy(video_path, wav_path=wav_path)
+
+    if events_data is None:
+        events_data = []
+        if audio_events_available():
+            if progress_callback:
+                progress_callback(40, "Detecting laughter and reactions...")
+            events_data = extract_audio_events(video_path, wav_path=wav_path)
 
     last_times = [e["time"] for e in energy_data] + [e["time"] for e in events_data]
     if not last_times:

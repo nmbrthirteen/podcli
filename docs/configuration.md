@@ -12,7 +12,7 @@ Copy `.env.example` to `.env`, or export these in your shell. `setup.sh` copies 
 | `PODCLI_QUALITY` | `high` | Render quality profile |
 | `PODCLI_NO_UPDATE` | unset | Set to `1` to skip the update check. Same as `podcli config set update.auto off` |
 | `PODCLI_LOG_LEVEL` | `info` | Logging verbosity |
-| `PODCLI_PORT` | `3847` | Web studio port. `PORT` also works |
+| `PODCLI_PORT` | `3847` | Web studio port. `PORT` also works. Set it in the MCP client's env too, or the MCP tools render without live studio progress |
 | `HF_TOKEN` | unset | Hugging Face token, required for speaker diarization |
 | `PODCLI_ENV_FILE` | `./.env` | Path to an alternate `.env` |
 | `PODCLI_BACKEND` | resolved | Override the Python backend directory |
@@ -63,7 +63,9 @@ podcli config migrate             # apply
 ## Transcript format
 
 podcli auto-transcribes with Whisper, and it accepts an existing transcript with
-`--transcript`. Drag-drop `.txt`, `.srt`, and `.vtt` work in the studio.
+`--transcript`: `.txt`, `.srt`, `.vtt`, and `.json` are detected by content. The
+same formats drag-drop into the studio. When the video was transcribed before,
+`--transcript` reuses the cached face map so speaker framing survives the swap.
 
 ```
 Speaker Name (00:00)

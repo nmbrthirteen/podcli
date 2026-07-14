@@ -14,7 +14,6 @@ export interface CaptionStyle {
   activeColor: string;
   uppercase: boolean;
   wordsPerChunk: number;
-  position: "bottom" | "center" | "lower-third";
   marginBottom: number;
 }
 
@@ -46,7 +45,6 @@ export const STYLES: Record<string, CaptionStyle> = {
     activeColor: "#FFFF00",
     uppercase: true,
     wordsPerChunk: 3,
-    position: "bottom",
     marginBottom: 400,
   },
   karaoke: {
@@ -57,7 +55,6 @@ export const STYLES: Record<string, CaptionStyle> = {
     activeColor: "#FFFFFF",
     uppercase: false,
     wordsPerChunk: 5,
-    position: "bottom",
     marginBottom: 400,
   },
   subtle: {
@@ -68,7 +65,6 @@ export const STYLES: Record<string, CaptionStyle> = {
     activeColor: "#FFFFFF",
     uppercase: false,
     wordsPerChunk: 6,
-    position: "bottom",
     marginBottom: 200,
   },
   branded: {
@@ -79,7 +75,6 @@ export const STYLES: Record<string, CaptionStyle> = {
     activeColor: "#FFFFFF",
     uppercase: false,
     wordsPerChunk: 3,
-    position: "lower-third",
     marginBottom: 420,
   },
 };

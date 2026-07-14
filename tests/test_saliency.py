@@ -159,5 +159,54 @@ class PooledTests(unittest.TestCase):
         self.assertEqual(len(pooled), 3)
 
 
+
+class PrecomputedProfilesTests(unittest.TestCase):
+    def test_precomputed_energy_and_events_skip_extraction(self):
+        energy = [
+            {"time": float(t), "rms_db": -5.0 if 28 <= t <= 32 else -30.0}
+            for t in range(120)
+        ]
+        events = [{"time": 30.0, "laughter": 0.5, "cheering": 0.0, "screaming": 0.0, "speech": 0.0}]
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("source audio must not be re-extracted")
+
+        orig_energy, orig_events = sal.extract_audio_energy, sal.extract_audio_events
+        sal.extract_audio_energy, sal.extract_audio_events = _boom, _boom
+        try:
+            clips = sal.detect_highlights(
+                "/nonexistent.mp4",
+                profile_name="party",
+                energy_data=energy,
+                events_data=events,
+                min_dur=8.0,
+                max_dur=30.0,
+            )
+        finally:
+            sal.extract_audio_energy, sal.extract_audio_events = orig_energy, orig_events
+
+        self.assertTrue(clips)
+        self.assertTrue(any("reaction" in c["reasons"] for c in clips))
+
+    def test_empty_events_list_counts_as_precomputed(self):
+        energy = [{"time": float(t), "rms_db": -30.0} for t in range(60)]
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("events must not be re-extracted")
+
+        orig_events = sal.extract_audio_events
+        sal.extract_audio_events = _boom
+        try:
+            clips = sal.detect_highlights(
+                "/nonexistent.mp4",
+                profile_name="party",
+                energy_data=energy,
+                events_data=[],
+            )
+        finally:
+            sal.extract_audio_events = orig_events
+        self.assertIsInstance(clips, list)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,7 @@ import { paths } from "../config/paths.js";
 import type { ClipResult, CreateClipInput, SuggestedClip, UIState } from "../models/index.js";
 import { childLogger } from "../utils/logger.js";
 import { sliceTranscript } from "../utils/transcript.js";
+import { validateClipRange } from "../utils/clip-validation.js";
 
 const log = childLogger("create-clip");
 const executor = new PythonExecutor();
@@ -176,6 +177,10 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
       error: "start_second and end_second are required (use clip_number to reference a suggestion)",
     });
   }
+  const rangeError = validateClipRange(startSecond, endSecond, format);
+  if (rangeError) {
+    return JSON.stringify({ error: rangeError });
+  }
 
   const result = await executor.execute<ClipResult>("create_clip", {
     video_path: videoPath,
@@ -187,7 +192,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     transcript_words: transcriptWords,
     title,
     output_dir: paths.output,
-    clean_fillers: input.clean_fillers !== false,
+    clean_fillers: input.clean_fillers ?? settings.cleanFillers ?? true,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
     logo_path: logoPath,

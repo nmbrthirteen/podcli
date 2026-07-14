@@ -137,5 +137,46 @@ class AssignFaceTracksTests(unittest.TestCase):
         self.assertEqual(frame0_ids, frame1_ids)
 
 
+
+class FaceSampleIndicesTests(unittest.TestCase):
+    def _reference_indices(self, total_frames, fps):
+        """The stepping the old cap.set() sampling loop used."""
+        sample_step = max(1, int(fps / 10))
+        dense_end = int(fps * 0.5)
+        semi_dense_end = int(fps * 1.0)
+        semi_dense_step = max(1, sample_step // 2)
+        indices = []
+        idx = 0
+        while idx < total_frames:
+            indices.append(idx)
+            if idx < dense_end:
+                idx += 1
+            elif idx < semi_dense_end:
+                idx += semi_dense_step
+            else:
+                idx += sample_step
+        return indices
+
+    def test_matches_seek_loop_progression_at_30fps(self):
+        self.assertEqual(vp._face_sample_indices(300, 30.0), self._reference_indices(300, 30.0))
+
+    def test_matches_seek_loop_progression_at_60fps(self):
+        self.assertEqual(vp._face_sample_indices(600, 60.0), self._reference_indices(600, 60.0))
+
+    def test_dense_start_then_sparse(self):
+        indices = vp._face_sample_indices(900, 30.0)
+        self.assertEqual(indices[:15], list(range(15)))
+        steps = {b - a for a, b in zip(indices, indices[1:]) if a >= 30}
+        self.assertEqual(steps, {3})
+
+    def test_strictly_increasing_and_bounded(self):
+        indices = vp._face_sample_indices(100, 24.0)
+        self.assertEqual(indices, sorted(set(indices)))
+        self.assertLess(indices[-1], 100)
+
+    def test_empty_video(self):
+        self.assertEqual(vp._face_sample_indices(0, 30.0), [])
+
+
 if __name__ == "__main__":
     unittest.main()

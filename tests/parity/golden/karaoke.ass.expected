@@ -13,4 +13,5 @@ Style: Default,Arial,60,&H00808080,&H00808080,&H00000000,&H80000000,0,0,0,0,100,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 0,0:00:00.00,0:00:01.95,Default,,0,0,0,,{\c&H00FFFFFF}{\2c&H00808080}{\kf34}The {\kf37}James {\kf33}Webb {\kf57}telescope {\kf32}cost
-Dialogue: 0,0:00:01.95,0:00:04.20,Default,,0,0,0,,{\c&H00FFFFFF}{\2c&H00808080}{\kf44}$10 {\kf55}billion. {\kf44}Wasn't {\kf4}that {\kf65}expensive?
+Dialogue: 0,0:00:01.95,0:00:03.10,Default,,0,0,0,,{\c&H00FFFFFF}{\2c&H00808080}{\kf44}$10 {\kf55}billion.
+Dialogue: 0,0:00:03.10,0:00:04.20,Default,,0,0,0,,{\c&H00FFFFFF}{\2c&H00808080}{\kf44}Wasn't {\kf4}that {\kf65}expensive?

@@ -27,8 +27,12 @@ try:
     load_dotenv(os.environ.get("PODCLI_ENV_FILE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 except ImportError:
     pass
+import threading
 import traceback
 from version import VERSION
+
+# Serializes event writes so parallel clip workers can't interleave JSON lines.
+_emit_lock = threading.Lock()
 
 
 def emit_progress(task_id: str, stage: str, percent: int, message: str, **extra):
@@ -40,7 +44,8 @@ def emit_progress(task_id: str, stage: str, percent: int, message: str, **extra)
         "message": message,
     }
     event.update(extra)
-    print(json.dumps(event), file=sys.stderr, flush=True)
+    with _emit_lock:
+        print(json.dumps(event), file=sys.stderr, flush=True)
 
 
 def emit_result(task_id: str, status: str, data=None, error=None):
@@ -53,7 +58,8 @@ def emit_result(task_id: str, status: str, data=None, error=None):
         result["data"] = data
     if error is not None:
         result["error"] = error
-    print(json.dumps(result), flush=True)
+    with _emit_lock:
+        print(json.dumps(result), flush=True)
 
 
 def handle_ping(task_id: str, params: dict):
@@ -76,6 +82,16 @@ def handle_transcribe(task_id: str, params: dict):
         os.environ["PODCLI_ENGINE"] = engine
     if params.get("assemblyai_api_key"):
         os.environ["ASSEMBLYAI_API_KEY"] = params["assemblyai_api_key"]
+
+    # One shared 16 kHz mono wav feeds transcription, energy and reactions
+    # instead of decoding the source three times.
+    shared_wav = None
+    try:
+        from services.audio_extract import extract_wav_16k_mono
+        shared_wav = extract_wav_16k_mono(file_path)
+    except Exception:
+        shared_wav = None
+
     try:
         result = transcribe_file(
             file_path=file_path,
@@ -85,7 +101,45 @@ def handle_transcribe(task_id: str, params: dict):
             enable_diarization=params.get("enable_diarization", True),
             num_speakers=params.get("num_speakers"),
             progress_callback=lambda pct, msg: emit_progress(task_id, "transcribing", pct, msg),
+            wav_path=shared_wav,
         )
+        # Apply word corrections (Whisper misheard proper nouns)
+        apply_corrections(result.get("words", []), result.get("segments", []))
+
+        energy_data = None
+        try:
+            from services.audio_analyzer import extract_audio_energy
+            energy_data = extract_audio_energy(file_path, wav_path=shared_wav)
+        except Exception:
+            pass  # energy is a nice-to-have
+
+        events_data = None
+        try:
+            from services.audio_events import extract_audio_events
+            events_data = extract_audio_events(file_path, wav_path=shared_wav)
+        except Exception:
+            pass  # reactions are a nice-to-have
+
+        # Cached so clip suggestion reuses these instead of decoding the source again.
+        from services.signal_cache import save_signals
+        save_signals(file_path, energy_data=energy_data, events_data=events_data)
+
+        # Auto-pack: emit compact LLM-readable markdown alongside raw JSON.
+        # Pulls energy data so the packed view includes peak moments for clip reasoning.
+        try:
+            cache_hash = compute_cache_hash(file_path) + engine_cache_suffix(result.get("engine") or engine)
+            packed_path, packed_md = write_packed(
+                result,
+                cache_hash,
+                source_label=os.path.basename(file_path),
+                energy_data=energy_data,
+                events_data=events_data,
+            )
+            result["packed_path"] = packed_path
+            result["packed_size_bytes"] = len(packed_md.encode("utf-8"))
+        except Exception as e:
+            # Non-fatal — transcription result is still useful without the packed view
+            emit_progress(task_id, "packing", 99, f"Packer skipped: {e}")
     finally:
         if previous_engine is None:
             os.environ.pop("PODCLI_ENGINE", None)
@@ -95,40 +149,11 @@ def handle_transcribe(task_id: str, params: dict):
             os.environ.pop("ASSEMBLYAI_API_KEY", None)
         else:
             os.environ["ASSEMBLYAI_API_KEY"] = previous_assemblyai_key
-    # Apply word corrections (Whisper misheard proper nouns)
-    apply_corrections(result.get("words", []), result.get("segments", []))
-
-    # Auto-pack: emit compact LLM-readable markdown alongside raw JSON.
-    # Pulls energy data so the packed view includes peak moments for clip reasoning.
-    try:
-        from services.audio_analyzer import extract_audio_energy
-
-        cache_hash = compute_cache_hash(file_path) + engine_cache_suffix(result.get("engine") or engine)
-        energy_data = None
-        try:
-            energy_data = extract_audio_energy(file_path)
-        except Exception:
-            pass  # energy is a nice-to-have
-
-        events_data = None
-        try:
-            from services.audio_events import extract_audio_events
-            events_data = extract_audio_events(file_path)
-        except Exception:
-            pass  # reactions are a nice-to-have
-
-        packed_path, packed_md = write_packed(
-            result,
-            cache_hash,
-            source_label=os.path.basename(file_path),
-            energy_data=energy_data,
-            events_data=events_data,
-        )
-        result["packed_path"] = packed_path
-        result["packed_size_bytes"] = len(packed_md.encode("utf-8"))
-    except Exception as e:
-        # Non-fatal — transcription result is still useful without the packed view
-        emit_progress(task_id, "packing", 99, f"Packer skipped: {e}")
+        if shared_wav and os.path.exists(shared_wav):
+            try:
+                os.unlink(shared_wav)
+            except OSError:
+                pass
 
     emit_result(task_id, "success", data=result)
 
@@ -164,65 +189,102 @@ def handle_create_clip(task_id: str, params: dict):
     emit_result(task_id, "success", data=result)
 
 
+def _render_concurrency() -> int:
+    raw = (os.environ.get("PODCLI_RENDER_CONCURRENCY") or "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return 2 if (os.cpu_count() or 1) >= 8 else 1
+
+
 def handle_batch_clips(task_id: str, params: dict):
-    """Create multiple clips in sequence."""
+    """Create multiple clips with a bounded worker pool."""
+    from concurrent.futures import ThreadPoolExecutor
     from services.clip_generator import generate_clip
     from services import asset_store
 
     clips = params["clips"]
-    results = []
     total = len(clips)
+    results = [None] * total
+    completed = 0
+    completed_lock = threading.Lock()
 
-    for i, clip in enumerate(clips):
+    def render_one(i: int, clip: dict) -> dict:
         emit_progress(
             task_id,
             "batch",
             int((i / total) * 100),
             f"Processing clip {i + 1}/{total}...",
         )
+        result = generate_clip(
+            video_path=params["video_path"],
+            start_second=clip["start_second"],
+            end_second=clip["end_second"],
+            caption_style=clip.get("caption_style", "hormozi"),
+            crop_strategy=clip.get("crop_strategy", "face"),
+            format=clip.get("format", params.get("format", "vertical")),
+            transcript_words=params.get("transcript_words", []),
+            title=clip.get("title", f"clip_{i + 1}"),
+            output_dir=params.get("output_dir"),
+            logo_path=asset_store.resolve(clip.get("logo_path") or params.get("logo_path")),
+            outro_path=asset_store.resolve(params.get("outro_path")),
+            intro_path=asset_store.resolve(clip.get("intro_path") or params.get("intro_path")),
+            clean_fillers=params.get("clean_fillers", True),
+            face_map=params.get("face_map"),
+            keep_segments=clip.get("keep_segments"),
+            allow_ass_fallback=clip.get("allow_ass_fallback", params.get("allow_ass_fallback", False)),
+            use_ass_captions=clip.get("use_ass_captions", params.get("use_ass_captions", False)),
+            keep_caption_overlay=clip.get(
+                "keep_caption_overlay", params.get("keep_caption_overlay", False)
+            ),
+            progress_callback=lambda pct, msg, _i=i: emit_progress(
+                task_id, "batch", int((_i / total) * 100 + pct / total), msg
+            ),
+        )
+        return {
+            "clip_index": i,
+            "status": "success",
+            "start_second": clip["start_second"],
+            "end_second": clip["end_second"],
+            **result,
+        }
+
+    def run_and_record(i: int, clip: dict) -> None:
+        nonlocal completed
         try:
-            result = generate_clip(
-                video_path=params["video_path"],
-                start_second=clip["start_second"],
-                end_second=clip["end_second"],
-                caption_style=clip.get("caption_style", "hormozi"),
-                crop_strategy=clip.get("crop_strategy", "face"),
-                format=clip.get("format", params.get("format", "vertical")),
-                transcript_words=params.get("transcript_words", []),
-                title=clip.get("title", f"clip_{i + 1}"),
-                output_dir=params.get("output_dir"),
-                logo_path=asset_store.resolve(clip.get("logo_path") or params.get("logo_path")),
-                outro_path=asset_store.resolve(params.get("outro_path")),
-                intro_path=asset_store.resolve(clip.get("intro_path") or params.get("intro_path")),
-                clean_fillers=params.get("clean_fillers", True),
-                face_map=params.get("face_map"),
-                keep_segments=clip.get("keep_segments"),
-                allow_ass_fallback=clip.get("allow_ass_fallback", params.get("allow_ass_fallback", False)),
-                use_ass_captions=clip.get("use_ass_captions", params.get("use_ass_captions", False)),
-                keep_caption_overlay=clip.get(
-                    "keep_caption_overlay", params.get("keep_caption_overlay", False)
-                ),
-                progress_callback=lambda pct, msg, _i=i: emit_progress(
-                    task_id, "batch", int((_i / total) * 100 + pct / total), msg
-                ),
-            )
-            row = {
-                "clip_index": i,
-                "status": "success",
-                "start_second": clip["start_second"],
-                "end_second": clip["end_second"],
-                **result,
-            }
-            results.append(row)
-            emit_progress(
-                task_id,
-                "clip_complete",
-                int(((i + 1) / total) * 100),
-                f"Clip {i + 1}/{total} complete",
-                clip_result=row,
-            )
+            row = results[i] = render_one(i, clip)
+            message = f"Clip {i + 1}/{total} complete"
         except Exception as e:
-            results.append({"clip_index": i, "status": "error", "error": str(e)})
+            row = results[i] = {
+                "clip_index": i,
+                "status": "error",
+                "start_second": clip.get("start_second"),
+                "end_second": clip.get("end_second"),
+                "error": str(e),
+            }
+            message = f"Clip {i + 1}/{total} failed"
+        with completed_lock:
+            completed += 1
+            done = completed
+        emit_progress(
+            task_id,
+            "clip_complete",
+            int((done / total) * 100),
+            message,
+            clip_result=row,
+        )
+
+    workers = min(_render_concurrency(), max(1, total))
+    if workers <= 1:
+        for i, clip in enumerate(clips):
+            run_and_record(i, clip)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(run_and_record, i, clip) for i, clip in enumerate(clips)]
+            for f in futures:
+                f.result()
 
     emit_result(
         task_id,
@@ -230,7 +292,7 @@ def handle_batch_clips(task_id: str, params: dict):
         data={
             "results": results,
             "total_clips": total,
-            "successful_clips": sum(1 for r in results if r["status"] == "success"),
+            "successful_clips": sum(1 for r in results if r and r["status"] == "success"),
         },
     )
 
@@ -524,9 +586,101 @@ def handle_corrections(task_id: str, params: dict):
         emit_result(task_id, "error", error=f"Unknown corrections action: {action}")
 
 
+def _extract_signals(
+    task_id: str,
+    video_path: str,
+    want_energy: bool,
+    want_events: bool,
+) -> tuple[list | None, list | None]:
+    """Decode the source once and derive whichever profiles aren't cached yet."""
+    from services.audio_events import is_available as audio_events_available
+
+    want_events = want_events and audio_events_available()
+    if not want_energy and not want_events:
+        return None, None
+
+    wav_path = None
+    try:
+        from services.audio_extract import extract_wav_16k_mono
+        emit_progress(task_id, "suggesting", 2, "Extracting audio...")
+        wav_path = extract_wav_16k_mono(video_path)
+    except Exception:
+        wav_path = None
+
+    energy_data = None
+    events_data = None
+    try:
+        if want_energy:
+            emit_progress(task_id, "suggesting", 5, "Analyzing audio energy...")
+            try:
+                from services.audio_analyzer import extract_audio_energy
+                energy_data = extract_audio_energy(video_path, wav_path=wav_path)
+            except Exception:
+                pass  # energy is a nice-to-have
+        if want_events:
+            emit_progress(task_id, "suggesting", 15, "Detecting laughter and reactions...")
+            try:
+                from services.audio_events import extract_audio_events
+                events_data = extract_audio_events(video_path, wav_path=wav_path)
+            except Exception:
+                pass  # reactions are a nice-to-have
+    finally:
+        if wav_path and os.path.exists(wav_path):
+            try:
+                os.unlink(wav_path)
+            except OSError:
+                pass
+
+    return energy_data, events_data
+
+
+def _signal_profiles_for_suggest(
+    task_id: str,
+    params: dict,
+) -> tuple[list | None, list | None, list | None]:
+    """Energy and reaction profiles for the suggester: caller-supplied first, then
+    what transcription cached for this video, and only then a fresh analysis."""
+    from services.audio_events import reaction_times as reaction_times_from_events
+    from services.signal_cache import load_signals, save_signals
+
+    energy_data = params.get("energy_data")
+    events_data = params.get("events_data")
+    anchors = params.get("reaction_times")
+    if anchors is not None:
+        anchors = [float(t) for t in anchors]
+
+    video_path = params.get("video_path")
+    if video_path and os.path.exists(video_path) and (energy_data is None or events_data is None):
+        cached = load_signals(video_path)
+        if energy_data is None:
+            energy_data = cached.get("energy_data")
+        if events_data is None:
+            events_data = cached.get("events_data")
+
+        if energy_data is None or events_data is None:
+            fresh_energy, fresh_events = _extract_signals(
+                task_id,
+                video_path,
+                want_energy=energy_data is None,
+                want_events=events_data is None,
+            )
+            save_signals(video_path, energy_data=fresh_energy, events_data=fresh_events)
+            energy_data = energy_data if energy_data is not None else fresh_energy
+            events_data = events_data if events_data is not None else fresh_events
+
+    if anchors is None and events_data:
+        anchors = reaction_times_from_events(events_data)
+
+    return energy_data, events_data, anchors
+
+
 def handle_suggest_clips(task_id: str, params: dict):
     """AI-powered clip suggestion using Claude/Codex and PodStack knowledge base."""
-    from services.claude_suggest import suggest_initial_with_claude, _find_ai_cli_candidates
+    from services.claude_suggest import (
+        _find_ai_cli_candidates,
+        select_clips_with_signal_scores,
+        suggest_initial_with_claude,
+    )
 
     segments = params.get("segments", [])
     top_n = params.get("top_n", 5)
@@ -548,12 +702,15 @@ def handle_suggest_clips(task_id: str, params: dict):
         return
 
     errors: list[str] = []
+    energy_data, events_data, reaction_times = _signal_profiles_for_suggest(task_id, params)
+    candidate_top_n = top_n * 2 if energy_data or events_data else top_n
     clips = suggest_initial_with_claude(
         segments=segments,
-        top_n=top_n,
+        top_n=candidate_top_n,
         exclude_clips=existing_clips,
         progress_callback=lambda pct, msg: emit_progress(task_id, "suggesting", pct, msg),
         error_sink=errors,
+        reaction_times=reaction_times,
     )
 
     if clips is None:
@@ -561,6 +718,12 @@ def handle_suggest_clips(task_id: str, params: dict):
         emit_result(task_id, "error", error=detail)
         return
 
+    clips = select_clips_with_signal_scores(
+        clips,
+        top_n=top_n,
+        energy_data=energy_data,
+        events_data=events_data,
+    )
     emit_result(task_id, "success", data={"clips": clips})
 
 
