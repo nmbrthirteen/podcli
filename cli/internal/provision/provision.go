@@ -386,13 +386,28 @@ func artifactStatePath(dir string) string {
 	return filepath.Join(dir, ".podcli-artifacts")
 }
 
-func artifactAt(dir, key string, files ...string) bool {
+// VerifyRemote makes the Ensure* functions re-resolve the upstream build and
+// re-provision when it differs from what is installed. Only `podcli setup` sets it.
+// Every other command relies on the local artifact state instead: resolving the
+// upstream release on each run left a fully-provisioned install unable to work
+// offline, spent an unauthenticated GitHub API call (60/hr/IP) per invocation, and
+// re-downloaded the runtime whenever upstream published a new build.
+var VerifyRemote bool
+
+func readArtifactState(dir string) (artifactState, bool) {
 	b, err := os.ReadFile(artifactStatePath(dir))
 	if err != nil {
-		return false
+		return artifactState{}, false
 	}
 	var state artifactState
-	if json.Unmarshal(b, &state) != nil || state.Key != key || len(state.Files) != len(files) {
+	if json.Unmarshal(b, &state) != nil {
+		return artifactState{}, false
+	}
+	return state, true
+}
+
+func artifactContentsMatch(dir string, state artifactState, files ...string) bool {
+	if len(state.Files) != len(files) {
 		return false
 	}
 	for _, file := range files {
@@ -406,6 +421,25 @@ func artifactAt(dir, key string, files ...string) bool {
 		}
 	}
 	return true
+}
+
+func artifactAt(dir, key string, files ...string) bool {
+	state, ok := readArtifactState(dir)
+	return ok && state.Key == key && artifactContentsMatch(dir, state, files...)
+}
+
+// artifactReady reports whether an installed artifact can be used without asking the
+// network which build is current. Recorded hashes are re-verified, so a corrupted or
+// swapped binary is still rejected. A runtime installed before artifact state existed
+// is adopted with an empty key: it was checksum-verified at download time, and forcing
+// every existing install to re-download on first run would be worse. The empty key
+// never matches an upstream key, so the next `podcli setup` re-verifies it properly.
+func artifactReady(dir string, files ...string) bool {
+	state, ok := readArtifactState(dir)
+	if !ok {
+		return writeArtifactState(dir, "", files...) == nil
+	}
+	return artifactContentsMatch(dir, state, files...)
 }
 
 func writeArtifactState(dir, key string, files ...string) error {
@@ -861,6 +895,9 @@ func releaseAssetChecksum(assets map[string]string, assetName string) (string, e
 
 func EnsureWhisperCpp() (string, error) {
 	bin := WhisperCLIBin()
+	if !VerifyRemote && nativeBin(bin) && artifactReady(filepath.Dir(bin), bin) {
+		return bin, nil
+	}
 	name := fmt.Sprintf("whisper-cli-%s-%s%s", runtime.GOOS, runtime.GOARCH, paths.ExeSuffix())
 	assets, err := latestReleaseAssets()
 	if err != nil {
@@ -909,6 +946,9 @@ func EnsureFFmpeg() (string, error) {
 	dir := filepath.Join(paths.RuntimeDir(), "ffmpeg")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
+	}
+	if !VerifyRemote && nativeBin(bin) && nativeBin(probe) && artifactReady(dir, bin, probe) {
+		return bin, nil
 	}
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 		assets, err := latestReleaseAssets()
@@ -1122,12 +1162,14 @@ func pythonRoot(bin string) string {
 // pythonAssetURL resolves a python-build-standalone install_only tarball for
 // this platform via the GitHub latest-release API, so it tracks upstream
 // without a hardcoded version that rots.
+var pythonReleasesAPI = "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
+
 func pythonAssetURL() (url, name, sumsURL string, err error) {
 	triple, ok := pyTriples[runtime.GOOS+"/"+runtime.GOARCH]
 	if !ok {
 		return "", "", "", fmt.Errorf("no python build for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	resp, err := githubAPIGet("https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest")
+	resp, err := githubAPIGet(pythonReleasesAPI)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -1170,40 +1212,42 @@ func pythonAssetURL() (url, name, sumsURL string, err error) {
 
 func EnsurePython(requirements string) (string, error) {
 	bin := PythonBin()
-	url, name, sumsURL, err := pythonAssetURL()
-	if err != nil {
-		return "", err
-	}
-	if sumsURL == "" {
-		return "", fmt.Errorf("cannot verify %s: release has no SHA256SUMS asset", name)
-	}
-	want, err := downloadChecksum(sumsURL, name)
-	if err != nil {
-		return "", err
-	}
 	root := pythonRoot(bin)
-	key := name + "|" + want
-	if !pythonHealthy(bin) || !artifactAt(root, key, bin) {
-		if err := os.RemoveAll(root); err != nil {
-			return "", fmt.Errorf("remove corrupted Python runtime %s: %w (close any running podcli or Python subprocesses)", root, err)
-		}
-		archive, err := downloadPath(url, "cpython.tar.gz")
+	if VerifyRemote || !pythonHealthy(bin) || !artifactReady(root, bin) {
+		url, name, sumsURL, err := pythonAssetURL()
 		if err != nil {
 			return "", err
 		}
-		if err := download(url, archive, want, "cpython"); err != nil {
-			return "", err
+		if sumsURL == "" {
+			return "", fmt.Errorf("cannot verify %s: release has no SHA256SUMS asset", name)
 		}
-		err = extractTarGz(archive, paths.RuntimeDir())
-		removeArchive(archive)
+		want, err := downloadChecksum(sumsURL, name)
 		if err != nil {
 			return "", err
 		}
-		if !pythonHealthy(bin) {
-			return "", fmt.Errorf("python runtime missing stdlib encodings after extraction")
-		}
-		if err := writeArtifactState(root, key, bin); err != nil {
-			return "", err
+		key := name + "|" + want
+		if !pythonHealthy(bin) || !artifactAt(root, key, bin) {
+			if err := os.RemoveAll(root); err != nil {
+				return "", fmt.Errorf("remove corrupted Python runtime %s: %w (close any running podcli or Python subprocesses)", root, err)
+			}
+			archive, err := downloadPath(url, "cpython.tar.gz")
+			if err != nil {
+				return "", err
+			}
+			if err := download(url, archive, want, "cpython"); err != nil {
+				return "", err
+			}
+			err = extractTarGz(archive, paths.RuntimeDir())
+			removeArchive(archive)
+			if err != nil {
+				return "", err
+			}
+			if !pythonHealthy(bin) {
+				return "", fmt.Errorf("python runtime missing stdlib encodings after extraction")
+			}
+			if err := writeArtifactState(root, key, bin); err != nil {
+				return "", err
+			}
 		}
 	}
 	if requirements != "" {
