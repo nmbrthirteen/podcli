@@ -101,25 +101,48 @@ class GatingTests(unittest.TestCase):
             f.write("# Knowledge base\n")
         self.assertTrue(kb.is_empty(kb_dir))
 
-    def test_main_does_not_dispatch_requested_command_after_cancellation(self):
+    def test_cancelling_the_wizard_fails_instead_of_silently_skipping_the_command(self):
         with mock.patch.object(sys, "argv", ["podcli", "info"]), \
                 mock.patch.object(cli_mod, "_auto_migrate_cli"), \
                 mock.patch.object(cli_mod, "_needs_onboarding", return_value=True), \
                 mock.patch.object(cli_mod, "_first_run_setup", return_value=False) as setup, \
                 mock.patch.object(cli_mod, "cmd_info") as info:
-            cli_mod.main()
+            with self.assertRaises(SystemExit) as exit_ctx:
+                cli_mod.main()
 
+        self.assertEqual(exit_ctx.exception.code, 130)
         setup.assert_called_once_with()
         info.assert_not_called()
+
+    def test_completed_wizard_dispatches_the_requested_command(self):
+        with mock.patch.object(sys, "argv", ["podcli", "info"]), \
+                mock.patch.object(cli_mod, "_auto_migrate_cli"), \
+                mock.patch.object(cli_mod, "_needs_onboarding", return_value=True), \
+                mock.patch.object(cli_mod, "_first_run_setup", return_value=True), \
+                mock.patch.object(cli_mod, "cmd_info") as info:
+            cli_mod.main()
+
+        info.assert_called_once()
+
+
+CTRL_D = object()
+
+
+def _reply(value):
+    def ask():
+        if value is CTRL_D:
+            raise EOFError
+        return value
+    return ask
 
 
 def _answering(confirm, answers, choice):
     """Drive questionary through a wizard run without a terminal."""
     replies = iter(answers)
     return [
-        mock.patch("questionary.confirm", return_value=mock.Mock(ask=lambda: confirm)),
-        mock.patch("questionary.text", side_effect=lambda *a, **k: mock.Mock(ask=lambda: next(replies))),
-        mock.patch("questionary.select", return_value=mock.Mock(ask=lambda: choice)),
+        mock.patch("questionary.confirm", return_value=mock.Mock(ask=_reply(confirm))),
+        mock.patch("questionary.text", side_effect=lambda *a, **k: mock.Mock(ask=_reply(next(replies)))),
+        mock.patch("questionary.select", return_value=mock.Mock(ask=_reply(choice))),
     ]
 
 
@@ -196,6 +219,25 @@ class WizardRunTests(unittest.TestCase):
 
         self.assertFalse(result)
         self.assertTrue(os.path.isdir(self.kb_dir))
+        self.assertFalse(os.path.exists(os.path.join(self.home.name, ".onboarded")))
+
+    def test_eof_at_the_confirmation_declines_without_crashing(self):
+        result = self._run(confirm=CTRL_D)
+
+        self.assertTrue(result)
+        self.assertFalse(os.path.isdir(self.kb_dir))
+        self.assertTrue(os.path.exists(os.path.join(self.home.name, ".onboarded")))
+
+    def test_eof_mid_wizard_cancels_without_crashing(self):
+        result = self._run(answers=[ANSWERS["show_name"], CTRL_D])
+
+        self.assertFalse(result)
+        self.assertFalse(os.path.exists(os.path.join(self.home.name, ".onboarded")))
+
+    def test_eof_at_the_next_step_cancels_without_crashing(self):
+        result = self._run(choice=CTRL_D)
+
+        self.assertFalse(result)
         self.assertFalse(os.path.exists(os.path.join(self.home.name, ".onboarded")))
 
 
