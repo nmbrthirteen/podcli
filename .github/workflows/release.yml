@@ -1,6 +1,8 @@
-# Cuts a release on a v* tag: cross-compiles the Go launcher for all 5 targets,
-# builds whisper.cpp per platform, publishes both as release assets (the names
-# the npm wrapper, self-update, and provisioner expect), then publishes npm.
+# Cuts a release on a v* tag: cross-compiles the Go launcher for the 4 targets
+# in the build matrix, builds whisper.cpp / ffmpeg / studio / remotion bundles
+# per platform, and publishes everything as release assets (the names
+# self-update and the provisioner expect). Distribution is the install script
+# plus these assets; there is no npm publish (the name is blocked, see RELEASE.md).
 #
 # The whisper.cpp matrix below is unverified until the first tagged run — the
 # binary name / cmake flags may need adjustment for the pinned whisper.cpp ref.
@@ -29,10 +31,13 @@ jobs:
           - { runner: ubuntu-latest, goos: linux, goarch: arm64 }
           - { runner: ubuntu-latest, goos: windows, goarch: amd64 }
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.23'
+          cache: false
       - name: Build launcher
         working-directory: cli
         env:
@@ -54,7 +59,7 @@ jobs:
           OUT="podcli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
           go build -trimpath -ldflags "-s -w" -o "../${OUT}" .
           echo "ASSET=${OUT}" >> "$GITHUB_ENV"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
@@ -73,10 +78,11 @@ jobs:
       WHISPER_REF: v1.7.4 # pin a known-good whisper.cpp tag
     steps:
       - name: Clone whisper.cpp
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: ggml-org/whisper.cpp
           ref: ${{ env.WHISPER_REF }}
+          persist-credentials: false
       - name: Build (static; Metal embedded on macOS)
         shell: bash
         run: |
@@ -92,7 +98,7 @@ jobs:
           OUT="whisper-cli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
           cp "$SRC" "$OUT"
           echo "ASSET=$OUT" >> "$GITHUB_ENV"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
@@ -164,7 +170,7 @@ jobs:
           for enc in libx264 h264_videotoolbox; do
             ./ffmpeg-darwin-arm64 -hide_banner -encoders | grep -q "$enc" || { echo "missing encoder: $enc"; exit 1; }
           done
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ffmpeg-darwin-arm64
           path: |
@@ -174,17 +180,20 @@ jobs:
   studio:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
+          cache: ''
       - name: Build studio bundle
         run: |
           npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
           npm ci
           sh scripts/build-studio.sh dist/studio
           tar -czf studio-bundle.tar.gz -C dist/studio .
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: studio-bundle.tar.gz
           path: studio-bundle.tar.gz
@@ -202,10 +211,13 @@ jobs:
           - { runner: windows-latest, goos: windows, goarch: amd64 }
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
+          cache: ''
       - name: Build remotion bundle
         shell: bash
         run: |
@@ -213,7 +225,7 @@ jobs:
           OUT="remotion-bundle-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
           tar -czf "$OUT" -C dist/remotion-bundle .
           echo "ASSET=$OUT" >> "$GITHUB_ENV"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
@@ -226,7 +238,7 @@ jobs:
     env:
       LANDING_DISPATCH_TOKEN: ${{ secrets.LANDING_DISPATCH_TOKEN }}
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
           merge-multiple: true
@@ -235,10 +247,35 @@ jobs:
         run: |
           sha256sum * > "$RUNNER_TEMP/checksums.txt"
           mv "$RUNNER_TEMP/checksums.txt" checksums.txt
-      - uses: softprops/action-gh-release@v3
+      - name: Assert the release asset set is complete
+        working-directory: dist
+        run: |
+          set -eu
+          expected="podcli-darwin-arm64 podcli-linux-amd64 podcli-linux-arm64 podcli-windows-amd64.exe \
+          whisper-cli-darwin-arm64 whisper-cli-linux-amd64 whisper-cli-linux-arm64 whisper-cli-windows-amd64.exe \
+          remotion-bundle-darwin-arm64.tar.gz remotion-bundle-linux-amd64.tar.gz remotion-bundle-linux-arm64.tar.gz remotion-bundle-windows-amd64.tar.gz \
+          ffmpeg-darwin-arm64 ffprobe-darwin-arm64 studio-bundle.tar.gz checksums.txt"
+          fail=0
+          for f in $expected; do
+            [ -f "$f" ] || { echo "::error::missing release asset: $f"; fail=1; }
+          done
+          for f in $expected; do
+            [ "$f" = checksums.txt ] && continue
+            grep -q " $f\$" checksums.txt || { echo "::error::checksums.txt has no entry for $f"; fail=1; }
+          done
+          # An unlisted file would be published unreviewed; treat it as a failure too.
+          for f in *; do
+            case " $expected " in *" $f "*) ;; *) echo "::error::unexpected file in dist/: $f"; fail=1 ;; esac
+          done
+          [ "$fail" -eq 0 ] || { echo "::error::release asset set is incomplete or wrong; refusing to publish"; exit 1; }
+          echo "all 16 release assets present, every binary checksummed"
+      - uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           files: dist/*
           generate_release_notes: true
+      - name: Warn that the landing changelog will not rebuild
+        if: ${{ env.LANDING_DISPATCH_TOKEN == '' }}
+        run: echo "::warning::LANDING_DISPATCH_TOKEN is unset; skipping the landing site dispatch, so podcli.com's changelog will not pick up ${GITHUB_REF_NAME}."
       - name: Rebuild the landing site so the changelog picks up this release
         if: ${{ env.LANDING_DISPATCH_TOKEN != '' }}
         run: |

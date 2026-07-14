@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"podcli/internal/paths"
 )
 
 type Config struct {
 	Update struct {
-		Auto *bool `json:"auto,omitempty"`
+		Auto      *bool  `json:"auto,omitempty"`
+		Latest    string `json:"latest,omitempty"`
+		CheckedAt string `json:"checkedAt,omitempty"`
 	} `json:"update"`
 }
 
@@ -50,6 +53,27 @@ func AutoUpdate() bool {
 		return *a
 	}
 	return true
+}
+
+// CachedUpdateCheck returns the last seen release tag when the check is fresher
+// than maxAge, so routine commands skip the network round-trip.
+func CachedUpdateCheck(maxAge time.Duration) (string, bool) {
+	c := Load()
+	if c.Update.Latest == "" || c.Update.CheckedAt == "" {
+		return "", false
+	}
+	at, err := time.Parse(time.RFC3339, c.Update.CheckedAt)
+	if err != nil || time.Since(at) > maxAge {
+		return "", false
+	}
+	return c.Update.Latest, true
+}
+
+func RecordUpdateCheck(latest string) {
+	c := Load()
+	c.Update.Latest = latest
+	c.Update.CheckedAt = time.Now().UTC().Format(time.RFC3339)
+	c.Save()
 }
 
 func Get(key string) (string, error) {

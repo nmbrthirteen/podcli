@@ -83,3 +83,92 @@ export function timeAgo(iso: string): string {
 }
 
 export const basename = (p: string) => (p || "").split(/[/\\]/).pop() || "";
+
+// A render result's clip_index counts the clips submitted to the renderer, which
+// for an agent-driven export is not the studio's clip order. The server stamps
+// every row with the bounds of the clip it rendered; match a result to a clip on
+// those instead of on position.
+export const clipBoundsKey = (start?: number, end?: number): string | null =>
+  typeof start === "number" && typeof end === "number"
+    ? `${start.toFixed(2)}:${end.toFixed(2)}`
+    : null;
+
+export const resultBoundsKey = (row?: ClipResultRow | null): string | null =>
+  row ? clipBoundsKey(row.source_start_second, row.source_end_second) : null;
+
+interface ClipResultRow {
+  source_start_second?: number;
+  source_end_second?: number;
+  [key: string]: unknown;
+}
+
+interface ClipIdentity {
+  clip_id?: string;
+  start_second?: number;
+  end_second?: number;
+}
+
+// A suggestion's position shifts whenever an agent deletes or inserts a clip, so
+// anything the studio computes per clip is keyed by identity instead. Sessions
+// persisted before clips carried a clip_id fall back to their bounds, which also
+// makes a re-timed clip drop its stale score.
+export const clipKey = (clip: ClipIdentity): string =>
+  clip.clip_id || clipBoundsKey(clip.start_second, clip.end_second) || "";
+
+type EnergyLevel = "high" | "medium" | "low";
+interface EnergyEntry {
+  score: number;
+  level: EnergyLevel;
+}
+
+const energyLevel = (score: number): EnergyLevel =>
+  score >= 7 ? "high" : score >= 4 ? "medium" : "low";
+
+/** Maps the backend's positional segment scores onto the clips they were measured for. */
+export function buildEnergyMap(
+  scores: unknown[],
+  clips: ClipIdentity[],
+): Record<string, EnergyEntry> {
+  const map: Record<string, EnergyEntry> = {};
+  scores.forEach((score, i) => {
+    const clip = clips[i];
+    if (!clip || typeof score !== "number") return;
+    const key = clipKey(clip);
+    if (key) map[key] = { score, level: energyLevel(score) };
+  });
+  return map;
+}
+
+export function dropEnergy(
+  map: Record<string, EnergyEntry>,
+  clip: ClipIdentity,
+): Record<string, EnergyEntry> {
+  const key = clipKey(clip);
+  if (!key || !(key in map)) return map;
+  const next = { ...map };
+  delete next[key];
+  return next;
+}
+
+/** Keeps the keyboard cursor on a row that exists after the clip list changes. */
+export const clampClipIndex = (idx: number | null, length: number): number | null =>
+  idx === null || length === 0 ? null : Math.min(idx, length - 1);
+
+/**
+ * The result for `clip`, or undefined if it has not been rendered. Rows written
+ * before the server stamped bounds (a restored session) carry no key, so they
+ * still land by position.
+ */
+export function findClipResult<T extends ClipResultRow>(
+  results: (T | undefined)[],
+  clip: { start_second?: number; end_second?: number },
+  positionalIdx: number,
+): T | undefined {
+  const key = clipBoundsKey(clip.start_second, clip.end_second);
+  if (key) {
+    const keyed = results.find((row) => resultBoundsKey(row) === key);
+    if (keyed) return keyed;
+  }
+  const row = results[positionalIdx];
+  return row && !resultBoundsKey(row) ? row : undefined;
+}

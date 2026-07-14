@@ -3,6 +3,7 @@
 # or ffmpeg needed; the binary provisions those itself on first run).
 # Usage: curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh
 # Uninstall: curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh -s -- --uninstall
+# Purge:     curl -fsSL https://raw.githubusercontent.com/nmbrthirteen/podcli/main/install.sh | sh -s -- --uninstall --purge
 set -eu
 
 REPO="nmbrthirteen/podcli"
@@ -19,6 +20,8 @@ esac
 bin_dir="$home_dir/bin"
 
 if [ "${1:-}" = "--uninstall" ]; then
+  purge=0
+  [ "${2:-}" = "--purge" ] && purge=1
   echo "Uninstalling podcli..."
   for d in /usr/local/bin "$HOME/.local/bin"; do
     link="$d/podcli"
@@ -30,7 +33,12 @@ if [ "${1:-}" = "--uninstall" ]; then
       fi
     fi
   done
-  for p in "$bin_dir" "$home_dir/runtime" "$home_dir/models" "$home_dir/tools"; do
+  if [ "$purge" = 1 ]; then
+    set -- "$home_dir"
+  else
+    set -- "$bin_dir" "$home_dir/runtime" "$home_dir/models"
+  fi
+  for p in "$@"; do
     if [ -e "$p" ]; then
       if rm -rf "$p"; then
         echo "  removed: $p"
@@ -39,9 +47,13 @@ if [ "${1:-}" = "--uninstall" ]; then
       fi
     fi
   done
-  echo "  removed app files from: $home_dir"
-  echo "  kept user data (config, knowledge, presets, assets, history, cache)."
-  echo "  To remove everything: rm -rf '$home_dir'"
+  if [ "$purge" = 1 ]; then
+    echo "  removed podcli and all managed data from: $home_dir"
+  else
+    echo "  removed app files from: $home_dir"
+    echo "  kept user data (config, knowledge, presets, assets, history, cache)."
+    echo "  To remove everything, re-run with: --uninstall --purge"
+  fi
   exit 0
 fi
 
@@ -52,7 +64,7 @@ case "$arch" in
 esac
 target="${goos}-${goarch}"
 if [ "$target" = "darwin-amd64" ]; then
-  err "Intel Macs aren't supported yet (coming in v2.0.1). Apple Silicon, Linux, and Windows are available."
+  err "Intel Macs aren't supported yet. Apple Silicon, Linux, and Windows are available."
 fi
 mkdir -p "$bin_dir"
 

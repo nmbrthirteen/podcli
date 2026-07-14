@@ -181,7 +181,7 @@ class AIFallbackTests(unittest.TestCase):
 
         calls = []
 
-        def fake_suggest(*, segments, top_n, exclude_clips=None, progress_callback=None, timeout=300, error_sink=None):
+        def fake_suggest(*, segments, top_n, exclude_clips=None, progress_callback=None, timeout=300, error_sink=None, reaction_times=None):
             calls.append({
                 "start": segments[0]["start"],
                 "end": segments[-1]["end"],

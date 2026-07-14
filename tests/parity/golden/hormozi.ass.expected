@@ -14,5 +14,5 @@ Style: Default,Arial,80,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 0,0:00:00.00,0:00:01.05,Default,,0,0,0,,{\c&H0000FFFF\2c&H00FFFFFF}{\kf34}THE {\kf37}JAMES {\kf33}WEBB
 Dialogue: 0,0:00:01.05,0:00:02.40,Default,,0,0,0,,{\c&H0000FFFF\2c&H00FFFFFF}{\kf57}TELESCOPE {\kf32}COST {\kf44}$10
-Dialogue: 0,0:00:02.40,0:00:03.60,Default,,0,0,0,,{\c&H0000FFFF\2c&H00FFFFFF}{\kf55}BILLION. {\kf44}WASN'T {\kf4}THAT
-Dialogue: 0,0:00:03.55,0:00:04.20,Default,,0,0,0,,{\c&H0000FFFF\2c&H00FFFFFF}{\kf65}EXPENSIVE?
+Dialogue: 0,0:00:02.40,0:00:03.10,Default,,0,0,0,,{\c&H0000FFFF\2c&H00FFFFFF}{\kf55}BILLION.
+Dialogue: 0,0:00:03.10,0:00:04.20,Default,,0,0,0,,{\c&H0000FFFF\2c&H00FFFFFF}{\kf44}WASN'T {\kf4}THAT {\kf65}EXPENSIVE?

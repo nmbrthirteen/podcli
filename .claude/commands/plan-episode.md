@@ -19,16 +19,14 @@ triggers:
 
 ## Before Starting
 
-Read the knowledge base:
-- `knowledge/01-brand-identity.md` — show positioning, what makes it unique
-- `knowledge/02-voice-and-tone.md` — voice fingerprint, what resonates with the audience
-- `knowledge/03-episodes-database.md` — past episodes (avoid repetition, find gaps)
-- `knowledge/05-title-formulas.md` — title patterns (design questions that produce title-worthy answers)
-- `knowledge/08-topics-themes.md` — core topics, audience interests
-- `knowledge/11-inspiration-channels.md` — reference channels and what they do well
-- `knowledge/13-learnings.md` — what consistently works / doesn't across past episodes
-
-If using podcli, replace `knowledge/` with `.podcli/knowledge/`.
+Read the knowledge base with the `knowledge_base` MCP tool:
+- `01-brand-identity.md` — show positioning, what makes it unique
+- `02-voice-and-tone.md` — voice fingerprint, what resonates with the audience
+- `03-episodes-database.md` — past episodes (avoid repetition, find gaps)
+- `05-title-formulas.md` — title patterns (design questions that produce title-worthy answers)
+- `08-topics-themes.md` — core topics, audience interests
+- `11-inspiration-channels.md` — reference channels and what they do well
+- `13-learnings.md` — what consistently works / doesn't across past episodes
 
 ---
 
@@ -127,7 +125,7 @@ For each planned moment, draft 2-3 title options BEFORE recording. This gives th
 
 ### Step 7: Apply Learnings
 
-Read `knowledge/13-learnings.md` and adjust:
+Read `13-learnings.md` and adjust:
 - Prefer question types that have produced high-performing shorts in past retros
 - Avoid patterns flagged as "consistently doesn't work"
 - Consider testing one Open Question if relevant
@@ -209,7 +207,7 @@ Read `knowledge/13-learnings.md` and adjust:
 
 ---
 
-## Applied Learnings (from knowledge/13-learnings.md)
+## Applied Learnings (from 13-learnings.md)
 - [Pattern applied in this plan] → [which question/moment uses it]
 - [Pattern avoided] → [what we're doing instead]
 

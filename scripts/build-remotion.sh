@@ -17,23 +17,9 @@ rm -rf "$out"
 mkdir -p "$out"
 cp -R "$here/remotion" "$out/remotion"
 cp "$here/tsconfig.json" "$out/tsconfig.json" 2>/dev/null || true
-
-cat > "$out/package.json" <<'JSON'
-{
-  "name": "podcli-remotion-bundle",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@remotion/bundler": "^4.0.441",
-    "@remotion/renderer": "^4.0.441",
-    "remotion": "^4.0.441",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "@fontsource/dm-sans": "^5.2.8"
-  }
-}
-JSON
+mv "$out/remotion/package.json" "$out/package.json"
+mv "$out/remotion/package-lock.json" "$out/package-lock.json"
 
 cd "$out"
-npm install --omit=dev --no-audit --no-fund --no-package-lock
+npm ci --omit=dev --no-audit --no-fund
 echo "remotion bundle -> $out"

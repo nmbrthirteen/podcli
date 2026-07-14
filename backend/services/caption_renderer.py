@@ -133,6 +133,36 @@ def render_captions(
 
 
 CAPTION_GAP_FILL_MAX = 0.4  # seconds
+CHUNK_BREAK_GAP = 0.8  # seconds of silence that forces a new caption chunk
+_TERMINAL_PUNCTUATION = (".", "?", "!")
+
+
+def _chunk_words(words: list[dict], chunk_size: int) -> list[list[dict]]:
+    """Group words into caption chunks.
+
+    Fixed word counts alone straddle sentence ends, speaker turns and pauses,
+    so a chunk also breaks after terminal punctuation, on a speaker change,
+    or across an inter-word gap longer than CHUNK_BREAK_GAP.
+    """
+    chunks: list[list[dict]] = []
+    current: list[dict] = []
+    for w in words:
+        if current:
+            prev = current[-1]
+            gap_break = float(w.get("start", 0)) - float(prev.get("end", 0)) > CHUNK_BREAK_GAP
+            speaker_break = (
+                w.get("speaker") is not None
+                and prev.get("speaker") is not None
+                and w.get("speaker") != prev.get("speaker")
+            )
+            sentence_break = str(prev.get("word", "")).strip().endswith(_TERMINAL_PUNCTUATION)
+            if len(current) >= chunk_size or gap_break or speaker_break or sentence_break:
+                chunks.append(current)
+                current = []
+        current.append(w)
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _hold_through_gap(chunks: list[list[dict]], idx: int, end: float, offset: float) -> float:
@@ -157,10 +187,7 @@ def _render_hormozi(words: list[dict], style: dict, offset: float) -> str:
     chunk_size = style["words_per_chunk"]
     uppercase = style["uppercase"]
 
-    chunks = []
-    for i in range(0, len(words), chunk_size):
-        chunk = words[i : i + chunk_size]
-        chunks.append(chunk)
+    chunks = _chunk_words(words, chunk_size)
 
     for idx, chunk in enumerate(chunks):
         if not chunk:
@@ -200,9 +227,7 @@ def _render_karaoke(words: list[dict], style: dict, offset: float) -> str:
     events = []
 
     sentence_size = style.get("words_per_chunk", 5)
-    sentences = []
-    for i in range(0, len(words), sentence_size):
-        sentences.append(words[i : i + sentence_size])
+    sentences = _chunk_words(words, sentence_size)
 
     for idx, sentence in enumerate(sentences):
         if not sentence:
@@ -238,9 +263,7 @@ def _render_subtle(words: list[dict], style: dict, offset: float) -> str:
     events = []
 
     line_size = style.get("words_per_chunk", 5)
-    lines = []
-    for i in range(0, len(words), line_size):
-        lines.append(words[i : i + line_size])
+    lines = _chunk_words(words, line_size)
 
     for idx, line_words in enumerate(lines):
         if not line_words:
@@ -502,11 +525,7 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
     play_res_y = 1920
     spacing = 2  # ASS Spacing field from header
 
-    # Group words into chunks
-    chunks = []
-    for i in range(0, len(words), chunk_size):
-        chunk = words[i : i + chunk_size]
-        chunks.append(chunk)
+    chunks = _chunk_words(words, chunk_size)
 
     for chunk_idx, chunk in enumerate(chunks):
         if not chunk:
@@ -582,7 +601,24 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
             line_left_x = (play_res_x - full_line_w) // 2
             line_geometry.append((line_center_ys[li], line_left_x, full_line_w, raw_space_w))
 
-        # For each word: emit pill + text (both explicitly positioned)
+        chunk_start_ts = seconds_to_ass(chunk_start)
+        chunk_end_ts = seconds_to_ass(chunk_end)
+
+        # Layer 1: the text layout is static for the whole chunk, so each word
+        # is emitted once for the chunk span. Only the karaoke pill below needs
+        # per-word events.
+        for li, line in enumerate(lines):
+            lcy_l, llx_l, _, asp_w = line_geometry[li]
+            wx = llx_l
+            for pi, (_, text, ww) in enumerate(line):
+                wcx = int(wx + ww // 2)
+                events.append(
+                    f"Dialogue: 1,{chunk_start_ts},{chunk_end_ts},BrandedNormal,,0,0,0,,"
+                    f"{{\\an5\\pos({wcx},{lcy_l})}}{text}"
+                )
+                wx += ww + asp_w
+
+        # Layer 0: per-word pill behind the active word
         for wi, w in enumerate(chunk):
             w_start = max(0, w["start"] - offset)
 
@@ -632,7 +668,6 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
             draw_offset_x = pill_w // 2
             draw_offset_y = pill_h // 2
 
-            # Layer 0: Pill — positioned at word center with \an5
             events.append(
                 f"Dialogue: 0,{start_ts},{end_ts},BrandedNormal,,0,0,0,,"
                 f"{{\\an7\\pos({word_cx - draw_offset_x},{line_cy - draw_offset_y})"
@@ -641,17 +676,5 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
                 f"}}"
                 f"{drawing}{{\\p0}}"
             )
-
-            # Layer 1: Each word positioned with \an5\pos for perfect pill alignment
-            for li, line in enumerate(lines):
-                lcy_l, llx_l, _, asp_w = line_geometry[li]
-                wx = llx_l
-                for pi, (_, text, ww) in enumerate(line):
-                    wcx = int(wx + ww // 2)
-                    events.append(
-                        f"Dialogue: 1,{start_ts},{end_ts},BrandedNormal,,0,0,0,,"
-                        f"{{\\an5\\pos({wcx},{lcy_l})}}{text}"
-                    )
-                    wx += ww + asp_w
 
     return header + "\n".join(events) + "\n"

@@ -1,0 +1,73 @@
+# CI only ran unit tests, so a change could break the render pipeline and still
+# go green: nothing in the pipeline ever produced a clip. This renders real ones.
+# Nightly rather than per-PR because it installs ffmpeg and a headless browser.
+name: nightly
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    name: End-to-end render
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install ffmpeg
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg ;;
+            macOS)   brew install --quiet ffmpeg ;;
+            Windows) choco install ffmpeg -y --no-progress ;;
+          esac
+          ffmpeg -version | head -1
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          npm ci
+          python -m pip install --upgrade pip
+          pip install numpy Pillow python-dotenv opencv-python-headless
+
+      # The caption renderer runs in a headless browser Remotion downloads on
+      # first use; failing here is a real failure, not a flake to retry away.
+      - name: Render a clip per caption style
+        shell: bash
+        run: |
+          for style in branded hormozi karaoke subtle; do
+            echo "::group::$style"
+            python scripts/e2e_render.py "$style"
+            echo "::endgroup::"
+          done
+
+      - name: Render the caption compositions directly
+        shell: bash
+        run: node remotion/test-render.mjs branded
+
+      - name: Upload the failed render for inspection
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-render-${{ matrix.os }}
+          path: e2e-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore

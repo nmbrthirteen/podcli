@@ -8,6 +8,7 @@ import {
 } from "remotion";
 import type { Word, CaptionStyle } from "../types";
 import { captionScale } from "../types";
+import { buildChunks, activeChunkAt } from "../chunks";
 
 interface Props {
   words: Word[];
@@ -16,61 +17,11 @@ interface Props {
   faceY?: number | null; // normalized 0-1 (0=top, 1=bottom)
 }
 
-interface Chunk {
-  words: Word[];
-  start: number;
-  end: number;
-}
-
 const MAX_CHARS_PER_CHUNK = 18;
-
-function buildChunks(words: Word[], perChunk: number): Chunk[] {
-  const chunks: Chunk[] = [];
-  let i = 0;
-
-  while (i < words.length) {
-    let end = i;
-    let charCount = 0;
-
-    while (end < words.length && end - i < perChunk) {
-      const nextWord = words[end].word.trim();
-      const nextChars = charCount === 0 ? nextWord.length : charCount + 1 + nextWord.length;
-
-      if (end > i && nextChars > MAX_CHARS_PER_CHUNK) {
-        break;
-      }
-
-      charCount = nextChars;
-      end += 1;
-    }
-
-    if (end === i) {
-      end = i + 1;
-    }
-
-    const remaining = words.length - end;
-    if (remaining === 1 && end - i > 2) {
-      end -= 1;
-    }
-
-    const slice = words.slice(i, end);
-    chunks.push({
-      words: slice,
-      start: slice[0].start,
-      end: slice[slice.length - 1].end,
-    });
-    i = end;
-  }
-
-  return chunks;
-}
 
 function splitIntoLines(words: Word[]): [Word[], Word[]] {
   if (words.length <= 2) {
     return [words, []];
-  }
-  if (words.length === 3) {
-    return [words.slice(0, 2), words.slice(2)];
   }
   return [words.slice(0, 2), words.slice(2)];
 }
@@ -137,7 +88,8 @@ const CaptionLine: React.FC<{
         color: style.color,
         textShadow: "0 0 40px rgba(0, 0, 0, 0.15), 0 0 80px rgba(0, 0, 0, 0.1), 0 0 150px rgba(0, 0, 0, 0.08)",
         lineHeight: 1.25,
-        whiteSpace: "nowrap",
+        maxWidth: "100%",
+        overflowWrap: "anywhere",
       }}
     >
       {words.map((word, i) => {
@@ -167,15 +119,18 @@ export const BrandedCaptions: React.FC<Props> = ({
   faceY,
 }) => {
   const frame = useCurrentFrame();
-  const { fps, height } = useVideoConfig();
+  const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
   const currentTime = frame / fps;
   const scaledStyle = { ...style, fontSize: style.fontSize * s };
 
-  const chunks = buildChunks(words, style.wordsPerChunk);
-  const activeChunk = chunks.find(
-    (c) => currentTime >= c.start && currentTime < c.end
-  );
+  const chunks = buildChunks(words, {
+    perChunk: style.wordsPerChunk,
+    maxChars: MAX_CHARS_PER_CHUNK,
+    splitTail: true,
+    clipEnd: durationInFrames / fps,
+  });
+  const activeChunk = activeChunkAt(chunks, currentTime);
 
   // Dynamic margin: if face is in the lower portion, push captions further down
   // faceY is normalized 0-1 (0=top, 1=bottom)

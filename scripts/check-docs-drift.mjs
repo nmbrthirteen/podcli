@@ -28,6 +28,28 @@ for (const claim of toolClaims) {
   }
 }
 
+const claudeMd = read("CLAUDE.md");
+const toolSection = claudeMd.split(/^## MCP tools/m)[1]?.split(/^## /m)[0] ?? "";
+const documentedTools = [...toolSection.matchAll(/^\| `([a-z0-9_]+)` \|/gm)].map((m) => m[1]).sort();
+if (Array.isArray(manifest.mcpToolNames)) {
+  const registered = [...manifest.mcpToolNames].sort();
+  const missing = registered.filter((t) => !documentedTools.includes(t));
+  const stale = documentedTools.filter((t) => !registered.includes(t));
+  if (missing.length) errors.push(`CLAUDE.md MCP tool table is missing: ${missing.join(", ")}`);
+  if (stale.length) errors.push(`CLAUDE.md MCP tool table lists unregistered tools: ${stale.join(", ")}`);
+  if (documentedTools.length !== registered.length) {
+    errors.push(`CLAUDE.md documents ${documentedTools.length} MCP tools but src registers ${registered.length}.`);
+  }
+  const claudeClaims = [...new Set([...claudeMd.matchAll(/All (\d+) tools/g)].map((m) => Number(m[1])))];
+  for (const claim of claudeClaims) {
+    if (claim !== registered.length) {
+      errors.push(`CLAUDE.md claims "${claim} tools" but src registers ${registered.length}.`);
+    }
+  }
+} else {
+  errors.push("docs-manifest.json has no mcpToolNames. Re-run: node scripts/gen-docs-manifest.mjs");
+}
+
 if (manifest.packageVersion && manifest.version && !manifest.version.endsWith(manifest.packageVersion)) {
   warnings.push(`package.json version ${manifest.packageVersion} lags the latest tag ${manifest.version}.`);
 }

@@ -20,10 +20,10 @@ triggers:
 ## Before Starting
 
 Read:
-- `knowledge/02-voice-and-tone.md` — voice fingerprint, banned words
-- `knowledge/05-title-formulas.md` — title rules and shapes
-- `knowledge/01-brand-identity.md` — brand positioning
-- `knowledge/13-learnings.md` — patterns from past retros (what worked, what didn't)
+- `02-voice-and-tone.md` — voice fingerprint, banned words
+- `05-title-formulas.md` — title rules and shapes
+- `01-brand-identity.md` — brand positioning
+- `13-learnings.md` — patterns from past retros (what worked, what didn't)
 
 ---
 
@@ -47,12 +47,12 @@ Dispatch subagents in parallel, each owning one dimension. Each returns a findin
 | Specialist | Owns | Always run? |
 |-----------|------|-------------|
 | **Voice Check** | Coffee Test, tone fingerprint match | Yes |
-| **Banned Words** | Exact scan against `knowledge/02-voice-and-tone.md` | Yes |
+| **Banned Words** | Exact scan against `02-voice-and-tone.md` | Yes |
 | **Title Review** | Length, keyword-first, shape, anchor presence, no tension-without-payoff | If titles in package |
 | **Standalone Check** | Each short makes sense without the episode | If shorts in package |
 | **Clickbait Detector** | Title promises something the clip can't deliver | If titles + clips both in package |
 | **SEO / Hashtags** | Description hashtags count, show hashtag present, keyword coverage | If descriptions in package |
-| **Duplication Check** | Cross-reference `knowledge/03-episodes-database.md` | If moments/shorts in package |
+| **Duplication Check** | Cross-reference `03-episodes-database.md` | If moments/shorts in package |
 
 Run specialists concurrently via `Task`. Collect findings, then merge with **deduplication**: if two specialists flag the same span/field, merge into one finding and raise confidence by +1 (cap 10). Tag `MULTI-SPECIALIST`.
 
