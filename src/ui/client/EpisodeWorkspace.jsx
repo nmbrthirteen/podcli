@@ -31,7 +31,7 @@ import MomentTrim from './MomentTrim';
 import { useDialog } from './useDialog';
 import { PageHeader } from './Page';
 import { buildPreviewChunks, activePreviewChunk, selectPreviewWords } from './captionChunks';
-import { findClipResult, resultBoundsKey } from './lib';
+import { findClipResult, resultBoundsKey, clipKey, buildEnergyMap, dropEnergy, clampClipIndex } from './lib';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
@@ -290,7 +290,7 @@ const onKeyActivate = (fn) => (e) => {
       return <div style={{ whiteSpace: 'normal' }}>{inner}</div>;
     }
 
-    function LivePhonePreview({ videoUrl, videoRef, captionStyle, activeClip, transcriptWords, logoPath, previewSrc, showTikTokFrame, onToggleFrame, clipEnded, onReplay }) {
+    function LivePhonePreview({ videoUrl, videoRef, captionStyle, activeClip, transcriptWords, logoPath, showTikTokFrame, onToggleFrame, clipEnded, onReplay }) {
       const cfg = STYLE_CONFIGS[captionStyle] || STYLE_CONFIGS.branded;
       const [logoBroken, setLogoBroken] = useState(false);
       useEffect(() => { setLogoBroken(false); }, [logoPath]);
@@ -362,8 +362,7 @@ const onKeyActivate = (fn) => (e) => {
           <div className="phone-notch" />
           {videoUrl ? (
             <video key={videoUrl} ref={videoRef} src={videoUrl}
-              muted playsInline preload="auto"
-              className={previewSrc ? '' : ''} />
+              muted playsInline preload="auto" />
           ) : (
             <div className="phone-empty">
               <div style={{ opacity: 0.4, display: 'flex' }}><Play size={22} /></div>
@@ -617,7 +616,7 @@ const onKeyActivate = (fn) => (e) => {
       }, [exportMenuOpen]);
 
       // Energy analysis
-      const [energyData, setEnergyData] = useState({}); // clip_id → { peak, avg, level }
+      const [energyData, setEnergyData] = useState({}); // clipKey(clip) → { score, level }
       const [analyzingEnergy, setAnalyzingEnergy] = useState(false);
 
       // Auto-transcribe + cache
@@ -718,17 +717,22 @@ const onKeyActivate = (fn) => (e) => {
 
       const saveClipEdit = () => {
         if (editingClip === null || editForm.end <= editForm.start) return;
+        const edited = suggestions[editingClip];
+        const reTimed = edited && (edited.start_second !== editForm.start || edited.end_second !== editForm.end);
         setSuggestions(prev => {
           const next = [...prev];
           next[editingClip] = { ...next[editingClip], title: editForm.title, start_second: editForm.start, end_second: editForm.end, duration: Math.round(editForm.end - editForm.start), segments: undefined };
           return next;
         });
+        // The score was measured over the old range, so it no longer describes this clip.
+        if (reTimed) setEnergyData(prev => dropEnergy(prev, edited));
         setEditingClip(null);
       };
 
       const deleteClipEdit = () => {
         if (editingClip === null) return;
         if (!confirm(`Delete clip "${editForm.title}" from this batch?`)) return;
+        const removed = suggestions[editingClip];
         setSuggestions(prev => prev.filter((_, i) => i !== editingClip));
         setDeselected(prev => {
           const next = new Set();
@@ -738,27 +742,20 @@ const onKeyActivate = (fn) => (e) => {
           }
           return next;
         });
+        if (removed) setEnergyData(prev => dropEnergy(prev, removed));
         setEditingClip(null);
       };
 
       // Energy analysis
       const analyzeEnergy = async () => {
         setAnalyzingEnergy(true);
+        const analyzed = suggestions;
         try {
-          const segments = suggestions.map(c => ({ start: c.start_second, end: c.end_second }));
+          const segments = analyzed.map(c => ({ start: c.start_second, end: c.end_second }));
           const vp = file?.file_path || videoPath.trim();
           const d = await api('/analyze-energy', { method: 'POST', body: JSON.stringify({ video_path: vp, segments }) });
           // Backend returns { segment_scores: [0-10, ...], peak_times: [...] }
-          if (d.segment_scores && Array.isArray(d.segment_scores)) {
-            const map = {};
-            d.segment_scores.forEach((score, i) => {
-              if (suggestions[i]) {
-                const level = score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low';
-                map[i] = { score: score, level };
-              }
-            });
-            setEnergyData(map);
-          }
+          if (Array.isArray(d.segment_scores)) setEnergyData(buildEnergyMap(d.segment_scores, analyzed));
         } catch {}
         finally { setAnalyzingEnergy(false); }
       };
@@ -896,16 +893,8 @@ const onKeyActivate = (fn) => (e) => {
 
         if (sseEvent.type === 'state-sync' || sseEvent.type === 'state') {
           const d = sseEvent.data;
-          if (d.suggestions) {
-            const sameClips = suggestions.length === d.suggestions.length &&
-              d.suggestions.every((c, i) => {
-                const p = suggestions[i];
-                return p && p.id === c.id && p.start_second === c.start_second && p.end_second === c.end_second;
-              });
-            setSuggestions(d.suggestions);
-            if (d.energyData !== undefined) setEnergyData(d.energyData || {});
-            else if (!sameClips) setEnergyData({});
-          }
+          if (d.suggestions) setSuggestions(d.suggestions);
+          if (d.energyData !== undefined) setEnergyData(d.energyData || {});
           if (d.deselectedIndices !== undefined) setDeselected(new Set(d.deselectedIndices));
           else if (d.suggestions && !d.deselectedIndices) setDeselected(new Set());
           if (d.phase) setPhase(d.phase);
@@ -949,9 +938,9 @@ const onKeyActivate = (fn) => (e) => {
             setBatchJobId(null);
           }
         }
-        // phase/transcript/suggestions are read above; the ts-guard makes re-runs
-        // on their change a no-op, so depending on them just keeps the reads fresh.
-      }, [sseEvent, phase, transcript, suggestions, applyClipResult]);
+        // phase/transcript are read above; the ts-guard makes re-runs on their
+        // change a no-op, so depending on them just keeps the reads fresh.
+      }, [sseEvent, phase, transcript, applyClipResult]);
 
       // Preview panel state
       const videoRef = useRef();
@@ -961,6 +950,12 @@ const onKeyActivate = (fn) => (e) => {
       const [clipEnded, setClipEnded] = useState(false);
 
       const activeClip = activeClipIdx !== null ? suggestions[activeClipIdx] : null;
+
+      // An agent can delete a clip out from under the cursor, leaving it on a row
+      // that no longer exists — space would then deselect an index nobody owns.
+      useEffect(() => {
+        setActiveClipIdx(prev => clampClipIndex(prev, suggestions.length));
+      }, [suggestions.length]);
 
       // Video source URL
       const videoUrl = previewSrc
@@ -1185,7 +1180,9 @@ const onKeyActivate = (fn) => (e) => {
       }, [retryStream?.status]);
 
       const toggleClip = (i) => setDeselected(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
-      const selectedCount = suggestions.length - deselected.size;
+      const selectedClips = suggestions.filter((_, i) => !deselected.has(i));
+      const selectedCount = selectedClips.length;
+      const clipRowRefs = useRef([]);
 
       // Keyboard shortcuts: j/k move clip selection, space toggles include, e edits
       useEffect(() => {
@@ -1204,12 +1201,14 @@ const onKeyActivate = (fn) => (e) => {
           if (key === 'j' || key === 'k') {
             e.preventDefault();
             setPreviewSrc(null);
-            setActiveClipIdx(prev => {
-              const cur = prev === null ? -1 : prev;
-              return key === 'j'
-                ? Math.min(cur + 1, suggestions.length - 1)
-                : Math.max(cur - 1, 0);
-            });
+            const cur = activeClipIdx === null ? -1 : activeClipIdx;
+            const next = key === 'j'
+              ? Math.min(cur + 1, suggestions.length - 1)
+              : Math.max(cur - 1, 0);
+            setActiveClipIdx(next);
+            // Without this the focus ring, the highlight, and what Enter
+            // re-activates drift onto different rows.
+            clipRowRefs.current[next]?.focus();
           } else if (key === ' ') {
             if (phase !== 'review' || activeClipIdx === null) return;
             e.preventDefault();
@@ -1315,7 +1314,7 @@ const onKeyActivate = (fn) => (e) => {
           if (data.clips && data.clips.length > 0) {
             // Claude returned suggestions — populate directly
             const mapped = data.clips.map((c, i) => ({
-              id: `claude-${i}`,
+              clip_id: `claude-${i}`,
               title: c.title,
               start_second: c.start_second,
               end_second: c.end_second,
@@ -1358,7 +1357,6 @@ const onKeyActivate = (fn) => (e) => {
 
       const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || transcribing || downloadingVideo;
       const sourceIsUrl = isHttpUrl(videoPath);
-      const selectedClips = suggestions.filter((_, i) => !deselected.has(i));
       const exportStats = phase === 'done' ? {
         total: results.length || selectedClips.length,
         ok: results.filter(r => r?.status === 'success').length,
@@ -1898,9 +1896,11 @@ const onKeyActivate = (fn) => (e) => {
                     const isRetryingThis = retryIdx === resultIdx;
                     const exportStatus = !off ? getExportStatus(clip, resultIdx) : null;
                     const isSelected = activeClipIdx === i && !previewSrc;
+                    const energy = energyData[clipKey(clip)];
 
                     return (
                       <div key={i} data-clip-row
+                        ref={el => { clipRowRefs.current[i] = el; }}
                         className={`clip-item ${off && phase === 'review' ? 'dimmed' : ''} ${phase === 'suggesting' ? 'clip-reveal' : ''} ${isSelected ? 'selected' : ''}`}
                         role="button" tabIndex={0} aria-label={`Preview clip: ${clip.title}`}
                         onClick={() => onClipClick(i)}
@@ -1930,9 +1930,9 @@ const onKeyActivate = (fn) => (e) => {
                           <div className="clip-title">{clip.title}</div>
                           <div className="clip-meta">
                             {fmt(clip.start_second)} {'\u2192'} {fmt(clip.end_second)} {'\u00B7'} {clip.duration}s
-                            {energyData[i] && (
-                              <span className={`energy-badge ${energyData[i].level}`} title={`Energy: ${energyData[i].score}/10`}>
-                                {energyData[i].level === 'high' ? <Activity size={10} /> : energyData[i].level === 'medium' ? '~' : '○'} {energyData[i].score.toFixed(1)}
+                            {energy && (
+                              <span className={`energy-badge ${energy.level}`} title={`Energy: ${energy.score}/10`}>
+                                {energy.level === 'high' ? <Activity size={10} /> : energy.level === 'medium' ? '~' : '○'} {energy.score.toFixed(1)}
                               </span>
                             )}
                             {r && !failed && <span> {'\u00B7'} {r.file_size_mb}MB</span>}
@@ -2102,7 +2102,8 @@ const onKeyActivate = (fn) => (e) => {
                   </div>
                 )}
 
-                {/* Style preview mockup — hidden when rendered clip is playing */}
+                {/* Style preview mockup — hidden when rendered clip is playing, whose
+                    captions are already burned in and whose clock is clip-relative */}
                 {!previewSrc && (
                   <LivePhonePreview
                     videoUrl={videoUrl}
@@ -2111,7 +2112,6 @@ const onKeyActivate = (fn) => (e) => {
                     activeClip={activeClip}
                     transcriptWords={transcript ? transcript.words : null}
                     logoPath={logoPath}
-                    previewSrc={previewSrc}
                     showTikTokFrame={showTikTokFrame}
                     onToggleFrame={() => setShowTikTokFrame(v => !v)}
                     clipEnded={clipEnded}
