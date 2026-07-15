@@ -47,4 +47,23 @@ describe("webpackOverride", () => {
     const config = webpackOverride(remotionLikeConfig());
     expect(config.module.rules[0].use[0]).toEqual({ loader: "css-loader" });
   });
+
+  it("inlines woff font assets so Remotion tabs do not fetch them", () => {
+    const config = webpackOverride({
+      module: {
+        rules: [
+          {
+            test: /\.(woff(2)?|otf|ttf|eot)(\?v=\d+\.\d+\.\d+)?$/,
+            type: "asset/resource",
+          },
+          {
+            test: /\.(png|svg|jpg)$/,
+            type: "asset/resource",
+          },
+        ],
+      },
+    });
+    expect(config.module.rules[0].type).toBe("asset/inline");
+    expect(config.module.rules[1].type).toBe("asset/resource");
+  });
 });

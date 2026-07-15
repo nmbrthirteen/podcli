@@ -1,26 +1,28 @@
-import "@fontsource/dm-sans/400.css";
-import "@fontsource/dm-sans/700.css";
 import React from "react";
 import { Composition, continueRender, delayRender, getInputProps } from "remotion";
 import { CaptionedClip } from "./CaptionedClip";
 import { Bookend } from "./Bookend";
 import { STYLES } from "./types";
 import type { Word } from "./types";
+import dmSans400 from "@fontsource/dm-sans/files/dm-sans-latin-400-normal.woff2";
+import dmSans700 from "@fontsource/dm-sans/files/dm-sans-latin-700-normal.woff2";
 
-// @fontsource only injects @font-face CSS and the browser fetches lazily, so
-// early frames can rasterize with fallback glyphs. Force the load and block
-// rendering on it. fonts.load() is used because fonts.ready resolves
-// immediately while no rendered text references the family yet.
 const fontsReady = delayRender("Waiting for DM Sans");
-Promise.all([
-  document.fonts.load("400 16px 'DM Sans'"),
-  document.fonts.load("700 16px 'DM Sans'"),
-])
-  .then(() => document.fonts.ready)
+
+const loadFace = (source: string, weight: string) =>
+  new FontFace("DM Sans", `url(${source})`, {
+    weight,
+    style: "normal",
+    display: "swap",
+  })
+    .load()
+    .then((face) => {
+      document.fonts.add(face);
+    });
+
+Promise.all([loadFace(dmSans400 as string, "400"), loadFace(dmSans700 as string, "700")])
   .then(() => continueRender(fontsReady))
   .catch((err) => {
-    // An unfetchable or unparseable woff2 must degrade to the fallback font. An
-    // uncleared delayRender fails every frame instead, killing the whole render.
     console.warn("DM Sans failed to load, falling back:", err);
     continueRender(fontsReady);
   });
@@ -33,7 +35,6 @@ const inputProps = getInputProps() as {
   faceY?: number | null;
   durationInFrames?: number;
   fps?: number;
-  // Bookend props
   bookendMode?: "intro" | "outro";
   bookendTitle?: string;
   bookendHandle?: string;
