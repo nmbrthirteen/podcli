@@ -1,11 +1,12 @@
-# CI only ran unit tests, so a change could break the render pipeline and still
-# go green: nothing in the pipeline ever produced a clip. This renders real ones.
-# Nightly rather than per-PR because it installs ffmpeg and a headless browser.
-name: nightly
+# PR CI never produces a real clip, so a change can break the render pipeline
+# and still go green. This runs the real path once a release is published
+# (plus manual dispatch). Scheduled daily was dropping unrelated failures when
+# nothing in the repo changed.
+name: post-release-render
 
 on:
-  schedule:
-    - cron: '0 4 * * *'
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -48,8 +49,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy Pillow python-dotenv opencv-python-headless
 
-      # The caption renderer runs in a headless browser Remotion downloads on
-      # first use; failing here is a real failure, not a flake to retry away.
       - name: Render a clip per caption style
         shell: bash
         run: |
