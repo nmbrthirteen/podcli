@@ -7,7 +7,7 @@ numpy>=2.5.1
 # Audio-event detection (YAMNet laughter/reaction channel) runs on ONNX Runtime —
 # no torch/TF, so it stays on the hermetic native path.
 onnxruntime>=1.27.0
-Pillow>=10.0.0
+Pillow>=12.3.0
 questionary>=2.1.1
 python-dotenv>=1.2.2
 yt-dlp>=2026.7.4
