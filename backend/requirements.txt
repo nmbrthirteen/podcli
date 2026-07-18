@@ -9,7 +9,7 @@ openai-whisper>=20250625
 # speechbrain>=1.0.0
 
 # Face detection (optional, for smart cropping)
-opencv-python-headless>=4.8.1.78
+opencv-python-headless>=5.0.0.93
 numpy>=2.5.1
 
 # Audio-event detection (laughter/reaction channel via YAMNet ONNX — no torch/TF)
