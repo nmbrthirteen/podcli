@@ -46,7 +46,7 @@
     "multer": "^2.2.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^6.30.4",
+    "react-router-dom": "^7.18.1",
     "remotion": "^4.0.490",
     "uuid": "^14.0.1",
     "winston": "^3.17.0",
