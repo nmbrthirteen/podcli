@@ -13,7 +13,7 @@ opencv-python-headless>=4.8.1.78
 numpy>=2.5.1
 
 # Audio-event detection (laughter/reaction channel via YAMNet ONNX — no torch/TF)
-onnxruntime>=1.27.0
+onnxruntime>=1.28.0
 
 # Thumbnails
 Pillow>=10.0.0
