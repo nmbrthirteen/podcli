@@ -18,6 +18,8 @@ Copy `.env.example` to `.env`, or export these in your shell. `setup.sh` copies 
 | `PODCLI_BACKEND` | resolved | Override the Python backend directory |
 | `PODCLI_PYTHON` | resolved | Override the Python interpreter. The launcher exports the resolved path as `PYTHON_PATH` for internal use |
 | `PODCLI_TRANSITION_AUTOFIX_PASSES` | auto | Transition QA/autofix passes. Runs only on reframes that can produce hard cuts. Set a number to force it, `0` disables; the renderer caps it at 2 |
+| `PODCLI_FACE_WORKERS` | auto | Threads used for face detection during reframing. Auto sizes by core count (max 12) and by clip length, so short clips stay serial rather than paying to build detectors they cannot amortize. Set `1` to force serial — the first thing to try when bisecting a framing regression, since it changes speed only, never the result |
+| `PODCLI_CROP_DUMP` | unset | Directory to write each clip's computed camera path to as `<clip>.crop.json`. Diagnostics only; use it to diff framing decisions before and after a change |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | Override the FFmpeg binaries |
 
 Installed builds provision their own Python, Node, FFmpeg, and whisper.cpp, so the
