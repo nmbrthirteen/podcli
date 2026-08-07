@@ -3,9 +3,18 @@
 </p>
 
 > [!NOTE]
-> **This is a maintained fork of [nmbrthirteen/podcli](https://github.com/nmbrthirteen/podcli).** It keeps Podcli's local processing and CLI while adding a simpler Studio workflow: full-episode YouTube preview and export, local silence removal, adjustable captions and logo placement, formatted transcript viewing and copying, and the `podclip` launcher. Upstream updates are merged regularly.
+> **This is a maintained product fork of [nmbrthirteen/podcli](https://github.com/nmbrthirteen/podcli).** It preserves Podcli's local-first engine and CLI while extending Studio for a simpler podcast-production workflow. Upstream changes are reviewed and merged regularly to limit drift.
 
-Launch the local Studio with `podclip`.
+### What this fork adds
+
+- One-command local Studio launch with `podclip`
+- Local silence detection, review, and removal before editing
+- Full-episode YouTube workflow with a large 16:9 preview and export
+- Live caption and logo previews with placement and font-size controls
+- Format-aware captions, including single-line captions for YouTube
+- Readable full-episode and per-clip transcripts with one-click copying
+
+Launch the Studio from any directory with `podclip`.
 
 <p align="center">
   <strong>Open-source AI podcast clipper.</strong><br/>

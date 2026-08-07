@@ -391,8 +391,15 @@ export default function ClipDetail() {
 
           {clip.transcript_slice && (
             <div className="section">
-              <label style={labelStyle}>Transcript</label>
-              <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.7 }}>{clip.transcript_slice}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <label style={{ ...labelStyle, marginBottom: 0 }}>Full clip transcript</label>
+                <CopyButton
+                  text={clip.transcript_slice}
+                  label="Copy transcript"
+                  copiedLabel="Copied"
+                />
+              </div>
+              <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{clip.transcript_slice}</div>
             </div>
           )}
         </div>
