@@ -29,7 +29,12 @@ def count_scene_cuts(video_path: str, threshold: float = 0.35) -> int:
             [
                 "ffmpeg",
                 "-i", str(video_path),
-                "-filter:v", f"select='gt(scene,{threshold})',showinfo",
+                # Audio and subtitles are irrelevant to scene detection, and the
+                # scene score is a whole-frame statistic — computing it on a
+                # 320px-wide copy gives the same cuts for a fraction of the
+                # decode. Downscale before select so the filter sees small frames.
+                "-an", "-sn",
+                "-filter:v", f"scale=320:-2,select='gt(scene,{threshold})',showinfo",
                 "-f", "null", "-",
             ],
             timeout=180,

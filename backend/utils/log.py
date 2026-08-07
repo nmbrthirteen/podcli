@@ -9,8 +9,12 @@ chosen path is always visible (and easy to grep) without a debugger.
 
 import os
 import sys
+import time
+from contextlib import contextmanager
 
 _VERBOSE = os.environ.get("PODCLI_LOG_VERBOSE", "").lower() in ("1", "true", "yes")
+
+_RESERVED_FIELDS = frozenset({"category", "message", "level", "stage", "ms"})
 
 
 def log_event(category: str, message: str, *, level: str = "info", **fields) -> None:
@@ -40,3 +44,31 @@ def warn(category: str, message: str, **fields) -> None:
 
 def debug(category: str, message: str, **fields) -> None:
     log_event(category, message, level="debug", **fields)
+
+
+@contextmanager
+def timed(category: str, stage: str, **fields):
+    """Time a block and emit `[category] timing stage=... ms=...` on exit.
+
+    Debug level, so stage timings stay silent unless PODCLI_LOG_VERBOSE is set.
+    Emits on failure too — a stage that blows up after 40s is exactly the one
+    worth seeing. Yields a dict the caller can add fields to before the line is
+    written, for counts that are only known once the block has run.
+    """
+    extra: dict = {}
+    start = time.perf_counter()
+    try:
+        yield extra
+    finally:
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        # A caller field named like a log_event parameter would raise TypeError
+        # here and mask whatever exception is already unwinding.
+        payload = {
+            key: value
+            for key, value in {**fields, **extra}.items()
+            if key not in _RESERVED_FIELDS
+        }
+        log_event(
+            category, "timing", level="debug",
+            stage=stage, ms=elapsed_ms, **payload,
+        )

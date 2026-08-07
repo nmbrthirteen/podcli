@@ -16,6 +16,7 @@ from typing import Optional, Callable
 
 from utils.proc import run as proc_run, ProcError
 from utils.text import safe_filename
+from utils.log import timed
 from config.paths import paths
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -816,10 +817,11 @@ def generate_clip(
             progress_callback(10, msg)
 
         segment_path = os.path.join(work_dir, "segment.mp4")
-        if keep_segments and len(keep_segments) > 1:
-            cut_multi_segment(video_path, segment_path, keep_segments)
-        else:
-            cut_segment(video_path, segment_path, start_second, end_second)
+        with timed("render", "cut", segments=len(keep_segments) if keep_segments else 1):
+            if keep_segments and len(keep_segments) > 1:
+                cut_multi_segment(video_path, segment_path, keep_segments)
+            else:
+                cut_segment(video_path, segment_path, start_second, end_second)
 
         # Remap transcript words for multi-segment clips.
         # Needed before crop (speaker detection) and captions.
@@ -861,18 +863,19 @@ def generate_clip(
             progress_callback(30, f"Resizing for {spec.name} format (2/{total_steps})")
 
         cropped_path = os.path.join(work_dir, "cropped.mp4")
-        if spec.reframe:
-            crop_to_vertical(
-                segment_path, cropped_path,
-                strategy=crop_strategy,
-                transcript_words=crop_words,
-                clip_start=crop_clip_start,
-                face_map=face_map,
-                crop_keyframes=crop_keyframes,
-                target_dims=spec.dims,
-            )
-        else:
-            fit_to_frame(segment_path, cropped_path, target_dims=spec.dims)
+        with timed("render", "crop", strategy=crop_strategy if spec.reframe else "fit"):
+            if spec.reframe:
+                crop_to_vertical(
+                    segment_path, cropped_path,
+                    strategy=crop_strategy,
+                    transcript_words=crop_words,
+                    clip_start=crop_clip_start,
+                    face_map=face_map,
+                    crop_keyframes=crop_keyframes,
+                    target_dims=spec.dims,
+                )
+            else:
+                fit_to_frame(segment_path, cropped_path, target_dims=spec.dims)
 
         # Step 3: Render captions (Remotion-first; ASS fallback optional)
         if transcript_words:
