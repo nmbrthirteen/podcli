@@ -11,15 +11,17 @@ from backend.utils.log import timed
 
 class TimedTests(unittest.TestCase):
     def test_reserved_field_does_not_mask_exception(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as context:
             with timed("crop", "detect", ms=1, message="collide"):
                 raise ValueError("original")
+        self.assertEqual(str(context.exception), "original")
 
     def test_reserved_extra_field_does_not_mask_exception(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as context:
             with timed("crop", "detect") as extra:
                 extra["level"] = "warn"
                 raise ValueError("original")
+        self.assertEqual(str(context.exception), "original")
 
     def test_yields_dict_for_late_fields(self):
         with timed("crop", "detect") as extra:
