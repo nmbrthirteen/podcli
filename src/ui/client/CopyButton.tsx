@@ -1,6 +1,37 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Copy, Check } from "lucide-react";
 
+async function copyText(value: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+  } catch {
+    // WebKit and embedded browsers can deny Clipboard API despite localhost.
+  }
+
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.opacity = "0";
+  field.style.pointerEvents = "none";
+  const activeElement = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+  document.body.appendChild(field);
+  let copied = false;
+  try {
+    field.select();
+    copied = document.execCommand("copy");
+  } finally {
+    field.remove();
+    activeElement?.focus({ preventScroll: true });
+  }
+  if (!copied) throw new Error("Clipboard unavailable");
+}
+
 type CopyButtonProps = {
   text?: string;
   getText?: () => string;
@@ -45,7 +76,7 @@ export default function CopyButton({
     if (!value) return;
 
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       setCopied(true);
       onCopied?.();
 

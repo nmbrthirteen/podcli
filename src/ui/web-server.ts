@@ -46,6 +46,12 @@ import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes
 import { childLogger } from "../utils/logger.js";
 import { sliceTranscript, sliceWords, findContentType, findSuggestionSegments } from "../utils/transcript.js";
 import { errMsg } from "../utils/errors.js";
+import { resolveByteRange } from "../utils/http-range.js";
+import {
+  FULL_EPISODE_CAPTION_STYLES,
+  fullEpisodeOutputStem,
+  parseFullEpisodeProgress,
+} from "../utils/full-episode-export.js";
 import type {
   AssetType,
   BatchClipsResult,
@@ -91,7 +97,7 @@ function safePath(base: string, filename: string): string | null {
 // Track active jobs so the UI can poll progress
 interface JobState {
   id: string;
-  type: "transcribe" | "create_clip" | "batch_clips" | "download_video";
+  type: "transcribe" | "create_clip" | "batch_clips" | "download_video" | "full_episode" | "silence_analysis" | "silence_render";
   status: "pending" | "running" | "done" | "error";
   progress: number;
   message: string;
@@ -122,6 +128,17 @@ setInterval(() => {
 
 /** Transcript data stored per file, plus optional face-tracking hints. */
 type ServerTranscript = TranscriptResult & { face_map?: unknown };
+type SilenceOriginal = { videoPath: string; transcript: ServerTranscript };
+type SilencePlan = {
+  keep_segments: Array<{ start: number; end: number }>;
+  removed_ranges: Array<{ start: number; end: number }>;
+  source_duration: number;
+  output_duration: number;
+  removed_duration: number;
+  removed_percent: number;
+  cut_count: number;
+  [key: string]: unknown;
+};
 
 // Store the latest transcript per uploaded file for the session
 const sessionTranscripts = new Map<string, ServerTranscript>();
@@ -133,6 +150,8 @@ interface UIState {
   activeExportJobId: string | null;
   transcript: ServerTranscript | null;
   rawTranscriptText: string;
+  silenceOriginal: SilenceOriginal | null;
+  silencePlan: SilencePlan | null;
   suggestions: SuggestedClip[];
   deselectedIndices: number[];
   settings: {
@@ -143,7 +162,13 @@ interface UIState {
     outroPath: string;
     introPath: string;
     cleanFillers: boolean;
+    captionPosition: string;
+    captionFontScale: number;
+    logoPosition: string;
     onboardingDismissed: boolean;
+    silenceThreshold: number;
+    silenceMinPause: number;
+    silencePadding: number;
   };
   phase: string;
   results: unknown[];
@@ -163,12 +188,17 @@ function loadPersistedState(): UIState {
         saved.filePath = "";
         saved.phase = "idle";
       }
+      if (saved.silenceOriginal?.videoPath && !existsSync(saved.silenceOriginal.videoPath)) {
+        saved.silenceOriginal = null;
+      }
       return {
         videoPath: saved.videoPath || "",
         filePath: saved.filePath || "",
         activeExportJobId: null,
         transcript: saved.transcript || null,
         rawTranscriptText: saved.rawTranscriptText || "",
+        silenceOriginal: saved.silenceOriginal || null,
+        silencePlan: saved.silencePlan || null,
         suggestions: saved.suggestions || [],
         deselectedIndices: saved.deselectedIndices || [],
         settings: {
@@ -179,7 +209,13 @@ function loadPersistedState(): UIState {
           outroPath: saved.settings?.outroPath || "",
           introPath: saved.settings?.introPath || "",
           cleanFillers: saved.settings?.cleanFillers !== false,
+          captionPosition: ["auto", "upper", "center", "lower"].includes(saved.settings?.captionPosition) ? saved.settings.captionPosition : "auto",
+          captionFontScale: Math.max(60, Math.min(160, Number(saved.settings?.captionFontScale) || 100)),
+          logoPosition: ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"].includes(saved.settings?.logoPosition) ? saved.settings.logoPosition : "top-left",
           onboardingDismissed: !!saved.settings?.onboardingDismissed,
+          silenceThreshold: Math.max(0.25, Math.min(0.8, Number(saved.settings?.silenceThreshold) || 0.5)),
+          silenceMinPause: Math.max(0.3, Math.min(5, Number(saved.settings?.silenceMinPause) || 0.65)),
+          silencePadding: Math.max(0.02, Math.min(0.5, Number(saved.settings?.silencePadding) || 0.12)),
         },
         // Never restore mid-export phases
         phase: ["exporting", "parsing", "suggesting"].includes(saved.phase)
@@ -203,6 +239,8 @@ function loadPersistedState(): UIState {
     activeExportJobId: null,
     transcript: null,
     rawTranscriptText: "",
+    silenceOriginal: null,
+    silencePlan: null,
     suggestions: [],
     deselectedIndices: [],
     settings: {
@@ -213,7 +251,13 @@ function loadPersistedState(): UIState {
       outroPath: "",
       introPath: "",
       cleanFillers: true,
+      captionPosition: "auto",
+      captionFontScale: 100,
+      logoPosition: "top-left",
       onboardingDismissed: false,
+      silenceThreshold: 0.5,
+      silenceMinPause: 0.65,
+      silencePadding: 0.12,
     },
     phase: "idle",
     results: [],
@@ -260,6 +304,7 @@ function registerSourcePath(p: string | undefined | null): void {
   } catch {}
 }
 registerSourcePath(uiState.videoPath);
+registerSourcePath(uiState.silenceOriginal?.videoPath);
 
 // Debounced save to disk
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -284,13 +329,12 @@ function streamVideo(req: Request, res: Response, filePath: string, contentType 
   const onErr = (stream: ReturnType<typeof createReadStream>) =>
     stream.on("error", () => res.destroy());
   if (range) {
-    const [s, e] = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(s, 10);
-    const end = e ? parseInt(e, 10) : fileSize - 1;
-    if (Number.isNaN(start) || Number.isNaN(end) || start > end || start < 0 || end >= fileSize) {
+    const resolved = resolveByteRange(range, fileSize);
+    if (!resolved) {
       res.writeHead(416, { "Content-Range": `bytes */${fileSize}` }).end();
       return;
     }
+    const { start, end } = resolved;
     res.writeHead(206, {
       "Content-Range": `bytes ${start}-${end}/${fileSize}`,
       "Accept-Ranges": "bytes",
@@ -491,6 +535,8 @@ function clearEpisodeSessionState(): void {
   uiState.activeExportJobId = null;
   uiState.transcript = null;
   uiState.rawTranscriptText = "";
+  uiState.silenceOriginal = null;
+  uiState.silencePlan = null;
   uiState.suggestions = [];
   uiState.deselectedIndices = [];
   uiState.phase = "idle";
@@ -503,7 +549,7 @@ function activeBlockingJobs(): JobState[] {
   return [...jobs.values()].filter(
     (job) =>
       job.status === "running" &&
-      ["transcribe", "create_clip", "batch_clips"].includes(job.type),
+      ["transcribe", "create_clip", "batch_clips", "silence_analysis", "silence_render"].includes(job.type),
   );
 }
 
@@ -1051,6 +1097,9 @@ app.post("/api/create-clip", async (req, res) => {
     allow_ass_fallback = false,
     content_type = null,
     keep_segments,
+    caption_position = "auto",
+    caption_font_scale = 100,
+    logo_position = "top-left",
   } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
@@ -1116,6 +1165,13 @@ app.post("/api/create-clip", async (req, res) => {
       .json({ error: `Invalid format. Use: ${validFormats.join(", ")}` });
     return;
   }
+  const validCaptionPositions = ["auto", "upper", "center", "lower"];
+  const validLogoPositions = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
+  if (!validCaptionPositions.includes(caption_position) || !validLogoPositions.includes(logo_position)) {
+    res.status(400).json({ error: "Invalid caption or logo position" });
+    return;
+  }
+  const normalizedFontScale = Math.max(60, Math.min(160, Number(caption_font_scale) || 100));
 
   await fileManager.ensureDirectories();
 
@@ -1156,6 +1212,9 @@ app.post("/api/create-clip", async (req, res) => {
         intro_path,
         clean_fillers,
         allow_ass_fallback,
+        caption_position,
+        caption_font_scale: normalizedFontScale,
+        logo_position,
         ...(enriched.keep_segments?.length && { keep_segments: enriched.keep_segments }),
       },
       (event) => {
@@ -1224,6 +1283,9 @@ app.post("/api/batch-clips", async (req, res) => {
     clean_fillers = false,
     keep_caption_overlay = false,
     format = "vertical",
+    caption_position = "auto",
+    caption_font_scale = 100,
+    logo_position = "top-left",
   } = req.body;
 
   if (!video_path || !existsSync(video_path)) {
@@ -1234,6 +1296,12 @@ app.post("/api/batch-clips", async (req, res) => {
     res.status(400).json({ error: "No clips provided" });
     return;
   }
+  if (!["auto", "upper", "center", "lower"].includes(caption_position) ||
+      !["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"].includes(logo_position)) {
+    res.status(400).json({ error: "Invalid caption or logo position" });
+    return;
+  }
+  const normalizedFontScale = Math.max(60, Math.min(160, Number(caption_font_scale) || 100));
 
   let logo_path: string | null = null;
   let outro_path: string | null = null;
@@ -1319,6 +1387,9 @@ app.post("/api/batch-clips", async (req, res) => {
         clean_fillers,
         keep_caption_overlay: keep_caption_overlay === true,
         face_map: uiState.transcript?.face_map,
+        caption_position,
+        caption_font_scale: normalizedFontScale,
+        logo_position,
       },
       (event) => {
         const progress = advanceProgress(job, event.percent);
@@ -1363,6 +1434,298 @@ app.post("/api/batch-clips", async (req, res) => {
       setExportState("review", null);
       broadcastSSE("job-error", { jobId, error: err.message });
     });
+});
+
+function findFullEpisodeRenderer(): string | null {
+  const candidates = [
+    join(paths.projectRoot, "remotion", "render-full-episode.mjs"),
+    join(paths.projectRoot, "runtime", "remotion", "render-full-episode.mjs"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) || null;
+}
+
+function reserveFullEpisodeOutput(videoPath: string): string {
+  const stem = fullEpisodeOutputStem(videoPath);
+  let candidate = join(paths.output, `${stem}.mp4`);
+  for (let suffix = 2; existsSync(candidate); suffix++) {
+    candidate = join(paths.output, `${stem}-${suffix}.mp4`);
+  }
+  return candidate;
+}
+
+/** Analyze spoken sections locally. The first run downloads a verified 1.3 MB VAD model. */
+app.post("/api/analyze-silence", async (req, res) => {
+  const {
+    video_path,
+    transcript_words = [],
+    threshold = 0.5,
+    min_silence_seconds = 0.65,
+    padding_seconds = 0.12,
+  } = req.body || {};
+  if (typeof video_path !== "string" || !existsSync(video_path)) {
+    res.status(400).json({ error: "Select a local episode first" });
+    return;
+  }
+  if (!Array.isArray(transcript_words) || transcript_words.length === 0) {
+    res.status(400).json({ error: "Transcribe the episode before removing silence" });
+    return;
+  }
+  const normalizedThreshold = Number(threshold);
+  const normalizedPause = Number(min_silence_seconds);
+  const normalizedPadding = Number(padding_seconds);
+  if (
+    !Number.isFinite(normalizedThreshold) || normalizedThreshold < 0.25 || normalizedThreshold > 0.8 ||
+    !Number.isFinite(normalizedPause) || normalizedPause < 0.3 || normalizedPause > 5 ||
+    !Number.isFinite(normalizedPadding) || normalizedPadding < 0.02 || normalizedPadding > 0.5
+  ) {
+    res.status(400).json({ error: "Invalid silence-removal settings" });
+    return;
+  }
+
+  const jobId = uuidv4();
+  const job: JobState = {
+    id: jobId,
+    type: "silence_analysis",
+    status: "running",
+    progress: 0,
+    message: "Preparing local silence analysis...",
+    createdAt: Date.now(),
+  };
+  jobs.set(jobId, job);
+  res.json({ job_id: jobId, status: "running" });
+
+  executor.execute<SilencePlan>("analyze_silence", {
+    video_path,
+    transcript_words,
+    threshold: normalizedThreshold,
+    min_silence_seconds: normalizedPause,
+    padding_seconds: normalizedPadding,
+  }, (event) => {
+    job.progress = event.percent;
+    job.message = event.message;
+  }).then((result) => {
+    job.status = "done";
+    job.progress = 100;
+    job.message = "Silence analysis ready";
+    job.result = result.data;
+  }).catch((err) => {
+    job.status = "error";
+    job.error = err.message;
+    job.message = `Error: ${err.message}`;
+  });
+});
+
+/** Render an approved keep plan locally, preserving the source and remapping captions. */
+app.post("/api/render-silence-removed", async (req, res) => {
+  const { video_path, keep_segments, transcript } = req.body || {};
+  if (typeof video_path !== "string" || !existsSync(video_path)) {
+    res.status(400).json({ error: "Source episode not found" });
+    return;
+  }
+  if (!Array.isArray(transcript?.words) || transcript.words.length === 0) {
+    res.status(400).json({ error: "Transcript is required to keep caption timing aligned" });
+    return;
+  }
+  if (!Array.isArray(keep_segments) || keep_segments.length === 0 || keep_segments.length > 5000) {
+    res.status(400).json({ error: "Invalid silence-removal plan" });
+    return;
+  }
+  const normalizedSegments: Array<{ start: number; end: number }> = [];
+  let previousEnd = 0;
+  for (const item of keep_segments) {
+    const start = Number(item?.start);
+    const end = Number(item?.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < previousEnd || end <= start) {
+      res.status(400).json({ error: "Silence-removal ranges must be ordered and non-overlapping" });
+      return;
+    }
+    normalizedSegments.push({ start, end });
+    previousEnd = end;
+  }
+  await fileManager.ensureDirectories();
+
+  const jobId = uuidv4();
+  const job: JobState = {
+    id: jobId,
+    type: "silence_render",
+    status: "running",
+    progress: 0,
+    message: "Creating compact episode...",
+    createdAt: Date.now(),
+  };
+  jobs.set(jobId, job);
+  res.json({ job_id: jobId, status: "running" });
+
+  executor.execute<{
+    output_path: string;
+    filename: string;
+    duration: number;
+    transcript: ServerTranscript;
+  }>("render_silence_removed", {
+    video_path,
+    keep_segments: normalizedSegments,
+    transcript,
+    output_dir: paths.output,
+  }, (event) => {
+    job.progress = event.percent;
+    job.message = event.message;
+  }).then((result) => {
+    job.status = "done";
+    job.progress = 100;
+    job.message = "Compact episode ready";
+    job.result = result.data;
+    if (result.data?.output_path) registerSourcePath(result.data.output_path);
+  }).catch((err) => {
+    job.status = "error";
+    job.error = err.message;
+    job.message = `Error: ${err.message}`;
+  });
+});
+
+/**
+ * POST /api/export-full-episode — Burn captions into the complete current source.
+ *
+ * Full episodes bypass clip duration limits and retain the source dimensions.
+ * The renderer chunks its temporary alpha overlay to keep disk use bounded.
+ */
+app.post("/api/export-full-episode", async (req, res) => {
+  const {
+    video_path,
+    transcript_words = [],
+    caption_style = "branded",
+    caption_position = "auto",
+    caption_font_scale = 100,
+    logo_position = "top-left",
+  } = req.body || {};
+
+  if (!video_path || typeof video_path !== "string" || !existsSync(video_path)) {
+    res.status(400).json({ error: "Video file not found" });
+    return;
+  }
+  if (!Array.isArray(transcript_words) || transcript_words.length === 0) {
+    res.status(400).json({ error: "Transcribe the episode before exporting it with captions" });
+    return;
+  }
+  if (!FULL_EPISODE_CAPTION_STYLES.includes(caption_style)) {
+    res.status(400).json({ error: `Invalid caption style. Use: ${FULL_EPISODE_CAPTION_STYLES.join(", ")}` });
+    return;
+  }
+  if (!["auto", "upper", "center", "lower"].includes(caption_position) ||
+      !["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"].includes(logo_position)) {
+    res.status(400).json({ error: "Invalid caption or logo position" });
+    return;
+  }
+  const normalizedFontScale = Math.max(60, Math.min(160, Number(caption_font_scale) || 100));
+
+  let logoPath: string | null = null;
+  if (req.body.logo_path) {
+    logoPath = await assetManager.resolve(req.body.logo_path);
+    if (!logoPath) {
+      res.status(400).json({ error: `logo not found: ${req.body.logo_path}` });
+      return;
+    }
+  }
+
+  const renderer = findFullEpisodeRenderer();
+  if (!renderer) {
+    res.status(500).json({ error: "Full-episode renderer is not installed" });
+    return;
+  }
+
+  await fileManager.ensureDirectories();
+  const outputPath = reserveFullEpisodeOutput(video_path);
+  const wordsPath = join(paths.working, `full-episode-${uuidv4()}.words.json`);
+  writeFileSync(wordsPath, JSON.stringify({ words: transcript_words }), "utf-8");
+
+  const jobId = uuidv4();
+  const job: JobState = {
+    id: jobId,
+    type: "full_episode",
+    status: "running",
+    progress: 0,
+    message: "Preparing full episode...",
+    createdAt: Date.now(),
+  };
+  jobs.set(jobId, job);
+  res.json({ job_id: jobId, status: "running" });
+
+  const args = [
+    renderer,
+    "--video", path.resolve(video_path),
+    "--words", wordsPath,
+    "--style", caption_style,
+    "--output", outputPath,
+    "--ffmpeg", paths.ffmpegPath,
+    "--ffprobe", paths.ffprobePath,
+    "--caption-position", caption_position,
+    "--caption-font-scale", String(normalizedFontScale),
+    "--logo-position", logo_position,
+  ];
+  if (caption_style === "branded" && logoPath) args.push("--logo", logoPath);
+
+  const child = spawn(process.execPath, args, {
+    cwd: dirname(renderer),
+    env: {
+      ...process.env,
+      PODCLI_CACHE_DIR: join(dirname(renderer), ".bundle-cache"),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdoutCarry = "";
+  let stderrTail = "";
+  const consumeStdout = (text: string, flush = false) => {
+    stdoutCarry += text;
+    const lines = stdoutCarry.split(/\r?\n/);
+    stdoutCarry = flush ? "" : lines.pop() || "";
+    for (const line of lines) {
+      const update = parseFullEpisodeProgress(line);
+      if (!update) continue;
+      job.progress = Math.max(job.progress, update.percent);
+      job.message = update.message;
+    }
+    if (flush && stdoutCarry) {
+      const update = parseFullEpisodeProgress(stdoutCarry);
+      if (update) {
+        job.progress = Math.max(job.progress, update.percent);
+        job.message = update.message;
+      }
+    }
+  };
+
+  child.stdout.on("data", (chunk) => consumeStdout(chunk.toString()));
+  child.stderr.on("data", (chunk) => {
+    stderrTail = (stderrTail + chunk.toString()).slice(-4000);
+  });
+  child.on("error", async (err) => {
+    job.status = "error";
+    job.error = err.message;
+    job.message = `Error: ${err.message}`;
+    try { await unlink(wordsPath); } catch { /* best effort */ }
+  });
+  child.on("close", async (code) => {
+    consumeStdout("", true);
+    try { await unlink(wordsPath); } catch { /* best effort */ }
+    if (job.status === "error") return;
+    if (code !== 0 || !existsSync(outputPath)) {
+      const detail = stderrTail.trim().split(/\r?\n/).slice(-4).join("\n");
+      job.status = "error";
+      job.error = detail || `Renderer exited with code ${code}`;
+      job.message = `Error: ${job.error}`;
+      return;
+    }
+
+    const stat = statSync(outputPath);
+    job.status = "done";
+    job.progress = 100;
+    job.message = "Full episode ready";
+    job.result = {
+      output_path: outputPath,
+      filename: basename(outputPath),
+      file_size_mb: Math.round((stat.size / (1024 * 1024)) * 100) / 100,
+      caption_style,
+    };
+  });
 });
 
 /**
@@ -3382,6 +3745,8 @@ app.get("/api/ui-state", (_req, res) => {
       : 0,
     transcript: uiState.transcript,
     rawTranscriptText: uiState.rawTranscriptText,
+    silenceOriginal: uiState.silenceOriginal,
+    silencePlan: uiState.silencePlan,
     lastUpdated: uiState.lastUpdated,
   });
 });
@@ -3394,11 +3759,44 @@ app.post("/api/ui-state", (req, res) => {
   // Track which fields changed for targeted SSE broadcasts
   const source = body._source || "mcp"; // UI sends _source:'ui'
 
+  // A newly mounted React client briefly holds form defaults before its SSE
+  // snapshot commits. Ignore that exact destructive shape so refresh/navigation
+  // cannot erase an existing episode. User-initiated Clear opts in explicitly.
+  const looksLikeMountDefaults =
+    source === "ui" &&
+    body._allowClear !== true &&
+    !!uiState.videoPath &&
+    body.videoPath === "";
+  if (looksLikeMountDefaults) {
+    res.json({ ok: true, ignored: "stale hydration defaults" });
+    return;
+  }
+
   if (body.videoPath !== undefined) uiState.videoPath = body.videoPath;
   if (body.filePath !== undefined) uiState.filePath = body.filePath;
   if (body.transcript !== undefined) uiState.transcript = body.transcript;
   if (body.rawTranscriptText !== undefined)
     uiState.rawTranscriptText = body.rawTranscriptText;
+  if (body.silenceOriginal !== undefined) {
+    const original = body.silenceOriginal;
+    if (original === null) {
+      uiState.silenceOriginal = null;
+    } else if (
+      typeof original?.videoPath === "string" &&
+      existsSync(original.videoPath) &&
+      Array.isArray(original?.transcript?.words)
+    ) {
+      uiState.silenceOriginal = original;
+      registerSourcePath(original.videoPath);
+    }
+  }
+  if (body.silencePlan !== undefined) {
+    const plan = body.silencePlan;
+    uiState.silencePlan = plan === null || (
+      Array.isArray(plan?.keep_segments) &&
+      Array.isArray(plan?.removed_ranges)
+    ) ? plan : uiState.silencePlan;
+  }
   if (body.suggestions !== undefined) {
     if (body._source === "ui" && Array.isArray(body.suggestions)) {
       uiState.suggestions = body.suggestions.map((incoming: SuggestedClip) => {
@@ -3440,8 +3838,20 @@ app.post("/api/ui-state", (req, res) => {
       uiState.settings.introPath = body.settings.introPath;
     if (body.settings.cleanFillers !== undefined)
       uiState.settings.cleanFillers = body.settings.cleanFillers !== false;
+    if (["auto", "upper", "center", "lower"].includes(body.settings.captionPosition))
+      uiState.settings.captionPosition = body.settings.captionPosition;
+    if (body.settings.captionFontScale !== undefined)
+      uiState.settings.captionFontScale = Math.max(60, Math.min(160, Number(body.settings.captionFontScale) || 100));
+    if (["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"].includes(body.settings.logoPosition))
+      uiState.settings.logoPosition = body.settings.logoPosition;
     if (body.settings.onboardingDismissed !== undefined)
       uiState.settings.onboardingDismissed = !!body.settings.onboardingDismissed;
+    if (body.settings.silenceThreshold !== undefined)
+      uiState.settings.silenceThreshold = Math.max(0.25, Math.min(0.8, Number(body.settings.silenceThreshold) || 0.5));
+    if (body.settings.silenceMinPause !== undefined)
+      uiState.settings.silenceMinPause = Math.max(0.3, Math.min(5, Number(body.settings.silenceMinPause) || 0.65));
+    if (body.settings.silencePadding !== undefined)
+      uiState.settings.silencePadding = Math.max(0.02, Math.min(0.5, Number(body.settings.silencePadding) || 0.12));
   }
   uiState.lastUpdated = Date.now();
   persistState();
@@ -3460,6 +3870,8 @@ app.post("/api/ui-state", (req, res) => {
       }),
       ...(body.phase !== undefined && { phase: uiState.phase }),
       ...(body.transcript !== undefined && { transcript: uiState.transcript }),
+      ...(body.silenceOriginal !== undefined && { silenceOriginal: uiState.silenceOriginal }),
+      ...(body.silencePlan !== undefined && { silencePlan: uiState.silencePlan }),
       ...(body.settings && { settings: uiState.settings }),
       energyData: uiState.energyData,
     });

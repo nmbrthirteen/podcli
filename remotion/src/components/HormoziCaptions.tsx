@@ -12,9 +12,10 @@ import { buildChunks, activeChunkAt } from "../chunks";
 interface Props {
   words: Word[];
   style: CaptionStyle;
+  singleLine?: boolean;
 }
 
-export const HormoziCaptions: React.FC<Props> = ({ words, style }) => {
+export const HormoziCaptions: React.FC<Props> = ({ words, style, singleLine = false }) => {
   const frame = useCurrentFrame();
   const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
@@ -65,6 +66,7 @@ export const HormoziCaptions: React.FC<Props> = ({ words, style }) => {
           maxWidth: `calc(100% - ${120 * s}px)`,
           boxSizing: "border-box",
           overflowWrap: "anywhere",
+          whiteSpace: singleLine ? "nowrap" : undefined,
           textAlign: "center",
           fontFamily: style.fontFamily,
           fontSize: style.fontSize * s,

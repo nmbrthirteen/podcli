@@ -23,17 +23,27 @@ import {
   ChevronRight,
   ChevronDown,
   ArrowRight,
+  Volume2,
+  Settings as SettingsGlyph,
+  Maximize,
+  Captions,
+  ThumbsUp,
+  Share2,
+  Bell,
+  Scissors,
 } from 'lucide-react';
 import CopyButton from './CopyButton';
 import AssetPicker from './AssetPicker';
+import { assetSrc, useAssets } from './useAssets';
 import RecentSources from './RecentSources';
 import MomentTrim from './MomentTrim';
 import { useDialog } from './useDialog';
 import { PageHeader } from './Page';
 import { buildPreviewChunks, activePreviewChunk, selectPreviewWords } from './captionChunks';
-import { findClipResult, resultBoundsKey, clipKey, buildEnergyMap, dropEnergy, clampClipIndex } from './lib';
+import { findClipResult, resultBoundsKey, clipKey, buildEnergyMap, dropEnergy, clampClipIndex, resolveAssetName, formatTranscriptText } from './lib';
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const fmtSaved = (s) => s < 10 ? `${Number(s || 0).toFixed(1)}s` : fmt(s);
 const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
 const onKeyActivate = (fn) => (e) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); fn(e); }
@@ -98,6 +108,45 @@ const onKeyActivate = (fn) => (e) => {
     const PREVIEW_SCALE = 0.27;
     const px = (n) => Math.round(n * PREVIEW_SCALE);
     const PROD_TO_PCT = (margin) => ((margin / 1920) * 100).toFixed(1) + '%';
+    const CAPTION_BOTTOMS = { upper: PROD_TO_PCT(760), center: PROD_TO_PCT(480), lower: PROD_TO_PCT(220) };
+    const captionBottom = (cfg, position) => CAPTION_BOTTOMS[position] || cfg.bottom;
+    const logoPlacement = (position) => {
+      const vertical = position.startsWith('bottom-') ? { bottom: '7%', top: 'auto' } : { top: '7%', bottom: 'auto' };
+      const horizontal = position.endsWith('-right')
+        ? { right: '3%', left: 'auto', transform: 'none' }
+        : position.endsWith('-center')
+          ? { left: '50%', right: 'auto', transform: 'translateX(-50%)' }
+          : { left: '3%', right: 'auto', transform: 'none' };
+      return { ...vertical, ...horizontal };
+    };
+
+    const LOGO_POSITIONS = [
+      ['top-left', 'Top left'],
+      ['top-center', 'Top center'],
+      ['top-right', 'Top right'],
+      ['bottom-left', 'Bottom left'],
+      ['bottom-center', 'Bottom center'],
+      ['bottom-right', 'Bottom right'],
+    ];
+
+    function LogoPositionPicker({ value, onChange, disabled }) {
+      const activeLabel = LOGO_POSITIONS.find(([position]) => position === value)?.[1] || 'Top left';
+      return (
+        <div className="logo-position-control">
+          <div className="logo-position-picker" role="radiogroup" aria-label="Logo position">
+            {LOGO_POSITIONS.map(([position, label]) => (
+              <button key={position} type="button" role="radio"
+                aria-checked={value === position} aria-label={label} title={label}
+                className={`logo-position-option${value === position ? ' selected' : ''}`}
+                disabled={disabled} onClick={() => onChange(position)}>
+                <span className={`logo-position-mark ${position}`} />
+              </button>
+            ))}
+          </div>
+          <output aria-live="polite">{activeLabel}</output>
+        </div>
+      );
+    }
 
     const STYLE_CONFIGS = {
       branded: {
@@ -207,7 +256,34 @@ const onKeyActivate = (fn) => (e) => {
       );
     }
 
-    function PhoneCaptionBody({ chunk, activeWordInChunk, cfg }) {
+    function YouTubeWireframe({ title, playing, progress, currentTime, duration, onTogglePlay }) {
+      return (
+        <div className="yt-wireframe">
+          <div className="ytwf-top-title">{title || 'Full episode preview'}</div>
+          {!playing && (
+            <button className="ytwf-center-play" onClick={onTogglePlay} aria-label="Play YouTube preview">
+              <Play size={22} fill="currentColor" />
+            </button>
+          )}
+          <div className="ytwf-bottom">
+            <div className="ytwf-progress"><span style={{ width: `${progress}%` }} /></div>
+            <div className="ytwf-controls">
+              <button onClick={onTogglePlay} aria-label={playing ? 'Pause' : 'Play'}>
+                {playing ? <span className="ytwf-pause">Ⅱ</span> : <Play size={14} fill="currentColor" />}
+              </button>
+              <Volume2 size={15} />
+              <span className="ytwf-time">{fmt(currentTime)} / {duration ? fmt(duration) : '0:00'}</span>
+              <span className="ytwf-spacer" />
+              <Captions size={16} />
+              <SettingsGlyph size={16} />
+              <Maximize size={16} />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function PhoneCaptionBody({ chunk, activeWordInChunk, cfg, singleLine = false }) {
       if (!chunk || !chunk.length) return null;
       const fmt = (w) => (cfg.uppercase ? w.toUpperCase() : w);
 
@@ -240,7 +316,7 @@ const onKeyActivate = (fn) => (e) => {
       };
 
       // Branded: split chunk into [first 2 words, rest], render as 2 lines.
-      if (cfg.splitLines) {
+      if (cfg.splitLines && !singleLine) {
         const [line1, line2] = splitBrandedLines(chunk);
         const startIdx2 = line1.length;
         return (
@@ -287,14 +363,11 @@ const onKeyActivate = (fn) => (e) => {
           }}>{inner}</div>
         );
       }
-      return <div style={{ whiteSpace: 'normal' }}>{inner}</div>;
+      return <div style={{ whiteSpace: singleLine ? 'nowrap' : 'normal' }}>{inner}</div>;
     }
 
-    function LivePhonePreview({ videoUrl, videoRef, captionStyle, activeClip, transcriptWords, logoPath, showTikTokFrame, onToggleFrame, clipEnded, onReplay }) {
+    function useLiveCaptionPreview({ videoUrl, videoRef, captionStyle, activeClip, transcriptWords }) {
       const cfg = STYLE_CONFIGS[captionStyle] || STYLE_CONFIGS.branded;
-      const [logoBroken, setLogoBroken] = useState(false);
-      useEffect(() => { setLogoBroken(false); }, [logoPath]);
-
       const sourcePool = useMemo(() => {
         const words = selectPreviewWords(transcriptWords, activeClip);
         return words.length >= 2 ? words : null;
@@ -356,6 +429,16 @@ const onKeyActivate = (fn) => (e) => {
         }
       }
 
+      return { cfg, usingSample, activeChunk, activeWordInChunk };
+    }
+
+    function LivePhonePreview({ videoUrl, videoRef, captionStyle, captionPosition, captionFontScale, logoPosition, activeClip, transcriptWords, logoPreviewUrl, showTikTokFrame, onToggleFrame, clipEnded, onReplay }) {
+      const { cfg, usingSample, activeChunk, activeWordInChunk } = useLiveCaptionPreview({
+        videoUrl, videoRef, captionStyle, activeClip, transcriptWords,
+      });
+      const [logoBroken, setLogoBroken] = useState(false);
+      useEffect(() => { setLogoBroken(false); }, [logoPreviewUrl]);
+
       return (
        <>
         <div className="phone-frame fade-in">
@@ -382,9 +465,9 @@ const onKeyActivate = (fn) => (e) => {
               <RotateCcw size={18} />
             </button>
           )}
-          {videoUrl && captionStyle === 'branded' && logoPath && !logoBroken && (
-            <div className="phone-logo">
-              <img src={`/api/stream-source?path=${encodeURIComponent(logoPath)}`}
+          {videoUrl && captionStyle === 'branded' && logoPreviewUrl && !logoBroken && (
+            <div className="phone-logo" style={logoPlacement(logoPosition)}>
+              <img src={logoPreviewUrl}
                 alt="Logo"
                 onError={() => setLogoBroken(true)}
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
@@ -392,8 +475,8 @@ const onKeyActivate = (fn) => (e) => {
           )}
           {videoUrl && (
             <div className="phone-caption" style={{
-              bottom: cfg.bottom,
-              fontSize: cfg.fontSize, fontWeight: cfg.fontWeight,
+              bottom: captionBottom(cfg, captionPosition),
+              fontSize: Math.round(cfg.fontSize * captionFontScale / 100), fontWeight: cfg.fontWeight,
               lineHeight: cfg.lineHeight,
               fontFamily: "'DM Sans', 'Inter', Arial, sans-serif",
             }}>
@@ -427,20 +510,110 @@ const onKeyActivate = (fn) => (e) => {
       );
     }
 
+    function LiveYouTubePreview({ videoUrl, videoRef, captionStyle, captionPosition, captionFontScale, logoPosition, transcriptWords, logoPreviewUrl, rendered, title, showYouTubeFrame, onToggleFrame, onBack }) {
+      const { cfg, usingSample, activeChunk, activeWordInChunk } = useLiveCaptionPreview({
+        videoUrl, videoRef, captionStyle, activeClip: null, transcriptWords,
+      });
+      const [logoBroken, setLogoBroken] = useState(false);
+      const [playing, setPlaying] = useState(false);
+      const [currentTime, setCurrentTime] = useState(0);
+      const [duration, setDuration] = useState(0);
+      useEffect(() => { setLogoBroken(false); }, [logoPreviewUrl]);
+      useEffect(() => { setPlaying(false); setCurrentTime(0); setDuration(0); }, [videoUrl]);
+
+      const togglePlay = () => {
+        const video = videoRef?.current;
+        if (!video) return;
+        if (video.paused) video.play().catch(() => {});
+        else video.pause();
+      };
+      const progress = duration > 0 ? Math.max(0, Math.min(100, (currentTime / duration) * 100)) : 0;
+
+      return (
+        <div className="youtube-preview fade-in">
+          <div className="youtube-preview-canvas">
+            {videoUrl ? (
+              <video key={videoUrl} ref={videoRef} src={videoUrl} controls={!showYouTubeFrame} playsInline preload="auto"
+                onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
+                onTimeUpdate={e => setCurrentTime(e.currentTarget.currentTime || 0)}
+                onLoadedMetadata={e => setDuration(e.currentTarget.duration || 0)} />
+            ) : (
+              <div className="youtube-preview-empty"><Play size={24} />Select a video to preview</div>
+            )}
+            {videoUrl && !rendered && cfg.gradient && <div className="youtube-preview-gradient" />}
+            {videoUrl && !rendered && captionStyle === 'branded' && logoPreviewUrl && !logoBroken && (
+              <div className="youtube-preview-logo" style={logoPlacement(logoPosition)}>
+                <img src={logoPreviewUrl}
+                  alt="Logo" onError={() => setLogoBroken(true)} />
+              </div>
+            )}
+            {videoUrl && !rendered && (
+              <div className="youtube-preview-caption" style={{
+                bottom: captionBottom(cfg, captionPosition),
+                fontSize: Math.max(15, Math.round(cfg.fontSize * 0.65 * captionFontScale / 100)),
+                fontWeight: cfg.fontWeight,
+                lineHeight: cfg.lineHeight,
+                fontFamily: "'DM Sans', 'Inter', Arial, sans-serif",
+              }}>
+                <PhoneCaptionBody
+                  chunk={activeChunk ? activeChunk.words.map(w => w.text) : null}
+                  activeWordInChunk={activeWordInChunk}
+                  cfg={cfg}
+                  singleLine
+                />
+                {usingSample && <div className="youtube-preview-placeholder">Transcribe to preview captions</div>}
+              </div>
+            )}
+            {videoUrl && showYouTubeFrame && (
+              <YouTubeWireframe title={title} playing={playing} progress={progress}
+                currentTime={currentTime} duration={duration} onTogglePlay={togglePlay} />
+            )}
+          </div>
+          {showYouTubeFrame && (
+            <div className="youtube-page-meta">
+              <div className="youtube-page-title">{title || 'Full episode preview'}</div>
+              <div className="youtube-page-row">
+                <div className="youtube-channel-avatar">P</div>
+                <div className="youtube-channel-copy"><strong>Your channel</strong><span>Full episode</span></div>
+                <div className="youtube-subscribe"><Bell size={12} /> Subscribe</div>
+                <div className="youtube-page-spacer" />
+                <div className="youtube-action"><ThumbsUp size={13} /> Like</div>
+                <div className="youtube-action"><Share2 size={13} /> Share</div>
+              </div>
+            </div>
+          )}
+          <div className="youtube-preview-bar">
+            <div>
+              <strong>YouTube full episode</strong>
+              <span>{rendered ? 'Rendered captions' : 'Live caption preview · 16:9'}</span>
+            </div>
+            <button className="preview-back" onClick={onBack}>Back to clip preview</button>
+          </div>
+          <div className="preview-toggle-row youtube-toggle-row">
+            <label>
+              <input type="checkbox" checked={!!showYouTubeFrame} onChange={onToggleFrame} />
+              YouTube wireframe
+            </label>
+          </div>
+        </div>
+      );
+    }
+
     /* ── Spec Recap ── re-renders form state as a reviewable card. */
-    function SpecRecap({ captionStyle, cropStrategy, logoPath, outroPath, activePreset, quality, cleanFillers }) {
+    function SpecRecap({ captionStyle, captionPosition, captionFontScale, logoPosition, cropStrategy, logoPath, outroPath, activePreset, quality, cleanFillers }) {
       const cfg = STYLE_CONFIGS[captionStyle] || STYLE_CONFIGS.branded;
       // Sample "color" comes from the active-word style of the caption preset.
       const swatch = (cfg.activeStyle && (cfg.activeStyle.color || cfg.activeStyle.background)) || '#ffffff';
       const rows = [
         ['Caption style', captionStyle],
         ['Crop', cropStrategy],
-        ['Font size', `${cfg.fontSize}px`],
+        ['Caption size', `${captionFontScale}%`],
+        ['Caption position', captionPosition],
         ['Highlight', <span><span className="sr-swatch" style={{ background: swatch }} />{swatch}</span>],
         ['Quality', quality || 'standard'],
         ['Clean fillers', cleanFillers ? 'on' : 'off'],
       ];
-      if (logoPath) rows.push(['Logo', logoPath.split('/').pop()]);
+      if (logoPath) rows.push(['Logo', `${logoPath.split('/').pop()} · ${logoPosition}`]);
       if (outroPath) rows.push(['Outro', outroPath.split('/').pop()]);
       if (activePreset) rows.push(['Preset', activePreset]);
       return (
@@ -524,6 +697,7 @@ const onKeyActivate = (fn) => (e) => {
     }
 
     export default function App() {
+      const { assets } = useAssets();
       const [videoPath, setVideoPath] = useState('');
       const [transcriptMode, setTranscriptMode] = useState('whisper');
       const [transcriptText, setTranscriptText] = useState('');
@@ -532,13 +706,21 @@ const onKeyActivate = (fn) => (e) => {
       const [assemblyAiKey, setAssemblyAiKey] = useState('');
       const [whisperModel, setWhisperModel] = useState('base');
       const [captionStyle, setCaptionStyle] = useState('branded');
+      const [captionPosition, setCaptionPosition] = useState('auto');
+      const [captionFontScale, setCaptionFontScale] = useState(100);
+      const [logoPosition, setLogoPosition] = useState('top-left');
       const [cropStrategy, setCropStrategy] = useState('face');
       const [format, setFormat] = useState('vertical');
       const [showTikTokFrame, setShowTikTokFrame] = useState(false);
       const [logoPath, setLogoPath] = useState('');
       const [outroPath, setOutroPath] = useState('');
       const [introPath, setIntroPath] = useState('');
-      const initializedRef = useRef(false);
+      const logoPreviewUrl = useMemo(() => {
+        const name = resolveAssetName(assets, logoPath, 'logo');
+        return name ? assetSrc(name) : '';
+      }, [assets, logoPath]);
+      const [stateHydrated, setStateHydrated] = useState(false);
+      const hydrationTargetRef = useRef(null);
       const videoFileRef = useRef();
       const [transcriptDragOver, setTranscriptDragOver] = useState(false);
       const [transcriptFileName, setTranscriptFileName] = useState('');
@@ -546,11 +728,27 @@ const onKeyActivate = (fn) => (e) => {
       const [phase, setPhase] = useState('idle');
       const [file, setFile] = useState(null);
       const [transcript, setTranscript] = useState(null);
+      const [transcriptOpen, setTranscriptOpen] = useState(true);
+      const [transcriptFormat, setTranscriptFormat] = useState('readable');
+      const formattedTranscript = useMemo(
+        () => formatTranscriptText(transcript, transcriptFormat),
+        [transcript, transcriptFormat],
+      );
       const [suggestions, setSuggestions] = useState([]);
       const [deselected, setDeselected] = useState(new Set());
       const [batchJobId, setBatchJobId] = useState(null);
       const batchStream = useJob(batchJobId);
       const [results, setResults] = useState([]);
+      const [fullEpisodeJobId, setFullEpisodeJobId] = useState(null);
+      const fullEpisodeStream = useJob(fullEpisodeJobId);
+      const [fullEpisodeResult, setFullEpisodeResult] = useState(null);
+      const [silenceOriginal, setSilenceOriginal] = useState(null);
+      const [silencePlan, setSilencePlan] = useState(null);
+      const [silenceAnalyzeJobId, setSilenceAnalyzeJobId] = useState(null);
+      const silenceAnalyzeStream = useJob(silenceAnalyzeJobId);
+      const [silenceRenderJobId, setSilenceRenderJobId] = useState(null);
+      const silenceRenderStream = useJob(silenceRenderJobId);
+      const pendingSilenceOriginalRef = useRef(null);
       const [error, setError] = useState(null);
       const [previewFile, setPreviewFile] = useState(null);
       const [momentText, setMomentText] = useState('');
@@ -590,6 +788,10 @@ const onKeyActivate = (fn) => (e) => {
       const [minDuration, setMinDuration] = useState(20);
       const [maxDuration, setMaxDuration] = useState(45);
       const [energyBoost, setEnergyBoost] = useState(true);
+      const [showYouTubeFrame, setShowYouTubeFrame] = useState(true);
+      const [silenceThreshold, setSilenceThreshold] = useState(0.5);
+      const [silenceMinPause, setSilenceMinPause] = useState(0.65);
+      const [silencePadding, setSilencePadding] = useState(0.12);
 
       // Clip editing
       const [editingClip, setEditingClip] = useState(null); // index
@@ -640,6 +842,9 @@ const onKeyActivate = (fn) => (e) => {
           const response = await api('/presets', { method: 'POST', body: JSON.stringify({ action: 'get', name }) });
           const d = response.config || response;
           if (d.caption_style) setCaptionStyle(d.caption_style);
+          if (d.caption_position) setCaptionPosition(d.caption_position);
+          if (d.caption_font_scale) setCaptionFontScale(Number(d.caption_font_scale));
+          if (d.logo_position) setLogoPosition(d.logo_position);
           if (d.crop_strategy) setCropStrategy(d.crop_strategy);
           if (d.format) setFormat(d.format);
           if (d.logo_path !== undefined) setLogoPath(d.logo_path || '');
@@ -651,6 +856,8 @@ const onKeyActivate = (fn) => (e) => {
             setVideoPath(nextVideoPath);
             setFile(null);
             if (changedVideo) {
+              setSilenceOriginal(null);
+              setSilencePlan(null);
               setTranscript(null);
               setCachedTranscript(false);
               setTranscriptText('');
@@ -684,7 +891,7 @@ const onKeyActivate = (fn) => (e) => {
         try {
           await api('/presets', { method: 'POST', body: JSON.stringify({
             action: 'save', name: presetName.trim(),
-            config: { caption_style: captionStyle, crop_strategy: cropStrategy, format, logo_path: logoPath, outro_path: outroPath, intro_path: introPath, video_path: videoPath.trim(), whisper_model: whisperModel, transcription_engine: transcriptionEngine, time_adjust: timeAdjust, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
+            config: { caption_style: captionStyle, caption_position: captionPosition, caption_font_scale: captionFontScale, logo_position: logoPosition, crop_strategy: cropStrategy, format, logo_path: logoPath, outro_path: outroPath, intro_path: introPath, video_path: videoPath.trim(), whisper_model: whisperModel, transcription_engine: transcriptionEngine, time_adjust: timeAdjust, clean_fillers: cleanFillers, quality, top_clips: topClips, min_clip_duration: minDuration, max_clip_duration: maxDuration, energy_boost: energyBoost }
           })});
           setActivePreset(presetName.trim());
           setPresetName(''); setShowPresetSave(false);
@@ -831,43 +1038,49 @@ const onKeyActivate = (fn) => (e) => {
       // Guard: don't sync until initial SSE state has been received to avoid overwriting persisted state with defaults
       const prevSyncRef = useRef('');
       useEffect(() => {
-        if (!initializedRef.current) return;
-        const state = {
-          _source: 'ui',
+        if (!stateHydrated) return;
+        const syncable = {
           videoPath,
-          filePath: file?.file_path || '',
+          silenceOriginal,
+          silencePlan,
           suggestions,
           deselectedIndices: Array.from(deselected),
-          settings: { captionStyle, cropStrategy, format, logoPath, outroPath, introPath, cleanFillers },
+          settings: { captionStyle, captionPosition, captionFontScale, logoPosition, cropStrategy, format, logoPath, outroPath, introPath, cleanFillers, silenceThreshold, silenceMinPause, silencePadding },
           phase,
           results,
           energyData,
         };
+        const signature = JSON.stringify(syncable);
+        // React may expose the readiness flag before every restored field has
+        // committed. Never let that intermediate render erase server state.
+        if (hydrationTargetRef.current && signature !== hydrationTargetRef.current) return;
+        hydrationTargetRef.current = null;
+        const state = { _source: 'ui', filePath: file?.file_path || '', ...syncable };
         const key = JSON.stringify(state);
         if (key === prevSyncRef.current) return;
         prevSyncRef.current = key;
         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => { });
-      }, [videoPath, file, suggestions, deselected, captionStyle, cropStrategy, format, logoPath, outroPath, introPath, cleanFillers, phase, results, energyData]);
+      }, [stateHydrated, videoPath, file, silenceOriginal, silencePlan, suggestions, deselected, captionStyle, captionPosition, captionFontScale, logoPosition, cropStrategy, format, logoPath, outroPath, introPath, cleanFillers, silenceThreshold, silenceMinPause, silencePadding, phase, results, energyData]);
 
       // Sync transcript separately (large payload)
       const prevTranscriptRef = useRef(null);
       useEffect(() => {
-        if (!initializedRef.current) return;
+        if (!stateHydrated) return;
         if (!transcript || transcript === prevTranscriptRef.current) return;
         prevTranscriptRef.current = transcript;
         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', transcript }) }).catch(() => { });
-      }, [transcript]);
+      }, [stateHydrated, transcript]);
 
       // Sync raw transcript text so MCP can read it before pipeline runs
       const prevRawRef = useRef('');
       useEffect(() => {
-        if (!initializedRef.current) return;
+        if (!stateHydrated) return;
         if (transcriptText === prevRawRef.current) return;
         prevRawRef.current = transcriptText;
         if (transcriptText.trim()) {
           fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', rawTranscriptText: transcriptText }) }).catch(() => { });
         }
-      }, [transcriptText]);
+      }, [stateHydrated, transcriptText]);
 
       const resultFor = useCallback(
         (clip, resultIdx) => findClipResult(results, clip, resultIdx),
@@ -893,6 +1106,33 @@ const onKeyActivate = (fn) => (e) => {
 
         if (sseEvent.type === 'state-sync' || sseEvent.type === 'state') {
           const d = sseEvent.data;
+          if (sseEvent.type === 'state') {
+            hydrationTargetRef.current = JSON.stringify({
+              videoPath: d.videoPath || '',
+              silenceOriginal: d.silenceOriginal || null,
+              silencePlan: d.silencePlan || null,
+              suggestions: d.suggestions || [],
+              deselectedIndices: d.deselectedIndices || [],
+              settings: {
+                captionStyle: d.settings?.captionStyle || 'branded',
+                captionPosition: d.settings?.captionPosition || 'auto',
+                captionFontScale: d.settings?.captionFontScale || 100,
+                logoPosition: d.settings?.logoPosition || 'top-left',
+                cropStrategy: d.settings?.cropStrategy || 'speaker',
+                format: d.settings?.format || 'vertical',
+                logoPath: d.settings?.logoPath || '',
+                outroPath: d.settings?.outroPath || '',
+                introPath: d.settings?.introPath || '',
+                cleanFillers: d.settings?.cleanFillers !== false,
+                silenceThreshold: d.settings?.silenceThreshold || 0.5,
+                silenceMinPause: d.settings?.silenceMinPause || 0.65,
+                silencePadding: d.settings?.silencePadding || 0.12,
+              },
+              phase: d.phase || 'idle',
+              results: Array.isArray(d.results) ? d.results : [],
+              energyData: d.energyData || {},
+            });
+          }
           if (d.suggestions) setSuggestions(d.suggestions);
           if (d.energyData !== undefined) setEnergyData(d.energyData || {});
           if (d.deselectedIndices !== undefined) setDeselected(new Set(d.deselectedIndices));
@@ -901,6 +1141,8 @@ const onKeyActivate = (fn) => (e) => {
           if (sseEvent.type === 'state' && Array.isArray(d.results)) setResults(d.results);
           if (d.activeExportJobId !== undefined) setBatchJobId(d.activeExportJobId);
           if (d.videoPath !== undefined) setVideoPath(d.videoPath);
+          if (d.silenceOriginal !== undefined) setSilenceOriginal(d.silenceOriginal);
+          if (d.silencePlan !== undefined) setSilencePlan(d.silencePlan);
           if (d.transcript !== undefined) {
             setTranscript(d.transcript);
             if (d.videoPath) autoTranscribeRef.current = d.videoPath;
@@ -909,16 +1151,23 @@ const onKeyActivate = (fn) => (e) => {
           if (d.rawTranscriptText !== undefined && (d.transcript === null || !transcript)) setTranscriptText(d.rawTranscriptText);
           if (d.settings) {
             if (d.settings.captionStyle) setCaptionStyle(d.settings.captionStyle);
+            if (d.settings.captionPosition) setCaptionPosition(d.settings.captionPosition);
+            if (d.settings.captionFontScale) setCaptionFontScale(Number(d.settings.captionFontScale));
+            if (d.settings.logoPosition) setLogoPosition(d.settings.logoPosition);
             if (d.settings.cropStrategy) setCropStrategy(d.settings.cropStrategy);
             if (d.settings.format) setFormat(d.settings.format);
             if (d.settings.logoPath !== undefined) setLogoPath(d.settings.logoPath);
             if (d.settings.outroPath !== undefined) setOutroPath(d.settings.outroPath);
             if (d.settings.introPath !== undefined) setIntroPath(d.settings.introPath);
             if (d.settings.cleanFillers !== undefined) setCleanFillers(d.settings.cleanFillers !== false);
+            if (d.settings.silenceThreshold !== undefined) setSilenceThreshold(Number(d.settings.silenceThreshold));
+            if (d.settings.silenceMinPause !== undefined) setSilenceMinPause(Number(d.settings.silenceMinPause));
+            if (d.settings.silencePadding !== undefined) setSilencePadding(Number(d.settings.silencePadding));
           }
-          // Mark initialized after first state restoration so sync useEffects don't overwrite with defaults
+          // Flip readiness in the same React batch as the restored fields. The
+          // first sync therefore contains restored values, never mount defaults.
           if (sseEvent.type === 'state') {
-            initializedRef.current = true;
+            setStateHydrated(true);
           }
         } else if (sseEvent.type === 'export-started') {
           setBatchJobId(sseEvent.data.jobId);
@@ -946,8 +1195,10 @@ const onKeyActivate = (fn) => (e) => {
       const videoRef = useRef();
       const [activeClipIdx, setActiveClipIdx] = useState(null);
       const [previewSrc, setPreviewSrc] = useState(null); // null=source, string=rendered clip filename
+      const [previewMode, setPreviewMode] = useState('clips'); // clips | youtube
       const [settingsFlash, setSettingsFlash] = useState(null);
       const [clipEnded, setClipEnded] = useState(false);
+      const previewSessionRef = useRef(Date.now().toString(36));
 
       const activeClip = activeClipIdx !== null ? suggestions[activeClipIdx] : null;
 
@@ -961,8 +1212,12 @@ const onKeyActivate = (fn) => (e) => {
       const videoUrl = previewSrc
         ? `/api/preview/${previewSrc}`
         : videoPath && !isHttpUrl(videoPath)
-          ? `/api/stream-source?path=${encodeURIComponent(videoPath)}`
+          ? `/api/stream-source?path=${encodeURIComponent(videoPath)}&preview=${previewSessionRef.current}`
           : null;
+      const youtubePreviewTitle = (videoPath.split(/[\\/]/).pop() || 'Full episode')
+        .replace(/\.[^.]+$/, '')
+        .replace(/[_-]+/g, ' ')
+        .trim();
 
       // Seek to clip when active clip changes (and showing source), pause at
       // its end boundary so the preview doesn't run into the rest of the episode
@@ -1010,14 +1265,40 @@ const onKeyActivate = (fn) => (e) => {
 
       // Click clip row → seek source video
       const onClipClick = (idx) => {
+        setPreviewMode('clips');
         setActiveClipIdx(idx);
         if (previewSrc) setPreviewSrc(null);
       };
 
       // Play rendered clip in preview panel
       const onPlayRendered = (filename) => {
+        setPreviewMode('clips');
         setPreviewSrc(filename);
         setActiveClipIdx(null);
+      };
+
+      const onPreviewFullEpisode = (filename = null) => {
+        setPreviewMode('youtube');
+        setPreviewSrc(filename);
+        setActiveClipIdx(null);
+      };
+
+      const clearEpisode = () => {
+        fetch('/api/ui-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            _source: 'ui', _allowClear: true, videoPath: '', filePath: '',
+            transcript: null, rawTranscriptText: '', suggestions: [],
+            silenceOriginal: null, silencePlan: null,
+            deselectedIndices: [], phase: 'idle', results: [], energyData: {},
+          }),
+        }).catch(() => {});
+        setVideoPath(''); setFile(null); setTranscript(null); setTranscriptText('');
+        setSuggestions([]); setDeselected(new Set()); setPhase('idle'); setResults([]);
+        setSilenceOriginal(null); setSilencePlan(null);
+        setEnergyData({}); setPreviewSrc(null); setPreviewMode('clips');
+        autoTranscribeRef.current = '';
       };
 
       const setUploadedVideo = useCallback(async (file) => {
@@ -1026,7 +1307,14 @@ const onKeyActivate = (fn) => (e) => {
         try {
           const d = await uploadFile(file, () => { });
           if (d.error) setError(d.error);
-          if (d.file_path) setVideoPath(d.file_path);
+          if (d.file_path) {
+            setVideoPath(d.file_path);
+            setFile({ file_path: d.file_path });
+            setTranscript(null); setCachedTranscript(false); setTranscriptText('');
+            setSilenceOriginal(null); setSilencePlan(null);
+            resetClipWorkForSource();
+            autoTranscribeRef.current = '';
+          }
         } catch (e) { setError('Upload failed: ' + e.message); }
         finally { setBrowsing(false); }
       }, []);
@@ -1066,6 +1354,8 @@ const onKeyActivate = (fn) => (e) => {
           }
           setFile(d);
           setVideoPath(d.file_path);
+          setSilenceOriginal(null);
+          setSilencePlan(null);
           setTranscript(null);
           setCachedTranscript(false);
           setTranscriptText('');
@@ -1112,6 +1402,9 @@ const onKeyActivate = (fn) => (e) => {
         end_second: c.end_second,
         title: c.title,
         caption_style: captionStyle,
+        caption_position: captionPosition,
+        caption_font_scale: captionFontScale,
+        logo_position: logoPosition,
         crop_strategy: cropStrategy,
         format,
         ...(Array.isArray(c.segments) && c.segments.length > 0 && { keep_segments: c.segments }),
@@ -1120,16 +1413,144 @@ const onKeyActivate = (fn) => (e) => {
       const startExport = async () => {
         setPhase('exporting'); setResults([]);
         const sc = suggestions.filter((_, i) => !deselected.has(i));
-        const vp = file?.file_path || videoPath.trim();
+        const vp = videoPath.trim() || file?.file_path;
         const data = await api('/batch-clips', {
           method: 'POST', body: JSON.stringify({
             video_path: vp,
             clips: sc.map(clipExportPayload),
             transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, intro_path: introPath || undefined, clean_fillers: cleanFillers || undefined,
+            caption_position: captionPosition, caption_font_scale: captionFontScale, logo_position: logoPosition,
           })
         });
         setBatchJobId(data.job_id);
       };
+
+      const startFullEpisodeExport = async () => {
+        setError(null);
+        setFullEpisodeResult(null);
+        const vp = videoPath.trim() || file?.file_path;
+        const data = await api('/export-full-episode', {
+          method: 'POST', body: JSON.stringify({
+            video_path: vp,
+            transcript_words: transcript?.words || [],
+            caption_style: captionStyle,
+            caption_position: captionPosition,
+            caption_font_scale: captionFontScale,
+            logo_position: logoPosition,
+            logo_path: captionStyle === 'branded' ? logoPath || undefined : undefined,
+          })
+        });
+        if (data.error) {
+          setError(data.error);
+          return;
+        }
+        setFullEpisodeJobId(data.job_id);
+      };
+
+      useEffect(() => {
+        if (fullEpisodeStream?.status === 'done') {
+          setFullEpisodeResult(fullEpisodeStream.result || null);
+          setFullEpisodeJobId(null);
+        }
+        if (fullEpisodeStream?.status === 'error') {
+          setError('Full episode export failed: ' + (fullEpisodeStream.error || 'Unknown error'));
+          setFullEpisodeJobId(null);
+        }
+      }, [fullEpisodeStream?.status]);
+
+      const analyzeSilence = async () => {
+        const vp = videoPath.trim() || file?.file_path;
+        if (!vp || !transcript?.words?.length || silenceOriginal) return;
+        setError(null);
+        setSilencePlan(null);
+        const data = await api('/analyze-silence', {
+          method: 'POST',
+          body: JSON.stringify({
+            video_path: vp,
+            transcript_words: transcript.words,
+            threshold: silenceThreshold,
+            min_silence_seconds: silenceMinPause,
+            padding_seconds: silencePadding,
+          }),
+        });
+        if (data.error) { setError(data.error); return; }
+        setSilenceAnalyzeJobId(data.job_id);
+      };
+
+      const applySilenceRemoval = async () => {
+        const vp = videoPath.trim() || file?.file_path;
+        if (!vp || !transcript || !silencePlan?.keep_segments?.length || silenceOriginal) return;
+        setError(null);
+        pendingSilenceOriginalRef.current = { videoPath: vp, transcript };
+        const data = await api('/render-silence-removed', {
+          method: 'POST',
+          body: JSON.stringify({
+            video_path: vp,
+            keep_segments: silencePlan.keep_segments,
+            transcript,
+          }),
+        });
+        if (data.error) {
+          pendingSilenceOriginalRef.current = null;
+          setError(data.error);
+          return;
+        }
+        setSilenceRenderJobId(data.job_id);
+      };
+
+      const resetClipWorkForSource = () => {
+        setSuggestions([]);
+        setDeselected(new Set());
+        setResults([]);
+        setEnergyData({});
+        setPreviewSrc(null);
+        setActiveClipIdx(null);
+        setFullEpisodeResult(null);
+        setPhase('idle');
+      };
+
+      const restoreSilenceOriginal = () => {
+        if (!silenceOriginal) return;
+        setVideoPath(silenceOriginal.videoPath);
+        setFile({ file_path: silenceOriginal.videoPath });
+        setTranscript(silenceOriginal.transcript);
+        setSilenceOriginal(null);
+        setSilencePlan(null);
+        resetClipWorkForSource();
+        autoTranscribeRef.current = silenceOriginal.videoPath;
+      };
+
+      useEffect(() => {
+        if (silenceAnalyzeStream?.status === 'done') {
+          setSilencePlan(silenceAnalyzeStream.result || null);
+          setSilenceAnalyzeJobId(null);
+        } else if (silenceAnalyzeStream?.status === 'error') {
+          setError('Silence analysis failed: ' + (silenceAnalyzeStream.error || 'Unknown error'));
+          setSilenceAnalyzeJobId(null);
+        }
+      }, [silenceAnalyzeStream?.status]);
+
+      useEffect(() => {
+        if (silenceRenderStream?.status === 'done') {
+          const rendered = silenceRenderStream.result;
+          const original = pendingSilenceOriginalRef.current;
+          if (rendered?.output_path && rendered?.transcript && original) {
+            setSilenceOriginal(original);
+            setVideoPath(rendered.output_path);
+            setFile({ file_path: rendered.output_path });
+            setTranscript(rendered.transcript);
+            setSilencePlan(prev => ({ ...(prev || {}), applied: true, output_path: rendered.output_path }));
+            resetClipWorkForSource();
+            autoTranscribeRef.current = rendered.output_path;
+          }
+          pendingSilenceOriginalRef.current = null;
+          setSilenceRenderJobId(null);
+        } else if (silenceRenderStream?.status === 'error') {
+          setError('Silence removal failed: ' + (silenceRenderStream.error || 'Unknown error'));
+          pendingSilenceOriginalRef.current = null;
+          setSilenceRenderJobId(null);
+        }
+      }, [silenceRenderStream?.status]);
 
       useEffect(() => {
         if (!batchStream) return;
@@ -1152,7 +1573,7 @@ const onKeyActivate = (fn) => (e) => {
         const data = await api('/create-clip', {
           method: 'POST', body: JSON.stringify({
             video_path: vp, start_second: c.start_second, end_second: c.end_second,
-            title: c.title, caption_style: captionStyle, crop_strategy: cropStrategy, format,
+            title: c.title, caption_style: captionStyle, caption_position: captionPosition, caption_font_scale: captionFontScale, logo_position: logoPosition, crop_strategy: cropStrategy, format,
             transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, intro_path: introPath || undefined, clean_fillers: cleanFillers || undefined,
             ...(Array.isArray(c.segments) && c.segments.length > 0 && { keep_segments: c.segments }),
           })
@@ -1289,7 +1710,7 @@ const onKeyActivate = (fn) => (e) => {
               _source: 'ui',
               videoPath: videoPath.trim(),
               rawTranscriptText: transcriptText.trim() || undefined,
-              settings: { captionStyle, cropStrategy, format, logoPath, outroPath, introPath },
+              settings: { captionStyle, captionPosition, captionFontScale, logoPosition, cropStrategy, format, logoPath, outroPath, introPath },
             }),
           }).catch(() => { });
         }
@@ -1355,7 +1776,9 @@ const onKeyActivate = (fn) => (e) => {
         }
       };
 
-      const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || transcribing || downloadingVideo;
+      const fullEpisodeBusy = fullEpisodeStream?.status === 'running' || !!fullEpisodeJobId;
+      const silenceBusy = !!silenceAnalyzeJobId || !!silenceRenderJobId;
+      const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || transcribing || downloadingVideo || fullEpisodeBusy || silenceBusy;
       const sourceIsUrl = isHttpUrl(videoPath);
       const exportStats = phase === 'done' ? {
         total: results.length || selectedClips.length,
@@ -1457,7 +1880,7 @@ const onKeyActivate = (fn) => (e) => {
                   <div className="file-badge fade-in">
                     <div className="dot" />
                     <div className="name">{videoPath.split(/[\\/]/).pop()}</div>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setVideoPath('')} style={{ padding: '4px 10px', fontSize: 11 }}>Clear</button>
+                    <button className="btn btn-ghost btn-sm" onClick={clearEpisode} style={{ padding: '4px 10px', fontSize: 11 }}>Clear</button>
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -1573,18 +1996,53 @@ const onKeyActivate = (fn) => (e) => {
 
                     {/* Transcript ready indicator */}
                     {transcript && transcriptMode === 'whisper' && (
-                      <div className="file-badge fade-in">
-                        <div className="dot" />
-                        <div className="name">Transcript ready</div>
-                        <div className="meta">
-                          {transcript.words?.length || 0} words
-                          {transcript.duration && <span> {'\u00B7'} {fmt(transcript.duration)}</span>}
+                      <>
+                        <div className="file-badge fade-in transcript-ready-badge">
+                          <div className="transcript-ready-summary">
+                            <div className="dot" />
+                            <div className="name">Transcript ready</div>
+                            <div className="meta">
+                              {transcript.words?.length || 0} words
+                              {transcript.duration && <span> {'\u00B7'} {fmt(transcript.duration)}</span>}
+                            </div>
+                            {cachedTranscript && (
+                              <span className="pill" style={{ fontSize: 10, background: 'var(--blue-subtle)', color: 'var(--blue)', border: '1px solid var(--blue-border)' }}>cached</span>
+                            )}
+                          </div>
+                          <div className="transcript-ready-actions">
+                            <button className="btn btn-ghost btn-sm" aria-expanded={transcriptOpen}
+                              onClick={() => setTranscriptOpen(open => !open)} style={{ padding: '4px 10px', fontSize: 11 }}>
+                              {transcriptOpen ? 'Hide transcript' : 'View transcript'}
+                            </button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => { setTranscript(null); setCachedTranscript(false); autoTranscribeRef.current = ''; }} style={{ padding: '4px 10px', fontSize: 11 }}>Re-transcribe</button>
+                          </div>
                         </div>
-                        {cachedTranscript && (
-                          <span className="pill" style={{ fontSize: 10, background: 'var(--blue-subtle)', color: 'var(--blue)', border: '1px solid var(--blue-border)' }}>cached</span>
+                        {transcriptOpen && formattedTranscript && (
+                          <div className="full-transcript-panel fade-in">
+                            <div className="full-transcript-head">
+                              <div className="full-transcript-title">
+                                <strong>Full transcript</strong>
+                                <span>Clean paragraphs, ready to read or copy</span>
+                              </div>
+                              <div className="full-transcript-actions">
+                                <div className="transcript-format-tabs" role="tablist" aria-label="Transcript format">
+                                  {[['readable', 'Readable'], ['timestamped', 'Timestamps']].map(([value, label]) => (
+                                    <button key={value} type="button" role="tab" aria-selected={transcriptFormat === value}
+                                      className={transcriptFormat === value ? 'active' : ''}
+                                      onClick={() => setTranscriptFormat(value)}>{label}</button>
+                                  ))}
+                                </div>
+                                <CopyButton text={formattedTranscript} label="Copy transcript" copiedLabel="Copied"
+                                  className="btn btn-ghost btn-sm transcript-copy-button" />
+                              </div>
+                            </div>
+                            <div className="transcript-document" role="document" tabIndex={0}
+                              aria-label={`${transcriptFormat === 'timestamped' ? 'Timestamped' : 'Readable'} full transcript`}>
+                              {formattedTranscript}
+                            </div>
+                          </div>
                         )}
-                        <button className="btn btn-ghost btn-sm" onClick={() => { setTranscript(null); setCachedTranscript(false); autoTranscribeRef.current = ''; }} style={{ padding: '4px 10px', fontSize: 11 }}>Re-transcribe</button>
-                      </div>
+                      </>
                     )}
 
                     {!transcript && !transcribing && videoPath.trim() && (
@@ -1593,6 +2051,128 @@ const onKeyActivate = (fn) => (e) => {
                       </button>
                     )}
                   </div>
+                )}
+              </div>
+
+              {/* Silence removal */}
+              <div className="section card silence-card">
+                <div className="silence-head">
+                  <div className="silence-title-wrap">
+                    <span className="silence-icon"><Scissors size={15} /></span>
+                    <div>
+                      <div className="section-label" style={{ marginBottom: 2 }}>Remove silence</div>
+                      <div className="silence-subtitle">Tighten the full episode before making clips</div>
+                    </div>
+                  </div>
+                  <span className="silence-local-badge">Local</span>
+                </div>
+
+                {silenceOriginal ? (
+                  <div className="silence-active fade-in">
+                    <div className="silence-active-copy">
+                      <Check size={16} />
+                      <div>
+                        <strong>Compact episode is active</strong>
+                        <span>
+                          {silencePlan?.removed_duration ? `${fmtSaved(silencePlan.removed_duration)} removed · ` : ''}
+                          previews, clips, captions, and full-episode export now use it.
+                        </span>
+                      </div>
+                    </div>
+                    <div className="silence-actions">
+                      {silencePlan?.output_path && (
+                        <a className="btn btn-ghost btn-sm" href={`/api/download/${encodeURIComponent(silencePlan.output_path.split(/[\\/]/).pop())}`} download>
+                          <Download size={13} /> Download MP4
+                        </a>
+                      )}
+                      <button className="btn btn-ghost btn-sm" onClick={restoreSilenceOriginal} disabled={isProcessing}>
+                        <RotateCcw size={13} /> Restore original
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="silence-controls">
+                      <div>
+                        <label className="field-label">Cut style</label>
+                        <select value={silenceThreshold} onChange={e => { setSilenceThreshold(Number(e.target.value)); setSilencePlan(null); }} disabled={isProcessing}>
+                          <option value={0.38}>Gentle</option>
+                          <option value={0.5}>Balanced</option>
+                          <option value={0.62}>Punchy</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="field-label">Remove pauses longer than</label>
+                        <select value={silenceMinPause} onChange={e => { setSilenceMinPause(Number(e.target.value)); setSilencePlan(null); }} disabled={isProcessing}>
+                          <option value={1}>1 second</option>
+                          <option value={0.65}>0.65 seconds</option>
+                          <option value={0.4}>0.4 seconds</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="field-label">Breathing room</label>
+                        <select value={silencePadding} onChange={e => { setSilencePadding(Number(e.target.value)); setSilencePlan(null); }} disabled={isProcessing}>
+                          <option value={0.2}>Relaxed</option>
+                          <option value={0.12}>Natural</option>
+                          <option value={0.08}>Tight</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {silenceAnalyzeJobId && (
+                      <div className="silence-progress fade-in">
+                        <div className="status-line">
+                          <span><div className="spinner sm" /> {silenceAnalyzeStream?.message || 'Analyzing speech locally…'}</span>
+                          <b>{silenceAnalyzeStream?.progress || 0}%</b>
+                        </div>
+                        <div className="progress-track"><div className="progress-fill" style={{ width: `${silenceAnalyzeStream?.progress || 2}%` }} /></div>
+                      </div>
+                    )}
+
+                    {silenceRenderJobId && (
+                      <div className="silence-progress fade-in">
+                        <div className="status-line">
+                          <span><div className="spinner sm" /> {silenceRenderStream?.message || 'Creating compact episode…'}</span>
+                          <b>{silenceRenderStream?.progress || 0}%</b>
+                        </div>
+                        <div className="progress-track"><div className="progress-fill" style={{ width: `${silenceRenderStream?.progress || 2}%` }} /></div>
+                      </div>
+                    )}
+
+                    {silencePlan && !silenceBusy && (
+                      <div className="silence-plan fade-in">
+                        <div className="silence-stats">
+                          <div><strong>{fmt(silencePlan.source_duration || 0)}</strong><span>Original</span></div>
+                          <ChevronRight size={14} />
+                          <div><strong>{fmt(silencePlan.output_duration || 0)}</strong><span>After</span></div>
+                          <div className="silence-saved"><strong>{fmtSaved(silencePlan.removed_duration || 0)}</strong><span>Saved</span></div>
+                        </div>
+                        <div className="silence-timeline" aria-label={`${silencePlan.cut_count || 0} silent sections will be removed`}>
+                          {(silencePlan.removed_ranges || []).map((range, index) => (
+                            <span key={index} className="silence-cut" style={{
+                              left: `${(range.start / silencePlan.source_duration) * 100}%`,
+                              width: `${((range.end - range.start) / silencePlan.source_duration) * 100}%`,
+                            }} />
+                          ))}
+                        </div>
+                        <div className="silence-plan-foot">
+                          <span>{silencePlan.cut_count || 0} pauses · {silencePlan.removed_percent || 0}% shorter</span>
+                          <button className="btn btn-primary btn-sm" onClick={applySilenceRemoval} disabled={!silencePlan.cut_count}>
+                            <Scissors size={13} /> Create compact episode
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {!silencePlan && !silenceBusy && (
+                      <div className="silence-start-row">
+                        <span>Uses local speech detection and protects every transcript word. Your original stays untouched.</span>
+                        <button className="btn btn-ghost btn-sm" onClick={analyzeSilence} disabled={!videoPath.trim() || !transcript?.words?.length || isProcessing}>
+                          <Activity size={13} /> Analyze episode
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -1659,6 +2239,37 @@ const onKeyActivate = (fn) => (e) => {
                   <AssetPicker type="outro" label="Outro" value={outroPath} onChange={setOutroPath} disabled={isProcessing} />
                 </div>
 
+                <div className="video-layout-controls">
+                  <div className="video-layout-heading">
+                    <span>Video layout</span>
+                    <small>Updates both previews and exports</small>
+                  </div>
+                  <div className="video-layout-grid">
+                    <div>
+                      <label className="field-label">Caption position</label>
+                      <select value={captionPosition} onChange={e => setCaptionPosition(e.target.value)} disabled={isProcessing}>
+                        <option value="auto">Automatic</option>
+                        <option value="upper">Upper third</option>
+                        <option value="center">Center</option>
+                        <option value="lower">Lower third</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label">Caption size</label>
+                      <div className="layout-range-row">
+                        <input aria-label="Caption size" type="range" min="60" max="160" step="5"
+                          value={captionFontScale} onChange={e => setCaptionFontScale(Number(e.target.value))} disabled={isProcessing} />
+                        <output>{captionFontScale}%</output>
+                      </div>
+                    </div>
+                    <div className="logo-position-field">
+                      <label className="field-label">Logo position</label>
+                      <LogoPositionPicker value={logoPosition} onChange={setLogoPosition}
+                        disabled={isProcessing || captionStyle !== 'branded' || !logoPath} />
+                    </div>
+                  </div>
+                </div>
+
                 {/* Advanced Settings */}
                 <div style={{ marginTop: 14 }}>
                   <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: '0.8px', color: 'var(--text2)', textTransform: 'uppercase' }}
@@ -1715,6 +2326,58 @@ const onKeyActivate = (fn) => (e) => {
                   )}
                 </div>
               </div>
+
+              {/* Full episode export stays separate from short-clip selection. */}
+              {transcript && videoPath.trim() && (
+                <div className="section card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                    <div>
+                      <div className="section-label" style={{ marginBottom: 5 }}>Full episode</div>
+                      <div className="hint" style={{ lineHeight: 1.45 }}>
+                        Export this entire imported video with {captionStyle} captions. Original framing and audio stay intact.
+                      </div>
+                    </div>
+                    <span className="pill pill-blue" style={{ flexShrink: 0, fontSize: 10 }}>Original frame</span>
+                  </div>
+
+                  {fullEpisodeBusy && (
+                    <div className="fade-in" style={{ marginTop: 14 }}>
+                      <div className="status-line">
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div className="spinner sm" />
+                          {fullEpisodeStream?.message || 'Preparing full episode…'}
+                        </span>
+                        <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fullEpisodeStream?.progress || 0}%</span>
+                      </div>
+                      <div className="progress-track" style={{ marginTop: 7 }}>
+                        <div className="progress-fill" style={{ width: `${fullEpisodeStream?.progress || 0}%` }} />
+                      </div>
+                    </div>
+                  )}
+
+                  {!fullEpisodeBusy && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+                      <button className="btn btn-primary" onClick={startFullEpisodeExport} disabled={isProcessing}>
+                        <Download size={14} /> {fullEpisodeResult ? 'Export another copy' : 'Export full episode'}
+                      </button>
+                      <button className="btn btn-ghost" onClick={() => onPreviewFullEpisode()}>
+                        <Play size={14} /> Preview for YouTube
+                      </button>
+                      {fullEpisodeResult?.filename && (
+                        <>
+                          <button className="btn btn-ghost" onClick={() => onPreviewFullEpisode(fullEpisodeResult.filename)}>
+                            <Play size={14} /> Preview rendered
+                          </button>
+                          <a href={`/api/download/${encodeURIComponent(fullEpisodeResult.filename)}`} className="btn btn-ghost" download>
+                            <Download size={14} /> Download
+                          </a>
+                          <span className="hint-xs">{fullEpisodeResult.file_size_mb}MB</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Word Corrections */}
               <div className="section">
@@ -1994,7 +2657,7 @@ const onKeyActivate = (fn) => (e) => {
                   {(phase === 'done' || phase === 'review' || phase === 'exporting') && (
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 24 }}>
                       <button className="btn btn-ghost" onClick={() => {
-                        setPhase('idle'); setResults([]); setSuggestions([]); setBatchJobId(null); setFile(null); setTranscript(null); setActiveClipIdx(null); setPreviewSrc(null); setEnergyData({}); setCachedTranscript(false); autoTranscribeRef.current = '';
+                        setPhase('idle'); setResults([]); setSuggestions([]); setBatchJobId(null); setFile(null); setTranscript(null); setActiveClipIdx(null); setPreviewSrc(null); setPreviewMode('clips'); setEnergyData({}); setCachedTranscript(false); autoTranscribeRef.current = '';
                         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', phase: 'idle', suggestions: [], deselectedIndices: [] }) }).catch(() => { });
                       }}>Start over</button>
                       {phase === 'done' && <button className="btn btn-ghost" onClick={() => { setPhase('review'); setResults([]); setBatchJobId(null); }}>Re-export</button>}
@@ -2053,8 +2716,8 @@ const onKeyActivate = (fn) => (e) => {
                         return (
                           <div key={c.id || i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--surface)', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer' }}
                             role="button" tabIndex={0} aria-label={`Preview ${c.title || fname}`}
-                            onClick={() => { const f = c.output_path?.split('/').pop(); if (f) setPreviewSrc(f); }}
-                            onKeyDown={onKeyActivate(() => { const f = c.output_path?.split('/').pop(); if (f) setPreviewSrc(f); })}>
+                            onClick={() => { const f = c.output_path?.split('/').pop(); if (f) onPlayRendered(f); }}
+                            onKeyDown={onKeyActivate(() => { const f = c.output_path?.split('/').pop(); if (f) onPlayRendered(f); })}>
                             <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--green)', flexShrink: 0 }} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || fname}</div>
@@ -2075,9 +2738,27 @@ const onKeyActivate = (fn) => (e) => {
             <div className="preview-col">
               <div className="preview-panel">
 
+                {previewMode === 'youtube' && (
+                  <LiveYouTubePreview
+                    videoUrl={videoUrl}
+                    videoRef={videoRef}
+                    captionStyle={captionStyle}
+                    captionPosition={captionPosition}
+                    captionFontScale={captionFontScale}
+                    logoPosition={logoPosition}
+                    transcriptWords={transcript ? transcript.words : null}
+                    logoPreviewUrl={logoPreviewUrl}
+                    rendered={!!previewSrc}
+                    title={youtubePreviewTitle}
+                    showYouTubeFrame={showYouTubeFrame}
+                    onToggleFrame={() => setShowYouTubeFrame(v => !v)}
+                    onBack={() => { setPreviewMode('clips'); setPreviewSrc(null); }}
+                  />
+                )}
+
                 {/* Old video player - used ONLY for playing a rendered clip.
                     Source-video preview now lives inside <LivePhonePreview/>. */}
-                {videoUrl && previewSrc && (
+                {previewMode === 'clips' && videoUrl && previewSrc && (
                   <div className="preview-player fade-in" style={{ marginBottom: 12 }}>
                     <video
                       key={videoUrl}
@@ -2104,14 +2785,17 @@ const onKeyActivate = (fn) => (e) => {
 
                 {/* Style preview mockup — hidden when rendered clip is playing, whose
                     captions are already burned in and whose clock is clip-relative */}
-                {!previewSrc && (
+                {previewMode === 'clips' && !previewSrc && (
                   <LivePhonePreview
                     videoUrl={videoUrl}
                     videoRef={videoRef}
                     captionStyle={captionStyle}
+                    captionPosition={captionPosition}
+                    captionFontScale={captionFontScale}
+                    logoPosition={logoPosition}
                     activeClip={activeClip}
                     transcriptWords={transcript ? transcript.words : null}
-                    logoPath={logoPath}
+                    logoPreviewUrl={logoPreviewUrl}
                     showTikTokFrame={showTikTokFrame}
                     onToggleFrame={() => setShowTikTokFrame(v => !v)}
                     clipEnded={clipEnded}
@@ -2120,6 +2804,9 @@ const onKeyActivate = (fn) => (e) => {
                 )}
                 <SpecRecap
                   captionStyle={captionStyle}
+                  captionPosition={captionPosition}
+                  captionFontScale={captionFontScale}
+                  logoPosition={logoPosition}
                   cropStrategy={cropStrategy}
                   logoPath={logoPath}
                   outroPath={outroPath}

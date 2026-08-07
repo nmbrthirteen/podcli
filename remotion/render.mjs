@@ -151,6 +151,9 @@ async function main() {
     faceY,
     durationInFrames,
     fps,
+    captionPosition: opts["caption-position"] || "auto",
+    captionFontScale: Number(opts["caption-font-scale"] || 100),
+    logoPosition: opts["logo-position"] || "top-left",
   };
 
   console.log(

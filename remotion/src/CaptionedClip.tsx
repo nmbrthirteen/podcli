@@ -4,7 +4,7 @@ import { HormoziCaptions } from "./components/HormoziCaptions";
 import { KaraokeCaptions } from "./components/KaraokeCaptions";
 import { SubtleCaptions } from "./components/SubtleCaptions";
 import { BrandedCaptions } from "./components/BrandedCaptions";
-import type { Word, CaptionStyle } from "./types";
+import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "./types";
 
 export interface CaptionedClipProps {
   videoSrc: string;
@@ -12,6 +12,9 @@ export interface CaptionedClipProps {
   style: CaptionStyle;
   logoSrc?: string;
   faceY?: number | null;
+  captionPosition?: CaptionPosition;
+  logoPosition?: LogoPosition;
+  singleLine?: boolean;
 }
 
 export const CaptionedClip: React.FC<CaptionedClipProps> = ({
@@ -19,6 +22,9 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   style,
   logoSrc,
   faceY,
+  captionPosition = "auto",
+  logoPosition = "top-left",
+  singleLine = false,
 }) => {
   const CaptionComponent = {
     hormozi: HormoziCaptions,
@@ -30,9 +36,10 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   return (
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
       {style.name === "branded" ? (
-        <BrandedCaptions words={words} style={style} logoSrc={logoSrc} faceY={faceY} />
+        <BrandedCaptions words={words} style={style} logoSrc={logoSrc} faceY={faceY}
+          captionPosition={captionPosition} logoPosition={logoPosition} singleLine={singleLine} />
       ) : (
-        <CaptionComponent words={words} style={style} />
+        <CaptionComponent words={words} style={style} singleLine={singleLine} />
       )}
     </AbsoluteFill>
   );
