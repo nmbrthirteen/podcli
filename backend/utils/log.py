@@ -14,6 +14,8 @@ from contextlib import contextmanager
 
 _VERBOSE = os.environ.get("PODCLI_LOG_VERBOSE", "").lower() in ("1", "true", "yes")
 
+_RESERVED_FIELDS = frozenset({"category", "message", "level", "stage", "ms"})
+
 
 def log_event(category: str, message: str, *, level: str = "info", **fields) -> None:
     """Emit one structured line: `[category] message k=v k=v`.
@@ -59,7 +61,14 @@ def timed(category: str, stage: str, **fields):
         yield extra
     finally:
         elapsed_ms = int((time.perf_counter() - start) * 1000)
+        # A caller field named like a log_event parameter would raise TypeError
+        # here and mask whatever exception is already unwinding.
+        payload = {
+            key: value
+            for key, value in {**fields, **extra}.items()
+            if key not in _RESERVED_FIELDS
+        }
         log_event(
             category, "timing", level="debug",
-            stage=stage, ms=elapsed_ms, **{**fields, **extra},
+            stage=stage, ms=elapsed_ms, **payload,
         )
