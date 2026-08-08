@@ -129,13 +129,11 @@ def write_semantic_learnings(top_n: int = 4, min_total: int = 6) -> Optional[str
     top_performers, underperformers = ranked[:top_n], ranked[-top_n:]
 
     try:
-        from services.claude_suggest import _find_ai_cli_candidates, _run_ai_command
+        from services import ai_provider
     except Exception:
         return None
-    candidates = _find_ai_cli_candidates()
-    if not candidates:
+    if not ai_provider.available():
         return None
-    cli_path, engine = candidates[0]
 
     prompt = (
         "You analyze short-form video performance to guide future clip selection.\n"
@@ -146,22 +144,10 @@ def write_semantic_learnings(top_n: int = 4, min_total: int = 6) -> Optional[str
         "the top performers from the underperformers (hooks, topic, emotional beat, structure) and give "
         "actionable guidance for picking future shorts. No preamble, just the bullets."
     )
-    os.makedirs(paths["working"], exist_ok=True)
-    prompt_file = os.path.join(paths["working"], "_perf_analysis_prompt.txt")
-    with open(prompt_file, "w", encoding="utf-8") as f:
-        f.write(prompt)
-    try:
-        res = _run_ai_command(cli_path, engine, prompt, prompt_file, paths["project_root"], timeout=180)
-    except Exception:
+    result = ai_provider.generate(prompt, timeout=180, project_dir=paths["project_root"])
+    if not result.ok:
         return None
-    finally:
-        try:
-            os.unlink(prompt_file)
-        except Exception:
-            pass
-    text = (res.stdout or "").strip()
-    if not text:
-        return None
+    text = result.text
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     block = f"{AI_START}\n## What separates top performers (AI analysis · {now})\n\n{text}\n{AI_END}"
     return write_learnings(ai_block=block)

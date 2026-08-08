@@ -11,6 +11,8 @@ BACKEND_ROOT = os.path.join(ROOT, "backend")
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
+from services import ai_cli
+from services import ai_provider
 from services import claude_suggest as cs
 
 SEGMENTS = [
@@ -39,14 +41,14 @@ def _fake_run(**kwargs):
 
 class FindMomentsTests(unittest.TestCase):
     def setUp(self):
-        self._orig_candidates = cs._find_ai_cli_candidates
-        self._orig_run = cs._run_ai_command
-        cs._find_ai_cli_candidates = lambda: [("/usr/bin/claude", "claude")]
-        cs._run_ai_command = lambda **kw: _fake_run(**kw)
+        self._orig_chain = ai_provider._chain
+        self._orig_run = ai_cli._run_ai_command
+        ai_provider._chain = lambda: [("cli", "/usr/bin/claude", "claude")]
+        ai_cli._run_ai_command = lambda **kw: _fake_run(**kw)
 
     def tearDown(self):
-        cs._find_ai_cli_candidates = self._orig_candidates
-        cs._run_ai_command = self._orig_run
+        ai_provider._chain = self._orig_chain
+        ai_cli._run_ai_command = self._orig_run
 
     def test_finds_and_shapes_moment(self):
         clips = cs.find_moments_from_text("the turning point", SEGMENTS, [])
@@ -60,7 +62,7 @@ class FindMomentsTests(unittest.TestCase):
         self.assertGreater(c["score"], 0)
 
     def test_no_ai_cli_returns_empty(self):
-        cs._find_ai_cli_candidates = lambda: []
+        ai_provider._chain = lambda: []
         self.assertEqual(cs.find_moments_from_text("x", SEGMENTS, []), [])
 
     def test_progress_callback_invoked(self):

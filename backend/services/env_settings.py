@@ -143,7 +143,7 @@ def set_setting(key: str, value: str) -> None:
     if not value:
         raise ValueError("value is empty")
     if key in ("PODCLI_CLAUDE_PATH", "PODCLI_CODEX_PATH"):
-        from services.claude_suggest import _resolve_cli_path
+        from services.ai_cli import _resolve_cli_path
         resolved = _resolve_cli_path(value) or (value if os.path.isfile(value) else None)
         if not resolved:
             raise ValueError(f"path does not exist: {value}")
@@ -160,7 +160,7 @@ def unset_setting(key: str) -> None:
 def run_env_action(action: str, key: Optional[str] = None, value: Optional[str] = None) -> dict[str, Any]:
     act = (action or "list").strip().lower()
     if act == "list":
-        from services.claude_suggest import get_ai_cli_status
+        from services.ai_cli import get_ai_cli_status
         return {
             "settings": list_settings(),
             "path": os.path.abspath(_env_path()),
