@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PageHeader } from "./Page";
 import { api, upload } from "./lib";
+import AiSetup from "./AiSetup";
 
 type SettingRow = {
   key: string;
@@ -54,7 +55,10 @@ export default function ConfigPage() {
     } catch { /* settings are optional */ }
   }
 
+  const [aiRefresh, setAiRefresh] = useState(0);
+
   async function refreshAiCli() {
+    setAiRefresh((n) => n + 1);
     try {
       setAiCli(await api<AiCliStatus>("/ai-cli-status"));
     } catch {
@@ -168,6 +172,8 @@ export default function ConfigPage() {
           ))
         )}
       </div>
+
+      <AiSetup key={aiRefresh} />
 
       <div className="section">
         <div className="section-label">AI CLI</div>

@@ -40,6 +40,7 @@ export class ClipsHistory {
   // requests can't lose each other's edits. Cross-process safety (vs the Python
   // CLI) rests on the atomic temp-file rename in save().
   private writeChain: Promise<unknown> = Promise.resolve();
+  private syncing = new Set<string>();
 
   private async ensureDir() {
     if (!existsSync(paths.history)) {
@@ -86,7 +87,74 @@ export class ClipsHistory {
     await this.mutate((entries) => {
       entries.push(full);
     });
+    void this.syncToCloud(full);
     return full;
+  }
+
+  /**
+   * Mirror a rendered clip to the workspace, for signed-in users.
+   *
+   * Deliberately not awaited and unable to throw: a clip that rendered
+   * successfully must be recorded locally whether or not a server was reachable.
+   * The local history file remains the source of truth; this is a copy.
+   *
+   * Clips that fail to sync are left marked so a later sweep can backfill them —
+   * the performance model wants the whole history, not the part that happened to
+   * have a working network.
+   */
+  private async syncToCloud(entry: ClipHistoryEntry): Promise<void> {
+    // record() starts this in the background, so `podcli sync` can reach the
+    // same entry while it is still in flight and register the clip twice.
+    if (this.syncing.has(entry.id)) return;
+    this.syncing.add(entry.id);
+    try {
+      const cloud = await import("./podcli-cloud.js");
+      if (!(await cloud.signedIn())) return;
+
+      const source = entry.source_video;
+      if (!source) return;
+
+      const clipId = entry.cloud_id ?? (await cloud.registerClip({
+        sourceHash: await cloud.sourceHash(source),
+        episodeTitle: basename(source),
+        title: entry.title,
+        startSecond: entry.start_second,
+        endSecond: entry.end_second,
+        durationSec: entry.duration,
+        contentType: entry.content_type,
+        captionStyle: entry.caption_style,
+        aspectRatio: entry.format,
+        transcriptSlice: entry.transcript_slice,
+      }))?.id;
+      if (!clipId) return;
+
+      await this.update(entry.id, { cloud_id: clipId });
+
+      // Metadata alone leaves a share link with nothing to play, so the
+      // rendered file follows it. Uploaded once: the server keeps the first
+      // copy and answers `unchanged` after that.
+      let hasVideo = entry.cloud_video_uploaded === true;
+      // A rendered file that no longer exists locally can never be uploaded.
+      // There is nothing left to do for it, and reporting it as failed on every
+      // run is the unfixable number this file already refuses to print.
+      const uploadable = !hasVideo && existsSync(entry.output_path);
+
+      if (uploadable) {
+        hasVideo = await cloud.uploadClipVideo(clipId, entry.output_path);
+        if (hasVideo) await this.update(entry.id, { cloud_video_uploaded: true });
+      }
+
+      // Synchronised means the clip is watchable, not merely described: an
+      // upload that failed while still reporting success is how `podcli sync`
+      // exits happy with every share link playing nothing.
+      await this.update(entry.id, {
+        cloud_synced: hasVideo || !existsSync(entry.output_path),
+      });
+    } catch {
+      await this.update(entry.id, { cloud_synced: false }).catch(() => {});
+    } finally {
+      this.syncing.delete(entry.id);
+    }
   }
 
   // Persist every successful row of a batch render. Single source of truth for
@@ -230,12 +298,76 @@ export class ClipsHistory {
 
   async update(id: string, patch: Partial<ClipHistoryEntry>): Promise<ClipHistoryEntry | null> {
     if (!id) return null;
-    return this.mutate((entries) => {
+    const changed = await this.mutate((entries) => {
       const e = entries.find((x) => x.id === id);
       if (!e) return null;
+      const before = e.title;
       Object.assign(e, patch);
-      return e;
+      return { entry: e, previousTitle: before };
     });
+    if (!changed) return null;
+
+    // A human rewriting a generated title is the clearest taste signal podcli
+    // gets — it says what the model produced and what a person preferred
+    // instead. Reported only when the title actually changed, so the sync
+    // bookkeeping in syncToCloud can't trigger it.
+    if (patch.title !== undefined && patch.title !== changed.previousTitle) {
+      void this.reportEvent(changed.entry, "title_edited", changed.previousTitle, patch.title);
+    }
+    return changed.entry;
+  }
+
+  /** Best-effort; never blocks or fails the edit that produced it. */
+  private async reportEvent(
+    entry: ClipHistoryEntry,
+    kind: "title_edited" | "discarded" | "thumbnail_regenerated",
+    before?: string,
+    after?: string,
+  ): Promise<void> {
+    if (!entry.cloud_id) return;
+    try {
+      const cloud = await import("./podcli-cloud.js");
+      if (!(await cloud.signedIn())) return;
+      await cloud.logClipEvent(entry.cloud_id, kind, before, after);
+    } catch {
+      // The signal is nice to have, not worth surfacing an error over.
+    }
+  }
+
+  /**
+   * Push clips that never reached the workspace.
+   *
+   * Covers two cases that both matter: a render that happened while the network
+   * was down, and — more importantly — everything rendered *before* the user
+   * subscribed. A new Pro user should start with their back catalogue behind the
+   * performance model, not an empty history.
+   */
+  async backfillCloud(limit = 200): Promise<{ synced: number; failed: number }> {
+    const cloud = await import("./podcli-cloud.js");
+    if (!(await cloud.signedIn())) return { synced: 0, failed: 0 };
+
+    // A clip whose source video has been moved or deleted can never be hashed,
+    // so it can never sync. Skipping it keeps `podcli sync` quiet; counting it
+    // as a failure would report the same unfixable number on every run until
+    // people stopped reading the output.
+    const pending = (await this.load())
+      .filter((e) => e.source_video && existsSync(e.source_video))
+      .filter((e) => !e.cloud_id || !e.cloud_video_uploaded)
+      .slice(0, limit);
+
+    let synced = 0;
+    let failed = 0;
+    for (const entry of pending) {
+      try {
+        await this.syncToCloud(entry);
+        const after = await this.findById(entry.id);
+        if (after?.cloud_synced) synced++;
+        else failed++;
+      } catch {
+        failed++;
+      }
+    }
+    return { synced, failed };
   }
 
   // Remove a clip and the artifacts podcli rendered for it (output video,

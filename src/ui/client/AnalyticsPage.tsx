@@ -3,6 +3,7 @@ import { PageHeader } from "./Page";
 import { Link } from "react-router-dom";
 import { TrendingUp, Eye, Percent, MousePointerClick } from "lucide-react";
 import { api, upload, fmt } from "./lib";
+import WorkspaceInsights from "./WorkspaceInsights";
 
 interface Row { key: string; count: number; avgViews: number; avgRetention: number; avgCtr: number }
 interface Data {
@@ -163,6 +164,8 @@ export default function AnalyticsPage() {
         {status && <span className="analytics-status-sub">· {status.with_metrics}/{status.total} clips with metrics</span>}
       </div>
       {msg && <div className="set-note ok" style={{ marginTop: 10, wordBreak: "break-all" }}>{msg}</div>}
+
+      <WorkspaceInsights />
 
       {showConnect && (
         <div className="section card">

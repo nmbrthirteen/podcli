@@ -12,7 +12,6 @@ import math
 import os
 import subprocess
 import sys
-import tempfile
 from typing import Optional, Callable
 
 from config.paths import paths
@@ -22,432 +21,16 @@ from services.audio_events import compute_event_scores, dominant_reaction
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 from utils.text import clean_title
-
-
-def _cli_name_exts() -> list[str]:
-    if sys.platform == "win32":
-        return ["", ".cmd", ".exe", ".bat"]
-    return [""]
-
-
-def _resolve_cli_path(path: str) -> Optional[str]:
-    for ext in _cli_name_exts():
-        candidate = path + ext
-        if os.path.isfile(candidate):
-            return candidate
-    return None
-
-
-def _dedupe_dirs(dirs: list[str]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for directory in dirs:
-        if not directory:
-            continue
-        directory = os.path.expanduser(directory)
-        if directory in seen:
-            continue
-        seen.add(directory)
-        if os.path.isdir(directory):
-            ordered.append(directory)
-    return ordered
-
-
-def _npmrc_prefix_dirs() -> list[str]:
-    dirs: list[str] = []
-    npmrc_paths = [os.path.join(os.path.expanduser("~"), ".npmrc")]
-    try:
-        from services.env_settings import _env_path
-        npmrc_paths.append(os.path.join(os.path.dirname(_env_path()), ".npmrc"))
-    except Exception:
-        pass
-    for npmrc in npmrc_paths:
-        if not os.path.isfile(npmrc):
-            continue
-        try:
-            with open(npmrc, encoding="utf-8") as f:
-                for line in f:
-                    stripped = line.strip()
-                    if not stripped or stripped.startswith("#") or stripped.startswith(";"):
-                        continue
-                    if stripped.startswith("prefix="):
-                        prefix = stripped.split("=", 1)[1].strip()
-                        if prefix:
-                            dirs.append(prefix if sys.platform == "win32" else os.path.join(prefix, "bin"))
-        except Exception:
-            pass
-    return dirs
-
-
-def _package_manager_bin_dirs() -> list[str]:
-    dirs: list[str] = []
-    npm_cmds = [
-        (["npm", "config", "get", "prefix"], "prefix"),
-        (["npm", "root", "-g"], "root"),
-    ]
-    for args, kind in npm_cmds:
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, timeout=2)
-        except Exception:
-            continue
-        if result.returncode != 0:
-            continue
-        raw = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
-        if not raw:
-            continue
-        if kind == "prefix":
-            dirs.append(raw if sys.platform == "win32" else os.path.join(raw, "bin"))
-        elif kind == "root":
-            dirs.append(os.path.join(raw, ".bin"))
-        else:
-            dirs.append(raw)
-
-    for args, kind in (
-        (["pnpm", "config", "get", "global-bin-dir"], "bin"),
-        (["pnpm", "bin", "-g"], "bin"),
-        (["yarn", "global", "bin"], "bin"),
-    ):
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, timeout=2)
-        except Exception:
-            continue
-        if result.returncode != 0:
-            continue
-        raw = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
-        if raw:
-            dirs.append(raw)
-
-    return dirs
-
-
-def _version_manager_bin_dirs() -> list[str]:
-    home = os.path.expanduser("~")
-    dirs = [
-        os.path.join(home, "bin"),
-        os.path.join(home, ".asdf", "shims"),
-        os.path.join(home, ".local", "share", "mise", "shims"),
-        os.path.join(home, ".local", "share", "rtx", "shims"),
-        os.path.join(home, ".bun", "bin"),
-        os.path.join(home, ".cargo", "bin"),
-        os.path.join(home, "go", "bin"),
-        os.path.join(home, ".local", "share", "pnpm"),
-        os.path.join(home, ".claude", "bin"),
-    ]
-
-    nvm_dir = os.environ.get("NVM_DIR") or os.path.join(home, ".nvm")
-    try:
-        import glob
-        dirs.extend(sorted(glob.glob(os.path.join(nvm_dir, "versions", "node", "*", "bin")), reverse=True))
-        dirs.extend(glob.glob(os.path.join(home, ".fnm", "node-versions", "*", "installation", "bin")))
-        dirs.extend(glob.glob(os.path.join(home, ".local", "share", "fnm", "node-versions", "*", "installation", "bin")))
-    except Exception:
-        pass
-
-    fnm_bin = os.path.join(home, ".local", "share", "fnm", "current", "bin")
-    dirs.append(fnm_bin)
-    dirs.append(os.path.join(home, ".volta", "bin"))
-
-    if sys.platform == "win32":
-        for env_key in ("APPDATA", "LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
-            base = os.environ.get(env_key)
-            if not base:
-                continue
-            dirs.extend([
-                os.path.join(base, "npm"),
-                os.path.join(base, "Programs", "nodejs"),
-                os.path.join(base, "Microsoft", "WinGet", "Links"),
-            ])
-        dirs.append(os.path.join(home, "scoop", "shims"))
-        dirs.append(os.path.join(os.environ.get("ProgramData", ""), "npm"))
-    else:
-        dirs.extend([
-            "/usr/bin",
-            "/bin",
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/snap/bin",
-            "/var/lib/snapd/snap/bin",
-        ])
-
-    npm_prefix = (
-        os.environ.get("NPM_CONFIG_PREFIX")
-        or os.environ.get("npm_config_prefix")
-        or ""
-    ).strip()
-    if npm_prefix:
-        dirs.append(os.path.join(os.path.expanduser(npm_prefix), "bin"))
-
-    return dirs
-
-
-def _static_lookup_dirs() -> list[str]:
-    home = os.path.expanduser("~")
-    dirs = [
-        os.path.join(home, ".local", "bin"),
-        os.path.join(home, ".claude", "local", "bin"),
-        os.path.join(home, ".claude", "local", "node_modules", ".bin"),
-        os.path.join(home, ".npm-global", "bin"),
-    ]
-    if sys.platform == "win32":
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            dirs.append(os.path.join(appdata, "npm"))
-        dirs.append(os.path.join(home, ".local", "bin"))
-    return dirs
-
-
-def _all_lookup_dirs() -> list[str]:
-    return _dedupe_dirs(
-        _static_lookup_dirs()
-        + _version_manager_bin_dirs()
-        + _npmrc_prefix_dirs()
-        + _package_manager_bin_dirs()
-    )
-
-
-def _path_lookup_dirs() -> list[str]:
-    return _all_lookup_dirs()
-
-
-def _npm_global_bin_dirs() -> list[str]:
-    return _package_manager_bin_dirs()
-
-
-def _parse_shell_lookup_line(line: str) -> Optional[str]:
-    candidate = line.strip().strip('"')
-    if not candidate:
-        return None
-    if " is " in candidate:
-        candidate = candidate.split(" is ", 1)[1].strip()
-    if candidate.startswith("(") and candidate.endswith(")"):
-        candidate = candidate[1:-1].strip()
-    return _resolve_cli_path(candidate) or (candidate if os.path.isfile(candidate) else None)
-
-
-def _shell_lookup(name: str) -> Optional[str]:
-    if sys.platform == "win32":
-        commands = [
-            ["where", name],
-            [
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                f"(Get-Command {name} -All -ErrorAction SilentlyContinue | "
-                f"Select-Object -ExpandProperty Source)",
-            ],
-        ]
-    else:
-        commands = [
-            ["sh", "-lc", f"command -v {name}"],
-            ["bash", "-lc", f"type -a {name} 2>/dev/null"],
-            ["zsh", "-lc", f"whence -p {name} 2>/dev/null; command -v {name} 2>/dev/null"],
-            ["fish", "-lc", f"type -a {name} 2>/dev/null"],
-        ]
-
-    for cmd in commands:
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-        except Exception:
-            continue
-        if result.returncode != 0 or not result.stdout.strip():
-            continue
-        for line in result.stdout.strip().splitlines():
-            resolved = _parse_shell_lookup_line(line)
-            if resolved:
-                return resolved
-    return None
-
-
-def _glob_cli_paths(name: str) -> list[str]:
-    import glob
-    home = os.path.expanduser("~")
-    patterns = [
-        os.path.join(home, ".claude", "bin", name),
-        os.path.join(home, ".claude", "*", "bin", name),
-        os.path.join(home, ".local", "share", "claude", "bin", name),
-        os.path.join(home, ".local", "share", "npm", "*", "bin", name),
-    ]
-    if sys.platform == "win32":
-        patterns.extend([
-            os.path.join(home, ".claude", "bin", f"{name}.exe"),
-            os.path.join(home, ".claude", "bin", f"{name}.cmd"),
-        ])
-    found: list[str] = []
-    for pattern in patterns:
-        try:
-            found.extend(glob.glob(pattern))
-        except Exception:
-            pass
-    return found
-
-
-def _configured_cli_path(engine: str) -> Optional[str]:
-    env_key = "PODCLI_CLAUDE_PATH" if engine == "claude" else "PODCLI_CODEX_PATH"
-    raw = (os.environ.get(env_key) or "").strip()
-    if not raw:
-        try:
-            from services.env_settings import _read_pairs
-            raw = (_read_pairs().get(env_key) or "").strip()
-        except Exception:
-            pass
-    if not raw:
-        return None
-    return _resolve_cli_path(raw) or (raw if os.path.isfile(raw) else None)
-
-
-def _find_cli(name: str, extra_paths: list[str] = None) -> Optional[str]:
-    import shutil
-
-    for path in (extra_paths or []) + _glob_cli_paths(name):
-        resolved = _resolve_cli_path(path)
-        if resolved:
-            return resolved
-
-    lookup_dirs = _all_lookup_dirs()
-    lookup_path = os.pathsep.join(lookup_dirs + [os.environ.get("PATH", "")])
-    found = shutil.which(name, path=lookup_path)
-    if found:
-        return found
-
-    for directory in lookup_dirs:
-        resolved = _resolve_cli_path(os.path.join(directory, name))
-        if resolved:
-            return resolved
-
-    for directory in (os.environ.get("PATH", "") or "").split(os.pathsep):
-        if not directory:
-            continue
-        resolved = _resolve_cli_path(os.path.join(directory, name))
-        if resolved:
-            return resolved
-
-    return _shell_lookup(name)
-
-
-def _ai_cli_search_paths(name: str) -> list[str]:
-    paths_out = [os.path.join(directory, name) for directory in _all_lookup_dirs()]
-    paths_out.extend(_glob_cli_paths(name))
-    return paths_out
-
-
-def _env_cli_path(engine: str) -> Optional[str]:
-    return _configured_cli_path(engine)
-
-
-def get_ai_cli_status() -> dict:
-    configured = {
-        "claude": _configured_cli_path("claude"),
-        "codex": _configured_cli_path("codex"),
-    }
-    candidates = [
-        {"engine": engine, "path": path}
-        for path, engine in _find_ai_cli_candidates()
-    ]
-    return {
-        "configured": configured,
-        "candidates": candidates,
-        "available": bool(candidates),
-        "searched_dirs": _all_lookup_dirs(),
-    }
-
-
-def _find_ai_cli_candidates() -> list[tuple[str, str]]:
-    candidates = []
-
-    claude = _env_cli_path("claude") or _find_cli("claude", _ai_cli_search_paths("claude"))
-    if claude:
-        candidates.append((claude, "claude"))
-
-    codex = _env_cli_path("codex") or _find_cli("codex", _ai_cli_search_paths("codex"))
-    if codex:
-        candidates.append((codex, "codex"))
-
-    return candidates
-
-
-def _find_ai_cli() -> tuple[Optional[str], str]:
-    """
-    Find the best available AI CLI.
-
-    Returns (path, engine) where engine is "claude" or "codex".
-    Returns (None, "") if neither is available.
-    """
-    candidates = _find_ai_cli_candidates()
-    return candidates[0] if candidates else (None, "")
-
-
-def _engine_label(engine: str) -> str:
-    """Human-readable name for an AI engine id."""
-    if engine == "claude":
-        return "Claude"
-    if engine == "codex":
-        return "Codex"
-    return "AI"
-
-
-def _format_timeout_label(timeout: int) -> str:
-    """Render a human-readable timeout label for progress messages."""
-    if timeout % 60 == 0 and timeout >= 60:
-        minutes = timeout // 60
-        unit = "minute" if minutes == 1 else "minutes"
-        return f"{minutes} {unit}"
-    return f"{timeout}s"
-
-
-def _run_ai_command(
-    cli_path: str,
-    engine: str,
-    prompt: str,
-    prompt_file: str,
-    project_dir: str,
-    timeout: int,
-) -> subprocess.CompletedProcess:
-    """Execute one AI CLI prompt and return the completed process."""
-    if engine == "codex":
-        output_file = prompt_file + ".out"
-        result = subprocess.run(
-            [
-                cli_path, "exec",
-                "--full-auto",
-                "-o", output_file,
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=project_dir,
-            timeout=timeout,
-        )
-        if os.path.exists(output_file):
-            with open(output_file, encoding="utf-8") as f:
-                result = subprocess.CompletedProcess(
-                    args=result.args,
-                    returncode=result.returncode,
-                    stdout=f.read(),
-                    stderr=result.stderr,
-                )
-            try:
-                os.unlink(output_file)
-            except Exception:
-                pass
-        return result
-
-    shell = sys.platform == "win32" and cli_path.lower().endswith((".cmd", ".bat"))
-    cmd = f'"{cli_path}" --print -p -' if shell else [cli_path, "--print", "-p", "-"]
-    with open(prompt_file, encoding="utf-8") as prompt_fh:
-        return subprocess.run(
-            cmd,
-            stdin=prompt_fh,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=project_dir,
-            timeout=timeout,
-            shell=shell,
-        )
+from services import ai_provider, podcli_cloud
+from services.ai_cli import (
+    _engine_label,
+    _find_ai_cli,
+    _find_ai_cli_candidates,
+    _format_timeout_label,
+    _run_ai_command,
+    classify_cli_error,
+    get_ai_cli_status,
+)
 
 
 def _load_existing_shorts(episodes_path: str) -> list[str]:
@@ -634,6 +217,19 @@ Transcript ({segment_count} segments, ~{duration_min:.0f} min):
 {transcript_text}"""
 
 
+def _split_prompt_for_cache(prompt: str, transcript_text: str) -> tuple[str, str]:
+    """Separate the transcript from the ask, for backends that cache prefixes.
+
+    Returns (stable_prefix, instruction). The transcript is the only large
+    thing here and it is identical across every pass on an episode, so caching
+    it turns four full reads into one read and three cache hits.
+    """
+    marker = f"\n\n{transcript_text}"
+    if not transcript_text or not prompt.endswith(marker):
+        return "", prompt
+    return transcript_text, prompt[: -len(marker)]
+
+
 def _build_transcript_text(segments: list[dict]) -> str:
     """Serialize transcript segments into the prompt-friendly text format."""
     lines = []
@@ -739,14 +335,13 @@ def find_moments_from_text(
     progress_callback: Optional[Callable[[int, str], None]] = None,
     max_results: int = 3,
 ) -> list[dict]:
-    """Locate the moment(s) the user described/pasted in the transcript via an AI
-    CLI. Returns clip dicts (same shape as suggest_with_claude). Status goes to
+    """Locate the moment(s) the user described/pasted in the transcript.
+    Returns clip dicts (same shape as suggest_with_claude). Status goes to
     progress_callback; warnings to stderr — never stdout, which is the task
     runner's JSON-RPC channel."""
     existing_clips = existing_clips or []
-    candidates = _find_ai_cli_candidates()
-    if not candidates:
-        print("No AI CLI available for moment search", file=sys.stderr, flush=True)
+    if not ai_provider.available():
+        print("No AI available for moment search", file=sys.stderr, flush=True)
         return []
 
     if progress_callback:
@@ -794,49 +389,17 @@ Return this JSON:
 Transcript:
 {transcript_text}"""
 
-    # Prompt goes to .podcli/tmp/ (gitignored), not the repo root, so a crash
-    # mid-run never litters the working tree with transcript dumps.
     project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
-    from utils.prompt_files import write_prompt_file
-    prompt_file = write_prompt_file(prompt)
+
+    def announce(label: str) -> None:
+        if progress_callback:
+            progress_callback(40, f"Searching transcript with {label}...")
 
     try:
-        for idx, (cli_path, engine) in enumerate(candidates):
-            if progress_callback:
-                label = "Claude" if engine == "claude" else "Codex"
-                progress_callback(40, f"Searching transcript with {label}...")
-            try:
-                result = _run_ai_command(
-                    cli_path=cli_path,
-                    engine=engine,
-                    prompt=prompt,
-                    prompt_file=prompt_file,
-                    project_dir=project_dir,
-                    timeout=900,
-                )
-            except Exception:
-                continue
-
-            if result.returncode != 0 or not result.stdout.strip():
-                continue
-
-            response = result.stdout.strip()
-            if "```" in response:
-                import re
-
-                fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", response, re.DOTALL)
-                if fence_match:
-                    response = fence_match.group(1).strip()
-
-            try:
-                json_start = response.find("{")
-                if json_start >= 0:
-                    data, _ = json.JSONDecoder().raw_decode(response, json_start)
-                else:
-                    data = json.loads(response)
-            except Exception:
-                continue
-
+        data, _result = ai_provider.generate_json(
+            prompt, timeout=900, project_dir=project_dir, on_attempt=announce,
+        )
+        if data:
             found = []
             for c in data.get("clips", []):
                 scores = c.get("scores", {})
@@ -882,26 +445,6 @@ Transcript:
     except Exception as e:
         print(f"Moment search error: {e}", file=sys.stderr, flush=True)
         return []
-    finally:
-        try:
-            os.unlink(prompt_file)
-        except Exception:
-            pass
-
-
-def classify_cli_error(detail: str) -> str:
-    """Turn a raw AI CLI failure into an actionable hint. The generic
-    'check login' message hides whether it's auth, a plan limit, or a crash."""
-    low = (detail or "").lower()
-    if any(s in low for s in ("not logged in", "please run", "/login", "authenticate", "unauthorized", "invalid api key", "no credentials")):
-        return "not logged in. Run `claude` (or `codex`) once in a terminal to authenticate, then retry."
-    if any(s in low for s in ("usage limit", "rate limit", "quota", "too many requests", "429")):
-        return "usage or rate limit reached on your plan. Wait for the limit to reset, then retry."
-    if "timed out" in low or "timeout" in low:
-        return detail
-    if not detail:
-        return "the AI CLI returned no output. Run `claude` once in a terminal to confirm it responds."
-    return detail
 
 
 def suggest_with_claude(
@@ -919,13 +462,12 @@ def suggest_with_claude(
     Tries available AI CLIs in preference order and retries on runtime failure.
     Returns None if neither succeeds.
     """
-    candidates = _find_ai_cli_candidates()
-    if not candidates:
+    providers = ai_provider.status()["providers"]
+    if not providers:
         return None
 
     if progress_callback:
-        label = _engine_label(candidates[0][1])
-        progress_callback(0, f"Preparing transcript for {label}...")
+        progress_callback(0, f"Preparing transcript for {providers[0]['label']}...")
 
     transcript_text = _build_transcript_text(segments)
 
@@ -943,161 +485,177 @@ def suggest_with_claude(
         reaction_times=reaction_times,
     )
 
-    # Write prompt to temp file to avoid shell escaping issues.
-    # Goes to .podcli/tmp/ (gitignored) so crashes don't litter the repo root.
     project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 
-    from utils.prompt_files import write_prompt_file
-    prompt_file = write_prompt_file(prompt)
+    def _parse_seconds(val) -> float:
+        """Parse a timestamp value — handles both 123.4 and '2:03' formats."""
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).strip()
+        if ":" in s:
+            parts = s.split(":")
+            try:
+                return float(parts[0]) * 60 + float(parts[1])
+            except (ValueError, IndexError):
+                return 0.0
+        try:
+            return float(s)
+        except ValueError:
+            return 0.0
+
+    attempted: list[str] = []
+    current = {"label": ""}
+
+    def announce(label: str) -> None:
+        current["label"] = label
+        if attempted and progress_callback:
+            progress_callback(0, f"Retrying with {label}...")
+        if progress_callback:
+            progress_callback(20, f"Asking {label} to analyze transcript...")
+        attempted.append(label)
+
+    def usable(text: str):
+        """Reject a response that parses but has nothing in it, so the next
+        engine gets a turn rather than the user getting an empty result."""
+        label = current["label"]
+        if progress_callback:
+            progress_callback(80, f"Parsing {label}'s suggestions...")
+        parsed = ai_provider.extract_json(text)
+        if not isinstance(parsed, dict):
+            return f"{label} returned output that wasn't valid JSON"
+        if not isinstance(parsed.get("clips"), list) or not parsed["clips"]:
+            return f"{label} ran but found no clips in the transcript"
+        return True
+
+    cached_prefix, instruction = _split_prompt_for_cache(prompt, transcript_text)
+
+    # What this channel's own published clips say about what works, plus the
+    # house style learned from edits the team made to earlier output. Empty for
+    # everyone else, so the free path is unchanged.
+    learned = podcli_cloud.prompt_block()
+    if learned:
+        instruction = f"{learned}\n\n{instruction}"
+
+    attempt = ai_provider.generate(
+        instruction,
+        timeout=timeout,
+        project_dir=project_dir,
+        on_attempt=announce,
+        accept=usable,
+        purpose="select_moments",
+        stable_prefix=cached_prefix or None,
+        # Local backends keep the prompt exactly as it has always been built;
+        # only the cloud sees the split form.
+        local_prompt=prompt,
+    )
+
+    if not attempt.ok:
+        if progress_callback:
+            progress_callback(0, attempt.error)
+        if error_sink is not None:
+            # Classified only for a CLI failure. The advice it adds is "run
+            # `claude` once in a terminal", which is right for a local CLI and
+            # wrong for a workspace session or an API key, and `classify_cli_error`
+            # matches on "unauthorized" so it rewrote those too.
+            # The CLI path tags the attempt with its engine name, not "cli",
+            # so this asks the question the other way round.
+            error_sink.append(
+                attempt.error
+                if attempt.provider in ("cloud", "api")
+                else classify_cli_error(attempt.error)
+            )
+        return None
+
+    label = attempt.label
+
+    # Several independent searches over the same transcript find overlapping but
+    # not identical moments. Keeping the union and re-ranking beats picking one
+    # set, and the dedupe/scoring below already exists for exactly this shape.
+    def records(payload: object) -> list[dict]:
+        """
+        The clip objects in a response, and only those.
+
+        `usable` checked the primary response is a non-empty list, which still
+        admits a null or a string inside it, and the alternates are not checked
+        at all: `.get` on any of those is an AttributeError out of a code path
+        with nothing above it to catch.
+        """
+        if not isinstance(payload, dict):
+            return []
+        found = payload.get("clips")
+        if not isinstance(found, list):
+            return []
+        return [c for c in found if isinstance(c, dict)]
+
+    clips = records(ai_provider.extract_json(attempt.text))
+    for alternate in attempt.alternates:
+        clips.extend(records(ai_provider.extract_json(alternate)))
+
+    normalized = []
+    for c in clips:
+        scores = c.get("scores")
+        scores = scores if isinstance(scores, dict) else {}
+        total = sum(scores.values()) if scores else c.get("total_score", 0)
+
+        raw_segments = c.get("segments")
+        raw_segments = raw_segments if isinstance(raw_segments, list) else []
+        keep_segments = []
+        for seg in raw_segments:
+            if not isinstance(seg, dict):
+                continue
+            s = round(_parse_seconds(seg.get("start", 0)), 1)
+            e = round(_parse_seconds(seg.get("end", 0)), 1)
+            if e > s:
+                keep_segments.append({"start": s, "end": e})
+
+        start_sec = round(_parse_seconds(c.get("start_second", 0)), 1)
+        end_sec = round(_parse_seconds(c.get("end_second", 0)), 1)
+
+        if not keep_segments and end_sec > start_sec:
+            keep_segments = [{"start": start_sec, "end": end_sec}]
+
+        kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
+        if kept_duration < MIN_CLIP_DURATION or kept_duration > MAX_CLIP_DURATION:
+            continue
+
+        normalized.append({
+            "title": clean_title(c.get("title", "Untitled")),
+            "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
+            "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
+            "segments": keep_segments,
+            "duration": round(kept_duration),
+            "score": total,
+            "content_type": c.get("content_type", "unknown"),
+            "reasoning": c.get("why", ""),
+            "preview_text": c.get("quote", "")[:120],
+            "suggested_caption_style": "hormozi",
+            "quote": c.get("quote", ""),
+            "why": c.get("why", ""),
+            "reasons": [c.get("content_type", "")],
+            "preview": c.get("quote", "")[:120],
+            "_ai_engine": attempt.provider,
+        })
+
+    # Dedupe within the pool as well as against already-selected clips: several
+    # attempts routinely surface the same strong moment, and without this the
+    # top N would be the same clip repeated.
+    selected = _select_top_by_score(
+        _drop_clips_overlapping(_dedupe_clips_by_range(normalized), exclude_clips or []),
+        top_n,
+    )
+
+    if selected:
+        if progress_callback:
+            progress_callback(100, f"{label} suggested {len(selected)} clips")
+        return selected
 
     if progress_callback:
-        first_label = _engine_label(candidates[0][1])
-        progress_callback(20, f"Asking {first_label} to analyze transcript...")
-
-    try:
-        def _parse_seconds(val) -> float:
-            """Parse a timestamp value — handles both 123.4 and '2:03' formats."""
-            if isinstance(val, (int, float)):
-                return float(val)
-            s = str(val).strip()
-            if ":" in s:
-                parts = s.split(":")
-                try:
-                    return float(parts[0]) * 60 + float(parts[1])
-                except (ValueError, IndexError):
-                    return 0.0
-            try:
-                return float(s)
-            except ValueError:
-                return 0.0
-
-        last_detail: Optional[str] = None
-        for idx, (cli_path, engine) in enumerate(candidates):
-            label = _engine_label(engine)
-            if idx > 0 and progress_callback:
-                progress_callback(0, f"Retrying with {label}...")
-                progress_callback(20, f"Asking {label} to analyze transcript...")
-
-            try:
-                result = _run_ai_command(
-                    cli_path=cli_path,
-                    engine=engine,
-                    prompt=prompt,
-                    prompt_file=prompt_file,
-                    project_dir=project_dir,
-                    timeout=timeout,
-                )
-            except subprocess.TimeoutExpired:
-                last_detail = f"{label} timed out ({_format_timeout_label(timeout)} limit)"
-                if progress_callback:
-                    progress_callback(0, last_detail)
-                continue
-            except Exception as e:
-                last_detail = f"{label} error: {e}"
-                if progress_callback:
-                    progress_callback(0, last_detail)
-                continue
-
-            if result.returncode != 0 or not result.stdout.strip():
-                detail = (result.stderr or "no response").strip()[:200]
-                last_detail = f"{label}: {detail}"
-                if progress_callback:
-                    progress_callback(0, f"{label} returned error: {detail}")
-                continue
-
-            if progress_callback:
-                progress_callback(80, f"Parsing {label}'s suggestions...")
-
-            try:
-                response = result.stdout.strip()
-                if "```" in response:
-                    import re
-                    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", response, re.DOTALL)
-                    if fence_match:
-                        response = fence_match.group(1).strip()
-
-                json_start = response.find("{")
-                if json_start >= 0:
-                    decoder = json.JSONDecoder()
-                    data, _ = decoder.raw_decode(response, json_start)
-                else:
-                    data = json.loads(response)
-            except json.JSONDecodeError as e:
-                last_detail = f"{label} returned output that wasn't valid JSON ({e})"
-                if progress_callback:
-                    progress_callback(0, f"Could not parse {label}'s response as JSON: {e}")
-                continue
-
-            clips = data.get("clips", [])
-            if not clips:
-                last_detail = f"{label} ran but found no clips in the transcript"
-                if progress_callback:
-                    progress_callback(0, f"{label} returned no clips")
-                continue
-
-            normalized = []
-            for c in clips:
-                scores = c.get("scores", {})
-                total = sum(scores.values()) if scores else c.get("total_score", 0)
-
-                raw_segments = c.get("segments", [])
-                keep_segments = []
-                for seg in raw_segments:
-                    s = round(_parse_seconds(seg.get("start", 0)), 1)
-                    e = round(_parse_seconds(seg.get("end", 0)), 1)
-                    if e > s:
-                        keep_segments.append({"start": s, "end": e})
-
-                start_sec = round(_parse_seconds(c.get("start_second", 0)), 1)
-                end_sec = round(_parse_seconds(c.get("end_second", 0)), 1)
-
-                if not keep_segments and end_sec > start_sec:
-                    keep_segments = [{"start": start_sec, "end": end_sec}]
-
-                kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
-                if kept_duration < MIN_CLIP_DURATION or kept_duration > MAX_CLIP_DURATION:
-                    continue
-
-                normalized.append({
-                    "title": clean_title(c.get("title", "Untitled")),
-                    "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
-                    "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
-                    "segments": keep_segments,
-                    "duration": round(kept_duration),
-                    "score": total,
-                    "content_type": c.get("content_type", "unknown"),
-                    "reasoning": c.get("why", ""),
-                    "preview_text": c.get("quote", "")[:120],
-                    "suggested_caption_style": "hormozi",
-                    "quote": c.get("quote", ""),
-                    "why": c.get("why", ""),
-                    "reasons": [c.get("content_type", "")],
-                    "preview": c.get("quote", "")[:120],
-                    "_ai_engine": engine,
-                })
-
-            selected = _select_top_by_score(
-                _drop_clips_overlapping(normalized, exclude_clips or []), top_n
-            )
-
-            if selected:
-                if progress_callback:
-                    progress_callback(100, f"{label} suggested {len(selected)} clips")
-                return selected
-
-            last_detail = f"{label} returned clips but none were usable (wrong length or format)"
-            if progress_callback:
-                progress_callback(0, f"{label} returned no usable clips")
-
-        if error_sink is not None:
-            error_sink.append(classify_cli_error(last_detail or ""))
-        return None
-    finally:
-        # Clean up temp file
-        try:
-            os.unlink(prompt_file)
-        except Exception:
-            pass
+        progress_callback(0, f"{label} returned no usable clips")
+    if error_sink is not None:
+        error_sink.append(
+            f"{label} returned clips but none were usable (wrong length or format)"
+        )
+    return None
 
 
 def suggest_initial_with_claude(

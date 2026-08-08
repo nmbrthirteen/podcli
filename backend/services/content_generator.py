@@ -1,5 +1,5 @@
 """
-Per-clip content generation (titles, descriptions, tags) via AI CLI.
+Per-clip content generation (titles, descriptions, tags).
 
 Single source of truth used by CLI, Web UI, and MCP.
 """
@@ -12,8 +12,17 @@ import tempfile
 import threading
 from typing import Optional, Callable
 
-from services.claude_suggest import _engine_label, _find_ai_cli_candidates, _run_ai_command
+from config.paths import paths
+from services import ai_provider
 from services.knowledge_base import load_kb_context as kb_load_context, warn_missing_context
+
+# Codex silently truncates long prompts, so it gets a shortened one. The prompts
+# here lead with the request precisely so this cut only costs transcript tail.
+CODEX_PROMPT_LIMIT = 4000
+
+
+def _shorten_for_codex(engine: str, prompt: str) -> str:
+    return prompt[:CODEX_PROMPT_LIMIT] if engine == "codex" else prompt
 
 
 CONTENT_KB_FILES = [
@@ -186,8 +195,7 @@ def generate_custom_content(
 
     Returns {"text", "engine"} with the raw model output, or None if no AI CLI.
     """
-    candidates = _find_ai_cli_candidates()
-    if not candidates:
+    if not ai_provider.available():
         return None
 
     kb_context = load_kb_context()
@@ -210,37 +218,25 @@ KNOWLEDGE BASE:
 TRANSCRIPT EXCERPT:
 {excerpt}"""
 
-    project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
-    from utils.prompt_files import write_prompt_file
-    prompt_file = write_prompt_file(prompt)
-    try:
-        for idx, (cli_path, engine) in enumerate(candidates):
-            label = _engine_label(engine)
-            if progress_callback:
-                progress_callback(30, f"Asking {label}..." if idx == 0 else f"Retrying with {label}...")
-            try:
-                cr = _run_ai_command(
-                    cli_path=cli_path,
-                    engine=engine,
-                    prompt=prompt[:4000] if engine == "codex" else prompt,
-                    prompt_file=prompt_file,
-                    project_dir=project_dir,
-                    timeout=120,
-                )
-            except Exception as exc:
-                print(f"Warning: {label} content generation failed: {exc}", file=sys.stderr)
-                continue
-            if cr.returncode != 0 or not cr.stdout.strip():
-                continue
-            if progress_callback:
-                progress_callback(100, "Done")
-            return {"text": cr.stdout.strip(), "engine": engine}
+    attempted: list[str] = []
+
+    def announce(label: str) -> None:
+        if progress_callback:
+            progress_callback(30, f"Asking {label}..." if not attempted else f"Retrying with {label}...")
+        attempted.append(label)
+
+    result = ai_provider.generate(
+        prompt,
+        timeout=120,
+        on_attempt=announce,
+        adapt=_shorten_for_codex,
+    )
+    if not result.ok:
+        print(f"Warning: content generation failed: {result.error}", file=sys.stderr)
         return None
-    finally:
-        try:
-            os.unlink(prompt_file)
-        except Exception as exc:
-            print(f"Warning: could not remove prompt file {prompt_file}: {exc}", file=sys.stderr)
+    if progress_callback:
+        progress_callback(100, "Done")
+    return {"text": result.text, "engine": result.provider}
 
 
 def generate_clip_content(
@@ -262,13 +258,12 @@ def generate_clip_content(
     Returns:
         dict with raw_text, titles, description, tags, hashtags, or None if AI unavailable
     """
-    candidates = _find_ai_cli_candidates()
-    if not candidates:
+    providers = ai_provider.status()["providers"]
+    if not providers:
         return None
 
-    label = _engine_label(candidates[0][1])
     if progress_callback:
-        progress_callback(0, f"Generating content via {label}...")
+        progress_callback(0, f"Generating content via {providers[0]['label']}...")
 
     kb_context = load_kb_context(task="title and description generation")
 
@@ -355,19 +350,23 @@ HASHTAGS:
 
     project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 
-    from utils.prompt_files import write_prompt_file
-    prompt_file = write_prompt_file(prompt)
+    def usable(text: str) -> bool:
+        parsed = _parse_content(text)
+        return bool(parsed["titles"] or parsed["description"])
 
-    try:
-        for idx, (cli_path, engine) in enumerate(candidates):
-            label = _engine_label(engine)
+    raw_text = None
+    engine_used = ""
+
+    # The Studio renders titles as they arrive. Only the Claude CLI can stream,
+    # so it gets first refusal; everything else falls through to the chain.
+    if partial_callback is not None:
+        cli_path = ai_provider.claude_cli_path()
+        if cli_path:
             if progress_callback:
-                if idx > 0:
-                    progress_callback(0, f"Retrying content generation with {label}...")
-                progress_callback(30, f"Asking {label} for titles & descriptions...")
-
-            raw_text = None
-            if engine == "claude" and partial_callback is not None:
+                progress_callback(30, "Asking Claude for titles & descriptions...")
+            from utils.prompt_files import write_prompt_file
+            prompt_file = write_prompt_file(prompt)
+            try:
                 raw_text = _stream_claude_content(
                     cli_path=cli_path,
                     prompt_file=prompt_file,
@@ -375,42 +374,42 @@ HASHTAGS:
                     timeout=120,
                     on_partial=partial_callback,
                 )
-
-            if raw_text is None:
+                engine_used = "claude"
+            finally:
                 try:
-                    cr = _run_ai_command(
-                        cli_path=cli_path,
-                        engine=engine,
-                        prompt=prompt[:4000] if engine == "codex" else prompt,
-                        prompt_file=prompt_file,
-                        project_dir=project_dir,
-                        timeout=120,
-                    )
-                except subprocess.TimeoutExpired:
-                    continue
-                except Exception:
-                    continue
+                    os.unlink(prompt_file)
+                except OSError:
+                    pass
 
-                if cr.returncode != 0 or not cr.stdout.strip():
-                    continue
-                raw_text = cr.stdout.strip()
+    if raw_text is None or not usable(raw_text):
+        attempted: list[str] = []
 
+        def announce(label: str) -> None:
             if progress_callback:
-                progress_callback(90, "Parsing content...")
+                if attempted:
+                    progress_callback(0, f"Retrying content generation with {label}...")
+                progress_callback(30, f"Asking {label} for titles & descriptions...")
+            attempted.append(label)
 
-            result = _parse_content(raw_text)
-            result["engine"] = engine
-            if not result["titles"] and not result["description"]:
-                continue
+        attempt = ai_provider.generate(
+            prompt,
+            timeout=120,
+            project_dir=project_dir,
+            on_attempt=announce,
+            adapt=_shorten_for_codex,
+            accept=usable,
+        )
+        if not attempt.ok:
+            return None
+        raw_text, engine_used = attempt.text, attempt.provider
 
-            if progress_callback:
-                progress_callback(100, f"Content ready ({len(result['titles'])} titles)")
+    if progress_callback:
+        progress_callback(90, "Parsing content...")
 
-            return result
+    result = _parse_content(raw_text)
+    result["engine"] = engine_used
 
-        return None
-    finally:
-        try:
-            os.unlink(prompt_file)
-        except Exception:
-            pass
+    if progress_callback:
+        progress_callback(100, f"Content ready ({len(result['titles'])} titles)")
+
+    return result

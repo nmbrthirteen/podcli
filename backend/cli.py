@@ -920,15 +920,15 @@ def cmd_process(args):
             print("         ⚠ No highlights found, falling back to transcript selection")
 
     # Try an AI CLI first (uses PodStack knowledge base for intelligent selection)
-    from services.claude_suggest import (
-        suggest_initial_with_claude, blend_signal_scores, _engine_label, _find_ai_cli,
-    )
+    from services import ai_provider
+    from services.ai_cli import _engine_label
+    from services.claude_suggest import blend_signal_scores, suggest_initial_with_claude
 
-    ai_path, ai_engine = _find_ai_cli()
+    providers = ai_provider.status()["providers"]
     if clips:
         pass  # already selected (resumed cache or saliency profile)
-    elif ai_path and config.get("ai_select", True):
-        ai_label = _engine_label(ai_engine)
+    elif providers and config.get("ai_select", True):
+        ai_label = providers[0]["label"]
         print(f"  [3/4] Selecting moments with {ai_label} (PodStack)...")
         clips = suggest_initial_with_claude(
             segments=segments,
@@ -938,8 +938,9 @@ def cmd_process(args):
         )
         if clips:
             blend_signal_scores(clips, energy_data=energy_data, events_data=events_data)
-            actual_engine = next((c.get("_ai_engine") for c in clips if c.get("_ai_engine")), ai_engine)
-            print(f"         ✓ {_engine_label(actual_engine)} selected {len(clips)} clips")
+            engine_id = next((c.get("_ai_engine") for c in clips if c.get("_ai_engine")), "")
+            actual_engine = _engine_label(engine_id) if engine_id in ("claude", "codex") else ai_label
+            print(f"         ✓ {actual_engine} selected {len(clips)} clips")
             _save_suggestions_session(cache_hash, top_n, actual_engine, clips, selection_sig)
         else:
             print("         ⚠ AI CLI unavailable, falling back to heuristics")
@@ -1006,9 +1007,9 @@ def cmd_process(args):
             pass
     _thumb_intro_duration = max(0.5, min(_thumb_intro_duration, 1.0))
 
-    # Check if AI CLI is available for per-clip content generation
-    from services.claude_suggest import _find_ai_cli
-    _ai_cli_path, _ = _find_ai_cli()
+    # Per-clip content generation needs any provider, not specifically a binary.
+    from services import ai_provider
+    _ai_cli_path = "cloud" if ai_provider.available() else None
 
     # Pre-load thumbnail tools if enabled
     _thumb_gen = None
@@ -3491,9 +3492,15 @@ def print_banner():
         _diarization_ok = False
     speakers_ok = bool(hf_token) and _diarization_ok
 
-    # Check AI CLI (Claude Code or Codex)
-    from services.claude_suggest import _find_ai_cli
-    ai_path, ai_engine = _find_ai_cli()
+    # `info` should report what AI podcli will actually use, which for a
+    # signed-in user is the workspace rather than any local binary.
+    from services import ai_provider
+    # Every other lookup in this banner is guarded. This one reads and parses
+    # the local auth file, so a truncated one would take `podcli info` with it.
+    try:
+        _providers = ai_provider.status()["providers"]
+    except Exception:
+        _providers = []
 
     print(f"  {bold}podcli{reset} v{VERSION}")
 
@@ -3504,8 +3511,8 @@ def print_banner():
         cache_count = len([f for f in os.listdir(cache_dir) if f.endswith(".json")])
 
     # Status — one line
-    ai_label = ("Claude" if ai_engine == "claude" else "Codex") if ai_path else "AI CLI"
-    ai_tag = f"{green}✓ {ai_label}{reset}" if ai_path else f"{yellow}✗{reset}"
+    ai_label = _providers[0]["label"] if _providers else "AI"
+    ai_tag = f"{green}✓ {ai_label}{reset}" if _providers else f"{yellow}✗{reset}"
     speaker_tag = f"{green}✓{reset}" if speakers_ok else f"{yellow}✗{reset}"
     cache_tag = f"{green}{cache_count}{reset}" if cache_count else f"{gray}0{reset}"
     kb_tag = f"{green}{kb_count}{reset}" if kb_count else f"{yellow}0{reset}"
@@ -3633,6 +3640,132 @@ def print_help():
     print()
 
 
+def cmd_login(args):
+    import getpass
+    from services import podcli_cloud
+
+    email = (args.email or input("Email: ")).strip()
+    # Prefer the prompt: a password in argv is visible in ps output and lands in
+    # the user's shell history.
+    password = args.password or getpass.getpass("Password: ")
+    if not email or not password:
+        print("Email and password are required.")
+        sys.exit(1)
+
+    try:
+        podcli_cloud.login(email, password)
+        account = podcli_cloud.me()
+        podcli_cloud.remember_plan(account.get("plan", ""))
+    except podcli_cloud.CloudError as exc:
+        print(f"Sign-in failed: {exc}")
+        sys.exit(1)
+
+    workspace = account.get("workspace") or {}
+    print(f"Signed in to {workspace.get('name', 'your workspace')} "
+          f"({account.get('plan', 'free')} plan, {account.get('role', 'member')}).")
+    if account.get("plan") == "free":
+        print("This workspace has no active subscription — podcli will keep using "
+              "your local AI CLI until one starts.")
+
+    # Everything already rendered on this machine belongs in the workspace too,
+    # so the performance model starts with a back catalogue instead of nothing.
+    try:
+        synced, failed = podcli_cloud.backfill_clips()
+    except Exception:
+        synced, failed = 0, 0
+    if synced:
+        print(f"Synced {synced} existing clip{'s' if synced != 1 else ''} to your workspace.")
+    if failed:
+        print(f"{failed} could not be synced — `podcli whoami` will retry later.")
+
+
+def cmd_logout(args):
+    from services import podcli_cloud
+
+    if not podcli_cloud.signed_in():
+        print("Not signed in.")
+        return
+    podcli_cloud.clear_token()
+    print("Signed out. podcli will use your local AI CLI from now on.")
+
+
+def cmd_whoami(args):
+    from services import ai_provider, podcli_cloud
+
+    if not podcli_cloud.signed_in():
+        print("Not signed in to podcli Pro. Run `podcli login`.")
+    else:
+        try:
+            account = podcli_cloud.me()
+            podcli_cloud.remember_plan(account.get("plan", ""))
+            workspace = account.get("workspace") or {}
+            print(f"Signed in to {workspace.get('name', '?')} "
+                  f"({account.get('plan')} plan, {account.get('role')})")
+            used = workspace.get("episodes_used")
+            if used is not None:
+                print(f"Episodes used this month: {used}")
+        except podcli_cloud.CloudError as exc:
+            print(f"Signed in, but the account could not be checked: {exc}")
+
+    providers = ai_provider.status()["providers"]
+    if providers:
+        print("AI will use: " + " → ".join(p["label"] for p in providers))
+    else:
+        print("No AI available. Install Claude Code, set ANTHROPIC_API_KEY, or sign in.")
+
+
+def cmd_workspace(args):
+    from services import podcli_cloud
+
+    if not podcli_cloud.signed_in():
+        print("Not signed in to podcli Pro. Run `podcli login`.")
+        sys.exit(1)
+
+    action = getattr(args, "workspace_action", None) or "list"
+    try:
+        if action == "new":
+            created = podcli_cloud.create_workspace(args.name)
+            print(f"Created {created['name']} and switched to it (free plan).")
+            print("Each show carries its own subscription, so this one needs its own.")
+            _warn_local_data()
+            return
+
+        workspaces = podcli_cloud.list_workspaces()
+
+        if action == "use":
+            target = next(
+                (w for w in workspaces
+                 if args.name.lower() in (w["name"].lower(), w["id"].lower())),
+                None,
+            )
+            if not target:
+                print(f"No workspace matching {args.name!r}.")
+                sys.exit(1)
+            switched = podcli_cloud.switch_workspace(target["id"])
+            print(f"Switched to {switched['name']} ({switched['plan']} plan).")
+            _warn_local_data()
+            return
+
+        for w in workspaces:
+            marker = "*" if w.get("current") else " "
+            print(f" {marker} {w['name']}  ({w['plan']}, {w['role']})")
+    except podcli_cloud.CloudError as exc:
+        print(f"Could not reach podcli Pro: {exc}")
+        sys.exit(1)
+
+
+def _warn_local_data():
+    """Switching workspace does not move the local knowledge base or assets.
+
+    Those live in .podcli/ on this machine, and a second show's brand voice
+    overwriting the first is data loss rather than a sync. Keeping each show in
+    its own directory (or PODCLI_HOME) is the honest answer until profiles do it
+    automatically.
+    """
+    print()
+    print("  Local .podcli/ data is per-directory, not per-workspace.")
+    print("  Work on each show from its own folder so their knowledge bases "
+          "and assets stay separate.")
 def _onboarding_marker() -> str:
     return os.path.join(paths["home"], ".onboarded")
 
@@ -3823,6 +3956,20 @@ def main():
     parser.add_argument("--version", action="version", version=f"podcli {VERSION}")
     parser.add_argument("--no-banner", action="store_true", help=argparse.SUPPRESS)
     sub = parser.add_subparsers(dest="command")
+
+    # ── podcli Pro account ──
+    login_p = sub.add_parser("login", help="Sign in to podcli Pro")
+    login_p.add_argument("--email", help="Account email (prompted if omitted)")
+    login_p.add_argument("--password", help="Password (prompted if omitted; prefer the prompt)")
+    sub.add_parser("logout", help="Sign out of podcli Pro on this machine")
+    sub.add_parser("whoami", help="Show the signed-in podcli Pro account")
+    ws_p = sub.add_parser("workspace", help="Switch between shows in podcli Pro")
+    ws_sub = ws_p.add_subparsers(dest="workspace_action")
+    ws_sub.add_parser("list", help="List your workspaces")
+    ws_new = ws_sub.add_parser("new", help="Create a workspace for another show")
+    ws_new.add_argument("name", help="Workspace name")
+    ws_use = ws_sub.add_parser("use", help="Switch to a workspace")
+    ws_use.add_argument("name", help="Workspace name or id")
 
     # ── process ──
     proc = sub.add_parser("process", help="Process a video into clips")
@@ -4160,7 +4307,15 @@ def main():
         print("  Setup cancelled. Your command did not run.", file=sys.stderr)
         sys.exit(130)
 
-    if args.command == "process":
+    if args.command == "login":
+        cmd_login(args)
+    elif args.command == "logout":
+        cmd_logout(args)
+    elif args.command == "whoami":
+        cmd_whoami(args)
+    elif args.command == "workspace":
+        cmd_workspace(args)
+    elif args.command == "process":
         if not getattr(args, "no_banner", False):
             print()
         cmd_process(args)

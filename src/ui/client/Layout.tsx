@@ -15,6 +15,7 @@ import {
   Search,
 } from "lucide-react";
 import CommandPalette from "./CommandPalette";
+import AccountChip from "./AccountChip";
 
 const icons: Record<string, typeof LayoutGrid> = {
   library: LayoutGrid,
@@ -73,6 +74,8 @@ export default function Layout() {
 
         <div className="sidebar-section">Insights</div>
         <NavLink to="/analytics" className="sidebar-link"><Icon name="analytics" /> Analytics</NavLink>
+
+        <AccountChip />
       </aside>
 
       <main className="shell-main">

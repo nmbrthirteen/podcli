@@ -676,8 +676,8 @@ def _signal_profiles_for_suggest(
 
 def handle_suggest_clips(task_id: str, params: dict):
     """AI-powered clip suggestion using Claude/Codex and PodStack knowledge base."""
+    from services import ai_provider
     from services.claude_suggest import (
-        _find_ai_cli_candidates,
         select_clips_with_signal_scores,
         suggest_initial_with_claude,
     )
@@ -690,13 +690,15 @@ def handle_suggest_clips(task_id: str, params: dict):
         emit_result(task_id, "error", error="segments is required")
         return
 
-    if not _find_ai_cli_candidates():
+    # Gate on the provider chain, not on a local binary: a signed-in Pro user
+    # has AI available without installing anything.
+    if not ai_provider.available():
         emit_result(
             task_id,
             "error",
             error=(
-                "No AI CLI available (install Claude Code or Codex). "
-                "If already installed, set the path in Config → AI CLI or PODCLI_CLAUDE_PATH."
+                "No AI available. Sign in with `podcli login`, install Claude Code "
+                "or Codex, or set ANTHROPIC_API_KEY."
             ),
         )
         return
@@ -740,9 +742,17 @@ def handle_manage_env(task_id: str, params: dict):
 
 
 def handle_ai_cli_status(task_id: str, params: dict):
-    from services.claude_suggest import get_ai_cli_status
+    from services.ai_cli import get_ai_cli_status
 
     emit_result(task_id, "success", data=get_ai_cli_status())
+
+
+def handle_ai_provider_status(task_id: str, params: dict):
+    """Everything podcli can use for AI, not just local binaries — so the studio
+    can tell "nothing installed" apart from "signed in, nothing needed"."""
+    from services import ai_provider
+
+    emit_result(task_id, "success", data=ai_provider.status())
 
 
 def handle_find_moment(task_id: str, params: dict):
@@ -774,7 +784,7 @@ def handle_find_moment(task_id: str, params: dict):
 def handle_generate_content(task_id: str, params: dict):
     """Generate titles, descriptions, tags for a clip using PodStack knowledge base."""
     from services.content_generator import generate_clip_content
-    from services.claude_suggest import _find_ai_cli_candidates
+    from services import ai_provider
 
     clip = params.get("clip", {})
     transcript_segments = params.get("transcript_segments", [])
@@ -783,13 +793,15 @@ def handle_generate_content(task_id: str, params: dict):
         emit_result(task_id, "error", error="clip is required")
         return
 
-    if not _find_ai_cli_candidates():
+    # Gate on the provider chain, not on a local binary: a signed-in Pro user
+    # has AI available without installing anything.
+    if not ai_provider.available():
         emit_result(
             task_id,
             "error",
             error=(
-                "No AI CLI available (install Claude Code or Codex). "
-                "If already installed, set the path in Config → AI CLI or PODCLI_CLAUDE_PATH."
+                "No AI available. Sign in with `podcli login`, install Claude Code "
+                "or Codex, or set ANTHROPIC_API_KEY."
             ),
         )
         return
@@ -808,7 +820,7 @@ def handle_generate_content(task_id: str, params: dict):
         emit_result(
             task_id,
             "error",
-            error="AI CLI found but content generation failed — check claude/codex login and try again",
+            error="Content generation failed — check that your AI provider is reachable and try again",
         )
         return
 
@@ -832,7 +844,10 @@ def handle_generate_custom(task_id: str, params: dict):
     )
 
     if result is None:
-        emit_result(task_id, "error", error="No AI CLI available (install Claude Code or Codex)")
+        # The gate above admits a workspace session or an API key as well as a
+        # local binary, so naming only the binary sends cloud users to install
+        # something they will never use.
+        emit_result(task_id, "error", error="No AI provider available — sign in to podcli Pro, install Claude Code or Codex, or set ANTHROPIC_API_KEY")
         return
 
     emit_result(task_id, "success", data=result)
@@ -927,6 +942,7 @@ TASK_HANDLERS = {
     "find_moment": handle_find_moment,
     "manage_env": handle_manage_env,
     "ai_cli_status": handle_ai_cli_status,
+    "ai_provider_status": handle_ai_provider_status,
     "generate_content": handle_generate_content,
     "generate_custom": handle_generate_custom,
     "manage_integrations": handle_manage_integrations,

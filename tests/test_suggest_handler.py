@@ -11,7 +11,7 @@ if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
 import main as backend_main
-from services import claude_suggest
+from services import ai_provider, claude_suggest
 
 SEGMENTS = [{"start": 0.0, "end": 10.0, "text": "hello"}]
 ENERGY_DATA = [{"time": float(t), "rms_db": -30.0} for t in range(31)] + [
@@ -44,7 +44,7 @@ class SuggestReactionTimesTests(unittest.TestCase):
             emitted.update({"task_id": task_id, "status": status, "data": data, "error": error})
 
         with mock.patch.object(claude_suggest, "suggest_initial_with_claude", fake_suggest), \
-             mock.patch.object(claude_suggest, "_find_ai_cli_candidates", return_value=["claude"]), \
+             mock.patch.object(ai_provider, "available", return_value=True), \
              mock.patch.object(backend_main, "emit_result", fake_emit_result), \
              mock.patch.object(backend_main, "emit_progress"):
             backend_main.handle_suggest_clips("task-1", params)

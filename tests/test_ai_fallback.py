@@ -12,6 +12,8 @@ BACKEND_ROOT = os.path.join(ROOT, "backend")
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
+from services import ai_cli as ai
+from services import ai_provider as ap
 from services import claude_suggest as cs
 from services import content_generator as cg
 from services import thumbnail_ai as tai
@@ -58,11 +60,11 @@ class AIFallbackTests(unittest.TestCase):
         })
 
         with mock.patch.object(
-            cs,
-            "_find_ai_cli_candidates",
-            return_value=[("/tmp/claude", "claude"), ("/tmp/codex", "codex")],
+            ap,
+            "_chain",
+            return_value=[("cli", "/tmp/claude", "claude"), ("cli", "/tmp/codex", "codex")],
         ), mock.patch.object(
-            cs,
+            ai,
             "_run_ai_command",
             side_effect=[
                 subprocess.CompletedProcess(args=["claude"], returncode=1, stdout="", stderr="claude down"),
@@ -218,11 +220,11 @@ class AIFallbackTests(unittest.TestCase):
         progress = []
 
         with mock.patch.object(
-            cs,
-            "_find_ai_cli_candidates",
-            return_value=[("/tmp/claude", "claude")],
+            ap,
+            "_chain",
+            return_value=[("cli", "/tmp/claude", "claude")],
         ), mock.patch.object(
-            cs,
+            ai,
             "_run_ai_command",
             side_effect=subprocess.TimeoutExpired(cmd=["claude"], timeout=90),
         ):
@@ -264,11 +266,11 @@ HASHTAGS:
 #power #energy #datacenters #ai #infrastructure"""
 
         with mock.patch.object(
-            cg,
-            "_find_ai_cli_candidates",
-            return_value=[("/tmp/claude", "claude"), ("/tmp/codex", "codex")],
+            ap,
+            "_chain",
+            return_value=[("cli", "/tmp/claude", "claude"), ("cli", "/tmp/codex", "codex")],
         ), mock.patch.object(
-            cg,
+            ai,
             "_run_ai_command",
             side_effect=[
                 subprocess.CompletedProcess(args=["claude"], returncode=1, stdout="", stderr="claude down"),
@@ -300,11 +302,11 @@ Some wrapper text
 """
 
         with mock.patch.object(
-            cs,
-            "_find_ai_cli_candidates",
-            return_value=[("/tmp/claude", "claude"), ("/tmp/codex", "codex")],
+            ap,
+            "_chain",
+            return_value=[("cli", "/tmp/claude", "claude"), ("cli", "/tmp/codex", "codex")],
         ), mock.patch.object(
-            cs,
+            ai,
             "_run_ai_command",
             side_effect=[
                 subprocess.CompletedProcess(args=["claude"], returncode=1, stdout="", stderr="claude down"),
@@ -329,8 +331,8 @@ class AICliDiscoveryTests(unittest.TestCase):
             shim = os.path.join(tmp, "claude.cmd")
             with open(shim, "w", encoding="utf-8") as fh:
                 fh.write("@echo off\n")
-            with mock.patch.object(cs.sys, "platform", "win32"):
-                found = cs._find_cli("claude", [os.path.join(tmp, "claude")])
+            with mock.patch.object(ai.sys, "platform", "win32"):
+                found = ai._find_cli("claude", [os.path.join(tmp, "claude")])
             self.assertEqual(found, shim)
 
     @unittest.skipIf(os.name == "nt", "POSIX executable discovery; Windows uses .cmd/.exe shims")
@@ -343,7 +345,7 @@ class AICliDiscoveryTests(unittest.TestCase):
                 fh.write("#!/bin/sh\n")
             with mock.patch.dict(os.environ, {"HOME": home, "PATH": ""}, clear=False):
                 with mock.patch("os.path.expanduser", side_effect=lambda p: p.replace("~", home)):
-                    found = cs._find_cli("claude", [])
+                    found = ai._find_cli("claude", [])
             self.assertEqual(found, cli)
 
     @unittest.skipIf(os.name == "nt", "POSIX executable discovery; Windows uses .cmd/.exe shims")
@@ -359,16 +361,16 @@ class AICliDiscoveryTests(unittest.TestCase):
                 fh.write(f"prefix={prefix}\n")
             with mock.patch.dict(os.environ, {"HOME": home, "PATH": ""}, clear=False):
                 with mock.patch("os.path.expanduser", side_effect=lambda p: p.replace("~", home)):
-                    with mock.patch.object(cs, "_package_manager_bin_dirs", return_value=[]):
-                        with mock.patch.object(cs, "_shell_lookup", return_value=None):
-                            found = cs._find_cli("claude", [])
+                    with mock.patch.object(ai, "_package_manager_bin_dirs", return_value=[]):
+                        with mock.patch.object(ai, "_shell_lookup", return_value=None):
+                            found = ai._find_cli("claude", [])
             self.assertEqual(found, cli)
 
     def test_parse_shell_lookup_line_handles_type_a(self):
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             path = tmp.name
         try:
-            self.assertEqual(cs._parse_shell_lookup_line(f"claude is {path}"), path)
+            self.assertEqual(ai._parse_shell_lookup_line(f"claude is {path}"), path)
         finally:
             os.remove(path)
 
@@ -381,7 +383,7 @@ class AICliDiscoveryTests(unittest.TestCase):
                 fh.write("#!/bin/sh\n")
             with mock.patch.dict(os.environ, {"HOME": home, "PATH": ""}, clear=False):
                 with mock.patch("os.path.expanduser", side_effect=lambda p: p.replace("~", home)):
-                    found = cs._find_cli("claude", cs._ai_cli_search_paths("claude"))
+                    found = ai._find_cli("claude", ai._ai_cli_search_paths("claude"))
             self.assertEqual(found, cli)
 
     def test_env_override_prefers_podcli_claude_path(self):
@@ -390,8 +392,8 @@ class AICliDiscoveryTests(unittest.TestCase):
             with open(cli, "w", encoding="utf-8") as fh:
                 fh.write("#!/bin/sh\n")
             with mock.patch.dict(os.environ, {"PODCLI_CLAUDE_PATH": cli, "PATH": ""}, clear=False):
-                with mock.patch.object(cs, "_find_cli", return_value=None) as find_mock:
-                    candidates = cs._find_ai_cli_candidates()
+                with mock.patch.object(ai, "_find_cli", return_value=None) as find_mock:
+                    candidates = ai._find_ai_cli_candidates()
             find_mock.assert_called_once()
             self.assertEqual(find_mock.call_args.args[0], "codex")
             self.assertEqual(candidates[0], (cli, "claude"))
@@ -406,7 +408,7 @@ class AICliDiscoveryTests(unittest.TestCase):
                 fh.write(f"PODCLI_CLAUDE_PATH={cli}\n")
             with mock.patch.dict(os.environ, {"PODCLI_ENV_FILE": env_file, "PATH": ""}, clear=False):
                 os.environ.pop("PODCLI_CLAUDE_PATH", None)
-                found = cs._configured_cli_path("claude")
+                found = ai._configured_cli_path("claude")
             self.assertEqual(found, cli)
 
     def test_find_cli_falls_back_to_shell_lookup(self):
@@ -414,18 +416,18 @@ class AICliDiscoveryTests(unittest.TestCase):
             cli = os.path.join(tmp, "claude")
             with open(cli, "w", encoding="utf-8") as fh:
                 fh.write("#!/bin/sh\n")
-            with mock.patch.object(cs, "_shell_lookup", return_value=cli):
+            with mock.patch.object(ai, "_shell_lookup", return_value=cli):
                 with mock.patch("shutil.which", return_value=None):
-                    found = cs._find_cli("claude", [])
+                    found = ai._find_cli("claude", [])
             self.assertEqual(found, cli)
 
     def test_get_ai_cli_status_reports_candidates(self):
         with mock.patch.object(
-            cs,
+            ai,
             "_find_ai_cli_candidates",
             return_value=[("/tmp/claude", "claude")],
-        ), mock.patch.object(cs, "_configured_cli_path", return_value=None):
-            status = cs.get_ai_cli_status()
+        ), mock.patch.object(ai, "_configured_cli_path", return_value=None):
+            status = ai.get_ai_cli_status()
         self.assertTrue(status["available"])
         self.assertEqual(status["candidates"][0]["engine"], "claude")
         with tempfile.TemporaryDirectory() as tmp:
@@ -436,14 +438,14 @@ class AICliDiscoveryTests(unittest.TestCase):
             with open(cli, "w", encoding="utf-8") as fh:
                 fh.write("#!/bin/sh\n")
 
-            with mock.patch("services.claude_suggest.subprocess.run") as run_mock:
+            with mock.patch("services.ai_cli.subprocess.run") as run_mock:
                 run_mock.return_value = subprocess.CompletedProcess(
                     args=[cli, "--print", "-p", "-"],
                     returncode=0,
                     stdout="{}",
                     stderr="",
                 )
-                cs._run_ai_command(
+                ai._run_ai_command(
                     cli_path=cli,
                     engine="claude",
                     prompt="find clips",
