@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PageHeader } from "./Page";
 import { api, upload } from "./lib";
+import AiSetup from "./AiSetup";
 
 type SettingRow = {
   key: string;
@@ -168,6 +169,8 @@ export default function ConfigPage() {
           ))
         )}
       </div>
+
+      <AiSetup />
 
       <div className="section">
         <div className="section-label">AI CLI</div>

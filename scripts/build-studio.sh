@@ -22,4 +22,6 @@ node -e "require('esbuild').buildSync({entryPoints:['dist/ui/web-server.js'],bun
 cp -r dist/ui/public "$out/public"
 # MCP stdio server (the mcp__podcli__* tools Claude/Codex drive).
 node -e "require('esbuild').buildSync({entryPoints:['dist/index.js'],bundle:true,platform:'node',format:'esm',outfile:'$out/mcp-server.mjs',banner:{js:\"$banner\"},logLevel:'error'})"
-echo "studio + mcp bundle -> $out"
+# `podcli sync` — reconciles clips, assets, and knowledge with a Pro workspace.
+node -e "require('esbuild').buildSync({entryPoints:['dist/sync.js'],bundle:true,platform:'node',format:'esm',outfile:'$out/sync.mjs',banner:{js:\"$banner\"},logLevel:'error'})"
+echo "studio + mcp + sync bundle -> $out"

@@ -1203,6 +1203,15 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .sidebar-link:hover { background: var(--surface2); color: var(--text); }
 .sidebar-link.active { background: var(--accent-subtle); color: var(--accent); }
+
+/* Signed-in workspace, pinned to the foot of the sidebar so it reads as status
+   rather than as another navigation item. */
+.sidebar-account { margin-top: auto; padding: 12px; border-top: 1px solid var(--border); }
+.sidebar-account-name {
+  font-size: 12px; font-weight: 700; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sidebar-account-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
 .sidebar-link .ico { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.85; }
 .sidebar-link.disabled { opacity: 0.4; pointer-events: none; }
 .sidebar-link .soon { margin-left: auto; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }

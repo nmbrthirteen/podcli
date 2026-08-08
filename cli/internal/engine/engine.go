@@ -151,6 +151,34 @@ func MCPServer() string {
 	return ""
 }
 
+func SyncScript() string {
+	p := filepath.Join(paths.RuntimeDir(), "studio", "sync.mjs")
+	if exists(p) {
+		return p
+	}
+	return ""
+}
+
+// RunSync reconciles this machine with the podcli Pro workspace. Ships with the
+// studio bundle because the sync logic lives on the TypeScript side, alongside
+// the clip history and asset registry it reconciles.
+func RunSync() (int, error) {
+	node, script := Node(), SyncScript()
+	if node == "" || script == "" {
+		return 1, fmt.Errorf("sync not provisioned — run `podcli setup`")
+	}
+	cmd := exec.Command(node, script)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Env = nodeEnv()
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.ExitCode(), nil
+		}
+		return 1, err
+	}
+	return 0, nil
+}
+
 // nodeEnv builds the env a bundled Node server (studio/MCP) needs: the TS
 // paths.ts reads these names (note PYTHON_PATH/FFMPEG_PATH differ from the
 // PODCLI_* names the Python side uses). Project data stays cwd-local.

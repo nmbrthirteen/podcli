@@ -54,6 +54,12 @@ func main() {
 			fmt.Fprintln(os.Stderr, "podcli:", err)
 		}
 		os.Exit(code)
+	case "sync":
+		code, err := engine.RunSync()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "podcli:", err)
+		}
+		os.Exit(code)
 	case "config":
 		if len(args) >= 2 && (args[1] == "get" || args[1] == "set") {
 			os.Exit(configCmd(args[1:]))
@@ -772,6 +778,9 @@ PodStack commands (run inside Claude Code / Codex):
   retro-episode        Add --codex / --claude to pick the agent
 
 Launcher commands:
+  login | logout | whoami
+                       podcli Pro account on this machine
+  sync                 Reconcile clips, assets, and knowledge with your workspace
   doctor               Show resolved paths, interpreter, backend, ffmpeg, models
   version              Print version
   update               Check for and apply a newer release
