@@ -23,7 +23,7 @@ _DTW_PRESETS = {
     "tiny", "tiny.en", "base", "base.en", "small", "small.en",
     "medium", "medium.en", "large.v1", "large.v2", "large.v3", "large.v3-turbo",
 }
-_QUANT_SUFFIX = re.compile(r"-(?:q\d+_\d+|q\d+k[a-z]*|f16|f32)$", re.IGNORECASE)
+_QUANT_SUFFIX = re.compile(r"-(?:q\d+(?:_\d+)?(?:_?[a-z]+)*|f16|f32)$", re.IGNORECASE)
 
 
 def _dtw_preset_for_model(model_path: str) -> Optional[str]:

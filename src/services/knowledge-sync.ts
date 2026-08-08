@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import { mkdir, readFile, readdir, writeFile } from "fs/promises";
-import { dirname, join, resolve, sep } from "path";
+import { dirname, join, relative, resolve, sep } from "path";
 import { paths } from "../config/paths.js";
 import * as cloud from "./podcli-cloud.js";
 
@@ -50,7 +50,15 @@ function insideKnowledge(path: string): string | null {
 
 async function localFiles(): Promise<string[]> {
   if (!existsSync(paths.knowledge)) return [];
-  return (await readdir(paths.knowledge)).filter((f) => f.endsWith(".md")).sort();
+  // Recursive because a pulled file may live in a subdirectory: the workspace
+  // accepts nested paths, and a flat listing would pull `brand/voice.md` once
+  // and then never push a local edit to it again.
+  const entries = await readdir(paths.knowledge, { recursive: true, withFileTypes: true });
+  return entries
+    .filter((e) => e.isFile() && e.name.endsWith(".md"))
+    .map((e) => relative(paths.knowledge, join(e.parentPath ?? e.path, e.name)))
+    .map((p) => p.split(sep).join("/"))
+    .sort();
 }
 
 export type KnowledgeSyncReport = {

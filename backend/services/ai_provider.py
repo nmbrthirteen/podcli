@@ -131,10 +131,13 @@ def extract_json(text: str) -> Optional[Any]:
         fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", body, re.DOTALL)
         if fenced:
             body = fenced.group(1).strip()
-    for opener in ("{", "["):
-        start = body.find(opener)
-        if start < 0:
-            continue
+    # By position, not by preference: a top-level array whose first element is
+    # an object would otherwise match "{" at index 1 and return one element of
+    # the list instead of the list.
+    openers = sorted(
+        (body.find(opener), opener) for opener in ("{", "[") if body.find(opener) >= 0
+    )
+    for start, _opener in openers:
         try:
             value, _ = json.JSONDecoder().raw_decode(body, start)
             return value

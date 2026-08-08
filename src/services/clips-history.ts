@@ -128,15 +128,21 @@ export class ClipsHistory {
       }))?.id;
       if (!clipId) return;
 
-      await this.update(entry.id, { cloud_id: clipId, cloud_synced: true });
+      await this.update(entry.id, { cloud_id: clipId });
 
       // Metadata alone leaves a share link with nothing to play, so the
       // rendered file follows it. Uploaded once: the server keeps the first
       // copy and answers `unchanged` after that.
-      if (!entry.cloud_video_uploaded && existsSync(entry.output_path)) {
-        const uploaded = await cloud.uploadClipVideo(clipId, entry.output_path);
-        if (uploaded) await this.update(entry.id, { cloud_video_uploaded: true });
+      let hasVideo = entry.cloud_video_uploaded === true;
+      if (!hasVideo && existsSync(entry.output_path)) {
+        hasVideo = await cloud.uploadClipVideo(clipId, entry.output_path);
+        if (hasVideo) await this.update(entry.id, { cloud_video_uploaded: true });
       }
+
+      // Synchronised means the clip is watchable, not merely described. A
+      // failed upload that still reported success is how `podcli sync` exits
+      // happy while every share link plays nothing.
+      await this.update(entry.id, { cloud_synced: hasVideo });
     } catch {
       await this.update(entry.id, { cloud_synced: false }).catch(() => {});
     } finally {
@@ -348,7 +354,7 @@ export class ClipsHistory {
       try {
         await this.syncToCloud(entry);
         const after = await this.findById(entry.id);
-        if (after?.cloud_id) synced++;
+        if (after?.cloud_synced) synced++;
         else failed++;
       } catch {
         failed++;

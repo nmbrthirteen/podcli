@@ -122,9 +122,15 @@ export async function pull(): Promise<SyncReport> {
     try {
       const body = await cloud.downloadAsset(entry.id);
       await mkdir(dir, { recursive: true });
-      const target = join(dir, basename(entry.name));
+      // The whole name, flattened: two workspace assets called `intro/logo.png`
+      // and `outro/logo.png` both end in `logo.png`, and the second download
+      // would land on the first and leave two registry entries pointing at one
+      // file.
+      const target = join(dir, entry.name.replace(/[\\/]+/g, "-"));
       await writeFile(target, body);
-      await manager.register(entry.name, target, inferType(target));
+      // The workspace already knows what this is. Re-deriving the type from the
+      // extension turns a `music` asset stored as .mp4 into a video.
+      await manager.register(entry.name, target, assetType(entry.kind) ?? inferType(target));
       report.downloaded.push(entry.name);
     } catch (err) {
       report.failed.push({
@@ -134,6 +140,17 @@ export async function pull(): Promise<SyncReport> {
     }
   }
   return report;
+}
+
+const ASSET_TYPES: readonly AssetType[] = [
+  "logo", "outro", "intro", "music", "video", "image",
+];
+
+/** The workspace's own kind, when it is one this app models. */
+function assetType(kind: string | undefined): AssetType | null {
+  return kind && (ASSET_TYPES as readonly string[]).includes(kind)
+    ? (kind as AssetType)
+    : null;
 }
 
 export async function sync(): Promise<SyncReport> {

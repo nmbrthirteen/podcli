@@ -12,6 +12,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
@@ -22,7 +23,17 @@ AUTH_FILENAME = "auth.json"
 
 
 def api_url() -> str:
-    return (os.environ.get("PODCLI_API_URL") or DEFAULT_API_URL).rstrip("/")
+    """
+    The API base, restricted to http and https.
+
+    urlopen honours whatever scheme it is given, so an unchecked value here
+    lets `file:` turn a local path into what the code treats as an API
+    response.
+    """
+    raw = (os.environ.get("PODCLI_API_URL") or DEFAULT_API_URL).rstrip("/")
+    if urllib.parse.urlparse(raw).scheme not in ("http", "https"):
+        return DEFAULT_API_URL
+    return raw
 
 
 def _auth_path() -> str:
@@ -53,7 +64,12 @@ def _auth_data() -> dict:
 def _write_auth(data: dict) -> None:
     os.makedirs(paths["home"], exist_ok=True)
     path = _auth_path()
-    with open(path, "w", encoding="utf-8") as fh:
+    # Opened with the mode already set rather than chmod'd afterwards: the
+    # session token would otherwise be world-readable for the width of the
+    # write, and a file that already existed would keep its old mode until the
+    # chmod landed.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(data, fh)
     try:
         os.chmod(path, 0o600)
@@ -146,7 +162,11 @@ def _describe(exc: urllib.error.HTTPError) -> tuple[str, bool]:
     """Turn an HTTP failure into something a user can act on."""
     payload: dict = {}
     try:
-        payload = json.loads(exc.read().decode("utf-8"))
+        parsed = json.loads(exc.read().decode("utf-8"))
+        # A server can answer with a list or a bare string. Assuming an object
+        # turns the error path itself into an AttributeError.
+        if isinstance(parsed, dict):
+            payload = parsed
     except Exception:
         pass
     detail = payload.get("error")
@@ -254,8 +274,13 @@ def backfill_clips(limit: int = 200) -> tuple[int, int]:
                 "aspectRatio": entry.get("format"),
                 "transcriptSlice": entry.get("transcript_slice"),
             })
-        except CloudError:
+        except CloudError as exc:
             failed += 1
+            # An expired session or a workspace with no subscription answers the
+            # same way for every remaining clip. Continuing would hash and
+            # upload another few hundred megabytes to be refused each time.
+            if exc.status in (401, 402, 403):
+                break
             continue
 
         if result and result.get("id"):

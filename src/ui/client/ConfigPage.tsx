@@ -55,7 +55,10 @@ export default function ConfigPage() {
     } catch { /* settings are optional */ }
   }
 
+  const [aiRefresh, setAiRefresh] = useState(0);
+
   async function refreshAiCli() {
+    setAiRefresh((n) => n + 1);
     try {
       setAiCli(await api<AiCliStatus>("/ai-cli-status"));
     } catch {
@@ -170,7 +173,7 @@ export default function ConfigPage() {
         )}
       </div>
 
-      <AiSetup />
+      <AiSetup key={aiRefresh} />
 
       <div className="section">
         <div className="section-label">AI CLI</div>

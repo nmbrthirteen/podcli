@@ -45,8 +45,15 @@ export default function AiSetup() {
 
   useEffect(() => {
     fetch("/api/ai-provider-status")
-      .then((r) => r.json())
-      .then(setStatus)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      // The types say these are always present; the server can answer with an
+      // error body or a partial payload, and rendering a missing array throws
+      // out of this component and takes the settings page with it.
+      .then((payload) => setStatus({
+        ...payload,
+        providers: Array.isArray(payload?.providers) ? payload.providers : [],
+        candidates: Array.isArray(payload?.candidates) ? payload.candidates : [],
+      }))
       .catch(() => setStatus(null));
   }, []);
 

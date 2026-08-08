@@ -20,6 +20,11 @@ const { sync } = await import("./knowledge-sync.js");
 describe("knowledge sync", () => {
   beforeEach(() => {
     rmSync(join(tmp, "knowledge"), { recursive: true, force: true });
+    // The sync state lives beside the folder, not in it. Leaving it behind made
+    // these tests order-dependent: the pull phase skips any path already in the
+    // map, so a later test passed only because an earlier one had not recorded
+    // a version for the same filename.
+    rmSync(join(tmp, "knowledge-sync.json"), { force: true });
     mkdirSync(join(tmp, "knowledge"), { recursive: true });
     vi.clearAllMocks();
   });

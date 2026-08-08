@@ -27,6 +27,10 @@ class DtwPresetTests(unittest.TestCase):
             "ggml-small.bin": "small",
             "ggml-large-v3-turbo.bin": "large.v3-turbo",
             "ggml-base.en-q5_1.bin": "base.en",
+            # K-quantisation names carry underscores between the qualifiers, and
+            # failing to strip them dropped -dtw for a model that supports it.
+            "ggml-large-v3-q4_k_m.gguf": "large.v3",
+            "ggml-small.en-q8_0.bin": "small.en",
         }
         for name, preset in cases.items():
             with self.subTest(name=name):

@@ -523,7 +523,7 @@ def suggest_with_claude(
         parsed = ai_provider.extract_json(text)
         if not isinstance(parsed, dict):
             return f"{label} returned output that wasn't valid JSON"
-        if not parsed.get("clips"):
+        if not isinstance(parsed.get("clips"), list) or not parsed["clips"]:
             return f"{label} ran but found no clips in the transcript"
         return True
 
@@ -553,7 +553,7 @@ def suggest_with_claude(
         if progress_callback:
             progress_callback(0, attempt.error)
         if error_sink is not None:
-            error_sink.append(classify_cli_error(attempt.error))
+            error_sink.append(attempt.error)
         return None
 
     label = attempt.label

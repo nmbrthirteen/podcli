@@ -158,11 +158,13 @@ export type Preferences = {
   observations: string[];
 };
 
-export async function getInsights(): Promise<Insights> {
+// Nullable because `request` returns null for an empty body, and a caller that
+// trusts the declared shape would dereference it.
+export async function getInsights(): Promise<Insights | null> {
   return request("GET", "/v1/insights");
 }
 
-export async function getPreferences(): Promise<Preferences> {
+export async function getPreferences(): Promise<Preferences | null> {
   return request("GET", "/v1/insights/preferences");
 }
 
@@ -202,6 +204,7 @@ export async function putKnowledge(
     method: "PUT",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ path, content, expectedVersion }),
+    signal: AbortSignal.timeout(30_000),
   });
 
   // A 409 is an expected outcome here, not an error: someone else edited the
@@ -254,6 +257,7 @@ export async function uploadAsset(
     },
     // Node's fetch wants a view, not the Buffer's whole underlying pool.
     body: new Uint8Array(body),
+    signal: AbortSignal.timeout(300_000),
   });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
@@ -267,6 +271,7 @@ export async function downloadAsset(id: string): Promise<Buffer> {
 
   const response = await fetch(`${apiUrl()}/v1/assets/${id}/download`, {
     headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(300_000),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return Buffer.from(await response.arrayBuffer());

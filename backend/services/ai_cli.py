@@ -344,6 +344,26 @@ def get_ai_cli_status() -> dict:
     }
 
 
+def _env_file_stamp() -> tuple:
+    """
+    Identity of the .env discovery also reads.
+
+    A configured CLI path can come from the file as well as the environment,
+    and the backend task runner is long-lived: it serves the request that saves
+    the path and every request after it. Without the file in the key, saving a
+    path in the studio has no effect until the process restarts, which is a
+    regression against the old probe-every-time behaviour.
+    """
+    try:
+        from services.env_settings import _env_path
+        path = _env_path()
+        stat = os.stat(path)
+        return (path, stat.st_mtime_ns, stat.st_size)
+    except Exception:
+        # No file, or no reading it: nothing to invalidate against.
+        return ()
+
+
 def _discovery_key() -> tuple:
     """Everything discovery reads. Changing any of it must re-probe."""
     return tuple(
@@ -353,7 +373,7 @@ def _discovery_key() -> tuple:
             "NPM_CONFIG_PREFIX", "npm_config_prefix",
             "PODCLI_CLAUDE_PATH", "PODCLI_CODEX_PATH",
         )
-    )
+    ) + _env_file_stamp()
 
 
 @lru_cache(maxsize=8)

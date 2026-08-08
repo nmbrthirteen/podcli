@@ -820,7 +820,7 @@ def handle_generate_content(task_id: str, params: dict):
         emit_result(
             task_id,
             "error",
-            error="AI CLI found but content generation failed — check claude/codex login and try again",
+            error="Content generation failed — check that your AI provider is reachable and try again",
         )
         return
 

@@ -3495,7 +3495,12 @@ def print_banner():
     # `info` should report what AI podcli will actually use, which for a
     # signed-in user is the workspace rather than any local binary.
     from services import ai_provider
-    _providers = ai_provider.status()["providers"]
+    # Every other lookup in this banner is guarded. This one reads and parses
+    # the local auth file, so a truncated one would take `podcli info` with it.
+    try:
+        _providers = ai_provider.status()["providers"]
+    except Exception:
+        _providers = []
 
     print(f"  {bold}podcli{reset} v{VERSION}")
 
@@ -3639,7 +3644,7 @@ def cmd_login(args):
     import getpass
     from services import podcli_cloud
 
-    email = args.email or input("Email: ").strip()
+    email = (args.email or input("Email: ")).strip()
     # Prefer the prompt: a password in argv is visible in ps output and lands in
     # the user's shell history.
     password = args.password or getpass.getpass("Password: ")
