@@ -480,40 +480,15 @@ def _extract_json(text: str):
 
 
 def _ask_ai_for_json(prompt: str, timeout: int = 30):
-    """Run the first available AI CLI on `prompt`, returning the first JSON value
-    it emits, or None if no CLI is available or none returns parseable JSON."""
-    from services.claude_suggest import _find_ai_cli_candidates, _run_ai_command
+    """Run `prompt` through the AI provider chain, returning the first JSON value
+    it emits, or None if nothing is available or nothing returns parseable JSON."""
+    from services import ai_provider
 
-    candidates = _find_ai_cli_candidates()
-    if not candidates:
-        return None
-
-    prompt_file = None
-    try:
-        from utils.prompt_files import write_prompt_file
-        prompt_file = write_prompt_file(prompt)
-        project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
-        for cli_path, engine in candidates:
-            try:
-                result = _run_ai_command(
-                    cli_path=cli_path, engine=engine, prompt=prompt,
-                    prompt_file=prompt_file, project_dir=project_dir, timeout=timeout,
-                )
-            except Exception as e:
-                log_event("thumbnail-ai", "ai cli failed", level="warn", engine=engine, err=e)
-                continue
-            if result.returncode != 0 or not result.stdout.strip():
-                continue
-            parsed = _extract_json(result.stdout)
-            if parsed is not None:
-                return parsed
-    finally:
-        if prompt_file:
-            try:
-                os.unlink(prompt_file)
-            except Exception:
-                pass
-    return None
+    parsed, result = ai_provider.generate_json(prompt, timeout=timeout)
+    if parsed is None:
+        log_event("thumbnail-ai", "ai request failed", level="warn",
+                  err=result.error, tried=", ".join(result.attempts))
+    return parsed
 
 
 def _thumbnail_kb_context() -> str:
