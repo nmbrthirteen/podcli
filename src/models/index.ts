@@ -2,7 +2,7 @@
 
 export interface TaskRequest {
   task_id: string;
-  task_type: "transcribe" | "parse_transcript" | "create_clip" | "batch_clips" | "analyze_energy" | "detect_highlights" | "manage_reel" | "pack_transcript" | "detect_encoder" | "presets" | "ping" | "suggest_clips" | "find_moment" | "generate_content" | "generate_custom" | "corrections" | "manage_integrations" | "run_integration_tool" | "manage_config" | "manage_env" | "ai_cli_status";
+  task_type: "transcribe" | "parse_transcript" | "create_clip" | "batch_clips" | "analyze_energy" | "detect_highlights" | "manage_reel" | "pack_transcript" | "detect_encoder" | "presets" | "ping" | "suggest_clips" | "find_moment" | "generate_content" | "generate_custom" | "corrections" | "manage_integrations" | "run_integration_tool" | "manage_config" | "manage_env" | "ai_cli_status" | "ai_provider_status";
   params: Record<string, unknown>;
 }
 
@@ -277,6 +277,12 @@ export interface ClipHistoryEntry {
   description?: string;
   tags?: string;
   hashtags?: string;
+  // Set for signed-in users once the clip is mirrored to the workspace. A false
+  // cloud_synced marks a clip a later sweep should backfill; the local file
+  // stays the source of truth either way.
+  cloud_id?: string;
+  cloud_synced?: boolean;
+  cloud_video_uploaded?: boolean;
 }
 
 // === Knowledge Base Models ===

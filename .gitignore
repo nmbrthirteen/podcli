@@ -47,6 +47,9 @@ tmp*.txt
 # Episodes (generated content packages)
 episodes/
 
+# Planning notes
+plans/
+
 # Media & temp files
 *.mp4
 *.mp3

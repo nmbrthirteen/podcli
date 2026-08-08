@@ -1425,6 +1425,47 @@ app.get("/api/job/:id/stream", (req, res) => {
 /**
  * GET /api/outputs — List finished clips
  */
+/**
+ * Workspace-wide performance, for signed-in users.
+ *
+ * Returns `{ signedIn: false }` rather than an error when there's no account:
+ * the studio renders the same Analytics page either way, just without the
+ * workspace section. Nothing is greyed out and nothing says "upgrade".
+ */
+app.get("/api/pro/insights", async (_req, res) => {
+  try {
+    const cloud = await import("../services/podcli-cloud.js");
+    if (!(await cloud.signedIn())) return res.json({ signedIn: false });
+
+    const [insights, preferences] = await Promise.all([
+      cloud.getInsights(),
+      cloud.getPreferences(),
+    ]);
+    res.json({ signedIn: true, insights, preferences });
+  } catch (err) {
+    // A workspace that can't be reached must not break the local analytics the
+    // page is primarily there to show.
+    res.json({ signedIn: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get("/api/pro/account", async (_req, res) => {
+  try {
+    const cloud = await import("../services/podcli-cloud.js");
+    if (!(await cloud.signedIn())) return res.json({ signedIn: false });
+    const me = await cloud.whoami();
+    res.json({
+      signedIn: true,
+      workspace: me.workspace?.name,
+      plan: me.plan,
+      episodesUsed: me.workspace?.episodes_used,
+      cap: me.plan === "team" ? 40 : 10,
+    });
+  } catch {
+    res.json({ signedIn: false });
+  }
+});
+
 app.get("/api/outputs", async (_req, res) => {
   try {
     await mkdir(paths.output, { recursive: true });
@@ -2330,6 +2371,15 @@ app.get("/api/ai-cli-status", async (_req, res) => {
       available?: boolean;
     }>("ai_cli_status", {});
     res.json(result.data ?? { available: false, candidates: [], configured: {} });
+  } catch (err: unknown) {
+    res.status(500).json({ error: errMsg(err) });
+  }
+});
+
+app.get("/api/ai-provider-status", async (_req, res) => {
+  try {
+    const result = await executor.execute<Record<string, unknown>>("ai_provider_status", {});
+    res.json(result.data ?? { available: false, providers: [], candidates: [] });
   } catch (err: unknown) {
     res.status(500).json({ error: errMsg(err) });
   }
