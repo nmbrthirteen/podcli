@@ -571,20 +571,38 @@ def suggest_with_claude(
     # Several independent searches over the same transcript find overlapping but
     # not identical moments. Keeping the union and re-ranking beats picking one
     # set, and the dedupe/scoring below already exists for exactly this shape.
-    clips = list(ai_provider.extract_json(attempt.text)["clips"])
+    def records(payload: object) -> list[dict]:
+        """
+        The clip objects in a response, and only those.
+
+        `usable` checked the primary response is a non-empty list, which still
+        admits a null or a string inside it, and the alternates are not checked
+        at all: `.get` on any of those is an AttributeError out of a code path
+        with nothing above it to catch.
+        """
+        if not isinstance(payload, dict):
+            return []
+        found = payload.get("clips")
+        if not isinstance(found, list):
+            return []
+        return [c for c in found if isinstance(c, dict)]
+
+    clips = records(ai_provider.extract_json(attempt.text))
     for alternate in attempt.alternates:
-        parsed = ai_provider.extract_json(alternate)
-        if isinstance(parsed, dict):
-            clips.extend(parsed.get("clips") or [])
+        clips.extend(records(ai_provider.extract_json(alternate)))
 
     normalized = []
     for c in clips:
-        scores = c.get("scores", {})
+        scores = c.get("scores")
+        scores = scores if isinstance(scores, dict) else {}
         total = sum(scores.values()) if scores else c.get("total_score", 0)
 
-        raw_segments = c.get("segments", [])
+        raw_segments = c.get("segments")
+        raw_segments = raw_segments if isinstance(raw_segments, list) else []
         keep_segments = []
         for seg in raw_segments:
+            if not isinstance(seg, dict):
+                continue
             s = round(_parse_seconds(seg.get("start", 0)), 1)
             e = round(_parse_seconds(seg.get("end", 0)), 1)
             if e > s:

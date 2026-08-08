@@ -33,7 +33,7 @@ export default function WorkspaceInsights() {
 
   useEffect(() => {
     fetch("/api/pro/insights")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then(setData)
       .catch(() => setData({ signedIn: false }));
   }, []);
@@ -41,8 +41,11 @@ export default function WorkspaceInsights() {
   if (!data?.signedIn || !data.insights) return null;
 
   const { insights, preferences } = data;
-  const hasModel = insights.guidance.length > 0;
-  const hasStyle = (preferences?.observations.length ?? 0) > 0;
+  // The types say these arrays are always there. The server can answer with a
+  // partial payload, and reading a missing one throws out of this panel and
+  // takes the page it sits on with it.
+  const hasModel = (insights.guidance?.length ?? 0) > 0;
+  const hasStyle = (preferences?.observations?.length ?? 0) > 0;
 
   // Signed in but nothing learned yet. Say why, and say what changes it —
   // an empty panel with no explanation reads as broken.

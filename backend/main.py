@@ -844,7 +844,10 @@ def handle_generate_custom(task_id: str, params: dict):
     )
 
     if result is None:
-        emit_result(task_id, "error", error="No AI CLI available (install Claude Code or Codex)")
+        # The gate above admits a workspace session or an API key as well as a
+        # local binary, so naming only the binary sends cloud users to install
+        # something they will never use.
+        emit_result(task_id, "error", error="No AI provider available — sign in to podcli Pro, install Claude Code or Codex, or set ANTHROPIC_API_KEY")
         return
 
     emit_result(task_id, "success", data=result)
