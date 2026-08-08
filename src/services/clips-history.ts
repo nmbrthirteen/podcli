@@ -134,15 +134,22 @@ export class ClipsHistory {
       // rendered file follows it. Uploaded once: the server keeps the first
       // copy and answers `unchanged` after that.
       let hasVideo = entry.cloud_video_uploaded === true;
-      if (!hasVideo && existsSync(entry.output_path)) {
+      // A rendered file that no longer exists locally can never be uploaded.
+      // There is nothing left to do for it, and reporting it as failed on every
+      // run is the unfixable number this file already refuses to print.
+      const uploadable = !hasVideo && existsSync(entry.output_path);
+
+      if (uploadable) {
         hasVideo = await cloud.uploadClipVideo(clipId, entry.output_path);
         if (hasVideo) await this.update(entry.id, { cloud_video_uploaded: true });
       }
 
-      // Synchronised means the clip is watchable, not merely described. A
-      // failed upload that still reported success is how `podcli sync` exits
-      // happy while every share link plays nothing.
-      await this.update(entry.id, { cloud_synced: hasVideo });
+      // Synchronised means the clip is watchable, not merely described: an
+      // upload that failed while still reporting success is how `podcli sync`
+      // exits happy with every share link playing nothing.
+      await this.update(entry.id, {
+        cloud_synced: hasVideo || !existsSync(entry.output_path),
+      });
     } catch {
       await this.update(entry.id, { cloud_synced: false }).catch(() => {});
     } finally {

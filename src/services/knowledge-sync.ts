@@ -48,17 +48,33 @@ function insideKnowledge(path: string): string | null {
   return target.startsWith(root + sep) ? target : null;
 }
 
+/**
+ * Every .md under the knowledge folder, as workspace-style relative paths.
+ *
+ * Walked by hand rather than with `readdir({ recursive })`: that option needs
+ * Node 20.1 and `dirent.parentPath` needs 20.12, while podcli supports 18. CI
+ * runs 20, so the crash would have reached Node 18 users rather than the build.
+ *
+ * Recursive at all because the workspace accepts nested paths: a flat listing
+ * pulled `brand/voice.md` once and then never pushed a local edit to it again.
+ */
 async function localFiles(): Promise<string[]> {
   if (!existsSync(paths.knowledge)) return [];
-  // Recursive because a pulled file may live in a subdirectory: the workspace
-  // accepts nested paths, and a flat listing would pull `brand/voice.md` once
-  // and then never push a local edit to it again.
-  const entries = await readdir(paths.knowledge, { recursive: true, withFileTypes: true });
-  return entries
-    .filter((e) => e.isFile() && e.name.endsWith(".md"))
-    .map((e) => relative(paths.knowledge, join(e.parentPath ?? e.path, e.name)))
-    .map((p) => p.split(sep).join("/"))
-    .sort();
+
+  const found: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else if (entry.isFile() && entry.name.endsWith(".md")) {
+        found.push(relative(paths.knowledge, full).split(sep).join("/"));
+      }
+    }
+  };
+
+  await walk(paths.knowledge);
+  return found.sort();
 }
 
 export type KnowledgeSyncReport = {

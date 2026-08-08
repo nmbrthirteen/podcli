@@ -553,7 +553,17 @@ def suggest_with_claude(
         if progress_callback:
             progress_callback(0, attempt.error)
         if error_sink is not None:
-            error_sink.append(attempt.error)
+            # Classified only for a CLI failure. The advice it adds is "run
+            # `claude` once in a terminal", which is right for a local CLI and
+            # wrong for a workspace session or an API key, and `classify_cli_error`
+            # matches on "unauthorized" so it rewrote those too.
+            # The CLI path tags the attempt with its engine name, not "cli",
+            # so this asks the question the other way round.
+            error_sink.append(
+                attempt.error
+                if attempt.provider in ("cloud", "api")
+                else classify_cli_error(attempt.error)
+            )
         return None
 
     label = attempt.label
