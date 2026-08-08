@@ -16,6 +16,29 @@ from typing import Optional
 
 _SPECIAL = re.compile(r"^\[.*\]$")  # [_BEG_], [_TT_...], etc.
 
+# whisper.cpp's WHISPER_AHEADS_* presets. The alignment heads are per-architecture:
+# passing a preset whose layer/head indices exceed the loaded model's dimensions
+# aborts whisper-cli with exit 3, so the preset must track the model, not a default.
+_DTW_PRESETS = {
+    "tiny", "tiny.en", "base", "base.en", "small", "small.en",
+    "medium", "medium.en", "large.v1", "large.v2", "large.v3", "large.v3-turbo",
+}
+_QUANT_SUFFIX = re.compile(r"-(?:q\d+_\d+|q\d+k[a-z]*|f16|f32)$", re.IGNORECASE)
+
+
+def _dtw_preset_for_model(model_path: str) -> Optional[str]:
+    name = os.path.basename(model_path)
+    for ext in (".bin", ".gguf"):
+        if name.lower().endswith(ext):
+            name = name[: -len(ext)]
+            break
+    if name.lower().startswith("ggml-"):
+        name = name[5:]
+    name = _QUANT_SUFFIX.sub("", name).lower()
+    if name.startswith("large-v"):
+        name = "large." + name[len("large-"):]
+    return name if name in _DTW_PRESETS else None
+
 
 def _extract_wav(media_path: str, wav_path: str, ffmpeg: str = "ffmpeg") -> None:
     subprocess.run(
@@ -142,7 +165,7 @@ def transcribe_file(
     whisper_cli: str = "whisper-cli",
     ffmpeg: str = "ffmpeg",
     language: Optional[str] = "en",
-    dtw_model: str = "base",
+    dtw_model: Optional[str] = None,
     threads: int = 4,
     vad: bool = False,
     vad_model: Optional[str] = None,
@@ -165,8 +188,9 @@ def transcribe_file(
 
         cmd = [whisper_cli, "-m", model_path, "-f", wav, "-ojf",
                "-of", out_base, "-t", str(threads)]
-        if dtw_model:
-            cmd += ["-dtw", dtw_model]
+        dtw = dtw_model if dtw_model is not None else _dtw_preset_for_model(model_path)
+        if dtw:
+            cmd += ["-dtw", dtw]
         if vad and vad_model and os.path.exists(vad_model):
             # VAD removes the trailing-words-into-silence failure mode but adds a
             # systematic early bias (silence-removal remapping). Off by default;

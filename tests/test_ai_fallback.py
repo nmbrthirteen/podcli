@@ -423,7 +423,7 @@ class AICliDiscoveryTests(unittest.TestCase):
 
     def test_get_ai_cli_status_reports_candidates(self):
         with mock.patch.object(
-            cs,
+            ai,
             "_find_ai_cli_candidates",
             return_value=[("/tmp/claude", "claude")],
         ), mock.patch.object(ai, "_configured_cli_path", return_value=None):

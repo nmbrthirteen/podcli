@@ -7,7 +7,7 @@ BACKEND_ROOT = os.path.join(ROOT, "backend")
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
-from services.transcription_whispercpp import _tokens_to_words
+from services.transcription_whispercpp import _dtw_preset_for_model, _tokens_to_words
 
 
 class WhisperCppAdapterTests(unittest.TestCase):
@@ -17,6 +17,23 @@ class WhisperCppAdapterTests(unittest.TestCase):
             {"text": "▁world", "offsets": {"from": 100, "to": 200}},
         ])
         self.assertEqual([w["word"] for w in words], ["hello", "world"])
+
+
+class DtwPresetTests(unittest.TestCase):
+    def test_preset_tracks_the_model_file(self):
+        cases = {
+            "ggml-tiny.en.bin": "tiny.en",
+            "ggml-base.bin": "base",
+            "ggml-small.bin": "small",
+            "ggml-large-v3-turbo.bin": "large.v3-turbo",
+            "ggml-base.en-q5_1.bin": "base.en",
+        }
+        for name, preset in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(_dtw_preset_for_model(os.path.join("/models", name)), preset)
+
+    def test_unknown_model_gets_no_preset(self):
+        self.assertIsNone(_dtw_preset_for_model("/models/ggml-distil-large-v2.bin"))
 
 
 if __name__ == "__main__":
