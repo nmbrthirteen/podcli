@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import { mkdir, readFile, writeFile } from "fs/promises";
-import { basename, join } from "path";
+import { join } from "path";
 import { paths } from "../config/paths.js";
 import { AssetManager, inferType } from "./asset-manager.js";
 import * as cloud from "./podcli-cloud.js";
@@ -142,8 +142,16 @@ export async function pull(): Promise<SyncReport> {
   return report;
 }
 
+/**
+ * The kinds worth taking back from the workspace.
+ *
+ * "other" is deliberately absent even though it is a valid type both ends: it
+ * is what `cloudKind` uploads anything unrecognised as, so honouring it on the
+ * way back would turn a local video into "other" on the round trip. Guessing
+ * from the file is the better answer for exactly that case.
+ */
 const ASSET_TYPES: readonly AssetType[] = [
-  "logo", "outro", "intro", "music", "video", "image",
+  "logo", "outro", "intro", "music", "video", "image", "audio",
 ];
 
 /** The workspace's own kind, when it is one this app models. */
