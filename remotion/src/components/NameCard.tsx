@@ -1,7 +1,8 @@
 import React from "react";
 import { useCurrentFrame, useVideoConfig } from "remotion";
 import { captionScale } from "../types";
-import { fadeInOut } from "../motion";
+import { MOTION, motionAt } from "../motion";
+import type { Motion } from "../motion";
 
 export interface NameCardProps {
   /** Who is speaking, and what they are. One line each. */
@@ -12,6 +13,7 @@ export interface NameCardProps {
   background?: string;
   color?: string;
   accent?: string;
+  motion?: Motion;
 }
 
 /**
@@ -31,6 +33,7 @@ export const NameCard: React.FC<NameCardProps> = ({
   background = "rgba(0,0,0,0.85)",
   color = "#FFFFFF",
   accent = "#2ED9C3",
+  motion,
 }) => {
   const frame = useCurrentFrame();
   const { fps, height } = useVideoConfig();
@@ -39,11 +42,10 @@ export const NameCard: React.FC<NameCardProps> = ({
   if (!title) return null;
   if (frame >= seconds * fps) return null;
 
-  // fadeInOut returns the rising half only when the ramps do not fit inside
-  // `seconds`, so opacity alone never brings the card back down.
-  const ramp = Math.min(8, Math.floor((seconds * fps) / 2));
-  const opacity = fadeInOut({
-    frame, fps, start: 0, end: seconds, inFrames: ramp, outFrames: Math.min(10, ramp),
+  const { opacity, shift } = motionAt({
+    frame, fps, start: 0, end: seconds,
+    motion: motion ?? MOTION.nameCard,
+    scale: 12 * s,
   });
   if (opacity <= 0) return null;
 
@@ -60,7 +62,7 @@ export const NameCard: React.FC<NameCardProps> = ({
         opacity,
         // Rises the last few pixels as it arrives, which reads as arriving
         // rather than appearing.
-        transform: `translateY(${(1 - opacity) * 12 * s}px)`,
+        transform: `translateY(${shift}px)`,
       }}
     >
       <div

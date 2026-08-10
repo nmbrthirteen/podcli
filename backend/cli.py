@@ -583,6 +583,12 @@ def cmd_process(args):
             "seconds": getattr(args, "name_card_seconds", None),
             "accent": getattr(args, "name_card_accent", None),
         }
+    if getattr(args, "motion", None):
+        try:
+            config["motion"] = json.loads(args.motion)
+        except (TypeError, ValueError):
+            print("  Warning: --motion is not valid JSON; using each style's own motion",
+                  file=sys.stderr)
     if getattr(args, "bookend_fade", None) is not None:
         config["bookend_fade"] = args.bookend_fade
     if getattr(args, "thumbnails", None) is not None:
@@ -1066,6 +1072,7 @@ def cmd_process(args):
                         outro_path=config.get("outro_path") or None,
                         intro_path=config.get("intro_path") or None,
                         name_card=config.get("name_card"),
+                        motion=config.get("motion"),
                         bookend_fade=config.get("bookend_fade", 0.0),
                         keep_segments=clip.get("segments"),
                         face_map=face_map,
@@ -4011,6 +4018,9 @@ def main():
                       help="How long the lower third holds (default 3)")
     proc.add_argument("--name-card-accent", dest="name_card_accent",
                       help="Underline colour on the lower third")
+    proc.add_argument("--motion", dest="motion",
+                      help='How each part arrives and leaves, as JSON: '
+                           '{"captions":{"enter":"rise","exit":"fade","duration":5,"feel":"soft"}}')
     proc.add_argument("--bookend-fade", dest="bookend_fade", type=float, default=None,
                       help="Seconds of crossfade into an intro or outro (default 0, a cut)")
     proc.add_argument("--no-outro", action="store_true", help="Do not append an outro (default for highlight profiles)")

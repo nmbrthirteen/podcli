@@ -466,6 +466,7 @@ def _render_with_remotion(
     time_offset: float = 0.0,
     logo_path: Optional[str] = None,
     name_card: Optional[dict] = None,
+    motion: Optional[dict] = None,
     keep_caption_overlay: bool = False,
     caption_position: str = "auto",
     caption_font_scale: int = 100,
@@ -605,6 +606,8 @@ def _render_with_remotion(
                 cmd.extend(["--name-card-seconds", str(name_card["seconds"])])
             if name_card.get("accent"):
                 cmd.extend(["--name-card-accent", str(name_card["accent"])])
+        if motion:
+            cmd.extend(["--motion", json.dumps(motion)])
         if keep_caption_overlay:
             cmd.append("--keep-overlay")
 
@@ -671,6 +674,7 @@ def generate_clip(
     outro_path: Optional[str] = None,
     intro_path: Optional[str] = None,
     name_card: Optional[dict] = None,
+    motion: Optional[dict] = None,
     bookend_fade: float = 0.0,
     clean_fillers: bool = True,
     keep_segments: list[dict] = None,
@@ -946,6 +950,7 @@ def generate_clip(
                         time_offset=caption_time_offset,
                         logo_path=logo_path or None,
                         name_card=name_card,
+                        motion=motion,
                         keep_caption_overlay=keep_caption_overlay,
                         caption_position=caption_position,
                         caption_font_scale=caption_font_scale,

@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -104,6 +105,15 @@ class ClipGeneratorTests(unittest.TestCase):
         self.assertIn("--name-card", argv)
         self.assertIn("Jamie Gull", argv)
         self.assertIn("--name-card-sub", argv)
+
+    def test_motion_reaches_the_renderer_as_one_value(self):
+        argv = self._render_args(
+            caption_style="subtle",
+            motion={"captions": {"enter": "pop", "exit": "sink", "duration": 8, "feel": "soft"}},
+        )
+        self.assertIn("--motion", argv)
+        payload = json.loads(argv[argv.index("--motion") + 1])
+        self.assertEqual(payload["captions"]["enter"], "pop")
 
     def test_remotion_runtime_failure_does_not_disable_future_clips(self):
         real_exists = os.path.exists

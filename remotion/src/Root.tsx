@@ -54,6 +54,10 @@ const inputProps = getInputProps() as {
     color?: string;
     accent?: string;
   } | null;
+  motion?: {
+    captions?: Record<string, unknown>;
+    nameCard?: Record<string, unknown>;
+  } | null;
 };
 
 export const RemotionRoot: React.FC = () => {
@@ -92,6 +96,7 @@ export const RemotionRoot: React.FC = () => {
           captionPosition,
           logoPosition: inputProps.logoPosition || "top-left",
           singleLine: inputProps.singleLine === true,
+          motion: inputProps.motion ?? null,
         }}
       />
       <Composition

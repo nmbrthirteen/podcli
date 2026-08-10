@@ -7,6 +7,8 @@ import { BrandedCaptions } from "./components/BrandedCaptions";
 import { NameCard } from "./components/NameCard";
 import type { NameCardProps } from "./components/NameCard";
 import { Watermark } from "./components/Watermark";
+import { MOTION } from "./motion";
+import type { Motion } from "./motion";
 import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "./types";
 
 export interface CaptionedClipProps {
@@ -20,6 +22,8 @@ export interface CaptionedClipProps {
   captionPosition?: CaptionPosition;
   logoPosition?: LogoPosition;
   singleLine?: boolean;
+  /** Per-part overrides; each part falls back to its style's own motion. */
+  motion?: { captions?: Partial<Motion>; nameCard?: Partial<Motion> } | null;
 }
 
 export const CaptionedClip: React.FC<CaptionedClipProps> = ({
@@ -31,8 +35,13 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   captionPosition = "auto",
   logoPosition = "top-left",
   singleLine = false,
+  motion,
 }) => {
   const { height } = useVideoConfig();
+  const captionMotion: Motion = {
+    ...(MOTION[style.name] ?? MOTION.subtle), ...(motion?.captions ?? {}),
+  };
+  const cardMotion: Motion = { ...MOTION.nameCard, ...(motion?.nameCard ?? {}) };
   const CaptionComponent = {
     hormozi: HormoziCaptions,
     karaoke: KaraokeCaptions,
@@ -47,9 +56,9 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
         <BrandedCaptions words={words} style={style} logoSrc={logoSrc} faceY={faceY}
           captionPosition={captionPosition} logoPosition={logoPosition} singleLine={singleLine} />
       ) : (
-        <CaptionComponent words={words} style={style} singleLine={singleLine} />
+        <CaptionComponent words={words} style={style} singleLine={singleLine} motion={captionMotion} />
       )}
-      {nameCard?.title && <NameCard {...nameCard} />}
+      {nameCard?.title && <NameCard {...nameCard} motion={cardMotion} />}
     </AbsoluteFill>
   );
 };
