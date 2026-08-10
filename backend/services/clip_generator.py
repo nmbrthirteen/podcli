@@ -465,6 +465,7 @@ def _render_with_remotion(
     output_path: str,
     time_offset: float = 0.0,
     logo_path: Optional[str] = None,
+    name_card: Optional[dict] = None,
     keep_caption_overlay: bool = False,
 ) -> tuple[bool, Optional[str]]:
     """
@@ -590,6 +591,14 @@ def _render_with_remotion(
         ]
         if logo_path and os.path.exists(logo_path):
             cmd.extend(["--logo", os.path.abspath(logo_path)])
+        if name_card and name_card.get("title"):
+            cmd.extend(["--name-card", str(name_card["title"])])
+            if name_card.get("subtitle"):
+                cmd.extend(["--name-card-sub", str(name_card["subtitle"])])
+            if name_card.get("seconds"):
+                cmd.extend(["--name-card-seconds", str(name_card["seconds"])])
+            if name_card.get("accent"):
+                cmd.extend(["--name-card-accent", str(name_card["accent"])])
         if keep_caption_overlay:
             cmd.append("--keep-overlay")
 
@@ -652,6 +661,8 @@ def generate_clip(
     logo_path: Optional[str] = None,
     outro_path: Optional[str] = None,
     intro_path: Optional[str] = None,
+    name_card: Optional[dict] = None,
+    bookend_fade: float = 0.0,
     clean_fillers: bool = True,
     keep_segments: list[dict] = None,
     trim_opening: Optional[bool] = None,
@@ -909,7 +920,8 @@ def generate_clip(
                         caption_style=caption_style,
                         output_path=captioned_path,
                         time_offset=caption_time_offset,
-                        logo_path=logo_path if (style_config.get("logo_support", False) and logo_path) else None,
+                        logo_path=logo_path or None,
+                        name_card=name_card,
                         keep_caption_overlay=keep_caption_overlay,
                     )
 
@@ -931,7 +943,7 @@ def generate_clip(
 
                     use_gradient = style_config.get("gradient_overlay", False)
                     gradient_opacity = style_config.get("gradient_opacity", 0.6)
-                    use_logo = style_config.get("logo_support", False) and logo_path
+                    use_logo = bool(logo_path)
 
                     burn_captions(
                         input_path=cropped_path,
@@ -970,7 +982,8 @@ def generate_clip(
             intro_scaled = os.path.join(work_dir, "intro_scaled.mp4")
             scale_to_frame(intro_path, intro_scaled, cw, ch)
             with_intro_path = os.path.join(work_dir, "with_intro.mp4")
-            concat_outro(intro_scaled, final_video_path, with_intro_path)
+            concat_outro(intro_scaled, final_video_path, with_intro_path,
+                         crossfade_duration=bookend_fade)
             final_video_path = with_intro_path
 
         if outro_path and os.path.exists(outro_path):
@@ -978,7 +991,8 @@ def generate_clip(
                 progress_callback(85, f"Adding outro ({total_steps}/{total_steps})")
 
             with_outro_path = os.path.join(work_dir, "with_outro.mp4")
-            concat_outro(final_video_path, outro_path, with_outro_path)
+            concat_outro(final_video_path, outro_path, with_outro_path,
+                         crossfade_duration=bookend_fade)
             final_video_path = with_outro_path
 
         # Step 6: Move to output

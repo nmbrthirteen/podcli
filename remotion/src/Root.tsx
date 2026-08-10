@@ -41,6 +41,14 @@ const inputProps = getInputProps() as {
   bookendPlatforms?: string[];
   bookendBg?: string;
   bookendAccent?: string;
+  nameCard?: {
+    title: string;
+    subtitle?: string;
+    seconds?: number;
+    background?: string;
+    color?: string;
+    accent?: string;
+  } | null;
 };
 
 export const RemotionRoot: React.FC = () => {
@@ -62,6 +70,7 @@ export const RemotionRoot: React.FC = () => {
           style: STYLES[inputProps.styleName || "branded"],
           logoSrc: inputProps.logoSrc,
           faceY: inputProps.faceY ?? null,
+          nameCard: inputProps.nameCard ?? null,
         }}
       />
       <Composition

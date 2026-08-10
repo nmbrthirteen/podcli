@@ -3,8 +3,6 @@ import {
   useCurrentFrame,
   useVideoConfig,
   spring,
-  Img,
-  staticFile,
 } from "remotion";
 import type { Word, CaptionStyle } from "../types";
 import { captionScale } from "../types";
@@ -13,7 +11,6 @@ import { buildChunks, activeChunkAt } from "../chunks";
 interface Props {
   words: Word[];
   style: CaptionStyle;
-  logoSrc?: string;
   faceY?: number | null; // normalized 0-1 (0=top, 1=bottom)
 }
 
@@ -115,7 +112,6 @@ const CaptionLine: React.FC<{
 export const BrandedCaptions: React.FC<Props> = ({
   words,
   style,
-  logoSrc,
   faceY,
 }) => {
   const frame = useCurrentFrame();
@@ -147,20 +143,6 @@ export const BrandedCaptions: React.FC<Props> = ({
 
   return (
     <>
-      {logoSrc && (
-        <Img
-          src={logoSrc.startsWith("http") ? logoSrc : staticFile(logoSrc)}
-          style={{
-            position: "absolute",
-            top: 180 * s,
-            left: 108 * s,
-            width: 255 * s,
-            height: 126 * s,
-            objectFit: "contain",
-          }}
-        />
-      )}
-
       {activeChunk && (() => {
         const [line1, line2] = splitIntoLines(activeChunk.words);
 

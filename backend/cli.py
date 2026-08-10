@@ -575,6 +575,15 @@ def cmd_process(args):
         config["format"] = args.format
     if getattr(args, "profile", None):
         config["profile"] = args.profile
+    if getattr(args, "name_card", None):
+        config["name_card"] = {
+            "title": args.name_card,
+            "subtitle": getattr(args, "name_card_sub", None),
+            "seconds": getattr(args, "name_card_seconds", None),
+            "accent": getattr(args, "name_card_accent", None),
+        }
+    if getattr(args, "bookend_fade", None) is not None:
+        config["bookend_fade"] = args.bookend_fade
     if getattr(args, "thumbnails", None) is not None:
         config["generate_thumbnails"] = args.thumbnails
     if args.top:
@@ -1055,6 +1064,8 @@ def cmd_process(args):
                         logo_path=config.get("logo_path") or None,
                         outro_path=config.get("outro_path") or None,
                         intro_path=config.get("intro_path") or None,
+                        name_card=config.get("name_card"),
+                        bookend_fade=config.get("bookend_fade", 0.0),
                         keep_segments=clip.get("segments"),
                         face_map=face_map,
                         allow_ass_fallback=config.get("allow_ass_fallback", False),
@@ -3989,6 +4000,16 @@ def main():
     proc.add_argument("--profile", choices=["podcast", "party", "action"], help="Detection profile: podcast (transcript-first, default), party/action (laughter/energy highlights)")
     proc.add_argument("--logo", help="Logo image (asset name or path)")
     proc.add_argument("--outro", help="Outro video (asset name or path)")
+    proc.add_argument("--name-card", dest="name_card",
+                      help="Lower third naming the speaker, shown for the first seconds")
+    proc.add_argument("--name-card-sub", dest="name_card_sub",
+                      help="Second line of the lower third")
+    proc.add_argument("--name-card-seconds", dest="name_card_seconds", type=float,
+                      help="How long the lower third holds (default 3)")
+    proc.add_argument("--name-card-accent", dest="name_card_accent",
+                      help="Underline colour on the lower third")
+    proc.add_argument("--bookend-fade", dest="bookend_fade", type=float, default=0.0,
+                      help="Seconds of crossfade into an intro or outro (default 0, a cut)")
     proc.add_argument("--no-outro", action="store_true", help="Do not append an outro (default for highlight profiles)")
     proc.add_argument("--intro", help="Intro video (asset name or path)")
     proc.add_argument("--time-adjust", type=float, help="Timestamp offset in seconds")
