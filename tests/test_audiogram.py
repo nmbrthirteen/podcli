@@ -8,6 +8,7 @@ in it, and being careful about when that is worth stopping a run over.
 
 import os
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -80,3 +81,65 @@ class MessageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RenderRoutingTests(unittest.TestCase):
+    """generate_clip branches once, so every caller of it gets audiograms."""
+
+    def test_an_audio_file_is_handed_to_the_audiogram_renderer(self):
+        from services import clip_generator
+
+        sentinel = {"output_path": "/tmp/x.mp4", "crop_strategy": "audiogram"}
+        with mock.patch.object(audiogram, "is_audio_only", return_value=True):
+            with mock.patch.object(audiogram, "render_audiogram", return_value=sentinel) as render:
+                out = clip_generator.generate_clip(
+                    video_path=__file__, start_second=0, end_second=3,
+                )
+        self.assertIs(out, sentinel)
+        self.assertEqual(render.call_args.kwargs["start_second"], 0)
+        self.assertEqual(render.call_args.kwargs["end_second"], 3)
+
+    def test_a_video_file_never_reaches_it(self):
+        from services import clip_generator
+
+        with mock.patch.object(audiogram, "is_audio_only", return_value=False):
+            with mock.patch.object(audiogram, "render_audiogram") as render:
+                with self.assertRaises(Exception):
+                    # Fails further down on a file that is not really a video,
+                    # which is the point: it went down the video road.
+                    clip_generator.generate_clip(
+                        video_path=__file__, start_second=0, end_second=3,
+                    )
+        render.assert_not_called()
+
+
+class WindowTests(unittest.TestCase):
+    def test_word_times_are_rebased_onto_the_clip(self):
+        """The render starts at zero; the episode's words do not."""
+        words = [
+            {"word": "before", "start": 1.0, "end": 1.4},
+            {"word": "inside", "start": 11.0, "end": 11.4},
+            {"word": "after", "start": 40.0, "end": 40.4},
+        ]
+        with mock.patch.object(audiogram, "envelope", return_value=[[0.5]]):
+            with mock.patch.object(audiogram, "extract_cover", return_value=None):
+                with mock.patch.object(audiogram, "proc_run") as run:
+                    run.return_value = mock.Mock(returncode=1, stderr="stop here")
+                    with self.assertRaises(RuntimeError):
+                        audiogram.render_audiogram(
+                            audio_path="/tmp/x.mp3", start_second=10, end_second=20,
+                            caption_style="hormozi",
+                            spec=mock.Mock(width=1080, height=1920, name="vertical"),
+                            transcript_words=words, title="clip",
+                            output_dir=tempfile.mkdtemp(),
+                        )
+
+    def test_a_window_with_no_audio_says_so(self):
+        with mock.patch.object(audiogram, "envelope", return_value=[]):
+            with self.assertRaises(ValueError):
+                audiogram.render_audiogram(
+                    audio_path="/tmp/x.mp3", start_second=0, end_second=3,
+                    caption_style="hormozi",
+                    spec=mock.Mock(width=1080, height=1920, name="vertical"),
+                    output_dir=tempfile.mkdtemp(),
+                )

@@ -550,14 +550,13 @@ def cmd_process(args):
         print(f"Error: Video not found: {video_path}", file=sys.stderr)
         sys.exit(1)
 
-    # Asked here, before the transcription that used to run first. An audio-only
-    # file went all the way through Whisper and then died inside get_dimensions
-    # on "No video stream found", which spends the expensive half of the run to
-    # deliver a message that was knowable from the header.
-    from services.audiogram import audio_only_message, is_audio_only
+    # An episode with no picture is cut the same way and drawn differently. Said
+    # here rather than discovered later: this used to run all the way through
+    # Whisper and then die inside get_dimensions on "No video stream found".
+    from services.audiogram import is_audio_only
     if is_audio_only(video_path):
-        print(f"Error: {audio_only_message(video_path)}", file=sys.stderr)
-        sys.exit(1)
+        print("  Audio-only episode: clips will be rendered as audiograms "
+              "(waveform + captions).")
 
     # Resolve transcript from preset if not given on CLI
     if not args.transcript and config.get("transcript_path"):

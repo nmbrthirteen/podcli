@@ -710,6 +710,25 @@ def generate_clip(
 
     spec = get_format(format)
 
+    # An episode that was never filmed takes the other road entirely. Branching
+    # here rather than at the five call sites means every caller of this
+    # function gets it, and none of them has to know the difference: what comes
+    # back is the same dict describing the same window.
+    from services.audiogram import is_audio_only
+    if is_audio_only(video_path):
+        from services.audiogram import render_audiogram
+        return render_audiogram(
+            audio_path=video_path,
+            start_second=start_second,
+            end_second=end_second,
+            caption_style=caption_style,
+            spec=spec,
+            transcript_words=transcript_words,
+            title=title,
+            output_dir=output_dir,
+            progress_callback=progress_callback,
+        )
+
     if trim_opening is None:
         trim_opening = not (keep_segments and len(keep_segments) > 0)
 

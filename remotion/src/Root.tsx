@@ -2,6 +2,7 @@ import React from "react";
 import { Composition, continueRender, delayRender, getInputProps } from "remotion";
 import { CaptionedClip } from "./CaptionedClip";
 import { Bookend } from "./Bookend";
+import { Audiogram } from "./Audiogram";
 import { STYLES } from "./types";
 import type { Word } from "./types";
 import type { CaptionPosition, LogoPosition } from "./types";
@@ -38,6 +39,11 @@ const inputProps = getInputProps() as {
   captionFontScale?: number;
   logoPosition?: LogoPosition;
   singleLine?: boolean;
+  levels?: number[][];
+  coverSrc?: string;
+  audiogramBg?: string;
+  audiogramAccent?: string;
+  audiogramTitle?: string;
   durationInFrames?: number;
   fps?: number;
   bookendMode?: "intro" | "outro";
@@ -82,6 +88,24 @@ export const RemotionRoot: React.FC = () => {
           faceY: inputProps.faceY ?? null,
           captionPosition,
           logoPosition: inputProps.logoPosition || "top-left",
+          singleLine: inputProps.singleLine === true,
+        }}
+      />
+      <Composition
+        id="Audiogram"
+        component={Audiogram}
+        durationInFrames={durationInFrames}
+        fps={fps}
+        width={1080}
+        height={1920}
+        defaultProps={{
+          words: inputProps.words || [],
+          style,
+          levels: inputProps.levels || [],
+          bg: inputProps.audiogramBg || "#0B0B0F",
+          accent: inputProps.audiogramAccent || "#FFE000",
+          coverSrc: inputProps.coverSrc,
+          title: inputProps.audiogramTitle,
           singleLine: inputProps.singleLine === true,
         }}
       />
