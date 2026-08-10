@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildChunks, activeChunkAt } from "./chunks";
+import { buildChunks, activeChunkAt, splitCaptionLines } from "./chunks";
 import type { Word } from "./types";
 
 function words(...spec: [string, number, number][]): Word[] {
@@ -67,6 +67,22 @@ describe("buildChunks", () => {
       "so",
       "yes",
       "later",
+    ]);
+  });
+});
+
+describe("splitCaptionLines", () => {
+  it("uses one line for YouTube full-episode captions", () => {
+    expect(splitCaptionLines(["one", "two", "three", "four"], 2, true)).toEqual([
+      ["one", "two", "three", "four"],
+      [],
+    ]);
+  });
+
+  it("preserves normal clip line splitting", () => {
+    expect(splitCaptionLines(["one", "two", "three", "four"], 2)).toEqual([
+      ["one", "two"],
+      ["three", "four"],
     ]);
   });
 });

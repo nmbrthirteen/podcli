@@ -7,6 +7,8 @@ import {
   clipKey,
   dropEnergy,
   clampClipIndex,
+  resolveAssetName,
+  formatTranscriptText,
 } from "./lib";
 
 describe("fmt", () => {
@@ -143,5 +145,70 @@ describe("clampClipIndex", () => {
   it("clears the cursor when there are no clips", () => {
     expect(clampClipIndex(0, 0)).toBeNull();
     expect(clampClipIndex(null, 5)).toBeNull();
+  });
+});
+
+describe("resolveAssetName", () => {
+  const assets = [
+    { name: "brand", path: "/assets/brand.png", type: "logo" },
+    { name: "intro", path: "/assets/intro.mp4", type: "intro" },
+  ];
+
+  it("resolves both persisted paths and names to the registered asset name", () => {
+    expect(resolveAssetName(assets, "/assets/brand.png", "logo")).toBe("brand");
+    expect(resolveAssetName(assets, "brand", "logo")).toBe("brand");
+  });
+
+  it("does not expose unregistered paths or assets of the wrong type", () => {
+    expect(resolveAssetName(assets, "/tmp/unregistered.png", "logo")).toBeNull();
+    expect(resolveAssetName(assets, "intro", "logo")).toBeNull();
+  });
+});
+
+describe("formatTranscriptText", () => {
+  it("joins Whisper fragments into readable paragraphs", () => {
+    const transcript = {
+      segments: [
+        { start: 0, end: 2, text: "Welcome to the show." },
+        { start: 2, end: 4, text: "Today we discuss relationships." },
+      ],
+    };
+    expect(formatTranscriptText(transcript)).toBe(
+      "Welcome to the show. Today we discuss relationships.",
+    );
+  });
+
+  it("labels speakers and starts a new paragraph when the speaker changes", () => {
+    const transcript = {
+      segments: [
+        { start: 5, end: 8, text: "Why did you start?", speaker: "SPEAKER_00" },
+        { start: 8, end: 12, text: "Relationships matter.", speaker: "SPEAKER_01" },
+      ],
+    };
+    expect(formatTranscriptText(transcript)).toBe(
+      "Speaker 1\nWhy did you start?\n\nSpeaker 2\nRelationships matter.",
+    );
+  });
+
+  it("preserves an existing human-readable speaker label", () => {
+    const transcript = {
+      segments: [{ start: 0, end: 2, text: "Welcome back.", speaker: "Speaker 1" }],
+    };
+    expect(formatTranscriptText(transcript)).toBe("Speaker 1\nWelcome back.");
+  });
+
+  it("adds copy-ready timestamps without changing transcript text", () => {
+    const transcript = {
+      segments: [{ start: 65.2, end: 70, text: "A useful answer." }],
+    };
+    expect(formatTranscriptText(transcript, "timestamped")).toBe(
+      "[1:05]\nA useful answer.",
+    );
+  });
+
+  it("formats raw transcript text when segments are unavailable", () => {
+    expect(formatTranscriptText({ transcript: "First sentence.   Second sentence." })).toBe(
+      "First sentence. Second sentence.",
+    );
   });
 });

@@ -6,25 +6,27 @@ import {
   Img,
   staticFile,
 } from "remotion";
-import type { Word, CaptionStyle } from "../types";
+import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "../types";
 import { captionScale } from "../types";
-import { buildChunks, activeChunkAt } from "../chunks";
+import { buildChunks, activeChunkAt, splitCaptionLines } from "../chunks";
 
 interface Props {
   words: Word[];
   style: CaptionStyle;
   logoSrc?: string;
   faceY?: number | null; // normalized 0-1 (0=top, 1=bottom)
+  captionPosition?: CaptionPosition;
+  logoPosition?: LogoPosition;
+  singleLine?: boolean;
 }
 
 const MAX_CHARS_PER_CHUNK = 18;
 
-function splitIntoLines(words: Word[]): [Word[], Word[]] {
-  if (words.length <= 2) {
-    return [words, []];
-  }
-  return [words.slice(0, 2), words.slice(2)];
-}
+// Unscaled logo box, shared by the logo style and the caption-margin guard so
+// the two cannot drift apart.
+const LOGO_INSET = 180;
+const LOGO_HEIGHT = 126;
+const LOGO_CAPTION_GAP = 24;
 
 /**
  * Active pill rendered as an absolutely positioned background behind the word.
@@ -90,6 +92,10 @@ const CaptionLine: React.FC<{
         lineHeight: 1.25,
         maxWidth: "100%",
         overflowWrap: "anywhere",
+        // No nowrap: MAX_CHARS_PER_CHUNK bounds character count, not rendered
+        // width, so at captionFontScale 1.6 a chunk can exceed the safe inset.
+        // Wrapping degrades better than bleeding off-frame; a chunk that fits
+        // still renders on one line.
       }}
     >
       {words.map((word, i) => {
@@ -117,6 +123,9 @@ export const BrandedCaptions: React.FC<Props> = ({
   style,
   logoSrc,
   faceY,
+  captionPosition = "auto",
+  logoPosition = "top-left",
+  singleLine = false,
 }) => {
   const frame = useCurrentFrame();
   const { fps, height, durationInFrames } = useVideoConfig();
@@ -137,12 +146,17 @@ export const BrandedCaptions: React.FC<Props> = ({
   // Default margin is style.marginBottom. If face center is below 0.55, reduce margin.
   const baseMargin = style.marginBottom * s;
   let dynamicMargin = baseMargin;
-  if (faceY != null && faceY > 0.55) {
+  if (captionPosition === "auto" && faceY != null && faceY > 0.55) {
     // Face is low — push captions to the very bottom
     dynamicMargin = Math.max(80 * s, baseMargin - Math.round((faceY - 0.55) * height * 0.6));
-  } else if (faceY != null && faceY < 0.35) {
+  } else if (captionPosition === "auto" && faceY != null && faceY < 0.35) {
     // Face is high — can bring captions up a bit
     dynamicMargin = baseMargin + 60 * s;
+  }
+  // A bottom-anchored logo spans 180-306 scaled units. Captions sitting inside
+  // that band (captionPosition "lower" starts at 220) would render over it.
+  if (logoSrc && logoPosition.startsWith("bottom-")) {
+    dynamicMargin = Math.max(dynamicMargin, (LOGO_INSET + LOGO_HEIGHT + LOGO_CAPTION_GAP) * s);
   }
 
   return (
@@ -152,17 +166,21 @@ export const BrandedCaptions: React.FC<Props> = ({
           src={logoSrc.startsWith("http") ? logoSrc : staticFile(logoSrc)}
           style={{
             position: "absolute",
-            top: 180 * s,
-            left: 108 * s,
+            ...(logoPosition.startsWith("top-") ? { top: LOGO_INSET * s } : { bottom: LOGO_INSET * s }),
+            ...(logoPosition.endsWith("-left")
+              ? { left: 108 * s }
+              : logoPosition.endsWith("-right")
+                ? { right: 108 * s }
+                : { left: "50%", transform: "translateX(-50%)" }),
             width: 255 * s,
-            height: 126 * s,
+            height: LOGO_HEIGHT * s,
             objectFit: "contain",
           }}
         />
       )}
 
       {activeChunk && (() => {
-        const [line1, line2] = splitIntoLines(activeChunk.words);
+        const [line1, line2] = splitCaptionLines(activeChunk.words, 2, singleLine);
 
         return (
           <div

@@ -466,6 +466,9 @@ def _render_with_remotion(
     time_offset: float = 0.0,
     logo_path: Optional[str] = None,
     keep_caption_overlay: bool = False,
+    caption_position: str = "auto",
+    caption_font_scale: int = 100,
+    logo_position: str = "top-left",
 ) -> tuple[bool, Optional[str]]:
     """
     Render captions using Remotion. Returns (success, optional_prores_overlay_path).
@@ -587,6 +590,9 @@ def _render_with_remotion(
             "--words", os.path.abspath(words_file),
             "--style", caption_style,
             "--output", os.path.abspath(output_path),
+            "--caption-position", caption_position,
+            "--caption-font-scale", str(caption_font_scale),
+            "--logo-position", logo_position,
         ]
         if logo_path and os.path.exists(logo_path):
             cmd.extend(["--logo", os.path.abspath(logo_path)])
@@ -642,6 +648,9 @@ def generate_clip(
     start_second: float,
     end_second: float,
     caption_style: str = "hormozi",
+    caption_position: str = "auto",
+    caption_font_scale: int = 100,
+    logo_position: str = "top-left",
     crop_strategy: str = "face",
     format: str = "vertical",
     crop_keyframes: list[dict] = None,
@@ -911,6 +920,9 @@ def generate_clip(
                         time_offset=caption_time_offset,
                         logo_path=logo_path if (style_config.get("logo_support", False) and logo_path) else None,
                         keep_caption_overlay=keep_caption_overlay,
+                        caption_position=caption_position,
+                        caption_font_scale=caption_font_scale,
+                        logo_position=logo_position,
                     )
 
                 if not remotion_ok and not allow_ass_fallback:
@@ -927,6 +939,8 @@ def generate_clip(
                         caption_style=caption_style,
                         output_path=ass_path,
                         time_offset=caption_time_offset,
+                        caption_position=caption_position,
+                        caption_font_scale=caption_font_scale,
                     )
 
                     use_gradient = style_config.get("gradient_overlay", False)
@@ -943,6 +957,7 @@ def generate_clip(
                         logo_height=style_config.get("logo_height", 80),
                         logo_margin_x=style_config.get("logo_margin_x", 30),
                         logo_margin_y=style_config.get("logo_margin_y", 40),
+                        logo_position=logo_position,
                     )
             else:
                 captioned_path = cropped_path
