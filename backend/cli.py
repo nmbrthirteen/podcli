@@ -431,6 +431,7 @@ def cmd_studio(args):
     cmd += [
         "--caption-style", args.caption_style,
         "--crop", args.crop,
+        "--format", getattr(args, "format", None) or "vertical",
         "--intro-seconds", str(args.intro_seconds),
         "--outro-seconds", str(args.outro_seconds),
     ]
@@ -4039,6 +4040,8 @@ def main():
     studio.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai. Prefer ASSEMBLYAI_API_KEY; command-line secrets can appear in process listings.")
     studio.add_argument("--caption-style", choices=["hormozi", "karaoke", "subtle", "branded"], default="hormozi")
     studio.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"], default="face")
+    studio.add_argument("--format", choices=["vertical", "horizontal", "square"], default="vertical",
+                        help="Output aspect ratio (default: vertical)")
     studio.add_argument("-o", "--output", help="Final output path")
     studio.add_argument("--intro-title", help="Intro headline (default: derived from first words)")
     studio.add_argument("--outro-title", default=None)
