@@ -169,6 +169,9 @@ def handle_create_clip(task_id: str, params: dict):
         start_second=params["start_second"],
         end_second=params["end_second"],
         caption_style=params.get("caption_style", "hormozi"),
+        caption_position=params.get("caption_position", "auto"),
+        caption_font_scale=params.get("caption_font_scale", 100),
+        logo_position=params.get("logo_position", "top-left"),
         crop_strategy=params.get("crop_strategy", "face"),
         format=params.get("format", "vertical"),
         crop_keyframes=params.get("crop_keyframes"),
@@ -223,6 +226,9 @@ def handle_batch_clips(task_id: str, params: dict):
             start_second=clip["start_second"],
             end_second=clip["end_second"],
             caption_style=clip.get("caption_style", "hormozi"),
+            caption_position=clip.get("caption_position", params.get("caption_position", "auto")),
+            caption_font_scale=clip.get("caption_font_scale", params.get("caption_font_scale", 100)),
+            logo_position=clip.get("logo_position", params.get("logo_position", "top-left")),
             crop_strategy=clip.get("crop_strategy", "face"),
             format=clip.get("format", params.get("format", "vertical")),
             transcript_words=params.get("transcript_words", []),
@@ -891,6 +897,46 @@ def handle_manage_config(task_id: str, params: dict):
         emit_result(task_id, "error", error=str(e))
 
 
+def handle_analyze_silence(task_id: str, params: dict):
+    """Analyze a full episode locally and return a conservative cut plan."""
+    from services.silence_removal import analyze_silence
+
+    try:
+        result = analyze_silence(
+            video_path=params.get("video_path", ""),
+            transcript_words=params.get("transcript_words") or [],
+            threshold=float(params.get("threshold", 0.5)),
+            min_silence_seconds=float(params.get("min_silence_seconds", 0.65)),
+            padding_seconds=float(params.get("padding_seconds", 0.12)),
+            progress_callback=lambda pct, msg: emit_progress(
+                task_id, "silence_analysis", pct, msg
+            ),
+        )
+        emit_result(task_id, "success", data=result)
+    except (FileNotFoundError, RuntimeError, ValueError) as e:
+        emit_result(task_id, "error", error=str(e))
+
+
+def handle_render_silence_removed(task_id: str, params: dict):
+    """Render the approved local cut plan and remap transcript timestamps."""
+    from config.paths import paths
+    from services.silence_removal import render_silence_removed
+
+    try:
+        result = render_silence_removed(
+            video_path=params.get("video_path", ""),
+            keep_segments=params.get("keep_segments") or [],
+            transcript=params.get("transcript") or {},
+            output_dir=params.get("output_dir") or paths["output"],
+            progress_callback=lambda pct, msg: emit_progress(
+                task_id, "silence_render", pct, msg
+            ),
+        )
+        emit_result(task_id, "success", data=result)
+    except (FileNotFoundError, RuntimeError, ValueError) as e:
+        emit_result(task_id, "error", error=str(e))
+
+
 def handle_run_integration_tool(task_id: str, params: dict):
     from services.integrations import IntegrationRegistry, IntegrationsManager
 
@@ -948,6 +994,8 @@ TASK_HANDLERS = {
     "manage_integrations": handle_manage_integrations,
     "run_integration_tool": handle_run_integration_tool,
     "manage_config": handle_manage_config,
+    "analyze_silence": handle_analyze_silence,
+    "render_silence_removed": handle_render_silence_removed,
 }
 
 

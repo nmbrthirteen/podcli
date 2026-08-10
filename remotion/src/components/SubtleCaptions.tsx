@@ -2,20 +2,15 @@ import React from "react";
 import { useCurrentFrame, useVideoConfig, interpolate } from "remotion";
 import type { Word, CaptionStyle } from "../types";
 import { captionScale } from "../types";
-import { buildChunks, activeChunkAt } from "../chunks";
+import { buildChunks, activeChunkAt, splitCaptionLines } from "../chunks";
 
 interface Props {
   words: Word[];
   style: CaptionStyle;
+  singleLine?: boolean;
 }
 
-function splitIntoLines(words: Word[]): [Word[], Word[]] {
-  if (words.length <= 4) return [words, []];
-  const mid = Math.ceil(words.length / 2);
-  return [words.slice(0, mid), words.slice(mid)];
-}
-
-export const SubtleCaptions: React.FC<Props> = ({ words, style }) => {
+export const SubtleCaptions: React.FC<Props> = ({ words, style, singleLine = false }) => {
   const frame = useCurrentFrame();
   const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
@@ -46,7 +41,11 @@ export const SubtleCaptions: React.FC<Props> = ({ words, style }) => {
     { extrapolateRight: "clamp" }
   );
 
-  const [line1, line2] = splitIntoLines(activeChunk.words);
+  const [line1, line2] = splitCaptionLines(
+    activeChunk.words,
+    Math.ceil(activeChunk.words.length / 2),
+    singleLine,
+  );
   const text1 = line1.map((w) => w.word).join(" ");
   const text2 = line2.map((w) => w.word).join(" ");
 
@@ -75,6 +74,7 @@ export const SubtleCaptions: React.FC<Props> = ({ words, style }) => {
             "0 1px 3px rgba(0,0,0,0.95), 0 0 20px rgba(0,0,0,0.6), 0 0 50px rgba(0,0,0,0.3)",
           textAlign: "center",
           lineHeight: 1.35,
+          whiteSpace: singleLine ? "nowrap" : undefined,
         }}
       >
         {text1}

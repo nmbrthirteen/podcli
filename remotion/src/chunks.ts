@@ -98,3 +98,12 @@ export function buildChunks(words: Word[], opts: ChunkOptions): Chunk[] {
 export function activeChunkAt(chunks: Chunk[], time: number): Chunk | undefined {
   return chunks.find((c) => time >= c.start && time < c.displayEnd);
 }
+
+export function splitCaptionLines<T>(
+  items: T[],
+  splitIndex: number,
+  singleLine = false,
+): [T[], T[]] {
+  if (singleLine || items.length <= splitIndex) return [items, []];
+  return [items.slice(0, splitIndex), items.slice(splitIndex)];
+}

@@ -2,24 +2,20 @@ import React from "react";
 import { useCurrentFrame, useVideoConfig } from "remotion";
 import type { Word, CaptionStyle } from "../types";
 import { captionScale } from "../types";
-import { buildChunks, activeChunkAt } from "../chunks";
+import { buildChunks, activeChunkAt, splitCaptionLines } from "../chunks";
 
 interface Props {
   words: Word[];
   style: CaptionStyle;
-}
-
-function splitIntoLines(words: Word[]): [Word[], Word[]] {
-  if (words.length <= 3) return [words, []];
-  const mid = Math.ceil(words.length / 2);
-  return [words.slice(0, mid), words.slice(mid)];
+  singleLine?: boolean;
 }
 
 const KaraokeLine: React.FC<{
   words: Word[];
   currentTime: number;
   style: CaptionStyle;
-}> = ({ words, currentTime, style }) => {
+  singleLine?: boolean;
+}> = ({ words, currentTime, style, singleLine = false }) => {
   return (
     <div
       style={{
@@ -29,6 +25,7 @@ const KaraokeLine: React.FC<{
         fontWeight: 600,
         lineHeight: 1.25,
         textShadow: "0 2px 12px rgba(0,0,0,0.9), 0 0 40px rgba(0,0,0,0.4)",
+        whiteSpace: singleLine ? "nowrap" : undefined,
       }}
     >
       {words.map((word, i) => {
@@ -64,7 +61,7 @@ const KaraokeLine: React.FC<{
   );
 };
 
-export const KaraokeCaptions: React.FC<Props> = ({ words, style }) => {
+export const KaraokeCaptions: React.FC<Props> = ({ words, style, singleLine = false }) => {
   const frame = useCurrentFrame();
   const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
@@ -79,7 +76,11 @@ export const KaraokeCaptions: React.FC<Props> = ({ words, style }) => {
 
   if (!activeChunk) return null;
 
-  const [line1, line2] = splitIntoLines(activeChunk.words);
+  const [line1, line2] = splitCaptionLines(
+    activeChunk.words,
+    Math.ceil(activeChunk.words.length / 2),
+    singleLine,
+  );
   const scaledStyle = { ...style, fontSize: style.fontSize * s };
 
   return (
@@ -95,9 +96,9 @@ export const KaraokeCaptions: React.FC<Props> = ({ words, style }) => {
         gap: 4 * s,
       }}
     >
-      <KaraokeLine words={line1} currentTime={currentTime} style={scaledStyle} />
+      <KaraokeLine words={line1} currentTime={currentTime} style={scaledStyle} singleLine={singleLine} />
       {line2.length > 0 && (
-        <KaraokeLine words={line2} currentTime={currentTime} style={scaledStyle} />
+        <KaraokeLine words={line2} currentTime={currentTime} style={scaledStyle} singleLine={singleLine} />
       )}
     </div>
   );

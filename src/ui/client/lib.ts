@@ -84,6 +84,137 @@ export function timeAgo(iso: string): string {
 
 export const basename = (p: string) => (p || "").split(/[/\\]/).pop() || "";
 
+interface AssetReference {
+  name: string;
+  path: string;
+  type?: string;
+}
+
+/**
+ * Resolves a persisted asset name or absolute path back to its registered name.
+ * Preview URLs must use the asset route; the video source route intentionally
+ * rejects arbitrary image paths.
+ */
+export function resolveAssetName(
+  assets: AssetReference[],
+  reference: string,
+  type?: string,
+): string | null {
+  if (!reference) return null;
+  return assets.find(
+    (asset) =>
+      (!type || asset.type === type) &&
+      (asset.name === reference || asset.path === reference),
+  )?.name ?? null;
+}
+
+interface TranscriptSegmentLike {
+  start?: number;
+  end?: number;
+  text?: string;
+  speaker?: string | null;
+}
+
+interface TranscriptLike {
+  transcript?: string;
+  text?: string;
+  segments?: TranscriptSegmentLike[];
+}
+
+export type TranscriptFormat = "readable" | "timestamped";
+
+interface TranscriptParagraph {
+  start: number;
+  speaker: string | null;
+  text: string;
+}
+
+const cleanTranscriptText = (value: unknown): string =>
+  typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+
+const endsSentence = (value: string): boolean => /[.!?…][\]})"']?$/.test(value);
+
+function friendlySpeaker(value: string | null | undefined): string | null {
+  const speaker = cleanTranscriptText(value);
+  if (!speaker) return null;
+  const machineLabel = speaker.match(/^speaker[_-]+0*(\d+)$/i);
+  if (machineLabel) return `Speaker ${Number(machineLabel[1]) + 1}`;
+  return speaker.replace(/_/g, " ");
+}
+
+function paragraphsFromPlainText(value: string): TranscriptParagraph[] {
+  const text = cleanTranscriptText(value);
+  if (!text) return [];
+  const sentences = text.split(/(?<=[.!?…])\s+/).filter(Boolean);
+  const paragraphs: TranscriptParagraph[] = [];
+  let buffer = "";
+  for (const sentence of sentences) {
+    buffer = buffer ? `${buffer} ${sentence}` : sentence;
+    if (buffer.length >= 420 || sentences.length === 1) {
+      paragraphs.push({ start: 0, speaker: null, text: buffer });
+      buffer = "";
+    }
+  }
+  if (buffer) paragraphs.push({ start: 0, speaker: null, text: buffer });
+  return paragraphs;
+}
+
+function transcriptParagraphs(transcript: TranscriptLike | null | undefined): TranscriptParagraph[] {
+  const segments = Array.isArray(transcript?.segments)
+    ? transcript.segments.filter((segment) => cleanTranscriptText(segment?.text))
+    : [];
+  if (!segments.length) {
+    return paragraphsFromPlainText(transcript?.transcript || transcript?.text || "");
+  }
+
+  const paragraphs: TranscriptParagraph[] = [];
+  let current: TranscriptParagraph | null = null;
+  let previousEnd: number | null = null;
+  const flush = () => {
+    if (current?.text) paragraphs.push(current);
+    current = null;
+  };
+
+  for (const segment of segments) {
+    const text = cleanTranscriptText(segment.text);
+    const segmentStart: number = typeof segment.start === "number" && Number.isFinite(segment.start)
+      ? segment.start
+      : previousEnd ?? 0;
+    const segmentEnd: number = typeof segment.end === "number" && Number.isFinite(segment.end)
+      ? segment.end
+      : segmentStart;
+    const speaker = friendlySpeaker(segment.speaker);
+    const speakerChanged = current !== null && current.speaker !== speaker;
+    const longPause = current !== null && previousEnd !== null && segmentStart - previousEnd >= 2.5;
+    if (speakerChanged || longPause) flush();
+
+    if (!current) current = { start: segmentStart, speaker, text };
+    else current.text = `${current.text} ${text}`;
+    previousEnd = segmentEnd;
+
+    if ((current.text.length >= 420 && endsSentence(current.text)) || current.text.length >= 900) {
+      flush();
+    }
+  }
+  flush();
+  return paragraphs;
+}
+
+/** Produces copy-ready paragraphs from Whisper or imported transcript data. */
+export function formatTranscriptText(
+  transcript: TranscriptLike | null | undefined,
+  format: TranscriptFormat = "readable",
+): string {
+  return transcriptParagraphs(transcript)
+    .map((paragraph) => {
+      const heading = format === "timestamped"
+        ? `[${fmt(paragraph.start)}]${paragraph.speaker ? ` ${paragraph.speaker}` : ""}`
+        : paragraph.speaker;
+      return heading ? `${heading}\n${paragraph.text}` : paragraph.text;
+    })
+    .join("\n\n");
+}
+
 // A render result's clip_index counts the clips submitted to the renderer, which
 // for an agent-driven export is not the studio's clip order. The server stamps
 // every row with the bounds of the clip it rendered; match a result to a clip on
