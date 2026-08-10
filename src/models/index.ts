@@ -138,6 +138,32 @@ export interface UIState {
   lastUpdated?: number;
 }
 
+/** Who is speaking, shown as a lower third for the first seconds of a clip. */
+export interface NameCard {
+  title: string;
+  subtitle?: string;
+  seconds?: number;
+  accent?: string;
+}
+
+/**
+ * How a part of a clip arrives and leaves.
+ *
+ * Omitted, each caption style uses the motion it has always had.
+ */
+export interface Motion {
+  enter?: "none" | "fade" | "rise" | "pop";
+  exit?: "none" | "fade" | "sink";
+  /** Frames, at the render's fps. */
+  duration?: number;
+  feel?: "snap" | "soft" | "linear";
+}
+
+export interface ClipMotion {
+  captions?: Motion;
+  nameCard?: Motion;
+}
+
 export interface CreateClipInput {
   clip_number?: number;
   video_path?: string;
@@ -150,6 +176,8 @@ export interface CreateClipInput {
   logo_path?: string;
   outro_path?: string;
   intro_path?: string;
+  name_card?: NameCard;
+  motion?: ClipMotion;
   transcript_words?: WordTimestamp[];
   clean_fillers?: boolean;
   allow_ass_fallback?: boolean;

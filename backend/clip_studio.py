@@ -119,7 +119,8 @@ def _find_paragraph(words: list, phrase: str) -> tuple[float, float]:
     return start, end
 
 
-def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt="vertical"):
+def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt="vertical",
+                     logo=None, name_card=None, motion=None):
     """Render the fragment with face-crop + captions via the existing engine."""
     from services.clip_generator import generate_clip
     print(f"  [fragment] rendering {start:.1f}s–{end:.1f}s ({style}, crop={crop}, {fmt})", flush=True)
@@ -127,6 +128,7 @@ def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt=
         video_path=video, start_second=start, end_second=end,
         caption_style=style, crop_strategy=crop, format=fmt,
         transcript_words=words, title=title, output_dir=out_dir,
+        logo_path=logo, name_card=name_card, motion=motion,
         clean_fillers=True, allow_ass_fallback=True,
         progress_callback=lambda p, m: print(f"    {p}% {m}", flush=True),
     )
@@ -275,9 +277,31 @@ def main():
     spec = get_format(args.format)
 
     # 1. Fragment
+    from services.asset_store import resolve_logo
+
+    name_card = None
+    if getattr(args, "name_card", None):
+        name_card = {
+            "title": args.name_card,
+            "subtitle": getattr(args, "name_card_sub", None),
+            "seconds": getattr(args, "name_card_seconds", None),
+            "accent": accent,
+        }
+
+    motion = None
+    if getattr(args, "motion", None):
+        try:
+            motion = json.loads(args.motion)
+        except (TypeError, ValueError):
+            print("  Warning: --motion is not valid JSON; using each style's own motion",
+                  flush=True)
+
     fragment = _render_fragment(
         video, start, end, words, args.caption_style, args.crop, "fragment", out_dir,
         fmt=args.format,
+        logo=resolve_logo(getattr(args, "logo", None)),
+        name_card=name_card,
+        motion=motion,
     )
 
     platforms = [p.strip() for p in platforms_str.split(",") if p.strip()]
