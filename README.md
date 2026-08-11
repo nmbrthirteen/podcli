@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fnmbrthirteen%2Fpodcli.svg)](https://mcptoplist.com/server/glama%2Fnmbrthirteen%2Fpodcli)
+
 <p align="center">
   <img src="public/podcli-badge.png" height="72" alt="podcli" />
 </p>
