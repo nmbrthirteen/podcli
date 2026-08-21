@@ -897,6 +897,21 @@ def generate_clip(
             else:
                 fit_to_frame(segment_path, cropped_path, target_dims=spec.dims)
 
+        # Only Remotion draws the name card, and it is reached only when there
+        # are words to caption. Refusing beats returning a clip that quietly
+        # lacks the overlay that was asked for.
+        if name_card and name_card.get("title"):
+            if use_ass_captions or allow_ass_fallback:
+                raise ValueError(
+                    "A name card can only be drawn by the Remotion renderer. "
+                    "Drop --name-card, or drop --fast and --allow-ass-fallback."
+                )
+            if not transcript_words:
+                raise ValueError(
+                    "A name card needs the caption renderer, which only runs when "
+                    "there is a transcript. Drop --name-card for an uncaptioned render."
+                )
+
         # Step 3: Render captions (Remotion-first; ASS fallback optional)
         if transcript_words:
             if progress_callback:
@@ -919,12 +934,6 @@ def generate_clip(
                     progress_callback(65, f"Rendering captions into video (3/{total_steps})")
 
                 captioned_path = os.path.join(work_dir, "captioned.mp4")
-
-                if name_card and name_card.get("title") and (use_ass_captions or allow_ass_fallback):
-                    raise ValueError(
-                        "A name card can only be drawn by the Remotion renderer. "
-                        "Drop --name-card, or drop --fast and --allow-ass-fallback."
-                    )
 
                 remotion_ok = False
                 caption_overlay_path = None
