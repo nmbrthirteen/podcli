@@ -280,9 +280,11 @@ export function createServer(): McpServer {
       enable_diarization: z
         .boolean()
         .optional()
-        .default(false)
+        .default(true)
         .describe(
-          "Set true for speaker labels (who is speaking). Works where torch is available (whisper-py engine); slower. Default: false",
+          "Speaker labels (who is speaking). On by default: without them a clip cannot tell a question " +
+            "from an answer. Set false only for a single-speaker recording. Falls back to no labels with " +
+            "a warning where torch is unavailable.",
         ),
       num_speakers: z
         .number()
@@ -354,7 +356,7 @@ export function createServer(): McpServer {
         .default("base"),
       language: z.string().optional(),
       engine: z.enum(["whisper-py", "whispercpp", "assemblyai"]).optional(),
-      enable_diarization: z.boolean().optional().default(false),
+      enable_diarization: z.boolean().optional().default(true),
       num_speakers: z.number().optional(),
     },
     async (input) => {

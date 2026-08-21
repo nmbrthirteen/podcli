@@ -20,8 +20,9 @@ export const transcribeToolDef = {
   name: "transcribe_podcast",
   description:
     "STEP 1 — Transcribe a podcast video/audio file. This is typically the first tool you call.\n\n" +
-    "What it does: Uses Whisper AI for word-level timestamps. Speaker detection (who said what) is off by " +
-    "default; pass enable_diarization=true to add speaker labels where torch/pyannote is available (whisper-py engine).\n" +
+    "What it does: Uses Whisper AI for word-level timestamps, with speaker detection (who said what) on by " +
+    "default. Speaker labels are what let a clip tell a question from an answer, so leave them on for any " +
+    "interview. Pass enable_diarization=false to skip them and save time on a single-speaker recording.\n" +
     "Returns: Lightweight metadata only — duration, language, word/segment counts, speaker summary, and " +
     "packed_ready flag. The actual transcript body is NOT returned here (it would be 500KB+ for a typical " +
     "episode). Read the content via get_ui_state(include_transcript: true) which returns a compact " +
@@ -56,9 +57,10 @@ export const transcribeToolDef = {
       enable_diarization: {
         type: "boolean",
         description:
-          "Set true for speaker labels (who is speaking). Works where torch/pyannote.audio is available " +
-          "(whisper-py engine); slower. Default: false",
-        default: false,
+          "Speaker labels (who is speaking). On by default, and required for any clip logic that needs " +
+          "to tell a question from an answer. Set false only for a single-speaker recording. " +
+          "Falls back to no labels with a warning where torch/pyannote.audio is unavailable.",
+        default: true,
       },
       num_speakers: {
         type: "number",
@@ -76,7 +78,7 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const modelSize = input.model_size ?? "base";
   const engine = input.engine;
   const language = input.language;
-  const enableDiarization = input.enable_diarization === true;
+  const enableDiarization = input.enable_diarization !== false;
   const numSpeakers = input.num_speakers;
 
   // Check cache first
@@ -170,7 +172,7 @@ export const transcribeStartToolDef = {
         type: "string",
         enum: ["whisper-py", "whispercpp", "assemblyai"],
       },
-      enable_diarization: { type: "boolean", default: false },
+      enable_diarization: { type: "boolean", default: true },
       num_speakers: { type: "number" },
     },
     required: ["file_path"],
@@ -187,7 +189,7 @@ export async function handleTranscribeStart(input: TranscribeInput): Promise<str
         model_size: input.model_size ?? "base",
         engine: input.engine,
         language: input.language,
-        enable_diarization: input.enable_diarization === true,
+        enable_diarization: input.enable_diarization !== false,
         num_speakers: input.num_speakers,
       }),
     });

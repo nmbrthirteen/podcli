@@ -49,6 +49,7 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
    - Loop: call `transcribe_status(job_id, wait_seconds: 30)`. Between calls, emit ONE terse line to the user like `"Progress: 47% — pyannote diarization"`. Keep it to one line per poll — no repeat prose. Exit the loop when `done: true`.
    - If `status: "error"`, stop and report the error.
 3. Read the packed transcript: `get_ui_state(include_transcript: true)`. This returns a compact phrase-grouped view with speakers, silence gaps, and energy peaks.
+   - **If the header says speakers: 0**, stop and tell the user before going further. Without speaker labels you cannot tell a question from an answer, so the whole question-with-the-answer rule below is inert and the picks will be worse. Offer to re-transcribe with `transcribe_start(file_path, enable_diarization: true)`. Only continue without it if the user says to.
 4. If `` exists, read `01-brand-identity.md`, `02-voice-and-tone.md`, and `04-shorts-creation-guide.md` for show context. Skip silently if missing — `/auto` works on any content.
 5. Call `clip_history` to see what's already been shipped for this episode. Avoid duplicates in the proposal.
 

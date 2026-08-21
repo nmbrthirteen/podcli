@@ -47,6 +47,44 @@ def extract_audio_wav(video_path: str, output_path: str) -> str:
     return output_path
 
 
+def _load_wav_waveform(audio_path: str):
+    """Read a PCM WAV into the {waveform, sample_rate} dict pyannote accepts.
+
+    pyannote 4 loads a file path through torchcodec, which needs FFmpeg's
+    shared libraries on the system and raises "Could not load libtorchcodec"
+    on machines that only have the ffmpeg binary. extract_audio_wav always
+    writes 16 kHz mono PCM, so read it with the stdlib instead and hand the
+    pipeline a tensor. Returns None when the file is not plain PCM, in which
+    case the caller falls back to passing the path.
+    """
+    import wave
+
+    try:
+        import numpy as np
+        import torch
+
+        with wave.open(audio_path, "rb") as wf:
+            sample_rate = wf.getframerate()
+            channels = wf.getnchannels()
+            width = wf.getsampwidth()
+            raw = wf.readframes(wf.getnframes())
+    except Exception:
+        return None
+
+    dtype = {1: "uint8", 2: "int16", 4: "int32"}.get(width)
+    if dtype is None or not raw:
+        return None
+
+    data = np.frombuffer(raw, dtype=dtype).astype("float32")
+    if width == 1:
+        data = (data - 128.0) / 128.0
+    else:
+        data /= float(1 << (8 * width - 1))
+
+    data = data.reshape(-1, channels).T if channels > 1 else data.reshape(1, -1)
+    return {"waveform": torch.from_numpy(data.copy()), "sample_rate": sample_rate}
+
+
 def run_diarization(
     audio_path: str,
     num_speakers: Optional[int] = None,
@@ -165,7 +203,7 @@ def run_diarization(
         diarization_params["min_speakers"] = min_speakers
         diarization_params["max_speakers"] = max_speakers
 
-    diarization = pipeline(audio_path, **diarization_params)
+    diarization = pipeline(_load_wav_waveform(audio_path) or audio_path, **diarization_params)
 
     if progress_callback:
         progress_callback(90, "Processing speaker segments...")

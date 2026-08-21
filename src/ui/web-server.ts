@@ -1002,7 +1002,7 @@ app.post("/api/transcribe", async (req, res) => {
     engine,
     assemblyai_api_key,
     language,
-    enable_diarization = false,
+    enable_diarization = true,
     num_speakers,
   } = req.body;
 
@@ -2201,11 +2201,11 @@ app.get("/api/encoder-info", async (_req, res) => {
 // --- Speaker Detection Status ---
 app.get("/api/speaker-status", (_req, res) => {
   if (DEMO) { res.json({ configured: true, setup_url: "", token_url: "" }); return; }
-  const envPath = join(process.cwd(), ".env");
   let token = process.env.HF_TOKEN || "";
-  if (!token && existsSync(envPath)) {
-    const envContent = readFileSync(envPath, "utf-8");
-    const match = envContent.match(/^HF_TOKEN=(.+)$/m);
+  for (const envPath of [paths.envFile, join(process.cwd(), ".env")]) {
+    if (token) break;
+    if (!existsSync(envPath)) continue;
+    const match = readFileSync(envPath, "utf-8").match(/^HF_TOKEN=(.+)$/m);
     if (match) token = match[1].trim();
   }
   res.json({

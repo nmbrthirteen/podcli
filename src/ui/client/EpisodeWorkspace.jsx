@@ -1008,7 +1008,7 @@ const onKeyActivate = (fn) => (e) => {
             model_size: whisperModel,
             engine,
             assemblyai_api_key: transcriptionEngine === 'assemblyai' ? assemblyAiKey.trim() : undefined,
-            enable_diarization: transcriptionEngine === 'assemblyai' || (speakerStatus?.configured || false),
+            enable_diarization: transcriptionEngine === 'assemblyai' || speakerStatus?.configured !== false,
           }) });
           if (data.error) {
             setError(data.error);

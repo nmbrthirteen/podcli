@@ -84,6 +84,10 @@ export const paths = {
   corrections: join(home, "corrections.json"),
   thumbnailConfig: join(home, "thumbnail-config.json"),
   integrations: join(home, "integrations.json"),
+  // Mirrors PODCLI_ENV_FILE from the Go launcher and backend/services/env_settings.py.
+  // Reading it from process.cwd() instead is how HF_TOKEN went missing and speaker
+  // detection silently stayed off.
+  envFile: process.env.PODCLI_ENV_FILE || join(home, ".env"),
   pythonBackend: join(backendDir, "main.py"),
   pythonPath: detectPython(),
   ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
