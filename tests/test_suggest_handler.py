@@ -112,6 +112,10 @@ class SuggestReactionTimesTests(unittest.TestCase):
         captured, _ = self._run({"segments": SEGMENTS})
         self.assertIsNone(captured["reaction_times"])
 
+    def test_a_pool_is_requested_even_with_no_audio_to_analyse(self):
+        captured, _ = self._run({"segments": SEGMENTS, "top_n": 3})
+        self.assertEqual(captured["top_n"], 6)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -319,12 +319,16 @@ def _drop_clips_overlapping(clips: list[dict], exclude_clips: list[dict]) -> lis
 
 
 def _select_top_by_score(clips: list[dict], top_n: int) -> list[dict]:
-    """Keep the highest-scored `top_n` clips, then order them by start time.
-    Ranking by score must come before truncation — otherwise the earliest clips
-    ship, not the best ones."""
+    """Keep the best `top_n` clips, then order them by start time.
+
+    An explicit `rank` wins over the score, but only when every clip has one.
+    """
     if len(clips) <= top_n:
         return sorted(clips, key=lambda c: c.get("start_second", 0))
-    ranked = sorted(clips, key=lambda c: c.get("score", 0), reverse=True)[:top_n]
+    if clips and all(isinstance(c.get("rank"), int) for c in clips):
+        ranked = sorted(clips, key=lambda c: c["rank"])[:top_n]
+    else:
+        ranked = sorted(clips, key=lambda c: c.get("score", 0), reverse=True)[:top_n]
     return sorted(ranked, key=lambda c: c.get("start_second", 0))
 
 
@@ -535,6 +539,8 @@ def suggest_with_claude(
     learned = podcli_cloud.prompt_block()
     if learned:
         instruction = f"{learned}\n\n{instruction}"
+        # local_prompt replaces the prompt outright, so local backends need it too.
+        prompt = f"{learned}\n\n{prompt}"
 
     attempt = ai_provider.generate(
         instruction,
@@ -820,14 +826,119 @@ def blend_signal_scores(
     return clips
 
 
+MIN_RANKABLE_SURPLUS = 2
+
+
+def rank_clips_with_ai(
+    clips: list[dict],
+    top_n: int,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    timeout: int = 45,
+) -> list[dict]:
+    """Compare a whole candidate pool in one transcript-free pass.
+
+    Mutates and returns `clips`, writing a 1-based `rank` and leaving `score`
+    untouched. Falls back to score ordering on any failure.
+    """
+    if len(clips) < top_n + MIN_RANKABLE_SURPLUS:
+        return clips
+
+    lines = []
+    for idx, clip in enumerate(clips):
+        boost = clip.get("signal_boost")
+        lines.append(
+            f'{idx}. "{clip.get("title", "Untitled")}" '
+            f'[{clip.get("duration", 0)}s, {clip.get("content_type", "unknown")}, '
+            f'score {clip.get("score", 0)}'
+            + (f', audience reaction +{boost}' if boost else "")
+            + "]\n"
+            f'   quote: {str(clip.get("quote", ""))[:200]}\n'
+            f'   why: {str(clip.get("why", ""))[:200]}'
+        )
+
+    learned = podcli_cloud.prompt_block()
+    prompt = f"""You are choosing which {top_n} of these {len(clips)} podcast clips to publish.
+
+IMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences.
+
+Each candidate was found by a separate pass over one stretch of the episode, so
+their scores are not comparable to each other. Rank them against each other now.
+
+Rank on:
+- Would a stranger stop scrolling for this? That is the whole job.
+- Does it stand alone, with no missing setup?
+- Does it end on a complete thought rather than trailing off?
+- Variety across the set: {top_n} clips that make the same point is one clip.
+
+{f"{learned}{chr(10)}{chr(10)}" if learned else ""}CANDIDATES:
+{chr(10).join(lines)}
+
+Return this exact JSON structure, best first, every candidate listed exactly once:
+{{
+  "ranked": [
+    {{"id": 3, "why": "One sentence on why this outranks the rest"}},
+    {{"id": 0, "why": "..."}}
+  ]
+}}"""
+
+    label = {"value": "AI"}
+
+    def announce(name: str) -> None:
+        label["value"] = name
+        if progress_callback:
+            progress_callback(0, f"Ranking {len(clips)} candidates with {name}...")
+
+    project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+    payload, result = ai_provider.generate_json(
+        prompt,
+        timeout=timeout,
+        project_dir=project_dir,
+        on_attempt=announce,
+        purpose="rank_moments",
+    )
+
+    def give_up(reason: str) -> list[dict]:
+        if progress_callback:
+            progress_callback(100, f"Ranking unavailable, using scores ({reason})")
+        print(f"Clip ranking skipped: {reason}", file=sys.stderr, flush=True)
+        return clips
+
+    if not result.ok:
+        return give_up(result.error or "ranking pass produced no response")
+    if not isinstance(payload, dict) or not isinstance(payload.get("ranked"), list):
+        return give_up(f"{label['value']} returned a ranking in an unreadable shape")
+
+    order: list[int] = []
+    for entry in payload["ranked"]:
+        if not isinstance(entry, dict):
+            continue
+        idx = entry.get("id")
+        if isinstance(idx, int) and 0 <= idx < len(clips) and idx not in order:
+            order.append(idx)
+
+    if len(order) < len(clips):
+        return give_up(
+            f"{label['value']} ranked {len(order)} of {len(clips)} candidates"
+        )
+
+    for position, idx in enumerate(order, start=1):
+        clips[idx]["rank"] = position
+    if progress_callback:
+        progress_callback(100, f"{label['value']} ranked {len(clips)} candidates")
+    return clips
+
+
 def select_clips_with_signal_scores(
     clips: list[dict],
     top_n: int,
     energy_data: list[dict] | None = None,
     events_data: list[dict] | None = None,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> list[dict]:
+    """Blend the audio signals in, rank against each other, cut to `top_n`."""
     blended = blend_signal_scores(clips, energy_data=energy_data, events_data=events_data)
-    return _select_top_by_score(blended, top_n)
+    ranked = rank_clips_with_ai(blended, top_n, progress_callback=progress_callback)
+    return _select_top_by_score(ranked, top_n)
 
 
 def _bucket_coverage_seconds(existing_clips: list[dict], start: float, end: float) -> float:

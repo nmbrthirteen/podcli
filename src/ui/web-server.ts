@@ -3502,6 +3502,7 @@ app.post("/api/claude-suggest", async (req, res) => {
         preview_text: c.preview_text ?? "",
         content_type: c.content_type,
         score: c.score,
+        rank: c.rank,
         suggested_caption_style: c.suggested_caption_style || "hormozi",
       }));
       uiState.deselectedIndices = [];
@@ -3575,6 +3576,7 @@ app.post("/api/find-moment", async (req, res) => {
         preview_text: c.preview_text ?? "",
         content_type: c.content_type,
         score: c.score,
+        rank: c.rank,
         suggested_caption_style: c.suggested_caption_style || "hormozi",
       });
     }

@@ -106,6 +106,7 @@ export interface SuggestedClip {
   timestamp_display?: string;
   content_type?: string;
   score?: number;
+  rank?: number;
 }
 
 export interface UIState {
