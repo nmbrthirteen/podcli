@@ -7,6 +7,7 @@ import { pipeline } from "stream/promises";
 import { paths, pythonEnv } from "../config/paths.js";
 import { ASSETS_SCHEMA_VERSION } from "../models/index.js";
 import type { Asset, AssetType, AssetRegistry } from "../models/index.js";
+import { buildYtDlpArgs } from "../utils/ytdlp-args.js";
 
 const VIDEO_EXTS = new Set([".mp4", ".mov", ".mkv", ".webm", ".m4v"]);
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"]);
@@ -268,19 +269,15 @@ async function downloadDirect(url: string, destPath: string): Promise<string> {
 
 function downloadWithYtDlp(url: string, destDir: string, name: string): Promise<string> {
   const slug = name.replace(/[^a-zA-Z0-9._-]/g, "_") || "asset";
-  const args = [
-    "-m", "yt_dlp",
-    "--js-runtimes", `node:${process.execPath}`,
-    "--no-playlist",
-    "--format", "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b",
-    "--merge-output-format", "mp4",
-    "--ffmpeg-location", paths.ffmpegPath,
-    "--restrict-filenames", "--windows-filenames",
-    "--paths", destDir,
-    "--output", `${slug}.%(ext)s`,
-    "--print", "after_move:podcli-filepath:%(filepath)s",
+  const args = buildYtDlpArgs({
     url,
-  ];
+    outputDir: destDir,
+    outputTemplate: `${slug}.%(ext)s`,
+    ffmpegLocation: paths.ffmpegPath,
+    jsRuntimeNodePath: process.execPath,
+    cookiesFromBrowser: (process.env.PODCLI_YTDLP_BROWSER || "").trim().toLowerCase() || undefined,
+    extractorArgs: process.env.PODCLI_YT_EXTRACTOR_ARGS || undefined,
+  });
   return new Promise((resolveP, rejectP) => {
     const proc = spawn(paths.pythonPath, args, { env: pythonEnv() });
     let stdout = "";

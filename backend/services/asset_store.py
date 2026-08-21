@@ -332,8 +332,12 @@ def _download_direct(url: str, dest: str):
 
 def _download_yt_dlp(url: str, dest_dir: str, name: str) -> str:
     slug = "".join(c if c.isalnum() or c in "._-" else "_" for c in name) or "asset"
+    # Keep in step with src/utils/ytdlp-args.ts, the other side of this pair.
     cmd = [
         sys.executable, "-m", "yt_dlp",
+        # A user's own yt-dlp config can carry --extract-audio or a narrower
+        # --format and hand podcli an audio-only or 360p file as the episode.
+        "--ignore-config", "--no-config-locations", "--no-plugin-dirs",
         "--no-playlist",
         "--format", "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b",
         "--merge-output-format", "mp4",
@@ -342,6 +346,12 @@ def _download_yt_dlp(url: str, dest_dir: str, name: str) -> str:
         "--output", f"{slug}.%(ext)s",
         "--print", "after_move:podcli-filepath:%(filepath)s",
     ]
+    browser = (os.environ.get("PODCLI_YTDLP_BROWSER") or "").strip().lower()
+    if browser:
+        cmd += ["--cookies-from-browser", browser]
+    extractor_args = (os.environ.get("PODCLI_YT_EXTRACTOR_ARGS") or "").strip()
+    if extractor_args:
+        cmd += ["--extractor-args", extractor_args]
     # Hermetic installs bundle ffmpeg off-PATH; yt-dlp needs it to merge streams.
     ffmpeg = os.environ.get("PODCLI_FFMPEG")
     if ffmpeg and os.path.exists(ffmpeg):
