@@ -117,6 +117,18 @@ export const createClipToolDef = {
         type: "string",
         description: "Intro video (asset name or path) prepended before the clip. Uses the default intro asset if omitted.",
       },
+      name_card: {
+        type: "object",
+        description:
+          "Lower third naming the speaker for the first seconds: { title, subtitle, seconds, accent }.",
+      },
+      motion: {
+        type: "object",
+        description:
+          'How each part arrives and leaves, per part: { captions: { enter, exit, duration, feel } }. ' +
+          'enter: none|fade|rise|pop, exit: none|fade|sink, feel: snap|soft|linear. ' +
+          "Omit to use each caption style's own motion.",
+      },
       keep_caption_overlay: {
         type: "boolean",
         description:
@@ -198,6 +210,8 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     logo_path: logoPath,
     outro_path: outroPath,
     intro_path: introPath,
+    ...(input.name_card ? { name_card: input.name_card } : {}),
+    ...(input.motion ? { motion: input.motion } : {}),
     ...(keepSegments && { keep_segments: keepSegments }),
   });
 

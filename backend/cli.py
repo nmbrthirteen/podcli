@@ -563,6 +563,11 @@ def cmd_process(args):
         if merged != global_corr:
             save_corrections(merged)
 
+    # A named look, fetched from the account it belongs to. Applied before the
+    # flags below, so anything typed on the command line still wins over it.
+    if getattr(args, "template", None):
+        _apply_template(config, args.template)
+
     # CLI overrides
     if getattr(args, "engine", None):
         os.environ["PODCLI_ENGINE"] = args.engine
@@ -593,6 +598,8 @@ def cmd_process(args):
         config["bookend_fade"] = args.bookend_fade
     if getattr(args, "thumbnails", None) is not None:
         config["generate_thumbnails"] = args.thumbnails
+    if getattr(args, "thumbnail_placement", None):
+        config["thumbnail_placement"] = args.thumbnail_placement
     if args.top:
         config["top_clips"] = args.top
     if getattr(args, "review_each", False):
@@ -1021,7 +1028,14 @@ def cmd_process(args):
                 )
         except Exception:
             pass
+    if config.get("thumbnail_seconds"):
+        _thumb_intro_duration = float(config["thumbnail_seconds"])
     _thumb_intro_duration = max(0.5, min(_thumb_intro_duration, 1.0))
+
+    # Where the picture goes in the video, which is a separate question from
+    # whether one is drawn at all. "start" keeps what podcli has always done.
+    _thumb_placement = config.get("thumbnail_placement", "start")
+    _thumb_style = config.get("thumbnail_style") or None
 
     # Per-clip content generation needs any provider, not specifically a binary.
     from services import ai_provider
@@ -1106,8 +1120,12 @@ def cmd_process(args):
                         start_second=result.get("start_second", clip.get("start_second")),
                         end_second=result.get("end_second", clip.get("end_second")),
                         logo_path=_thumb_logo,
+                        config=_thumb_style,
                     )
-                    if thumb_paths:
+                    if thumb_paths and _thumb_placement == "off":
+                        print(f"                 + {len(thumb_paths)} thumbnail(s) in "
+                              f"{os.path.basename(clip_thumb_dir)}/")
+                    elif thumb_paths:
                         thumb_video = os.path.join(clip_thumb_dir, "thumb_frame.mp4")
                         _thumb_to_video(thumb_paths[0], thumb_video, duration=_thumb_intro_duration)
                         from services.video_processor import concat_outro
@@ -3661,6 +3679,111 @@ def print_help():
     print()
 
 
+def cmd_templates(args):
+    """List the looks this account can cut in."""
+    from services import podcli_cloud
+
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    bold = "\033[1m"
+    reset = "\033[0m"
+
+    if not podcli_cloud.signed_in():
+        print(f"\n  Templates come with podcli Pro.")
+        print(f"  {gray}Sign in with{reset} {accent}podcli login{reset}"
+              f"{gray}, or set the look with flags:{reset}")
+        print(f"  {gray}--caption-style --crop --format --logo --name-card --motion{reset}\n")
+        return
+
+    try:
+        found = podcli_cloud.templates()
+    except podcli_cloud.CloudError as exc:
+        print(f"  Could not load templates: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if not found:
+        print(f"\n  {gray}No templates yet. Make one in the studio.{reset}\n")
+        return
+
+    print()
+    for template in found:
+        look = template.get("config") or {}
+        cut = look.get("cut") or {}
+        facts = [
+            (look.get("captions") or {}).get("preset"),
+            cut.get("crop"),
+            cut.get("format"),
+        ]
+        mark = f" {accent}default{reset}" if template.get("is_default") else ""
+        print(f"  {bold}{template.get('name', '?')}{reset}{mark}")
+        print(f"    {gray}{' · '.join(f for f in facts if f)}{reset}")
+    print(f"\n  {gray}Use one:{reset} {accent}podcli process video.mp4 --template "
+          f"\"{found[0].get('name', 'Default')}\"{reset}\n")
+
+
+def _apply_template(config: dict, name_or_id: str) -> None:
+    """Fill the render config from a Pro template.
+
+    Templates live with the account rather than on a machine, so the same name
+    means the same look on a laptop and in the studio. Everything a template
+    sets is something this CLI already takes as a flag — the template is a name
+    for a set of them, not a second way to render.
+    """
+    from services import podcli_cloud
+
+    if not podcli_cloud.signed_in():
+        print("  Templates come with podcli Pro. Sign in with `podcli login`, "
+              "or set the look with flags.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        template = podcli_cloud.find_template(name_or_id)
+    except podcli_cloud.CloudError as exc:
+        print(f"  Could not load templates: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if not template:
+        try:
+            known = ", ".join(t.get("name", "?") for t in podcli_cloud.templates()) or "none yet"
+        except podcli_cloud.CloudError:
+            known = "unknown"
+        print(f"  No template called '{name_or_id}'. This account has: {known}", file=sys.stderr)
+        sys.exit(1)
+
+    look = template.get("config") or {}
+    cut = look.get("cut") or {}
+    if cut.get("crop"):
+        config["crop_strategy"] = cut["crop"]
+    if cut.get("format"):
+        config["format"] = cut["format"]
+    if cut.get("topN"):
+        config["top_clips"] = cut["topN"]
+    if (look.get("captions") or {}).get("preset"):
+        config["caption_style"] = look["captions"]["preset"]
+
+    # The template says which of the show's assets take part; the asset store
+    # says which file each one is.
+    from services.asset_store import default_intro, default_logo, default_outro
+
+    if (look.get("watermark") or {}).get("enabled"):
+        config["logo_path"] = config.get("logo_path") or default_logo()
+    if (look.get("intro") or {}).get("kind") == "asset":
+        config["intro_path"] = config.get("intro_path") or default_intro()
+    if (look.get("outro") or {}).get("kind") == "asset":
+        config["outro_path"] = config.get("outro_path") or default_outro()
+
+    card = look.get("thumbnailCard") or {}
+    if card:
+        config["generate_thumbnails"] = bool(card.get("auto", True))
+        config["thumbnail_placement"] = card.get("placement", "off")
+        if card.get("seconds"):
+            config["thumbnail_seconds"] = card["seconds"]
+        if card.get("style"):
+            config["thumbnail_style"] = card["style"]
+
+    print(f"  Template: {template.get('name', name_or_id)}")
+
+
 def cmd_login(args):
     import getpass
     from services import podcli_cloud
@@ -4004,6 +4127,11 @@ def main():
     proc.add_argument("--fast", action="store_true", help="Draft mode: tiny Whisper, heuristic selection, center crop, low quality")
     proc.add_argument("--thumbnails", dest="thumbnails", action="store_true", default=None, help="Force thumbnail generation on")
     proc.add_argument("--no-thumbnails", dest="thumbnails", action="store_false", help="Skip thumbnail generation")
+    proc.add_argument("--thumbnail-placement", dest="thumbnail_placement",
+                      choices=["off", "start"],
+                      help="Where the thumbnail goes in the video itself. "
+                           "off keeps the pictures and leaves the video alone (default: start)")
+    proc.add_argument("--template", help="Cut in a saved look (podcli Pro). Name or id.")
     proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
     proc.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
     proc.add_argument("--format", choices=["vertical", "horizontal", "square"], help="Output aspect ratio (default: vertical)")
@@ -4075,6 +4203,17 @@ def main():
     studio.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"], default="face")
     studio.add_argument("--format", choices=["vertical", "horizontal", "square"], default="vertical",
                         help="Output aspect ratio (default: vertical)")
+    studio.add_argument("--template", help="Cut in a saved look (podcli Pro). Name or id.")
+    studio.add_argument("--logo", help="Logo image (asset name or path)")
+    studio.add_argument("--name-card", dest="name_card",
+                        help="Lower third naming the speaker, shown for the first seconds")
+    studio.add_argument("--name-card-sub", dest="name_card_sub",
+                        help="Second line of the lower third")
+    studio.add_argument("--name-card-seconds", dest="name_card_seconds", type=float,
+                        help="How long the lower third holds (default 3)")
+    studio.add_argument("--motion", dest="motion",
+                        help='How each part arrives and leaves, as JSON: '
+                             '{"captions":{"enter":"rise","exit":"fade","duration":5,"feel":"soft"}}')
     studio.add_argument("-o", "--output", help="Final output path")
     studio.add_argument("--intro-title", help="Intro headline (default: derived from first words)")
     studio.add_argument("--outro-title", default=None)
@@ -4221,6 +4360,9 @@ def main():
     st.add_argument("-n", "--variations", type=int, default=3, help="Number of variations to generate")
     st.add_argument("--thumb-duration", type=float, default=1.5, help="Duration of thumbnail end card (default 1.5s)")
 
+    # ── templates ──
+    sub.add_parser("templates", help="List the saved looks on this account (podcli Pro)")
+
     # ── corrections ──
     corr = sub.add_parser("corrections", help="Manage transcript word corrections (Whisper fixes)")
     corr_sub = corr.add_subparsers(dest="corrections_action")
@@ -4359,6 +4501,8 @@ def main():
         cmd_studio(args)
     elif args.command == "reel":
         cmd_reel(args)
+    elif args.command == "templates":
+        cmd_templates(args)
     elif args.command == "thumbnails":
         cmd_thumbnails(args)
     elif args.command == "thumbnail-config":
