@@ -2,20 +2,21 @@ import React from "react";
 import {
   useCurrentFrame,
   useVideoConfig,
-  interpolate,
-  spring,
 } from "remotion";
 import type { Word, CaptionStyle } from "../types";
 import { captionScale } from "../types";
 import { buildChunks, activeChunkAt } from "../chunks";
+import { MOTION, motionAt } from "../motion";
+import type { Motion } from "../motion";
 
 interface Props {
   words: Word[];
   style: CaptionStyle;
   singleLine?: boolean;
+  motion?: Motion;
 }
 
-export const HormoziCaptions: React.FC<Props> = ({ words, style, singleLine = false }) => {
+export const HormoziCaptions: React.FC<Props> = ({ words, style, singleLine = false, motion }) => {
   const frame = useCurrentFrame();
   const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
@@ -30,20 +31,12 @@ export const HormoziCaptions: React.FC<Props> = ({ words, style, singleLine = fa
 
   if (!activeChunk) return null;
 
-  const entryFrame = Math.round(activeChunk.start * fps);
-
-  const scale = spring({
-    frame: frame - entryFrame,
-    fps,
-    config: { damping: 12, stiffness: 180, mass: 0.5 },
+  const { opacity, scale } = motionAt({
+    frame, fps,
+    start: activeChunk.start,
+    end: activeChunk.end,
+    motion: motion ?? MOTION.hormozi,
   });
-
-  const opacity = interpolate(
-    frame - entryFrame,
-    [0, 3],
-    [0, 1],
-    { extrapolateRight: "clamp" }
-  );
 
   return (
     <div

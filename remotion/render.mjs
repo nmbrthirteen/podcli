@@ -161,6 +161,17 @@ async function main() {
       }
     : null;
 
+  // How each part arrives and leaves. A JSON object rather than a flag per
+  // property: it is one value in a template, and it travels as one.
+  let motion = null;
+  if (opts.motion) {
+    try {
+      motion = JSON.parse(opts.motion);
+    } catch {
+      console.error("Ignoring --motion: not valid JSON");
+    }
+  }
+
   const inputProps = {
     videoSrc,
     words,
@@ -168,6 +179,7 @@ async function main() {
     logoSrc,
     faceY,
     nameCard,
+    motion,
     durationInFrames,
     fps,
     captionPosition: opts["caption-position"] || "auto",

@@ -8,6 +8,8 @@ interface Props {
   words: Word[];
   style: CaptionStyle;
   singleLine?: boolean;
+  /** Accepted for one shape across the caption components; karaoke holds still. */
+  motion?: unknown;
 }
 
 const KaraokeLine: React.FC<{
