@@ -12,6 +12,7 @@ import {
 } from "./handlers/transcribe.handler.js";
 import {
   suggestClipsToolDef,
+  suggestClipsInputShape,
   handleSuggestClips,
 } from "./handlers/suggest-clips.handler.js";
 import {
@@ -186,7 +187,8 @@ async function getWorkflowGuidance(): Promise<string> {
       "1. Set the video: use set_video or transcribe_podcast with a file path\n" +
       "2. Get a transcript: use transcribe_podcast (auto) or import_transcript / parse_transcript\n" +
       "3. Read the transcript: use get_ui_state(include_transcript: true)\n" +
-      "4. Suggest clips: analyze the transcript yourself, then call suggest_clips with your picks\n" +
+      "4. Suggest clips: analyze the transcript yourself, then call suggest_clips with your picks.\n" +
+      "   Each pick needs a payoff and a standalone check, and an answer needs its question.\n" +
       "5. Export: use batch_create_clips(export_selected: true) or create_clip(clip_number: N)\n\n" +
       "Note: The Web UI is not running. Start it with: npm run ui"
     );
@@ -228,7 +230,8 @@ async function getWorkflowGuidance(): Promise<string> {
       `NEXT: Transcript is ready (${wordCount} words). Time to find viral moments!\n` +
         "  → Use get_ui_state(include_transcript: true) to read the full transcript\n" +
         "  → Analyze it for the most engaging, viral-worthy moments\n" +
-        "  → Then call suggest_clips with your suggestions (title, start_second, end_second, reasoning)",
+        "  → For each one: pull the question in if it is an answer, then state the payoff before the title\n" +
+        "  → Then call suggest_clips with your suggestions (title, start_second, end_second, payoff, standalone, reasoning)",
     );
   } else if (phase === "review" && selectedCount > 0) {
     lines.push(
@@ -390,30 +393,7 @@ export function createServer(): McpServer {
   server.tool(
     suggestClipsToolDef.name,
     suggestClipsToolDef.description,
-    {
-      suggestions: z
-        .array(
-          z.object({
-            title: z.string(),
-            start_second: z.number(),
-            end_second: z.number(),
-            segments: z
-              .array(z.object({ start: z.number(), end: z.number() }))
-              .optional()
-              .describe(
-                "Multi-cut keep-ranges. Omit for a single continuous clip.",
-              ),
-            reasoning: z.string(),
-            preview_text: z.string().optional(),
-            content_type: z.string().optional(),
-            score: z.number().optional(),
-            suggested_caption_style: z
-              .enum(["hormozi", "karaoke", "subtle", "branded"])
-              .optional(),
-          }),
-        )
-        .describe("Array of suggested clip moments"),
-    },
+    suggestClipsInputShape,
     async ({ suggestions }) => {
       try {
         const result = await handleSuggestClips({ suggestions });
@@ -1521,6 +1501,9 @@ export function createServer(): McpServer {
           title: z.string().optional(),
           start_second: z.number().optional(),
           end_second: z.number().optional(),
+          payoff: z.string().optional(),
+          standalone: z.string().optional(),
+          context_line: z.string().optional(),
           reasoning: z.string().optional(),
           preview_text: z.string().optional(),
           suggested_caption_style: z
@@ -1539,7 +1522,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "No updates provided. Specify at least one field: title, start_second, end_second, reasoning, preview_text, or suggested_caption_style.",
+                text: "No updates provided. Specify at least one field: title, start_second, end_second, payoff, standalone, context_line, reasoning, preview_text, or suggested_caption_style.",
               },
             ],
           };
@@ -2529,7 +2512,8 @@ export function createServer(): McpServer {
               "- Questions that hook the viewer",
               "",
               "For each moment, note the start/end timestamps and craft a catchy title.",
-              "Aim for 15-45 second clips (target 20-35s). Then call suggest_clips with your picks.",
+              "Aim for 15-45 second clips (target 20-35s). If a moment is an answer, start on the question. "
+                + "Then call suggest_clips with your picks, each carrying a payoff and a standalone check.",
               "",
               "## Step 5: Export",
               "Call batch_create_clips(export_selected: true) to render all clips.",

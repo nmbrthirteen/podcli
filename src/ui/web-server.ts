@@ -3497,6 +3497,9 @@ app.post("/api/claude-suggest", async (req, res) => {
         duration: c.duration ?? c.end_second - c.start_second,
         segments: c.segments,
         reasoning: c.reasoning ?? "",
+        payoff: c.payoff ?? "",
+        standalone: c.standalone ?? "",
+        context_line: c.context_line ?? "",
         preview_text: c.preview_text ?? "",
         content_type: c.content_type,
         score: c.score,
@@ -3571,6 +3574,9 @@ app.post("/api/find-moment", async (req, res) => {
         duration: c.duration ?? c.end_second - c.start_second,
         segments: c.segments,
         reasoning: c.reasoning ?? "",
+        payoff: c.payoff ?? "",
+        standalone: c.standalone ?? "",
+        context_line: c.context_line ?? "",
         preview_text: c.preview_text ?? "",
         content_type: c.content_type,
         score: c.score,
@@ -4006,6 +4012,9 @@ app.post("/api/suggestions/modify", (req, res) => {
     if (typeof upd.title === "string") clip.title = upd.title;
     clip.start_second = nextStart;
     clip.end_second = nextEnd;
+    if (typeof upd.payoff === "string") clip.payoff = upd.payoff;
+    if (typeof upd.standalone === "string") clip.standalone = upd.standalone;
+    if (typeof upd.context_line === "string") clip.context_line = upd.context_line;
     if (typeof upd.reasoning === "string") clip.reasoning = upd.reasoning;
     if (typeof upd.preview_text === "string") clip.preview_text = upd.preview_text;
     if (typeof upd.suggested_caption_style === "string") {

@@ -812,7 +812,7 @@ const onKeyActivate = (fn) => (e) => {
 
       // Clip editing
       const [editingClip, setEditingClip] = useState(null); // index
-      const [editForm, setEditForm] = useState({ title: '', start: 0, end: 0 });
+      const [editForm, setEditForm] = useState({ title: '', start: 0, end: 0, payoff: '', contextLine: '' });
       const [editDuration, setEditDuration] = useState(0);
       const editDialogRef = useDialog(editingClip !== null, () => setEditingClip(null));
       const previewDialogRef = useDialog(!!previewFile, () => setPreviewFile(null));
@@ -925,7 +925,13 @@ const onKeyActivate = (fn) => (e) => {
         const clip = suggestions[idx];
         if (!clip) return;
         setEditingClip(idx);
-        setEditForm({ title: clip.title, start: clip.start_second, end: clip.end_second });
+        setEditForm({
+          title: clip.title,
+          start: clip.start_second,
+          end: clip.end_second,
+          payoff: clip.payoff || '',
+          contextLine: clip.context_line || '',
+        });
       };
 
       const clampEditTime = (v) => {
@@ -939,7 +945,16 @@ const onKeyActivate = (fn) => (e) => {
         const reTimed = edited && (edited.start_second !== editForm.start || edited.end_second !== editForm.end);
         setSuggestions(prev => {
           const next = [...prev];
-          next[editingClip] = { ...next[editingClip], title: editForm.title, start_second: editForm.start, end_second: editForm.end, duration: Math.round(editForm.end - editForm.start), segments: undefined };
+          next[editingClip] = {
+            ...next[editingClip],
+            title: editForm.title,
+            start_second: editForm.start,
+            end_second: editForm.end,
+            payoff: editForm.payoff,
+            context_line: editForm.contextLine,
+            duration: Math.round(editForm.end - editForm.start),
+            segments: undefined,
+          };
           return next;
         });
         // The score was measured over the old range, so it no longer describes this clip.
@@ -1759,6 +1774,9 @@ const onKeyActivate = (fn) => (e) => {
               start_second: c.start_second,
               end_second: c.end_second,
               reasoning: c.reasoning || c.content_type || '',
+              payoff: c.payoff || '',
+              standalone: c.standalone || '',
+              context_line: c.context_line || '',
               segments: c.segments,
               duration: c.duration ?? Math.round((c.end_second || 0) - (c.start_second || 0)),
             }));
@@ -2616,6 +2634,12 @@ const onKeyActivate = (fn) => (e) => {
 
                         <div className="clip-info">
                           <div className="clip-title">{clip.title}</div>
+                          {clip.payoff && <div className="clip-payoff">{clip.payoff}</div>}
+                          {clip.context_line && (
+                            <div className="clip-context" title={clip.context_line}>
+                              <span>Setup</span> {clip.context_line}
+                            </div>
+                          )}
                           <div className="clip-meta">
                             {fmt(clip.start_second)} {'\u2192'} {fmt(clip.end_second)} {'\u00B7'} {clip.duration}s
                             {energy && (
@@ -2854,6 +2878,19 @@ const onKeyActivate = (fn) => (e) => {
                   <label>Title</label>
                   <input type="text" value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
                     onKeyDown={e => { if (e.key === 'Enter') saveClipEdit(); }} autoFocus />
+                </div>
+                <div className="edit-field">
+                  <label htmlFor="clip-edit-payoff">Payoff</label>
+                  <textarea id="clip-edit-payoff" rows={2} value={editForm.payoff}
+                    placeholder="What the viewer walks away with, in one sentence"
+                    onChange={e => setEditForm(f => ({ ...f, payoff: e.target.value }))} />
+                </div>
+                <div className="edit-field">
+                  <label htmlFor="clip-edit-context">Setup line</label>
+                  <input id="clip-edit-context" type="text" value={editForm.contextLine}
+                    placeholder="The question this answers, if it is not in the clip"
+                    onChange={e => setEditForm(f => ({ ...f, contextLine: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') saveClipEdit(); }} />
                 </div>
                 {videoPath && !sourceIsUrl && (
                   <div className="edit-field">

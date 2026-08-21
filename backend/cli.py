@@ -135,7 +135,8 @@ def _selection_signature(config: dict) -> str:
     ]
     if ai_select:
         try:
-            from services.claude_suggest import kb_signature
+            from services.claude_suggest import PROMPT_VERSION, kb_signature
+            parts.append(PROMPT_VERSION)
             parts.append(kb_signature())
         except Exception:
             # Unique per call, so a run that could not read the knowledge base

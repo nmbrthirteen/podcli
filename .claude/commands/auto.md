@@ -23,6 +23,7 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
 2. **Strategy first, render after.** Propose the cut list and WAIT for user confirmation before calling `batch_create_clips`.
 3. **Knowledge base is context, not template.** If `` exists, read it for brand voice and format preferences. If not, infer from the content itself.
 4. **Never silently render.** Every clip that ships must appear in the proposal the user approved.
+5. **Every clip carries its own context.** A stranger who never heard the episode has to follow it from the first second. If the moment is an answer, the question comes with it.
 
 ---
 
@@ -53,7 +54,60 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
 
 **Fallback**: if `transcribe_start` returns an error about the Web UI not running, tell the user and offer either (a) run `npm run ui` in another terminal then retry, or (b) fall back to the synchronous `transcribe_podcast` (no live progress, works silently).
 
-### Phase 2 — Strategy Proposal (GATE)
+### Phase 2 — Topic Map (silent)
+
+Before picking a single clip, map the whole episode. Clips get cut out of topics, never out of loose lines.
+
+1. Sweep the packed transcript end to end and mark every topic change.
+2. Emit 2-5 topics per 30 minutes of runtime, 6-12 for a full hour. Each topic covers 3-12 minutes.
+3. Cover the whole runtime. The first 10 minutes and the last 5 get skipped most often, and they hold the setup and the summary. Anything that fits nowhere goes into a "loose ends" topic rather than being dropped.
+4. Merge adjacent topics that both run under 2 minutes and cover the same ground.
+
+Per topic, hold:
+
+| Field | Value |
+|-------|-------|
+| `span` | `[hh:mm:ss-hh:mm:ss]` |
+| `title` | what the topic is about, not a headline |
+| `beats` | 2-5 sub-points actually said |
+| `speakers` | who drives it |
+
+Keep the map internal. It feeds Phase 3 and is only shown if the user asks for it.
+
+### Phase 3 — Cut Planning (silent)
+
+Work inside one topic at a time. Set boundaries by meaning, not by the clock.
+
+**start_second**
+
+- Land on the first sentence of the core statement. Drop the throat-clearing in front of it.
+- If the moment is an answer, move the start back to include the question. Otherwise the clip opens on a reply to nothing and the viewer bounces.
+- When that question rambles past roughly 8 seconds, leave it out and write `context_line` instead: the question rewritten to one line for on-screen text.
+- Never open on a word pointing back before the cut: "that", "it", "they", "yeah", "so", "exactly", "right", "which is why". Either widen the start or supply `context_line`.
+
+**end_second**
+
+- Land on the end of the last sentence of the argument, never on the end of the topic block.
+- Cut before trailing summaries, transitions, and "anyway, so" tails.
+- If the thought is unfinished at the boundary, extend until it closes or drop the moment. Never ship half an argument.
+
+**Never cut** mid-sentence, mid-list, or between a claim and the evidence for it.
+
+**Write the payoff before the title.** One sentence, second person, on what the viewer walks away with. The title is then derived from the payoff, not from transcript wording. A moment with no payoff you can state in one sentence is not a clip. Drop it.
+
+**Check the moment against its own type**, not against one generic bar:
+
+| Type | Carries the clip | Fails when |
+|------|------------------|-----------|
+| Guest story | A turn: what they expected, what happened instead | It summarizes the story instead of telling it |
+| Technical insight | One mechanism explained in plain words | It needs a diagram, or terms the viewer does not have |
+| Market / landscape | A specific read on where things are going, with a reason | It lists players without taking a position |
+| Business / strategy | A number, a trade-off, or a decision with a cost | The advice would fit any company in any year |
+| Hot take | A claim a reasonable person would argue with, plus the reason | It is only a strong tone with no claim under it |
+
+**Run the standalone check.** Name what the viewer must already know. If that is anything other than "nothing", it goes into `context_line` or the start moves back to cover it. If neither works, drop the moment.
+
+### Phase 4 — Strategy Proposal (GATE)
 
 Emit a numbered strategy table. Do NOT render yet.
 
@@ -65,33 +119,37 @@ Inferred tone:   <from voice fingerprint or 02-voice-and-tone.md>
 Target count:    <N> clips (from arg, or inferred from content density)
 
 #1  [00:04:22-00:05:01]  39s  S0 "<hook>"
-    Why: <one line — the angle, the stakes, or the moment>
-    Title: <suggested, ≤60 chars>
-    Style: <hormozi | karaoke | subtle | branded>
+    Payoff: <what the viewer walks away with, one sentence, second person>
+    Needs:  <nothing | what the viewer must know, and how this clip covers it>
+    Why:    <the angle, the stakes, or the moment>
+    Title:  <derived from the payoff, ≤60 chars>
+    Style:  <hormozi | karaoke | subtle | branded>
 
 #2  ...
 
 Unused peaks / skipped moments:
-- [00:18:45] — high energy but no standalone hook
-- [00:34:10] — great quote, but needs 40s of setup
+- [00:18:45] high energy, no payoff you can state in one sentence
+- [00:34:10] great quote, needs 40s of setup that will not fit
+- [00:41:02] answer with no question in reach, and the setup is too long to card
 
 Confirm? (yes / redirect / change specific clips)
 ```
 
 **Stop here. Wait for the user's response.** Do not call `batch_create_clips` on implicit approval — require an explicit "yes", "go", "ship it", or similar.
 
-### Phase 3 — Render (with live progress)
+### Phase 5 — Render (with live progress)
 
 Once the user confirms:
 
-1. Call `batch_create_clips(clip_numbers=[1,2,...], async_mode: true)` → returns `{job_id, clip_count}` immediately.
-2. Emit to the user: _"Rendering {clip_count} clips — I'll report progress per clip."_
-3. Loop: `job_status(job_id, wait_seconds: 30)` → emit ONE terse line per poll, e.g. `"Rendering 3/7 — clip #3 (speaker crop)"`. Exit when `done: true`.
-4. When done, print the output paths and a one-line-per-clip summary (from the result field).
+1. Call `suggest_clips` with the approved list. Every entry carries `payoff`, `standalone`, `context_line`, and `preview_text` (the real opening line, verbatim) alongside the timings. The tool rejects a clip whose context is missing and tells you which one; fix it and resubmit the full list rather than dropping it.
+2. Call `batch_create_clips(clip_numbers=[1,2,...], async_mode: true)` → returns `{job_id, clip_count}` immediately.
+3. Emit to the user: _"Rendering {clip_count} clips — I'll report progress per clip."_
+4. Loop: `job_status(job_id, wait_seconds: 30)` → emit ONE terse line per poll, e.g. `"Rendering 3/7 — clip #3 (speaker crop)"`. Exit when `done: true`.
+5. When done, print the output paths and a one-line-per-clip summary (from the result field).
 
 **Fallback**: if `async_mode` fails (Web UI down), fall back to sync `batch_create_clips(clip_numbers=[...])` — renders silently but still works.
 
-### Phase 4 — Persist
+### Phase 6 — Persist
 
 Write a compact session log to `.podcli/sessions/<episode-slug>.md` (create the dir if missing):
 

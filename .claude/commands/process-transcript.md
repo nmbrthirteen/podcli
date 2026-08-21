@@ -73,20 +73,43 @@ Scan the entire transcript for:
 
 Flag 15-20 potential moments.
 
-### Phase 3: Score Each Moment
+### Phase 3: Anchor Each Moment (Silent)
+
+Before scoring, fix each flagged moment's edges and state its payoff.
+
+**Start**
+
+- Open on the first sentence of the core statement. Drop the throat-clearing in front of it.
+- If the moment is an answer, pull the start back to include the question. A clip that opens on a reply to nothing loses the viewer in two seconds.
+- When that question rambles past roughly 8 seconds, leave it out and write a **setup line** instead: the question rewritten to one line for on-screen text.
+- Never open on a word pointing back before the cut: "that", "it", "they", "yeah", "so", "exactly", "right", "which is why".
+
+**End**
+
+- Close on the last sentence of the argument, not on the last sentence in the topic.
+- Cut before trailing summaries, transitions, and "anyway, so" tails.
+- If the thought is unfinished at the edge, extend until it closes or drop the moment. Never ship half an argument.
+
+**Never cut** mid-sentence, mid-list, or between a claim and the evidence for it.
+
+**Then write the payoff, before any title.** One sentence, second person, on what the viewer walks away with. The title is derived from the payoff, never from transcript wording. A moment with no payoff you can state in one sentence is not a short. Drop it.
+
+**Then run the standalone check.** Name what the viewer must already know. If it is anything other than nothing, it goes into the setup line or the start moves back to cover it. If neither works, drop the moment.
+
+### Phase 4: Score Each Moment
 
 For every flagged moment, score on four dimensions (1-5 each):
 
 | Dimension | What It Measures |
 |-----------|-----------------|
-| **Standalone value** | Makes complete sense without episode context? |
+| **Standalone value** | Makes complete sense with no episode context, including the question it answers? |
 | **Hook strength** | Grabs attention in first 3 seconds of the clip? |
 | **Relevance** | Matters to the show's target audience? |
 | **Quotability** | Contains memorable, shareable phrasing? |
 
 **Total score = sum of 4 dimensions (max 20).**
 
-### Phase 4: Select & Classify
+### Phase 5: Select & Classify
 
 1. Rank all moments by total score
 2. Select the top moments (per target count)
@@ -100,11 +123,23 @@ For every flagged moment, score on four dimensions (1-5 each):
 | **Business / Strategy** | Revenue, fundraising, pricing, go-to-market |
 | **Hot Take / Opinion** | Challenges widely held belief |
 
-### Phase 5: Check for Duplicates
+Then check each moment against its own type, not against one generic bar:
+
+| Type | Carries the clip | Fails when |
+|------|------------------|-----------|
+| **Founder/Guest Story** | A turn: what they expected, what happened instead | It summarizes the story instead of telling it |
+| **Product/Technical Insight** | One mechanism explained in plain words | It needs a diagram, or three terms the viewer does not have |
+| **Market / Landscape** | A specific read on where things are going, with a reason | It lists players without taking a position |
+| **Business / Strategy** | A number, a trade-off, or a decision with a cost attached | The advice would fit any company in any year |
+| **Hot Take / Opinion** | A claim a reasonable person would argue with, plus the reason | It is only a strong tone with no actual claim under it |
+
+A moment that fails its type's bar drops, however well it scored.
+
+### Phase 6: Check for Duplicates
 
 Read `03-episodes-database.md` and verify no selected moments overlap with existing shorts.
 
-### Phase 6: Extract Keywords
+### Phase 7: Extract Keywords
 
 From the full transcript, extract:
 - Main topics discussed
@@ -144,6 +179,10 @@ Format: comma-separated, under 500 characters.
 
 > "[Exact quote from transcript — the hook sentence]"
 
+**Payoff:** [What the viewer walks away with. One sentence, second person.]
+**Needs:** [nothing | what the viewer must already know]
+**Setup line:** [The question this answers, in one line, or omit when the clip carries its own setup]
+
 **Why it works:** [One sentence explaining the appeal]
 
 **Suggested titles:**
@@ -169,6 +208,8 @@ Format: comma-separated, under 500 characters.
 
 For every moment included:
 - [ ] Makes sense without the full episode
+- [ ] Payoff states what the viewer gets, and is not a restatement of the title
+- [ ] Does not open on a word pointing back before the cut, or a setup line covers it
 - [ ] Has a clear start and satisfying end
 - [ ] Hook lands in first 3 seconds
 - [ ] Single focused idea, fully delivered
@@ -182,7 +223,7 @@ For every moment included:
 ## Self-Correction Rules
 
 1. If output feels generic → add specificity from the transcript
-2. If a moment needs context → it's not a good short, skip it
+2. If a moment needs context → pull the start back to include it, or carry it in the setup line. If neither fits, skip the moment
 3. If you can't find enough strong moments → flag it honestly, don't pad with weak ones
 4. Always prioritize variety across content types
 

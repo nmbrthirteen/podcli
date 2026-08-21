@@ -123,6 +123,12 @@ KB_FILES = [
 ]
 
 
+# Bump when the selection rules in _build_prompt change. Folded into the
+# suggestion cache key for the same reason the knowledge base is: replaying old
+# picks under new rules teaches people the rules do nothing.
+PROMPT_VERSION = 2
+
+
 def kb_signature() -> str:
     """Fingerprint of exactly what the knowledge base contributes to the prompt.
 
@@ -314,6 +320,9 @@ DURATION RULES (CRITICAL):
 CUTTING RULES (CRITICAL):
 - Cut TIGHT. Every second must earn its place.
 - Start at the exact moment the hook hits — no preamble, no "so", no "well"
+- ONE EXCEPTION: if the moment is an ANSWER, start on the QUESTION that prompted it.
+  A question is not preamble, it is the setup the viewer needs. Only leave it out when
+  it rambles past ~8 seconds, and then put it in "context_line" instead.
 - End the MOMENT the point lands with a complete thought — don't trail off
 - NEVER cut mid-sentence or mid-thought. The viewer must feel closure.
 - The last sentence must feel like a natural ending, a punchline, or a mic-drop
@@ -324,6 +333,8 @@ MOMENT SELECTION ({b.lens}):
 - Would YOU stop scrolling for this? If no, skip it.
 - First 3 seconds must HOOK — a bold claim, shocking number, or provocative question
 - Must make complete sense standalone — no "as I mentioned" or "going back to"
+- Must not OPEN on a word pointing back before the cut: "that", "it", "they", "yeah",
+  "so", "exactly", "right", "which is why". Widen the start or write a "context_line".
 - Must end on a COMPLETE THOUGHT — sentence boundary, natural pause, or mic-drop moment
 - Single focused idea — one concept, fully delivered, no loose threads
 - Prioritize: controversial takes, surprising numbers, founder war stories, "wait what?" moments, emotional peaks
@@ -334,6 +345,15 @@ MOMENT SELECTION ({b.lens}):
 
 {f"ALREADY PUBLISHED (do NOT suggest these moments again):{chr(10)}{chr(10).join('- ' + s for s in existing_shorts)}" if existing_shorts else ""}
 {excluded_ranges}{_format_reaction_anchors(reaction_times)}
+
+CONTEXT RULES (CRITICAL):
+- State the PAYOFF first: one sentence, second person, on what the viewer walks away with.
+  If you cannot state it in one sentence, the moment is not a clip. Skip it.
+- The title comes off the payoff, not off the transcript wording.
+- In "needs", name what the viewer must already know. Write "nothing" when the clip
+  carries its own setup.
+- If "needs" is anything other than "nothing", either move start_second back to cover it
+  on camera, or write "context_line": that setup rewritten to one line for on-screen text.
 
 Score each moment on 4 dimensions (1-5 each):
 - standalone: Makes sense without episode context?
@@ -359,7 +379,10 @@ Return this exact JSON structure:
       "scores": {{"standalone": 4, "hook": 5, "relevance": 4, "quotability": 3}},
       "total_score": 16,
       "quote": "The key quote from this moment",
-      "why": "One sentence on why this works as a short"
+      "payoff": "What the viewer walks away with, one sentence, second person",
+      "needs": "nothing",
+      "context_line": "",
+      "why": "One sentence on why this earns 30 seconds of a stranger's attention"
     }}
   ]
 }}
@@ -605,6 +628,9 @@ Transcript:
                     "score": total,
                     "content_type": c.get("content_type", "unknown"),
                     "reasoning": c.get("why", ""),
+                    "payoff": c.get("payoff", ""),
+                    "standalone": c.get("needs", ""),
+                    "context_line": c.get("context_line", ""),
                     "preview_text": c.get("quote", "")[:120],
                     "suggested_caption_style": caption_style,
                     "quote": c.get("quote", ""),
@@ -808,6 +834,9 @@ def suggest_with_claude(
             "score": total,
             "content_type": c.get("content_type", "unknown"),
             "reasoning": c.get("why", ""),
+            "payoff": c.get("payoff", ""),
+            "standalone": c.get("needs", ""),
+            "context_line": c.get("context_line", ""),
             "preview_text": c.get("quote", "")[:120],
             "suggested_caption_style": caption_style,
             "quote": c.get("quote", ""),
