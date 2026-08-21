@@ -22,6 +22,10 @@
  */
 
 import { renderMedia, selectComposition } from "@remotion/renderer";
+
+// Same reason as remotion/render.mjs: the 30s default is measured against
+// the font delayRender competing with the whole bundle.
+const DELAY_RENDER_TIMEOUT_MS = 120_000;
 import { getCachedBundle } from "./bundle-cache.mjs";
 import path from "path";
 import fs from "fs";
@@ -80,6 +84,7 @@ async function main() {
     onBundle: () => console.log("  Remotion: bundling (first run, or src/config changed)..."),
   });
   const composition = await selectComposition({
+    timeoutInMilliseconds: DELAY_RENDER_TIMEOUT_MS,
     serveUrl: bundleLocation,
     id: "Audiogram",
     inputProps,
@@ -95,6 +100,7 @@ async function main() {
   );
 
   await renderMedia({
+    timeoutInMilliseconds: DELAY_RENDER_TIMEOUT_MS,
     composition: { ...composition, durationInFrames, fps, width, height },
     serveUrl: bundleLocation,
     codec: "h264",

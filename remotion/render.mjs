@@ -52,6 +52,11 @@ function clampCaptionFontScale(raw) {
 }
 
 
+// Remotion's 30s default is measured against the font delayRender in Root.tsx,
+// which competes with evaluating the whole bundle. That bundle has three
+// compositions now, and the slowest CI runner does not finish inside 30s.
+const DELAY_RENDER_TIMEOUT_MS = 120_000;
+
 async function main() {
   const opts = parseArgs();
 
@@ -197,6 +202,7 @@ async function main() {
       serveUrl: bundleLocation,
       id: "CaptionedClip",
       inputProps,
+      timeoutInMilliseconds: DELAY_RENDER_TIMEOUT_MS,
     });
 
     const cpus = os.cpus().length;
@@ -227,6 +233,7 @@ async function main() {
       outputLocation: captionOverlay,
       inputProps,
       concurrency,
+      timeoutInMilliseconds: DELAY_RENDER_TIMEOUT_MS,
       onProgress: ({ progress }) => {
         const pct = Math.round(progress * 100);
         if (pct > lastPct + 9) {
