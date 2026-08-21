@@ -55,3 +55,42 @@ class SharedWavTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SelectionSignatureTests(unittest.TestCase):
+    """The suggestions cache is only allowed to replay picks made under the
+    same rules."""
+
+    def _sig(self, config, kb="kb-a"):
+        with mock.patch("services.claude_suggest.kb_signature", return_value=kb):
+            return cli_mod._selection_signature(config)
+
+    def test_editing_the_knowledge_base_invalidates_an_ai_session(self):
+        cfg = {"ai_select": True}
+        self.assertNotEqual(self._sig(cfg, kb="kb-a"), self._sig(cfg, kb="kb-b"))
+
+    def test_editing_the_knowledge_base_leaves_a_saliency_session_alone(self):
+        cfg = {"ai_select": False}
+        self.assertEqual(self._sig(cfg, kb="kb-a"), self._sig(cfg, kb="kb-b"))
+
+    def test_changing_profile_invalidates(self):
+        a = self._sig({"ai_select": True, "profile": "party"})
+        b = self._sig({"ai_select": True})
+        self.assertNotEqual(a, b)
+
+    def test_turning_energy_off_invalidates(self):
+        a = self._sig({"ai_select": True, "energy_boost": False})
+        b = self._sig({"ai_select": True, "energy_boost": True})
+        self.assertNotEqual(a, b)
+
+    def test_an_unreadable_knowledge_base_does_not_raise(self):
+        with mock.patch("services.claude_suggest.kb_signature", side_effect=OSError("boom")):
+            self.assertIn("kb-unavailable", cli_mod._selection_signature({"ai_select": True}))
+
+    def test_two_failed_lookups_never_compare_equal(self):
+        # Otherwise a session saved during one failure replays during the next,
+        # after the knowledge base has changed underneath it.
+        with mock.patch("services.claude_suggest.kb_signature", side_effect=OSError("boom")):
+            a = cli_mod._selection_signature({"ai_select": True})
+            b = cli_mod._selection_signature({"ai_select": True})
+        self.assertNotEqual(a, b)

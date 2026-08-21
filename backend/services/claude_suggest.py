@@ -7,9 +7,11 @@ Delegates moment selection to an AI CLI, which uses the PodStack knowledge base
 Priority: Claude Code → Codex → heuristic fallback.
 """
 
+import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from typing import Optional, Callable
@@ -19,7 +21,7 @@ from services.audio_analyzer import compute_energy_scores
 from services.audio_events import compute_event_scores, dominant_reaction
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
+from presets import DEFAULT_PRESET, MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 from utils.text import clean_title
 from services import ai_provider, podcli_cloud
 from services.ai_cli import (
@@ -34,28 +36,103 @@ from services.ai_cli import (
 
 
 def _load_existing_shorts(episodes_path: str) -> list[str]:
-    """Extract existing short titles from episode database to avoid duplicates."""
+    """Titles of shorts already published, so they are not suggested again.
+
+    Reads the shipped table shape and the older numbered-list shape. Cells left
+    as `[placeholder]` are not titles.
+    """
     if not os.path.exists(episodes_path):
         return []
     try:
         with open(episodes_path, encoding="utf-8") as f:
             content = f.read()
-        # Parse lines that look like shorts entries: "1. [title] — [category]"
-        shorts = []
-        for line in content.split("\n"):
-            line = line.strip()
-            if line and (line.startswith("1.") or line.startswith("2.") or
-                         line.startswith("3.") or line.startswith("4.") or
-                         line.startswith("5.") or line.startswith("6.") or
-                         line.startswith("7.") or line.startswith("8.") or
-                         line.startswith("9.")):
-                # Extract title between brackets or after number
-                title = line.split("—")[0].strip().lstrip("0123456789.").strip()
-                if title and title != "[Short title]":
-                    shorts.append(title)
-        return shorts
-    except Exception:
+    except OSError:
         return []
+
+    shorts: list[str] = []
+    for raw in content.split("\n"):
+        line = raw.strip()
+        if not line:
+            continue
+        title = ""
+        if line.startswith("|"):
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            # | # | Moment | Title | Platform | Status |
+            if len(cells) >= 3 and cells[0].lower() not in ("#", "num", "no"):
+                if not all(set(c) <= set("-: ") for c in cells):
+                    status = cells[4].lower() if len(cells) >= 5 else ""
+                    # A dropped moment was considered and passed over, and the
+                    # template says it can be reconsidered. Anything else that
+                    # reached this table is a clip that exists.
+                    if "drop" not in status:
+                        title = cells[2]
+        elif re.match(r"^\d+[.)]\s", line):
+            title = re.split(r"\s[-\u2013\u2014]\s", line, maxsplit=1)[0]
+            title = re.sub(r"^\d+[.)]\s*", "", title).strip()
+
+        title = title.strip().strip("*`").strip()
+        if title and not (title.startswith("[") and title.endswith("]")):
+            shorts.append(title)
+    return shorts
+
+
+# (filename, max_chars) that reach the selection prompt, highest priority first.
+# Shared with kb_signature so the suggestion cache and the prompt cannot drift.
+KB_FILES = [
+    ("04-shorts-creation-guide.md", 4000),   # moment selection criteria, content types
+    ("05-title-formulas.md", 3000),          # title rules, shapes, banned openers
+    ("02-voice-and-tone.md", 3000),          # banned words, voice fingerprint, coffee test
+    ("01-brand-identity.md", 1500),          # show context, positioning, audience
+    ("11-inspiration-channels.md", 2000),    # viral hook patterns, reference styles
+    ("12-quick-reference.md", 2000),         # hook bank, title formulas, hashtags
+    ("08-topics-themes.md", 1000),           # topic areas, audience interest map
+    ("00-master-instructions.md", 1500),     # quality gate, auto-detection rules
+]
+
+
+def kb_signature() -> str:
+    """Fingerprint of exactly what the knowledge base contributes to the prompt.
+
+    Hashes the assembled text rather than file mtimes, so it survives a git
+    checkout that rewrites timestamps without changing content, and it already
+    accounts for per-file truncation and for files skipped as unfilled.
+    """
+    from services.knowledge_base import load_kb_context
+
+    kb_dir = paths["knowledge"]
+    parts = [load_kb_context(KB_FILES, kb_dir) or ""]
+    parts.extend(_load_existing_shorts(os.path.join(kb_dir, "03-episodes-database.md")))
+    return hashlib.sha256("\u0000".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+CAPTION_STYLES = ("branded", "hormozi", "karaoke", "subtle")
+
+
+def _preferred_caption_style(kb_dir: str) -> str:
+    """The show's caption style, from the knowledge base or the preset default.
+
+    04-shorts-creation-guide.md carries a "Caption style:" line that nothing
+    read, so every suggestion arrived asking for hormozi regardless of what the
+    show had written down or set as its preset.
+    """
+    path = os.path.join(kb_dir, "04-shorts-creation-guide.md")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                m = re.match(r"^\s*[-*]?\s*caption style\s*:\s*(.+)$", line, re.I)
+                if not m:
+                    continue
+                value = m.group(1).strip().strip("*`").lower()
+                # Still the shipped "[branded / hormozi / karaoke / subtle]" list.
+                if value.startswith("["):
+                    break
+                for style in CAPTION_STYLES:
+                    if value == style:
+                        return style
+                break
+    except OSError:
+        pass
+    return DEFAULT_PRESET.get("caption_style", "branded")
 
 
 MAX_REACTION_ANCHORS = 40
@@ -94,18 +171,7 @@ def _build_prompt(
     from services.knowledge_base import load_kb_context, warn_missing_context
 
     kb_dir = paths["knowledge"]
-    # (filename, max_chars) — higher priority files get more budget
-    _kb_files = [
-        ("04-shorts-creation-guide.md", 4000),   # moment selection criteria, content types
-        ("05-title-formulas.md", 3000),           # title rules, shapes, banned openers
-        ("02-voice-and-tone.md", 3000),           # banned words, voice fingerprint, coffee test
-        ("01-brand-identity.md", 1500),           # show context, positioning, audience
-        ("11-inspiration-channels.md", 2000),     # viral hook patterns, reference styles
-        ("12-quick-reference.md", 2000),          # hook bank, title formulas, hashtags
-        ("08-topics-themes.md", 1000),            # topic areas, audience interest map
-        ("00-master-instructions.md", 1500),      # quality gate, auto-detection rules
-    ]
-    kb_context = load_kb_context(_kb_files, kb_dir)
+    kb_context = load_kb_context(KB_FILES, kb_dir)
     if not kb_context:
         warn_missing_context("clip scoring")
 
@@ -163,7 +229,7 @@ MOMENT SELECTION (think like a TikTok editor):
 
 {f"KNOWLEDGE BASE:{kb_context}" if kb_context else ""}
 
-{f"EXISTING SHORTS (avoid duplicating these moments):{chr(10).join('- ' + s for s in existing_shorts)}" if existing_shorts else ""}
+{f"ALREADY PUBLISHED (do NOT suggest these moments again):{chr(10)}{chr(10).join('- ' + s for s in existing_shorts)}" if existing_shorts else ""}
 {excluded_ranges}{_format_reaction_anchors(reaction_times)}
 
 Score each moment on 4 dimensions (1-5 each):
@@ -399,6 +465,7 @@ Transcript:
         if progress_callback:
             progress_callback(40, f"Searching transcript with {label}...")
 
+    caption_style = _preferred_caption_style(paths["knowledge"])
     try:
         data, _result = ai_provider.generate_json(
             prompt, timeout=900, project_dir=project_dir, on_attempt=announce,
@@ -434,7 +501,7 @@ Transcript:
                     "content_type": c.get("content_type", "unknown"),
                     "reasoning": c.get("why", ""),
                     "preview_text": c.get("quote", "")[:120],
-                    "suggested_caption_style": "hormozi",
+                    "suggested_caption_style": caption_style,
                     "quote": c.get("quote", ""),
                     "why": c.get("why", ""),
                     "reasons": [c.get("content_type", "")],
@@ -597,6 +664,7 @@ def suggest_with_claude(
     for alternate in attempt.alternates:
         clips.extend(records(ai_provider.extract_json(alternate)))
 
+    caption_style = _preferred_caption_style(paths["knowledge"])
     normalized = []
     for c in clips:
         scores = c.get("scores")
@@ -634,7 +702,7 @@ def suggest_with_claude(
             "content_type": c.get("content_type", "unknown"),
             "reasoning": c.get("why", ""),
             "preview_text": c.get("quote", "")[:120],
-            "suggested_caption_style": "hormozi",
+            "suggested_caption_style": caption_style,
             "quote": c.get("quote", ""),
             "why": c.get("why", ""),
             "reasons": [c.get("content_type", "")],
