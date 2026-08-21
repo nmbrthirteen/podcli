@@ -6,8 +6,10 @@ or any external tools.
 """
 
 import os
+import tempfile
 import sys
 import unittest
+from unittest import mock
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND_ROOT = os.path.join(ROOT, "backend")
@@ -261,3 +263,96 @@ class BlendSignalScoresTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExistingShortsTests(unittest.TestCase):
+    def _write(self, body):
+        path = os.path.join(self.tmp.name, "03-episodes-database.md")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        return path
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_the_shipped_template_yields_nothing(self):
+        shipped = os.path.join(
+            ROOT, "backend", "templates", "knowledge", "03-episodes-database.md"
+        )
+        self.assertEqual(cs._load_existing_shorts(shipped), [])
+
+    def test_titles_come_out_of_the_shipped_table_shape(self):
+        path = self._write(
+            "| # | Moment (timestamps) | Title | Platform | Status |\n"
+            "|---|---------------------|-------|----------|--------|\n"
+            "| 1 | [00:14:20-00:15:05] | The pricing mistake | YouTube Shorts | published |\n"
+            "| 2 | [00:31:02-00:31:40] | Why we fired our best engineer | TikTok | published |\n"
+        )
+        self.assertEqual(
+            cs._load_existing_shorts(path),
+            ["The pricing mistake", "Why we fired our best engineer"],
+        )
+
+    def test_the_older_numbered_shape_still_reads(self):
+        path = self._write("1. An older entry — hot take\n2. Another one — story\n")
+        self.assertEqual(cs._load_existing_shorts(path), ["An older entry", "Another one"])
+
+    def test_unfilled_cells_are_not_titles(self):
+        path = self._write(
+            "| # | Moment | Title | Platform | Status |\n"
+            "|---|--------|-------|----------|--------|\n"
+            "| 1 | [00:00-00:30] | [published title] | [YouTube Shorts] | [published] |\n"
+        )
+        self.assertEqual(cs._load_existing_shorts(path), [])
+
+    def test_published_titles_reach_the_prompt_one_per_line(self):
+        with mock.patch.object(
+            cs, "_load_existing_shorts", return_value=["First short", "Second short"]
+        ):
+            prompt = cs._build_prompt(
+                transcript_text="[0.0s] hello",
+                segment_count=1,
+                duration_min=1.0,
+                top_n=3,
+            )
+        self.assertIn("ALREADY PUBLISHED", prompt)
+        self.assertIn("\n- First short\n- Second short", prompt)
+
+    def test_no_published_titles_means_no_heading(self):
+        with mock.patch.object(cs, "_load_existing_shorts", return_value=[]):
+            prompt = cs._build_prompt(
+                transcript_text="[0.0s] hello",
+                segment_count=1,
+                duration_min=1.0,
+                top_n=3,
+            )
+        self.assertNotIn("ALREADY PUBLISHED", prompt)
+
+
+class CaptionStyleTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _guide(self, line):
+        with open(
+            os.path.join(self.tmp.name, "04-shorts-creation-guide.md"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write("# Guide\n\n" + line + "\n")
+        return self.tmp.name
+
+    def test_an_unfilled_placeholder_falls_back_to_the_preset(self):
+        kb = self._guide("- Caption style: [branded / hormozi / karaoke / subtle]")
+        self.assertEqual(cs._preferred_caption_style(kb), "branded")
+
+    def test_a_chosen_style_wins(self):
+        kb = self._guide("- Caption style: karaoke")
+        self.assertEqual(cs._preferred_caption_style(kb), "karaoke")
+
+    def test_an_unknown_style_falls_back_rather_than_shipping_garbage(self):
+        kb = self._guide("- Caption style: neon")
+        self.assertEqual(cs._preferred_caption_style(kb), "branded")
+
+    def test_a_missing_knowledge_base_falls_back(self):
+        self.assertEqual(cs._preferred_caption_style("/nonexistent"), "branded")

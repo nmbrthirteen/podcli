@@ -100,15 +100,31 @@ def _suggestions_session_path(cache_hash: str) -> str:
 
 
 def _selection_signature(config: dict) -> str:
-    """Flags that change which clips get selected. A cached session is only
-    valid for a re-run with the same signature, otherwise it would serve clips
-    that ignore the new --no-ai / --min-duration / --max-duration flags."""
-    return "|".join(str(x) for x in (
-        bool(config.get("ai_select", True)),
+    """Everything that changes which clips get selected.
+
+    A cached session is only replayed for a re-run with the same signature.
+    The knowledge base is in here because editing it and re-running is the
+    whole iteration loop, and serving the previous picks under the new rules
+    teaches people the knowledge base does nothing. It is folded in only for
+    AI selection, since the saliency and heuristic engines never read it and
+    would otherwise throw away sessions that cost real audio analysis.
+    """
+    ai_select = bool(config.get("ai_select", True))
+    parts = [
+        ai_select,
         config.get("min_clip_duration", MIN_CLIP_DURATION),
         config.get("max_clip_duration", MAX_CLIP_DURATION),
         config.get("format", "vertical"),
-    ))
+        config.get("profile") or "",
+        bool(config.get("energy_boost", True)),
+    ]
+    if ai_select:
+        try:
+            from services.claude_suggest import kb_signature
+            parts.append(kb_signature())
+        except Exception:
+            parts.append("kb?")
+    return "|".join(str(x) for x in parts)
 
 
 def _load_suggestions_session(cache_hash: str, top_n: int, signature: str) -> list | None:
