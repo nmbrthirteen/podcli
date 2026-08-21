@@ -664,6 +664,12 @@ def cmd_process(args):
         config["no_speakers"] = True
     if getattr(args, "no_cache", False):
         config["no_cache"] = True
+    # Told rather than detected. Detection reads the opening seconds, so an
+    # episode that starts with music, an English intro clip, or a guest saying
+    # hello in a second language gets transcribed in the wrong one for its whole
+    # hour, and every caption is then a translation nobody asked for.
+    if getattr(args, "language", None):
+        config["language"] = args.language
     if args.quality:
         config["quality"] = args.quality
     if getattr(args, "allow_ass_fallback", False):
@@ -838,6 +844,7 @@ def cmd_process(args):
                     file_path=video_path,
                     model_size=config.get("whisper_model", "base"),
                     engine=os.environ.get("PODCLI_ENGINE") or None,
+                    language=config.get("language") or None,
                     enable_diarization=not config.get("no_speakers", False),
                     progress_callback=_transcribe_progress,
                     wav_path=shared_wav.get() if config.get("energy_boost", True) else None,
@@ -953,7 +960,7 @@ def cmd_process(args):
     # Try an AI CLI first (uses PodStack knowledge base for intelligent selection)
     from services import ai_provider
     from services.ai_cli import _engine_label
-    from services.claude_suggest import blend_signal_scores, suggest_initial_with_claude
+    from services.claude_suggest import select_clips_with_signal_scores, suggest_initial_with_claude
 
     providers = ai_provider.status()["providers"]
     if clips:
@@ -961,14 +968,21 @@ def cmd_process(args):
     elif providers and config.get("ai_select", True):
         ai_label = providers[0]["label"]
         print(f"  [3/4] Selecting moments with {ai_label} (PodStack)...")
+        candidate_top_n = top_n * 2
         clips = suggest_initial_with_claude(
             segments=segments,
-            top_n=top_n,
+            top_n=candidate_top_n,
             progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
             reaction_times=reaction_times,
         )
         if clips:
-            blend_signal_scores(clips, energy_data=energy_data, events_data=events_data)
+            clips = select_clips_with_signal_scores(
+                clips,
+                top_n=top_n,
+                energy_data=energy_data,
+                events_data=events_data,
+                progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
+            )
             engine_id = next((c.get("_ai_engine") for c in clips if c.get("_ai_engine")), "")
             actual_engine = _engine_label(engine_id) if engine_id in ("claude", "codex") else ai_label
             print(f"         ✓ {actual_engine} selected {len(clips)} clips")
@@ -4131,6 +4145,7 @@ def main():
     proc.add_argument("-o", "--output", help="Output directory (default: ./clips)")
     proc.add_argument("-p", "--preset", help="Load a saved preset")
     proc.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], help="Transcription engine (default: whisper-py; whispercpp is local; assemblyai uses ASSEMBLYAI_API_KEY)")
+    proc.add_argument("--language", help="Language of the recording (e.g. es, pt-BR, ka). Auto-detect if omitted.")
     proc.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai. Prefer ASSEMBLYAI_API_KEY; command-line secrets can appear in process listings.")
     proc.add_argument("--fast", action="store_true", help="Draft mode: tiny Whisper, heuristic selection, center crop, low quality")
     proc.add_argument("--thumbnails", dest="thumbnails", action="store_true", default=None, help="Force thumbnail generation on")

@@ -717,7 +717,7 @@ def handle_suggest_clips(task_id: str, params: dict):
 
     errors: list[str] = []
     energy_data, events_data, reaction_times = _signal_profiles_for_suggest(task_id, params)
-    candidate_top_n = top_n * 2 if energy_data or events_data else top_n
+    candidate_top_n = top_n * 2
     clips = suggest_initial_with_claude(
         segments=segments,
         top_n=candidate_top_n,
@@ -737,6 +737,7 @@ def handle_suggest_clips(task_id: str, params: dict):
         top_n=top_n,
         energy_data=energy_data,
         events_data=events_data,
+        progress_callback=lambda pct, msg: emit_progress(task_id, "suggesting", pct, msg),
     )
     emit_result(task_id, "success", data={"clips": clips})
 

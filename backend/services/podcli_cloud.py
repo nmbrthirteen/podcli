@@ -292,6 +292,9 @@ def backfill_clips(limit: int = 200) -> tuple[int, int]:
     return synced, failed
 
 
+_PROMPT_BLOCK_CACHE: dict[str, str] = {}
+
+
 def prompt_block() -> str:
     """What this workspace has learned, phrased for the selection prompt.
 
@@ -300,15 +303,24 @@ def prompt_block() -> str:
     something that waits for every user to upgrade their CLI.
 
     Short timeout and silent on failure: better clips are the point, but not at
-    the cost of blocking a suggestion run behind a slow network.
+    the cost of blocking a suggestion run behind a slow network. Held for the
+    life of the process, keyed on the token so a workspace switch cannot serve
+    one workspace's learnings into another's prompt.
     """
-    if not signed_in():
+    token = read_token()
+    if not token:
         return ""
+    if token in _PROMPT_BLOCK_CACHE:
+        return _PROMPT_BLOCK_CACHE[token]
     try:
         payload = request("GET", "/v1/insights/prompt-block", timeout=10)
-    except CloudError:
-        return ""
-    return (payload or {}).get("block") or ""
+        block = (payload or {}).get("block") or ""
+    except Exception:
+        # Never raises: a stall gives TimeoutError and a non-JSON 200 gives
+        # JSONDecodeError, neither of them a CloudError.
+        block = ""
+    _PROMPT_BLOCK_CACHE[token] = block
+    return block
 
 
 def templates() -> list[dict]:
