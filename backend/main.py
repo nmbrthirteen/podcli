@@ -690,6 +690,7 @@ def handle_suggest_clips(task_id: str, params: dict):
     """AI-powered clip suggestion using Claude/Codex and PodStack knowledge base."""
     from services import ai_provider
     from services.claude_suggest import (
+        ClipBounds,
         select_clips_with_signal_scores,
         suggest_initial_with_claude,
     )
@@ -697,6 +698,11 @@ def handle_suggest_clips(task_id: str, params: dict):
     segments = params.get("segments", [])
     top_n = params.get("top_n", 5)
     existing_clips = params.get("existing_clips", [])
+    bounds = ClipBounds.of(
+        params.get("format"),
+        params.get("min_duration"),
+        params.get("max_duration"),
+    )
 
     if not segments:
         emit_result(task_id, "error", error="segments is required")
@@ -725,6 +731,7 @@ def handle_suggest_clips(task_id: str, params: dict):
         progress_callback=lambda pct, msg: emit_progress(task_id, "suggesting", pct, msg),
         error_sink=errors,
         reaction_times=reaction_times,
+        bounds=bounds,
     )
 
     if clips is None:

@@ -22,6 +22,7 @@ from services.audio_events import compute_event_scores, dominant_reaction
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from presets import DEFAULT_PRESET, MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
+from services.formats import get_format
 from utils.text import clean_title
 from services import ai_provider, podcli_cloud
 from services.ai_cli import (
@@ -78,6 +79,38 @@ def _load_existing_shorts(episodes_path: str) -> list[str]:
 
 # (filename, max_chars) that reach the selection prompt, highest priority first.
 # Shared with kb_signature so the suggestion cache and the prompt cannot drift.
+class ClipBounds:
+    """Duration bounds and prompt framing for one output format.
+
+    formats.py calls itself the single source of truth for duration bounds and
+    every consumer honoured that except the one deciding which moments get
+    picked. Explicit overrides still win, so a Studio slider or a preset can
+    narrow a format without redefining it.
+    """
+
+    __slots__ = ("dur_min", "dur_max", "target_min", "target_max", "editor", "pacing", "lens")
+
+    def __init__(self, spec, dur_min=None, dur_max=None):
+        self.dur_min = int(dur_min) if dur_min else spec.dur_min
+        self.dur_max = int(dur_max) if dur_max else spec.dur_max
+        if self.dur_max < self.dur_min:
+            self.dur_min, self.dur_max = spec.dur_min, spec.dur_max
+        self.target_min = max(spec.target_min, self.dur_min)
+        self.target_max = min(spec.target_max, self.dur_max)
+        if self.target_max < self.target_min:
+            self.target_min, self.target_max = self.dur_min, self.dur_max
+        self.editor = spec.editor
+        self.pacing = spec.pacing
+        self.lens = spec.lens
+
+    @classmethod
+    def of(cls, fmt=None, dur_min=None, dur_max=None) -> "ClipBounds":
+        return cls(get_format(fmt), dur_min, dur_max)
+
+    def keeps(self, seconds: float) -> bool:
+        return self.dur_min <= seconds <= self.dur_max
+
+
 KB_FILES = [
     ("04-shorts-creation-guide.md", 4000),   # moment selection criteria, content types
     ("05-title-formulas.md", 3000),          # title rules, shapes, banned openers
@@ -160,6 +193,7 @@ def _build_prompt(
     top_n: int,
     exclude_clips: list[dict] | None = None,
     reaction_times: list[float] | None = None,
+    bounds: "ClipBounds | None" = None,
 ) -> str:
     """Build the prompt for Claude to extract clips.
 
@@ -194,7 +228,8 @@ def _build_prompt(
                 + "\n".join(lines)
             )
 
-    return f"""You are a viral clip editor for TikTok and YouTube Shorts. Find the {top_n} most scroll-stopping moments in this podcast transcript.
+    b = bounds or ClipBounds.of()
+    return f"""You are {b.editor}. Find the {top_n} most scroll-stopping moments in this podcast transcript.
 
 IMPORTANT: Return ONLY valid JSON. No markdown, no explanation, no code fences.
 
@@ -202,11 +237,11 @@ TIMESTAMP FORMAT: All timestamps in the transcript are in SECONDS (e.g., [123.4s
 All timestamps you return MUST be in SECONDS as numbers (e.g., 123.4), NOT minutes:seconds.
 
 DURATION RULES (CRITICAL):
-- Target: {TARGET_CLIP_DURATION_MIN}-{TARGET_CLIP_DURATION_MAX} seconds (this is the viral sweet spot)
-- Maximum: {MAX_CLIP_DURATION} seconds (anything longer still renders, but gets flagged as over target)
-- Minimum: {MIN_CLIP_DURATION} seconds (too short = no payoff)
-- SHORTER IS BETTER. A punchy 25s clip outperforms a 40s clip every time.
-- If a thought takes longer than {TARGET_CLIP_DURATION_MAX}s, use segments to cut the filler in the middle
+- Target: {b.target_min}-{b.target_max} seconds (this is the sweet spot)
+- Maximum: {b.dur_max} seconds (anything longer still renders, but gets flagged as over target)
+- Minimum: {b.dur_min} seconds (too short = no payoff)
+- {b.pacing}
+- If a thought takes longer than {b.target_max}s, use segments to cut the filler in the middle
 
 CUTTING RULES (CRITICAL):
 - Cut TIGHT. Every second must earn its place.
@@ -215,9 +250,9 @@ CUTTING RULES (CRITICAL):
 - NEVER cut mid-sentence or mid-thought. The viewer must feel closure.
 - The last sentence must feel like a natural ending, a punchline, or a mic-drop
 - If there's filler/tangent in the middle, use multiple segments to skip it
-- A 30s clip with zero dead weight beats a {MAX_CLIP_DURATION}s clip with fluff
+- A tight clip with zero dead weight beats a {b.dur_max}s clip with fluff
 
-MOMENT SELECTION (think like a TikTok editor):
+MOMENT SELECTION ({b.lens}):
 - Would YOU stop scrolling for this? If no, skip it.
 - First 3 seconds must HOOK — a bold claim, shocking number, or provocative question
 - Must make complete sense standalone — no "as I mentioned" or "going back to"
@@ -272,7 +307,7 @@ SEGMENTS RULES:
 - Example: speaker makes great point (10s), rambles (8s), delivers punchline (12s) → 2 segments, 22s total
 
 Rules:
-- Final clip duration (sum of segments) MUST be {MIN_CLIP_DURATION}-{MAX_CLIP_DURATION} seconds (target {TARGET_CLIP_DURATION_MIN}-{TARGET_CLIP_DURATION_MAX}s)
+- Final clip duration (sum of segments) MUST be {b.dur_min}-{b.dur_max} seconds (target {b.target_min}-{b.target_max}s)
 - Each segment must start and end on COMPLETE SENTENCES — never mid-thought
 - The LAST segment must end on a sentence that feels like a natural conclusion
 - Must make sense standalone when stitched together
@@ -404,12 +439,14 @@ def find_moments_from_text(
     existing_clips: Optional[list[dict]] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
     max_results: int = 3,
+    bounds: ClipBounds | None = None,
 ) -> list[dict]:
     """Locate the moment(s) the user described/pasted in the transcript.
     Returns clip dicts (same shape as suggest_with_claude). Status goes to
     progress_callback; warnings to stderr — never stdout, which is the task
     runner's JSON-RPC channel."""
     existing_clips = existing_clips or []
+    bounds = bounds or ClipBounds.of()
     if not ai_provider.available():
         print("No AI available for moment search", file=sys.stderr, flush=True)
         return []
@@ -434,7 +471,7 @@ RULES:
 - The user may list several moments — return one clip per distinct moment they mention
 - Return 1-{upper} matching moments (best match first)
 - All timestamps in SECONDS as numbers
-- Duration target: {TARGET_CLIP_DURATION_MIN}-{TARGET_CLIP_DURATION_MAX} seconds, max {MAX_CLIP_DURATION} seconds
+- Duration target: {bounds.target_min}-{bounds.target_max} seconds, max {bounds.dur_max} seconds
 - Cut tight: start at the hook, end when the point lands
 - Use segments to cut filler if needed
 
@@ -488,7 +525,7 @@ Transcript:
                     keep_segments = [{"start": start_sec, "end": end_sec}]
 
                 kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
-                if kept_duration < MIN_CLIP_DURATION or kept_duration > MAX_CLIP_DURATION:
+                if not bounds.keeps(kept_duration):
                     continue
 
                 found.append({
@@ -526,6 +563,7 @@ def suggest_with_claude(
     timeout: int = 900,
     error_sink: Optional[list[str]] = None,
     reaction_times: list[float] | None = None,
+    bounds: ClipBounds | None = None,
 ) -> Optional[list[dict]]:
     """
     Use an AI CLI (Claude Code or Codex) to extract the best clip moments.
@@ -536,6 +574,7 @@ def suggest_with_claude(
     providers = ai_provider.status()["providers"]
     if not providers:
         return None
+    bounds = bounds or ClipBounds.of()
 
     if progress_callback:
         progress_callback(0, f"Preparing transcript for {providers[0]['label']}...")
@@ -554,6 +593,7 @@ def suggest_with_claude(
         top_n,
         exclude_clips=exclude_clips,
         reaction_times=reaction_times,
+        bounds=bounds,
     )
 
     project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
@@ -689,7 +729,7 @@ def suggest_with_claude(
             keep_segments = [{"start": start_sec, "end": end_sec}]
 
         kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
-        if kept_duration < MIN_CLIP_DURATION or kept_duration > MAX_CLIP_DURATION:
+        if not bounds.keeps(kept_duration):
             continue
 
         normalized.append({
@@ -739,6 +779,7 @@ def suggest_initial_with_claude(
     progress_callback: Optional[Callable[[int, str], None]] = None,
     error_sink: Optional[list[str]] = None,
     reaction_times: list[float] | None = None,
+    bounds: ClipBounds | None = None,
 ) -> Optional[list[dict]]:
     """
     Initial clip discovery entry point.
@@ -757,6 +798,7 @@ def suggest_initial_with_claude(
             error_sink=error_sink,
             timeout=180,
             reaction_times=reaction_times,
+            bounds=bounds,
         )
 
     start_bound = float(segments[0].get("start", 0))
@@ -789,6 +831,7 @@ def suggest_initial_with_claude(
             error_sink=error_sink,
             timeout=180,
             reaction_times=reaction_times,
+            bounds=bounds,
         )
 
     if progress_callback:
@@ -822,6 +865,7 @@ def suggest_initial_with_claude(
             reaction_times=[
                 t for t in (reaction_times or []) if bucket["start"] <= t <= bucket["end"]
             ] or None,
+            bounds=bounds,
         )
         if not bucket_clips:
             continue
@@ -846,6 +890,7 @@ def suggest_initial_with_claude(
         error_sink=error_sink,
         timeout=120,
         reaction_times=reaction_times,
+        bounds=bounds,
     )
     if fallback_clips:
         deduped = _dedupe_clips_by_range(deduped + fallback_clips)
@@ -1034,6 +1079,7 @@ def suggest_more_with_claude(
     existing_clips: list[dict],
     top_n: int = 8,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    bounds: ClipBounds | None = None,
 ) -> Optional[list[dict]]:
     """
     Ask the AI for more clips by searching under-covered time buckets first.
@@ -1075,6 +1121,7 @@ def suggest_more_with_claude(
             top_n=top_n,
             exclude_clips=existing_clips,
             progress_callback=progress_callback,
+            bounds=bounds,
         )
 
     buckets.sort(key=lambda b: (b["coverage_ratio"], b["coverage_seconds"], b["start"]))
@@ -1100,6 +1147,7 @@ def suggest_more_with_claude(
                     f"{bucket_label}: {msg}" if msg else msg,
                 )
             ),
+            bounds=bounds,
         )
         if not bucket_clips:
             continue
@@ -1125,6 +1173,7 @@ def suggest_more_with_claude(
                         f"{bucket_label}: {msg}" if msg else msg,
                     )
                 ),
+                bounds=bounds,
             )
             if not bucket_clips:
                 continue
@@ -1145,6 +1194,7 @@ def suggest_more_with_claude(
                     f"global pass: {msg}" if msg else msg,
                 )
             ),
+            bounds=bounds,
         )
         if fallback_clips:
             aggregated.extend(fallback_clips)

@@ -42,6 +42,15 @@ import { PageHeader } from './Page';
 import { buildPreviewChunks, activePreviewChunk, selectPreviewWords } from './captionChunks';
 import { findClipResult, resultBoundsKey, clipKey, buildEnergyMap, dropEnergy, clampClipIndex, resolveAssetName, formatTranscriptText } from './lib';
 
+// Mirrors backend/services/formats.py. A horizontal cutdown is minutes long,
+// so a slider capped at 60s could not express one.
+const FORMAT_BOUNDS = {
+  vertical: { min: 20, max: 45, ceiling: 60 },
+  square: { min: 20, max: 45, ceiling: 60 },
+  horizontal: { min: 60, max: 300, ceiling: 360 },
+};
+const boundsFor = (f) => FORMAT_BOUNDS[f] || FORMAT_BOUNDS.vertical;
+
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const fmtSaved = (s) => s < 10 ? `${Number(s || 0).toFixed(1)}s` : fmt(s);
 const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
@@ -785,9 +794,17 @@ const onKeyActivate = (fn) => (e) => {
       const [cleanFillers, setCleanFillers] = useState(true);
       const [quality, setQuality] = useState('max');
       const [topClips, setTopClips] = useState(8);
-      const [minDuration, setMinDuration] = useState(20);
-      const [maxDuration, setMaxDuration] = useState(45);
+      const [minDuration, setMinDuration] = useState(boundsFor("vertical").min);
+      const [maxDuration, setMaxDuration] = useState(boundsFor("vertical").max);
       const [energyBoost, setEnergyBoost] = useState(true);
+
+      // A vertical 20-45s window means nothing to a horizontal cutdown, so the
+      // sliders follow the format rather than pinning it back to shorts length.
+      useEffect(() => {
+        const b = boundsFor(format);
+        setMinDuration(b.min);
+        setMaxDuration(b.max);
+      }, [format]);
       const [showYouTubeFrame, setShowYouTubeFrame] = useState(true);
       const [silenceThreshold, setSilenceThreshold] = useState(0.5);
       const [silenceMinPause, setSilenceMinPause] = useState(0.65);
@@ -2305,14 +2322,14 @@ const onKeyActivate = (fn) => (e) => {
                       <div className="field">
                         <label className="field-label">Min duration</label>
                         <div className="field-row">
-                          <input type="range" min="10" max="60" step="5" value={minDuration} onChange={e => setMinDuration(parseInt(e.target.value))} />
+                          <input type="range" min="10" max={boundsFor(format).ceiling} step="5" value={minDuration} onChange={e => setMinDuration(parseInt(e.target.value))} />
                           <span className="range-value">{minDuration}s</span>
                         </div>
                       </div>
                       <div className="field">
                         <label className="field-label">Max duration</label>
                         <div className="field-row">
-                          <input type="range" min="30" max="60" step="5" value={maxDuration} onChange={e => setMaxDuration(parseInt(e.target.value))} />
+                          <input type="range" min="30" max={boundsFor(format).ceiling} step="5" value={maxDuration} onChange={e => setMaxDuration(parseInt(e.target.value))} />
                           <span className="range-value">{maxDuration}s</span>
                         </div>
                       </div>

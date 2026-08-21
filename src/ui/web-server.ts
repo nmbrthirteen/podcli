@@ -3477,6 +3477,9 @@ app.post("/api/claude-suggest", async (req, res) => {
     if (suggestVideo) params.video_path = suggestVideo;
     if (min_duration) params.min_duration = min_duration;
     if (max_duration) params.max_duration = max_duration;
+    // Duration bounds are per-format, so the numbers above mean nothing without it.
+    const suggestFormat = (uiState.settings as Record<string, unknown> | undefined)?.format;
+    if (suggestFormat) params.format = suggestFormat;
     const result = await executor.execute<{ clips?: SuggestedClip[] }>(
       "suggest_clips",
       params,
