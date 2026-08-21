@@ -52,6 +52,7 @@ import {
   fullEpisodeOutputStem,
   parseFullEpisodeProgress,
 } from "../utils/full-episode-export.js";
+import { buildYtDlpArgs, isCookieBrowser, ytDlpHint } from "../utils/ytdlp-args.js";
 import type {
   AssetType,
   BatchClipsResult,
@@ -674,6 +675,13 @@ app.post("/api/upload", upload.single("file"), (req, res) => {
 /**
  * POST /api/download-video — Download a video URL with yt-dlp into uploads.
  */
+/** The browser whose cookies yt-dlp should read, from the request or the env. */
+function cookieBrowser(fromRequest: unknown): string | undefined {
+  if (isCookieBrowser(fromRequest)) return fromRequest;
+  const configured = (process.env.PODCLI_YTDLP_BROWSER || "").trim().toLowerCase();
+  return isCookieBrowser(configured) ? configured : undefined;
+}
+
 app.post("/api/download-video", async (req, res) => {
   let url: string;
   try {
@@ -701,35 +709,16 @@ app.post("/api/download-video", async (req, res) => {
   };
   jobs.set(jobId, job);
 
-  const args = [
-    "-m",
-    "yt_dlp",
-    // Node is enabled only as a local JS runtime; remote EJS components stay disabled.
-    "--js-runtimes",
-    `node:${process.execPath}`,
-    "--no-playlist",
-    // Best video+audio up to 1080p merged to mp4. A bare muxed stream (b[ext=mp4])
-    // is 360p on YouTube, which then upscales into a terrible-looking reel.
-    "--format",
-    "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b",
-    "--merge-output-format",
-    "mp4",
-    "--ffmpeg-location",
-    paths.ffmpegPath,
-    "--restrict-filenames",
-    "--windows-filenames",
-    "--paths",
-    uploadDir,
-    "--output",
-    "%(title).200B [%(id)s].%(ext)s",
-    "--newline",
-    "--progress",
-    "--progress-template",
-    "download:podcli-progress:%(progress._percent_str)s",
-    "--print",
-    "after_move:podcli-filepath:%(filepath)s",
+  const args = buildYtDlpArgs({
     url,
-  ];
+    outputDir: uploadDir,
+    outputTemplate: "%(title).200B [%(id)s].%(ext)s",
+    ffmpegLocation: paths.ffmpegPath,
+    jsRuntimeNodePath: process.execPath,
+    cookiesFromBrowser: cookieBrowser(req.body?.browser),
+    extractorArgs: process.env.PODCLI_YT_EXTRACTOR_ARGS || undefined,
+    progressTemplate: "download:podcli-progress:%(progress._percent_str)s",
+  });
   // Detached so a kill takes out yt-dlp's ffmpeg children with it.
   const proc = spawn(paths.pythonPath, args, {
     env: pythonEnv(),
@@ -790,7 +779,8 @@ app.post("/api/download-video", async (req, res) => {
     finish(() => {
       if (code !== 0) {
         job.status = "error";
-        job.error = `yt-dlp failed for ${url} with exit code ${code}. stderr: ${stderr.slice(-1200)}`;
+        const hint = ytDlpHint(stderr);
+        job.error = `yt-dlp failed for ${url} with exit code ${code}.${hint ? ` ${hint}` : ""} stderr: ${stderr.slice(-1200)}`;
         job.message = job.error;
         broadcastSSE("job-error", { jobId, error: job.error });
         return;

@@ -27,6 +27,15 @@ SETTINGS = [
         "placeholder": "aai_...",
     },
     {
+        "key": "PODCLI_YTDLP_BROWSER",
+        "label": "Browser for download cookies",
+        "help": "Read cookies from this browser so yt-dlp can fetch members-only, "
+        "age-gated, unlisted or private videos you have access to. One of: brave, "
+        "chrome, chromium, edge, firefox, opera, safari, vivaldi, whale.",
+        "secret": False,
+        "placeholder": "chrome",
+    },
+    {
         "key": "PODCLI_CLAUDE_PATH",
         "label": "Claude Code CLI path",
         "help": "Full path to the claude binary when auto-discovery fails. "
