@@ -366,3 +366,66 @@ class CaptionStyleTests(unittest.TestCase):
 
     def test_a_missing_knowledge_base_falls_back(self):
         self.assertEqual(cs._preferred_caption_style("/nonexistent"), "branded")
+
+
+class ClipBoundsTests(unittest.TestCase):
+    def test_vertical_is_the_shorts_window(self):
+        b = cs.ClipBounds.of("vertical")
+        self.assertEqual((b.dur_min, b.dur_max), (20, 45))
+        self.assertIn("SHORTER IS BETTER", b.pacing)
+
+    def test_horizontal_is_minutes_not_seconds(self):
+        b = cs.ClipBounds.of("horizontal")
+        self.assertEqual((b.dur_min, b.dur_max), (60, 300))
+        self.assertEqual((b.target_min, b.target_max), (90, 240))
+        self.assertNotIn("SHORTER IS BETTER", b.pacing)
+
+    def test_an_explicit_override_narrows_the_format(self):
+        b = cs.ClipBounds.of("horizontal", 90, 120)
+        self.assertEqual((b.dur_min, b.dur_max), (90, 120))
+        self.assertTrue(b.dur_min <= b.target_min <= b.target_max <= b.dur_max)
+
+    def test_an_inverted_override_falls_back_to_the_format(self):
+        b = cs.ClipBounds.of("vertical", 90, 30)
+        self.assertEqual((b.dur_min, b.dur_max), (20, 45))
+
+    def test_an_unknown_format_falls_back_rather_than_raising(self):
+        b = cs.ClipBounds.of("hexagonal")
+        self.assertEqual((b.dur_min, b.dur_max), (20, 45))
+
+    def test_keeps_is_inclusive_at_both_ends(self):
+        b = cs.ClipBounds.of("vertical")
+        self.assertTrue(b.keeps(20))
+        self.assertTrue(b.keeps(45))
+        self.assertFalse(b.keeps(19.9))
+        self.assertFalse(b.keeps(45.1))
+
+    def test_a_horizontal_length_survives_the_filter_that_used_to_drop_it(self):
+        self.assertFalse(cs.ClipBounds.of("vertical").keeps(120))
+        self.assertTrue(cs.ClipBounds.of("horizontal").keeps(120))
+
+
+class FormatFramingTests(unittest.TestCase):
+    def test_the_prompt_asks_for_the_format_it_will_render(self):
+        prompt = cs._build_prompt(
+            transcript_text="[0.0s] hello",
+            segment_count=1,
+            duration_min=90.0,
+            top_n=3,
+            bounds=cs.ClipBounds.of("horizontal"),
+        )
+        self.assertIn("60", prompt)
+        self.assertIn("90-240 seconds", prompt)
+        self.assertNotIn("SHORTER IS BETTER", prompt)
+        self.assertNotIn("TikTok editor", prompt)
+
+    def test_the_vertical_prompt_is_unchanged_in_substance(self):
+        prompt = cs._build_prompt(
+            transcript_text="[0.0s] hello",
+            segment_count=1,
+            duration_min=30.0,
+            top_n=3,
+        )
+        self.assertIn("20-35 seconds", prompt)
+        self.assertIn("SHORTER IS BETTER", prompt)
+        self.assertIn("TikTok", prompt)

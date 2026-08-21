@@ -94,3 +94,28 @@ class SelectionSignatureTests(unittest.TestCase):
             a = cli_mod._selection_signature({"ai_select": True})
             b = cli_mod._selection_signature({"ai_select": True})
         self.assertNotEqual(a, b)
+
+
+class ExplicitClipBoundsTests(unittest.TestCase):
+    """config is seeded from DEFAULT_PRESET, which carries the vertical numbers.
+    Forwarding those unconditionally would make --format horizontal a no-op."""
+
+    def test_untouched_preset_values_do_not_override_the_format(self):
+        from presets import DEFAULT_PRESET
+
+        config = {**DEFAULT_PRESET, "format": "horizontal"}
+        self.assertEqual(cli_mod._explicit_clip_bounds(config), (None, None))
+
+    def test_a_value_the_user_changed_is_forwarded(self):
+        from presets import DEFAULT_PRESET
+
+        config = {**DEFAULT_PRESET, "min_clip_duration": 30}
+        self.assertEqual(cli_mod._explicit_clip_bounds(config), (30, None))
+
+    def test_horizontal_selection_uses_the_format_window(self):
+        from presets import DEFAULT_PRESET
+        from services.claude_suggest import ClipBounds
+
+        config = {**DEFAULT_PRESET, "format": "horizontal"}
+        bounds = ClipBounds.of(config["format"], *cli_mod._explicit_clip_bounds(config))
+        self.assertEqual((bounds.dur_min, bounds.dur_max), (60, 300))

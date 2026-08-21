@@ -73,7 +73,7 @@ def _reveal_in_os(path: str) -> None:
 
 from config.paths import paths
 from config.server import DEFAULT_PORT, resolve_web_server_port, web_server_url
-from presets import MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
+from presets import DEFAULT_PRESET, MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 from services.knowledge_base import is_empty as kb_is_empty, kb_files
 
 
@@ -98,6 +98,20 @@ def _cached_face_map(video_path: str):
 
 def _suggestions_session_path(cache_hash: str) -> str:
     return os.path.join(paths["home"], "sessions", f"clips-{cache_hash}.json")
+
+
+def _explicit_clip_bounds(config: dict) -> tuple[int | None, int | None]:
+    """Duration bounds the user actually chose, or (None, None).
+
+    config is seeded from DEFAULT_PRESET, which carries the vertical numbers,
+    so passing them through unconditionally would override every other format
+    with 20-45s and make --format horizontal a no-op for selection.
+    """
+    out = []
+    for key in ("min_clip_duration", "max_clip_duration"):
+        value = config.get(key)
+        out.append(value if value != DEFAULT_PRESET.get(key) else None)
+    return out[0], out[1]
 
 
 def _selection_signature(config: dict) -> str:
@@ -981,7 +995,7 @@ def cmd_process(args):
     # Try an AI CLI first (uses PodStack knowledge base for intelligent selection)
     from services import ai_provider
     from services.ai_cli import _engine_label
-    from services.claude_suggest import select_clips_with_signal_scores, suggest_initial_with_claude
+    from services.claude_suggest import ClipBounds, select_clips_with_signal_scores, suggest_initial_with_claude
 
     providers = ai_provider.status()["providers"]
     if clips:
@@ -995,6 +1009,7 @@ def cmd_process(args):
             top_n=candidate_top_n,
             progress_callback=lambda pct, msg: print(f"         {msg}") if msg else None,
             reaction_times=reaction_times,
+            bounds=ClipBounds.of(config.get("format"), *_explicit_clip_bounds(config)),
         )
         if clips:
             clips = select_clips_with_signal_scores(
