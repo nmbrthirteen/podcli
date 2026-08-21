@@ -298,6 +298,16 @@ class ExistingShortsTests(unittest.TestCase):
         path = self._write("1. An older entry — hot take\n2. Another one — story\n")
         self.assertEqual(cs._load_existing_shorts(path), ["An older entry", "Another one"])
 
+    def test_a_dropped_moment_stays_available(self):
+        path = self._write(
+            "| # | Moment | Title | Platform | Status |\n"
+            "|---|--------|-------|----------|--------|\n"
+            "| 1 | [00:01-00:30] | Shipped one | YouTube Shorts | published |\n"
+            "| 2 | [00:40-01:10] | Considered and cut | - | dropped |\n"
+            "| 3 | [02:00-02:30] | Queued one | TikTok | scheduled |\n"
+        )
+        self.assertEqual(cs._load_existing_shorts(path), ["Shipped one", "Queued one"])
+
     def test_unfilled_cells_are_not_titles(self):
         path = self._write(
             "| # | Moment | Title | Platform | Status |\n"

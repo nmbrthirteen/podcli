@@ -85,4 +85,12 @@ class SelectionSignatureTests(unittest.TestCase):
 
     def test_an_unreadable_knowledge_base_does_not_raise(self):
         with mock.patch("services.claude_suggest.kb_signature", side_effect=OSError("boom")):
-            self.assertIn("kb?", cli_mod._selection_signature({"ai_select": True}))
+            self.assertIn("kb-unavailable", cli_mod._selection_signature({"ai_select": True}))
+
+    def test_two_failed_lookups_never_compare_equal(self):
+        # Otherwise a session saved during one failure replays during the next,
+        # after the knowledge base has changed underneath it.
+        with mock.patch("services.claude_suggest.kb_signature", side_effect=OSError("boom")):
+            a = cli_mod._selection_signature({"ai_select": True})
+            b = cli_mod._selection_signature({"ai_select": True})
+        self.assertNotEqual(a, b)

@@ -60,7 +60,12 @@ def _load_existing_shorts(episodes_path: str) -> list[str]:
             # | # | Moment | Title | Platform | Status |
             if len(cells) >= 3 and cells[0].lower() not in ("#", "num", "no"):
                 if not all(set(c) <= set("-: ") for c in cells):
-                    title = cells[2]
+                    status = cells[4].lower() if len(cells) >= 5 else ""
+                    # A dropped moment was considered and passed over, and the
+                    # template says it can be reconsidered. Anything else that
+                    # reached this table is a clip that exists.
+                    if "drop" not in status:
+                        title = cells[2]
         elif re.match(r"^\d+[.)]\s", line):
             title = re.split(r"\s[-\u2013\u2014]\s", line, maxsplit=1)[0]
             title = re.sub(r"^\d+[.)]\s*", "", title).strip()

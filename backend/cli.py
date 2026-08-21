@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+import uuid
 import textwrap
 import time
 from pathlib import Path
@@ -123,7 +124,11 @@ def _selection_signature(config: dict) -> str:
             from services.claude_suggest import kb_signature
             parts.append(kb_signature())
         except Exception:
-            parts.append("kb?")
+            # Unique per call, so a run that could not read the knowledge base
+            # neither replays an older session nor becomes one. A constant here
+            # would make two failed lookups compare equal and serve stale picks
+            # across a knowledge-base edit.
+            parts.append("kb-unavailable-" + uuid.uuid4().hex)
     return "|".join(str(x) for x in parts)
 
 
