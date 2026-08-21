@@ -150,12 +150,36 @@ async function main() {
   const durationSec = videoDuration || (lastWord ? lastWord.end + 0.5 : 30);
   const durationInFrames = Math.ceil(durationSec * fps);
 
+  // Who is speaking, for the lower third. Sent whole so the composition takes
+  // one prop rather than six loose ones.
+  const nameCard = opts["name-card"]
+    ? {
+        title: opts["name-card"],
+        subtitle: opts["name-card-sub"] || undefined,
+        seconds: opts["name-card-seconds"] ? parseFloat(opts["name-card-seconds"]) : undefined,
+        accent: opts["name-card-accent"] || undefined,
+      }
+    : null;
+
+  // How each part arrives and leaves. A JSON object rather than a flag per
+  // property: it is one value in a template, and it travels as one.
+  let motion = null;
+  if (opts.motion) {
+    try {
+      motion = JSON.parse(opts.motion);
+    } catch {
+      console.error("Ignoring --motion: not valid JSON");
+    }
+  }
+
   const inputProps = {
     videoSrc,
     words,
     styleName,
     logoSrc,
     faceY,
+    nameCard,
+    motion,
     durationInFrames,
     fps,
     captionPosition: opts["caption-position"] || "auto",

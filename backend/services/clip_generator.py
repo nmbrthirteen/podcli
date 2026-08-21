@@ -465,6 +465,8 @@ def _render_with_remotion(
     output_path: str,
     time_offset: float = 0.0,
     logo_path: Optional[str] = None,
+    name_card: Optional[dict] = None,
+    motion: Optional[dict] = None,
     keep_caption_overlay: bool = False,
     caption_position: str = "auto",
     caption_font_scale: int = 100,
@@ -596,6 +598,16 @@ def _render_with_remotion(
         ]
         if logo_path and os.path.exists(logo_path):
             cmd.extend(["--logo", os.path.abspath(logo_path)])
+        if name_card and name_card.get("title"):
+            cmd.extend(["--name-card", str(name_card["title"])])
+            if name_card.get("subtitle"):
+                cmd.extend(["--name-card-sub", str(name_card["subtitle"])])
+            if name_card.get("seconds"):
+                cmd.extend(["--name-card-seconds", str(name_card["seconds"])])
+            if name_card.get("accent"):
+                cmd.extend(["--name-card-accent", str(name_card["accent"])])
+        if motion:
+            cmd.extend(["--motion", json.dumps(motion)])
         if keep_caption_overlay:
             cmd.append("--keep-overlay")
 
@@ -661,6 +673,9 @@ def generate_clip(
     logo_path: Optional[str] = None,
     outro_path: Optional[str] = None,
     intro_path: Optional[str] = None,
+    name_card: Optional[dict] = None,
+    motion: Optional[dict] = None,
+    bookend_fade: float = 0.0,
     clean_fillers: bool = True,
     keep_segments: list[dict] = None,
     trim_opening: Optional[bool] = None,
@@ -905,6 +920,21 @@ def generate_clip(
             else:
                 fit_to_frame(segment_path, cropped_path, target_dims=spec.dims)
 
+        # Only Remotion draws the name card, and it is reached only when there
+        # are words to caption. Refusing beats returning a clip that quietly
+        # lacks the overlay that was asked for.
+        if name_card and name_card.get("title"):
+            if use_ass_captions or allow_ass_fallback:
+                raise ValueError(
+                    "A name card can only be drawn by the Remotion renderer. "
+                    "Drop --name-card, or drop --fast and --allow-ass-fallback."
+                )
+            if not transcript_words:
+                raise ValueError(
+                    "A name card needs the caption renderer, which only runs when "
+                    "there is a transcript. Drop --name-card for an uncaptioned render."
+                )
+
         # Step 3: Render captions (Remotion-first; ASS fallback optional)
         if transcript_words:
             if progress_callback:
@@ -937,7 +967,9 @@ def generate_clip(
                         caption_style=caption_style,
                         output_path=captioned_path,
                         time_offset=caption_time_offset,
-                        logo_path=logo_path if (style_config.get("logo_support", False) and logo_path) else None,
+                        logo_path=logo_path or None,
+                        name_card=name_card,
+                        motion=motion,
                         keep_caption_overlay=keep_caption_overlay,
                         caption_position=caption_position,
                         caption_font_scale=caption_font_scale,
@@ -964,7 +996,7 @@ def generate_clip(
 
                     use_gradient = style_config.get("gradient_overlay", False)
                     gradient_opacity = style_config.get("gradient_opacity", 0.6)
-                    use_logo = style_config.get("logo_support", False) and logo_path
+                    use_logo = bool(logo_path)
 
                     burn_captions(
                         input_path=cropped_path,
@@ -1004,7 +1036,8 @@ def generate_clip(
             intro_scaled = os.path.join(work_dir, "intro_scaled.mp4")
             scale_to_frame(intro_path, intro_scaled, cw, ch)
             with_intro_path = os.path.join(work_dir, "with_intro.mp4")
-            concat_outro(intro_scaled, final_video_path, with_intro_path)
+            concat_outro(intro_scaled, final_video_path, with_intro_path,
+                         crossfade_duration=bookend_fade)
             final_video_path = with_intro_path
 
         if outro_path and os.path.exists(outro_path):
@@ -1012,7 +1045,8 @@ def generate_clip(
                 progress_callback(85, f"Adding outro ({total_steps}/{total_steps})")
 
             with_outro_path = os.path.join(work_dir, "with_outro.mp4")
-            concat_outro(final_video_path, outro_path, with_outro_path)
+            concat_outro(final_video_path, outro_path, with_outro_path,
+                         crossfade_duration=bookend_fade)
             final_video_path = with_outro_path
 
         # Step 6: Move to output

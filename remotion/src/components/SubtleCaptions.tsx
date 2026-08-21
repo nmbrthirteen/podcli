@@ -1,16 +1,19 @@
 import React from "react";
-import { useCurrentFrame, useVideoConfig, interpolate } from "remotion";
+import { useCurrentFrame, useVideoConfig } from "remotion";
 import type { Word, CaptionStyle } from "../types";
 import { captionScale } from "../types";
 import { buildChunks, activeChunkAt, splitCaptionLines } from "../chunks";
+import { MOTION, motionAt } from "../motion";
+import type { Motion } from "../motion";
 
 interface Props {
   words: Word[];
   style: CaptionStyle;
   singleLine?: boolean;
+  motion?: Motion;
 }
 
-export const SubtleCaptions: React.FC<Props> = ({ words, style, singleLine = false }) => {
+export const SubtleCaptions: React.FC<Props> = ({ words, style, singleLine = false, motion }) => {
   const frame = useCurrentFrame();
   const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
@@ -25,21 +28,13 @@ export const SubtleCaptions: React.FC<Props> = ({ words, style, singleLine = fal
 
   if (!activeChunk) return null;
 
-  const entryFrame = Math.round(activeChunk.start * fps);
-  const opacity = interpolate(
-    frame - entryFrame,
-    [0, 5],
-    [0, 1],
-    { extrapolateRight: "clamp" }
-  );
-
-  // Slight upward slide on entry
-  const translateY = interpolate(
-    frame - entryFrame,
-    [0, 6],
-    [8 * s, 0],
-    { extrapolateRight: "clamp" }
-  );
+  const { opacity, shift: translateY } = motionAt({
+    frame, fps,
+    start: activeChunk.start,
+    end: activeChunk.end,
+    motion: motion ?? MOTION.subtle,
+    scale: 8 * s,
+  });
 
   const [line1, line2] = splitCaptionLines(
     activeChunk.words,

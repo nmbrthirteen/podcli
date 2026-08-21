@@ -119,27 +119,34 @@ def _find_paragraph(words: list, phrase: str) -> tuple[float, float]:
     return start, end
 
 
-def _render_fragment(video, start, end, words, style, crop, title, out_dir):
+def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt="vertical",
+                     logo=None, name_card=None, motion=None):
     """Render the fragment with face-crop + captions via the existing engine."""
     from services.clip_generator import generate_clip
-    print(f"  [fragment] rendering {start:.1f}s–{end:.1f}s ({style}, crop={crop})", flush=True)
+    print(f"  [fragment] rendering {start:.1f}s–{end:.1f}s ({style}, crop={crop}, {fmt})", flush=True)
     res = generate_clip(
         video_path=video, start_second=start, end_second=end,
-        caption_style=style, crop_strategy=crop,
+        caption_style=style, crop_strategy=crop, format=fmt,
         transcript_words=words, title=title, output_dir=out_dir,
+        logo_path=logo, name_card=name_card, motion=motion,
         clean_fillers=True, allow_ass_fallback=True,
         progress_callback=lambda p, m: print(f"    {p}% {m}", flush=True),
     )
     return res["output_path"]
 
 
-def _render_bookend(mode, title, handle, platforms, seconds, out_path, accent, bg):
+def _render_bookend(mode, title, handle, platforms, seconds, out_path, accent, bg,
+                    width=1080, height=1920):
     cmd = [
         NODE, os.path.join(ROOT, "remotion", "render-bookend.mjs"),
         "--mode", mode, "--title", title,
         "--platforms", ",".join(platforms),
         "--seconds", str(seconds), "--output", out_path,
         "--accent", accent, "--bg", bg,
+        # Sized to match the fragment. Left at the renderer's own defaults a
+        # square or wide clip would get vertical cards and be letterboxed by
+        # the concat below.
+        "--width", str(width), "--height", str(height),
     ]
     if handle:
         cmd += ["--handle", handle]
@@ -150,12 +157,18 @@ def _render_bookend(mode, title, handle, platforms, seconds, out_path, accent, b
     return out_path
 
 
-def _concat(parts: list[str], out_path: str, fps: int = 30):
+def _concat(parts: list[str], out_path: str, fps: int = 30,
+            width: int = 1080, height: int = 1920):
     """Concatenate parts (intro + clip + outro) in a single ffmpeg pass.
 
-    Every part is normalized to 1080x1920 @ fps with stereo 44.1k audio inside
-    the filtergraph, then joined with the concat filter. This gives an exact
-    summed duration (no crossfade-offset drift) and a single clean re-encode.
+    Every part is normalized to width x height @ fps with stereo 44.1k audio
+    inside the filtergraph, then joined with the concat filter. This gives an
+    exact summed duration (no crossfade-offset drift) and a single clean
+    re-encode.
+
+    The size comes from the format spec rather than being fixed at 1080x1920,
+    which is what services/formats.py exists to prevent: normalizing a square
+    fragment to a vertical canvas would pillarbox the clip it just rendered.
     """
     n = len(parts)
     inputs = []
@@ -165,10 +178,10 @@ def _concat(parts: list[str], out_path: str, fps: int = 30):
     fc = []
     labels = []
     for i in range(n):
-        # Normalize video: scale to fit 1080x1920, pad, set fps + SAR + format.
+        # Normalize video: scale to fit the canvas, pad, set fps + SAR + format.
         fc.append(
-            f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
-            f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps={fps},format=yuv420p[v{i}];"
+            f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps={fps},format=yuv420p[v{i}];"
         )
         # Normalize audio to a common format so concat doesn't choke.
         fc.append(
@@ -204,6 +217,8 @@ def main():
     ap.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], default=None, help="Transcription engine")
     ap.add_argument("--caption-style", default="hormozi", choices=["hormozi", "karaoke", "subtle", "branded"])
     ap.add_argument("--crop", default="face", choices=["center", "face", "speaker", "speaker-hardcut"])
+    ap.add_argument("--format", default="vertical", choices=["vertical", "horizontal", "square"],
+                    help="Output aspect ratio (default: vertical)")
     ap.add_argument("--output", default=None, help="Final output path")
     # bookends (defaults are None so we can tell what the user explicitly set;
     # unset values fall back to the saved brand config, then BRAND_DEFAULTS)
@@ -256,9 +271,37 @@ def main():
     else:
         raise SystemExit("Provide either --start/--end or --paragraph")
 
+    # The canvas every part is rendered and stitched on. One lookup, so the
+    # fragment, the bookends and the concat cannot disagree about the shape.
+    from services.formats import get_format
+    spec = get_format(args.format)
+
     # 1. Fragment
+    from services.asset_store import resolve_logo
+
+    name_card = None
+    if getattr(args, "name_card", None):
+        name_card = {
+            "title": args.name_card,
+            "subtitle": getattr(args, "name_card_sub", None),
+            "seconds": getattr(args, "name_card_seconds", None),
+            "accent": accent,
+        }
+
+    motion = None
+    if getattr(args, "motion", None):
+        try:
+            motion = json.loads(args.motion)
+        except (TypeError, ValueError):
+            print("  Warning: --motion is not valid JSON; using each style's own motion",
+                  flush=True)
+
     fragment = _render_fragment(
         video, start, end, words, args.caption_style, args.crop, "fragment", out_dir,
+        fmt=args.format,
+        logo=resolve_logo(getattr(args, "logo", None)),
+        name_card=name_card,
+        motion=motion,
     )
 
     platforms = [p.strip() for p in platforms_str.split(",") if p.strip()]
@@ -274,6 +317,7 @@ def main():
         intro = _render_bookend(
             "intro", intro_title, handle, platforms,
             args.intro_seconds, os.path.join(out_dir, "_intro.mp4"), accent, bg,
+            width=spec.width, height=spec.height,
         )
         parts.append(intro)
 
@@ -284,6 +328,7 @@ def main():
         outro = _render_bookend(
             "outro", outro_title, handle, platforms,
             args.outro_seconds, os.path.join(out_dir, "_outro.mp4"), accent, bg,
+            width=spec.width, height=spec.height,
         )
         parts.append(outro)
 
@@ -297,7 +342,7 @@ def main():
         import shutil
         shutil.copy(parts[0], final)
     else:
-        _concat(parts, final)
+        _concat(parts, final, width=spec.width, height=spec.height)
 
     dur = _probe_duration(final)
     print(f"\n  ✓ DONE  {final}")

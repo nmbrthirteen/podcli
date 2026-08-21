@@ -52,6 +52,18 @@ const inputProps = getInputProps() as {
   bookendPlatforms?: string[];
   bookendBg?: string;
   bookendAccent?: string;
+  nameCard?: {
+    title: string;
+    subtitle?: string;
+    seconds?: number;
+    background?: string;
+    color?: string;
+    accent?: string;
+  } | null;
+  motion?: {
+    captions?: Record<string, unknown>;
+    nameCard?: Record<string, unknown>;
+  } | null;
 };
 
 export const RemotionRoot: React.FC = () => {
@@ -86,9 +98,11 @@ export const RemotionRoot: React.FC = () => {
           style,
           logoSrc: inputProps.logoSrc,
           faceY: inputProps.faceY ?? null,
+          nameCard: inputProps.nameCard ?? null,
           captionPosition,
           logoPosition: inputProps.logoPosition || "top-left",
           singleLine: inputProps.singleLine === true,
+          motion: inputProps.motion ?? null,
         }}
       />
       <Composition

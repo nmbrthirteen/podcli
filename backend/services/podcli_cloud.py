@@ -311,6 +311,34 @@ def prompt_block() -> str:
     return (payload or {}).get("block") or ""
 
 
+def templates() -> list[dict]:
+    """The looks this account cuts in.
+
+    Templates are a Pro feature and they belong to the account, not to a
+    machine: signed in on a laptop, `--template "Bold cuts"` means the same
+    thing it means in the studio. The look itself is still only the flags this
+    CLI already takes, so nothing about a free, offline render changes.
+    """
+    payload = request("GET", "/v1/templates", timeout=30) or {}
+    return payload.get("templates", [])
+
+
+def find_template(name_or_id: str) -> Optional[dict]:
+    """Match on id first, then on name, case-insensitively."""
+    wanted = (name_or_id or "").strip()
+    if not wanted:
+        return None
+
+    found = templates()
+    for template in found:
+        if template.get("id") == wanted:
+            return template
+    for template in found:
+        if (template.get("name") or "").lower() == wanted.lower():
+            return template
+    return None
+
+
 def list_workspaces() -> list[dict]:
     return (request("GET", "/v1/workspaces", timeout=30) or {}).get("workspaces", [])
 

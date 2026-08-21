@@ -3,16 +3,17 @@ import {
   useCurrentFrame,
   useVideoConfig,
   spring,
-  Img,
-  staticFile,
 } from "remotion";
 import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "../types";
 import { captionScale } from "../types";
 import { buildChunks, activeChunkAt, splitCaptionLines } from "../chunks";
+import { LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET } from "./Watermark";
 
 interface Props {
   words: Word[];
   style: CaptionStyle;
+  // The logo is drawn by Watermark now, but the caption margin still has to
+  // know it is there.
   logoSrc?: string;
   faceY?: number | null; // normalized 0-1 (0=top, 1=bottom)
   captionPosition?: CaptionPosition;
@@ -21,12 +22,6 @@ interface Props {
 }
 
 const MAX_CHARS_PER_CHUNK = 18;
-
-// Unscaled logo box, shared by the logo style and the caption-margin guard so
-// the two cannot drift apart.
-const LOGO_INSET = 180;
-const LOGO_HEIGHT = 126;
-const LOGO_CAPTION_GAP = 24;
 
 /**
  * Active pill rendered as an absolutely positioned background behind the word.
@@ -161,24 +156,6 @@ export const BrandedCaptions: React.FC<Props> = ({
 
   return (
     <>
-      {logoSrc && (
-        <Img
-          src={logoSrc.startsWith("http") ? logoSrc : staticFile(logoSrc)}
-          style={{
-            position: "absolute",
-            ...(logoPosition.startsWith("top-") ? { top: LOGO_INSET * s } : { bottom: LOGO_INSET * s }),
-            ...(logoPosition.endsWith("-left")
-              ? { left: 108 * s }
-              : logoPosition.endsWith("-right")
-                ? { right: 108 * s }
-                : { left: "50%", transform: "translateX(-50%)" }),
-            width: 255 * s,
-            height: LOGO_HEIGHT * s,
-            objectFit: "contain",
-          }}
-        />
-      )}
-
       {activeChunk && (() => {
         const [line1, line2] = splitCaptionLines(activeChunk.words, 2, singleLine);
 
