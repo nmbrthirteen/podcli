@@ -41,6 +41,70 @@ class ClipGeneratorTests(unittest.TestCase):
             self.assertTrue(expected.endswith("_captions.mov"))
             self.assertIn("captioned", expected)
 
+    def _render_args(self, **kwargs):
+        """The argv one Remotion render was invoked with."""
+        real_exists = os.path.exists
+        ok = subprocess.CompletedProcess(args=["node"], returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as td:
+            video_path = os.path.join(td, "video.mp4")
+            output_path = os.path.join(td, "captioned.mp4")
+            logo_path = os.path.join(td, "logo.png")
+            for path in (video_path, logo_path):
+                with open(path, "wb"):
+                    pass
+
+            with mock.patch.object(cg.os.path, "exists", side_effect=self._fake_exists(real_exists)), \
+                 mock.patch.object(cg.shutil, "which", return_value="/usr/bin/node"), \
+                 mock.patch("subprocess.run", return_value=ok) as mock_run:
+                cg._render_with_remotion(
+                    video_path=video_path,
+                    words=[{"word": "hello", "start": 0.0, "end": 0.5}],
+                    output_path=output_path,
+                    logo_path=logo_path,
+                    **kwargs,
+                )
+
+            for call in mock_run.call_args_list:
+                argv = call.args[0] if call.args else call.kwargs.get("args", [])
+                if any(str(part).endswith("render.mjs") for part in argv):
+                    return [str(part) for part in argv]
+        return []
+
+    def test_logo_reaches_the_renderer_whatever_the_caption_style(self):
+        """A logo belongs to the show, not to one caption style.
+
+        `--logo` was accepted, resolved and then dropped for every style except
+        branded, so three of the four rendered no watermark at all.
+        """
+        for style in ("branded", "hormozi", "karaoke", "subtle"):
+            argv = self._render_args(caption_style=style)
+            self.assertIn("--logo", argv, f"{style} lost the logo")
+
+    def test_no_caption_style_gates_the_logo(self):
+        """The gate that dropped it lived in the style config, so guard that.
+
+        Every style carried `logo_support`, and only branded said true. A logo
+        is the show's; if a per-style opt-out comes back, three quarters of
+        renders silently lose their watermark again.
+        """
+        from config.caption_styles import STYLES
+
+        for name, config in STYLES.items():
+            self.assertNotIn(
+                "logo_support", config,
+                f"{name} decides whether the show's logo is drawn",
+            )
+
+    def test_name_card_reaches_the_renderer(self):
+        argv = self._render_args(
+            caption_style="subtle",
+            name_card={"title": "Jamie Gull", "subtitle": "Wave Function Ventures"},
+        )
+        self.assertIn("--name-card", argv)
+        self.assertIn("Jamie Gull", argv)
+        self.assertIn("--name-card-sub", argv)
+
     def test_remotion_runtime_failure_does_not_disable_future_clips(self):
         real_exists = os.path.exists
         fail_result = subprocess.CompletedProcess(

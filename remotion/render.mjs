@@ -150,12 +150,24 @@ async function main() {
   const durationSec = videoDuration || (lastWord ? lastWord.end + 0.5 : 30);
   const durationInFrames = Math.ceil(durationSec * fps);
 
+  // Who is speaking, for the lower third. Sent whole so the composition takes
+  // one prop rather than six loose ones.
+  const nameCard = opts["name-card"]
+    ? {
+        title: opts["name-card"],
+        subtitle: opts["name-card-sub"] || undefined,
+        seconds: opts["name-card-seconds"] ? parseFloat(opts["name-card-seconds"]) : undefined,
+        accent: opts["name-card-accent"] || undefined,
+      }
+    : null;
+
   const inputProps = {
     videoSrc,
     words,
     styleName,
     logoSrc,
     faceY,
+    nameCard,
     durationInFrames,
     fps,
     captionPosition: opts["caption-position"] || "auto",

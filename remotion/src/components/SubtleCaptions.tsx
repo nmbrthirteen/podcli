@@ -3,6 +3,7 @@ import { useCurrentFrame, useVideoConfig, interpolate } from "remotion";
 import type { Word, CaptionStyle } from "../types";
 import { captionScale } from "../types";
 import { buildChunks, activeChunkAt, splitCaptionLines } from "../chunks";
+import { fadeInOut } from "../motion";
 
 interface Props {
   words: Word[];
@@ -26,12 +27,9 @@ export const SubtleCaptions: React.FC<Props> = ({ words, style, singleLine = fal
   if (!activeChunk) return null;
 
   const entryFrame = Math.round(activeChunk.start * fps);
-  const opacity = interpolate(
-    frame - entryFrame,
-    [0, 5],
-    [0, 1],
-    { extrapolateRight: "clamp" }
-  );
+  const opacity = fadeInOut({
+    frame, fps, start: activeChunk.start, end: activeChunk.end, inFrames: 5, outFrames: 5,
+  });
 
   // Slight upward slide on entry
   const translateY = interpolate(

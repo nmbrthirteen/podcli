@@ -74,7 +74,6 @@ STYLES = {
         "words_per_chunk": 3,                  # Show 3 words at a time
         "uppercase": True,
         "gradient_overlay": False,
-        "logo_support": False,
     },
     "karaoke": {
         "description": "Full sentence visible, words highlight progressively",
@@ -92,7 +91,6 @@ STYLES = {
         "words_per_chunk": 5,
         "uppercase": False,
         "gradient_overlay": False,
-        "logo_support": False,
     },
     "subtle": {
         "description": "Clean white text at bottom with shadow, professional look",
@@ -110,7 +108,6 @@ STYLES = {
         "words_per_chunk": 5,
         "uppercase": False,
         "gradient_overlay": False,
-        "logo_support": False,
     },
     "branded": {
         "description": "Large bold text, 5-7 words wrapping across 2 lines, dark rounded pill on active word. Clean, no gradient.",
@@ -134,7 +131,6 @@ STYLES = {
         "uppercase": False,                     # Mixed case, natural capitalization
         "gradient_overlay": False,              # No gradient — clean direct-on-video
         "gradient_opacity": 0.0,
-        "logo_support": True,                   # Logo top-left
         "logo_margin_x": 40,                    # Logo X offset from left
         "logo_margin_y": 60,                    # Logo Y offset from top
         "logo_height": 100,                     # Logo height in px
