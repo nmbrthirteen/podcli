@@ -1070,6 +1070,10 @@ app.post("/api/transcribe", async (req, res) => {
       registerSourcePath(file_path);
       uiState.lastUpdated = Date.now();
       persistState();
+      // Without this a tab reloaded during a 25-minute run shows an idle screen
+      // forever: the job id lived only in the tab that started it, and nothing
+      // else announces that the transcript landed.
+      broadcastSSE("state-sync", uiState);
       // Cache it
       try {
         await cache.set(file_path, result.data as unknown as TranscriptResult, engine);
@@ -1081,6 +1085,7 @@ app.post("/api/transcribe", async (req, res) => {
       job.status = "error";
       job.error = err.message;
       job.message = `Error: ${err.message}`;
+      broadcastSSE("job-error", { jobId, error: job.error });
     });
 });
 
