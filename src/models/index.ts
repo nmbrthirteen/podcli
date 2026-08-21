@@ -2,7 +2,7 @@
 
 export interface TaskRequest {
   task_id: string;
-  task_type: "transcribe" | "parse_transcript" | "create_clip" | "batch_clips" | "analyze_energy" | "detect_highlights" | "manage_reel" | "pack_transcript" | "detect_encoder" | "presets" | "ping" | "suggest_clips" | "find_moment" | "generate_content" | "generate_custom" | "corrections" | "manage_integrations" | "run_integration_tool" | "manage_config" | "manage_env" | "ai_cli_status" | "ai_provider_status";
+  task_type: "transcribe" | "parse_transcript" | "create_clip" | "batch_clips" | "analyze_energy" | "detect_highlights" | "manage_reel" | "pack_transcript" | "detect_encoder" | "presets" | "ping" | "suggest_clips" | "find_moment" | "generate_content" | "generate_custom" | "corrections" | "manage_integrations" | "run_integration_tool" | "manage_config" | "manage_env" | "ai_cli_status" | "ai_provider_status" | "analyze_silence" | "render_silence_removed";
   params: Record<string, unknown>;
 }
 
@@ -114,6 +114,8 @@ export interface UIState {
   activeExportJobId?: string | null;
   transcript?: TranscriptResult | null;
   rawTranscriptText?: string;
+  silenceOriginal?: { videoPath: string; transcript: TranscriptResult } | null;
+  silencePlan?: Record<string, unknown> | null;
   suggestions?: SuggestedClip[];
   deselectedIndices?: number[];
   settings?: {
@@ -124,6 +126,13 @@ export interface UIState {
     outroPath?: string;
     introPath?: string;
     cleanFillers?: boolean;
+    captionPosition?: string;
+    captionFontScale?: number;
+    logoPosition?: string;
+    onboardingDismissed?: boolean;
+    silenceThreshold?: number;
+    silenceMinPause?: number;
+    silencePadding?: number;
   };
   phase?: string;
   lastUpdated?: number;

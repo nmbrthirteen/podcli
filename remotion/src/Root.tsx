@@ -4,6 +4,7 @@ import { CaptionedClip } from "./CaptionedClip";
 import { Bookend } from "./Bookend";
 import { STYLES } from "./types";
 import type { Word } from "./types";
+import type { CaptionPosition, LogoPosition } from "./types";
 import dmSans400 from "@fontsource/dm-sans/files/dm-sans-latin-400-normal.woff2";
 import dmSans700 from "@fontsource/dm-sans/files/dm-sans-latin-700-normal.woff2";
 
@@ -33,6 +34,10 @@ const inputProps = getInputProps() as {
   styleName?: string;
   logoSrc?: string;
   faceY?: number | null;
+  captionPosition?: CaptionPosition;
+  captionFontScale?: number;
+  logoPosition?: LogoPosition;
+  singleLine?: boolean;
   durationInFrames?: number;
   fps?: number;
   bookendMode?: "intro" | "outro";
@@ -54,6 +59,19 @@ const inputProps = getInputProps() as {
 export const RemotionRoot: React.FC = () => {
   const fps = inputProps.fps || 30;
   const durationInFrames = inputProps.durationInFrames || 900;
+  const baseStyle = STYLES[inputProps.styleName || "branded"];
+  const positionMargins: Partial<Record<CaptionPosition, number>> = {
+    upper: 760,
+    center: 480,
+    lower: 220,
+  };
+  const captionPosition = inputProps.captionPosition || "auto";
+  const fontScale = Math.max(0.6, Math.min(1.6, (inputProps.captionFontScale || 100) / 100));
+  const style = {
+    ...baseStyle,
+    fontSize: baseStyle.fontSize * fontScale,
+    marginBottom: positionMargins[captionPosition] ?? baseStyle.marginBottom,
+  };
 
   return (
     <>
@@ -67,10 +85,13 @@ export const RemotionRoot: React.FC = () => {
         defaultProps={{
           videoSrc: inputProps.videoSrc || "",
           words: inputProps.words || [],
-          style: STYLES[inputProps.styleName || "branded"],
+          style,
           logoSrc: inputProps.logoSrc,
           faceY: inputProps.faceY ?? null,
           nameCard: inputProps.nameCard ?? null,
+          captionPosition,
+          logoPosition: inputProps.logoPosition || "top-left",
+          singleLine: inputProps.singleLine === true,
         }}
       />
       <Composition

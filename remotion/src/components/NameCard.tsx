@@ -37,9 +37,13 @@ export const NameCard: React.FC<NameCardProps> = ({
   const s = captionScale(height);
 
   if (!title) return null;
+  if (frame >= seconds * fps) return null;
 
+  // fadeInOut returns the rising half only when the ramps do not fit inside
+  // `seconds`, so opacity alone never brings the card back down.
+  const ramp = Math.min(8, Math.floor((seconds * fps) / 2));
   const opacity = fadeInOut({
-    frame, fps, start: 0, end: seconds, inFrames: 8, outFrames: 10,
+    frame, fps, start: 0, end: seconds, inFrames: ramp, outFrames: Math.min(10, ramp),
   });
   if (opacity <= 0) return null;
 

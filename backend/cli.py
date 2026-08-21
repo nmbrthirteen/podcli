@@ -431,6 +431,7 @@ def cmd_studio(args):
     cmd += [
         "--caption-style", args.caption_style,
         "--crop", args.crop,
+        "--format", getattr(args, "format", None) or "vertical",
         "--intro-seconds", str(args.intro_seconds),
         "--outro-seconds", str(args.outro_seconds),
     ]
@@ -1284,6 +1285,8 @@ def cmd_process(args):
                                 face_map=face_map,
                                 allow_ass_fallback=config.get("allow_ass_fallback", False),
                                 use_ass_captions=config.get("use_ass_captions", False),
+                                name_card=config.get("name_card"),
+                                bookend_fade=config.get("bookend_fade", 0.0),
                             )
                             results[-1] = result
                             print(f"         ✓ Re-rendered: {result['file_size_mb']}MB")
@@ -4008,7 +4011,7 @@ def main():
                       help="How long the lower third holds (default 3)")
     proc.add_argument("--name-card-accent", dest="name_card_accent",
                       help="Underline colour on the lower third")
-    proc.add_argument("--bookend-fade", dest="bookend_fade", type=float, default=0.0,
+    proc.add_argument("--bookend-fade", dest="bookend_fade", type=float, default=None,
                       help="Seconds of crossfade into an intro or outro (default 0, a cut)")
     proc.add_argument("--no-outro", action="store_true", help="Do not append an outro (default for highlight profiles)")
     proc.add_argument("--intro", help="Intro video (asset name or path)")
@@ -4060,6 +4063,8 @@ def main():
     studio.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai. Prefer ASSEMBLYAI_API_KEY; command-line secrets can appear in process listings.")
     studio.add_argument("--caption-style", choices=["hormozi", "karaoke", "subtle", "branded"], default="hormozi")
     studio.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"], default="face")
+    studio.add_argument("--format", choices=["vertical", "horizontal", "square"], default="vertical",
+                        help="Output aspect ratio (default: vertical)")
     studio.add_argument("-o", "--output", help="Final output path")
     studio.add_argument("--intro-title", help="Intro headline (default: derived from first words)")
     studio.add_argument("--outro-title", default=None)

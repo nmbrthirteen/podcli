@@ -93,6 +93,8 @@ def render_captions(
     caption_style: str,
     output_path: str,
     time_offset: float = 0.0,
+    caption_position: str = "auto",
+    caption_font_scale: int = 100,
 ) -> str:
     """
     Generate an ASS subtitle file from word-level timestamps.
@@ -113,7 +115,12 @@ def render_captions(
             f.write(generate_ass_header(get_style(caption_style)))
         return output_path
 
-    style = get_style(caption_style)
+    style = dict(get_style(caption_style))
+    scale = max(60, min(160, int(caption_font_scale))) / 100
+    style["font_size"] = round(style["font_size"] * scale)
+    position_margins = {"upper": 760, "center": 480, "lower": 220}
+    if caption_position in position_margins:
+        style["margin_v"] = position_margins[caption_position]
 
     if caption_style == "hormozi":
         content = _render_hormozi(words, style, time_offset)

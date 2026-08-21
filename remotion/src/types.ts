@@ -17,6 +17,15 @@ export interface CaptionStyle {
   marginBottom: number;
 }
 
+export type CaptionPosition = "auto" | "upper" | "center" | "lower";
+export type LogoPosition =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
+
 export interface CaptionProps {
   words: Word[];
   style: CaptionStyle;

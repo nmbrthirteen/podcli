@@ -7,7 +7,7 @@ import { BrandedCaptions } from "./components/BrandedCaptions";
 import { NameCard } from "./components/NameCard";
 import type { NameCardProps } from "./components/NameCard";
 import { Watermark } from "./components/Watermark";
-import type { Word, CaptionStyle } from "./types";
+import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "./types";
 
 export interface CaptionedClipProps {
   videoSrc: string;
@@ -17,6 +17,9 @@ export interface CaptionedClipProps {
   faceY?: number | null;
   /** Who is speaking, shown for the first few seconds. */
   nameCard?: NameCardProps | null;
+  captionPosition?: CaptionPosition;
+  logoPosition?: LogoPosition;
+  singleLine?: boolean;
 }
 
 export const CaptionedClip: React.FC<CaptionedClipProps> = ({
@@ -25,6 +28,9 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   logoSrc,
   faceY,
   nameCard,
+  captionPosition = "auto",
+  logoPosition = "top-left",
+  singleLine = false,
 }) => {
   const { height } = useVideoConfig();
   const CaptionComponent = {
@@ -36,11 +42,12 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
 
   return (
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
-      <Watermark src={logoSrc} height={height} />
+      <Watermark src={logoSrc} height={height} position={logoPosition} />
       {style.name === "branded" ? (
-        <BrandedCaptions words={words} style={style} faceY={faceY} />
+        <BrandedCaptions words={words} style={style} logoSrc={logoSrc} faceY={faceY}
+          captionPosition={captionPosition} logoPosition={logoPosition} singleLine={singleLine} />
       ) : (
-        <CaptionComponent words={words} style={style} />
+        <CaptionComponent words={words} style={style} singleLine={singleLine} />
       )}
       {nameCard?.title && <NameCard {...nameCard} />}
     </AbsoluteFill>

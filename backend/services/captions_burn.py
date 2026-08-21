@@ -64,6 +64,7 @@ def burn_captions(
     logo_height: int = 80,
     logo_margin_x: int = 30,
     logo_margin_y: int = 40,
+    logo_position: str = "top-left",
 ) -> str:
     """Burn ASS subtitles into the video.
 
@@ -99,9 +100,13 @@ def burn_captions(
         logo_idx = input_idx
         input_idx += 1
         filter_parts.append(f"[{logo_idx}:v]scale=-1:{logo_height}[logo]")
-        filter_parts.append(
-            f"[{current_label}][logo]overlay={logo_margin_x}:{logo_margin_y}[withlogo]"
+        logo_x = (
+            str(logo_margin_x) if logo_position.endswith("-left")
+            else f"main_w-overlay_w-{logo_margin_x}" if logo_position.endswith("-right")
+            else "(main_w-overlay_w)/2"
         )
+        logo_y = str(logo_margin_y) if logo_position.startswith("top-") else f"main_h-overlay_h-{logo_margin_y}"
+        filter_parts.append(f"[{current_label}][logo]overlay={logo_x}:{logo_y}[withlogo]")
         current_label = "withlogo"
 
     # Burn ASS subtitles
