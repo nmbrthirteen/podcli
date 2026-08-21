@@ -34,6 +34,14 @@ func TestRefusalSuggestsRepairWhenAlreadyRootOwned(t *testing.T) {
 	}
 }
 
+func TestRepairCommandQuotesTheUserName(t *testing.T) {
+	msg := sudoRefusalMessage("od d; rm -rf /", "/home/x/podcli", true)
+	want := `sudo chown -R 'od d; rm -rf /' /home/x/podcli`
+	if !strings.Contains(msg, want) {
+		t.Errorf("expected the name quoted, got:\n%s", msg)
+	}
+}
+
 func TestShellQuoteOnlyWhenNeeded(t *testing.T) {
 	if got := shellQuote("/home/x/podcli"); got != "/home/x/podcli" {
 		t.Errorf("plain path should not be quoted, got %q", got)

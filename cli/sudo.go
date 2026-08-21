@@ -29,7 +29,7 @@ func sudoRefusalMessage(sudoUser, home string, rootOwned bool) string {
 	b.WriteString("  podcli needs no elevated privileges. Run it as " + sudoUser + ".\n")
 	if rootOwned {
 		b.WriteString("\n  An earlier sudo run already left root-owned files there. Repair with:\n")
-		b.WriteString(fmt.Sprintf("    sudo chown -R %s %s\n", sudoUser, shellQuote(home)))
+		b.WriteString(fmt.Sprintf("    sudo chown -R %s %s\n", shellQuote(sudoUser), shellQuote(home)))
 	}
 	return b.String()
 }
