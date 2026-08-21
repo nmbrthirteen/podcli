@@ -22,8 +22,9 @@ import (
 
 func main() {
 	os.Setenv("PODCLI_VERSION", Version)
-	update.CleanupOldBinary()
 	args := os.Args[1:]
+	refuseSudo(args)
+	update.CleanupOldBinary()
 	if len(args) == 0 {
 		os.Exit(runEngine(args)) // backend's branded interactive menu
 	}
