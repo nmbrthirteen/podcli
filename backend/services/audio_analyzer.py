@@ -179,16 +179,21 @@ def get_energy_profile(
     segments: list[dict],
     progress_callback: Optional[Callable] = None,
     wav_path: str = None,
+    energy_data: Optional[list[dict]] = None,
 ) -> dict:
     """
     Full pipeline: extract energy data and score all segments.
+
+    Pass energy_data to score a profile that was already extracted; scoring is
+    pure, the decode is what costs.
 
     Returns {energy_data, segment_scores, mean_rms, peak_times}
     """
     if progress_callback:
         progress_callback(0, "Analyzing audio energy...")
 
-    energy_data = extract_audio_energy(video_path, wav_path=wav_path)
+    if energy_data is None:
+        energy_data = extract_audio_energy(video_path, wav_path=wav_path)
 
     if progress_callback:
         progress_callback(70, "Scoring segments by energy...")

@@ -283,8 +283,8 @@ def generate(
     if not chain:
         return AIResult(
             ok=False,
-            error="No AI available. Install Claude Code or set ANTHROPIC_API_KEY "
-                  "(podcli config set ANTHROPIC_API_KEY ...).",
+            error="No AI available. Sign in with `podcli login`, install Claude "
+                  "Code or Codex, or run `podcli env set ANTHROPIC_API_KEY sk-...`.",
         )
 
     if project_dir is None:

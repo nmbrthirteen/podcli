@@ -254,6 +254,7 @@ def get_event_profile(
     progress_callback: Optional[Callable] = None,
     reaction_threshold: float = REACTION_THRESHOLD,
     wav_path: Optional[str] = None,
+    events_data: Optional[list[dict]] = None,
 ) -> dict:
     """
     Full pipeline: detect audio events and score all segments.
@@ -268,7 +269,9 @@ def get_event_profile(
     if progress_callback:
         progress_callback(0, "Detecting laughter and reactions...")
 
-    events_data = extract_audio_events(video_path, wav_path=wav_path)
+    # Already-extracted events skip the model pass; scoring them is pure.
+    if events_data is None:
+        events_data = extract_audio_events(video_path, wav_path=wav_path)
 
     if progress_callback:
         progress_callback(70, "Scoring segments by reaction...")

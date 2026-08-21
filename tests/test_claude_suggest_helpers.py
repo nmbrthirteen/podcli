@@ -429,3 +429,66 @@ class FormatFramingTests(unittest.TestCase):
         self.assertIn("20-35 seconds", prompt)
         self.assertIn("SHORTER IS BETTER", prompt)
         self.assertIn("TikTok", prompt)
+
+
+class TotalScoreTests(unittest.TestCase):
+    """One malformed field used to raise inside the normalization loop and take
+    down the whole suggestion run rather than costing a single clip."""
+
+    def test_the_normal_case_still_sums(self):
+        clip = {"scores": {"standalone": 4, "hook": 5, "relevance": 4, "quotability": 3}}
+        self.assertEqual(cs._total_score(clip), 16)
+
+    def test_a_string_score_does_not_raise(self):
+        clip = {"scores": {"standalone": 4, "hook": "5"}}
+        self.assertEqual(cs._total_score(clip), 9)
+
+    def test_an_unparseable_score_is_skipped_not_fatal(self):
+        clip = {"scores": {"standalone": 4, "hook": "very good"}}
+        self.assertEqual(cs._total_score(clip), 4)
+
+    def test_all_scores_unusable_falls_back_to_total_score(self):
+        clip = {"scores": {"hook": None}, "total_score": 12}
+        self.assertEqual(cs._total_score(clip), 12)
+
+    def test_a_missing_or_junk_total_score_is_zero(self):
+        self.assertEqual(cs._total_score({}), 0.0)
+        self.assertEqual(cs._total_score({"total_score": "nope"}), 0.0)
+
+    def test_a_non_dict_scores_field_does_not_raise(self):
+        self.assertEqual(cs._total_score({"scores": [4, 5], "total_score": 9}), 9)
+
+
+class CodexTranscriptTests(unittest.TestCase):
+    """Codex takes its prompt as an argv argument and silently truncates it.
+    Cutting the tail is what clusters every clip in the opening minutes."""
+
+    def _transcript(self, n=4000):
+        return "\n".join(f"[{i * 3.0:.1f}s] line {i}" for i in range(n))
+
+    def test_a_short_transcript_is_untouched(self):
+        text = self._transcript(10)
+        self.assertEqual(cs._sample_transcript(text), text)
+
+    def test_a_long_transcript_is_thinned_not_truncated(self):
+        text = self._transcript()
+        out = cs._sample_transcript(text)
+        self.assertLess(len(out), len(text))
+        self.assertIn("line 0", out)
+        # The last line is the half a tail truncation would have thrown away.
+        self.assertIn(f"line {3999}", out)
+
+    def test_only_codex_is_adapted(self):
+        text = self._transcript()
+        prompt = "RULES\n\n" + text
+        adapt = cs._codex_adapter(text)
+        self.assertEqual(adapt("claude", prompt), prompt)
+        self.assertNotEqual(adapt("codex", prompt), prompt)
+
+    def test_the_adapted_prompt_keeps_the_rules_and_says_it_sampled(self):
+        text = self._transcript()
+        prompt = "RULES THAT MUST SURVIVE\n\n" + text
+        out = cs._codex_adapter(text)("codex", prompt)
+        self.assertIn("RULES THAT MUST SURVIVE", out)
+        self.assertIn("sampled across the full episode", out)
+        self.assertLess(len(out), len(prompt))

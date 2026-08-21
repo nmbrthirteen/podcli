@@ -928,9 +928,23 @@ def cmd_process(args):
     events_data = None
     reaction_times = None
     if config.get("energy_boost", True):
-        print("  [2/4] Analyzing audio energy...")
+        # The Studio has cached these since it first transcribed the episode.
+        # Reading them here is the difference between re-running YAMNet over a
+        # whole hour on every `podcli process` and not.
+        from services.signal_cache import load_signals, save_signals
+
+        cached = load_signals(video_path) if video_path else {}
+        cached_energy = cached.get("energy_data")
+        cached_events = cached.get("events_data")
+        print(
+            "  [2/4] Scoring cached audio analysis..."
+            if cached_energy and cached_events
+            else "  [2/4] Analyzing audio energy..."
+        )
         try:
-            profile = get_energy_profile(video_path, segments, wav_path=shared_wav.get())
+            profile = get_energy_profile(
+                video_path, segments, wav_path=shared_wav.get(), energy_data=cached_energy
+            )
             energy_scores = profile["segment_scores"]
             energy_data = profile["energy_data"]
             print(f"         {len(profile['peak_times'])} peak moments found")
@@ -938,7 +952,9 @@ def cmd_process(args):
             print(f"         Skipped (error: {e})")
         if audio_events_available():
             try:
-                reactions = get_event_profile(video_path, segments, wav_path=shared_wav.get())
+                reactions = get_event_profile(
+                    video_path, segments, wav_path=shared_wav.get(), events_data=cached_events
+                )
                 reaction_scores = reactions["segment_scores"]
                 events_data = reactions["events_data"]
                 reaction_times = reactions["reaction_times"]
@@ -947,6 +963,10 @@ def cmd_process(args):
                     print(f"         {n} laughter/reaction moments found")
             except Exception as e:
                 print(f"         Reactions skipped (error: {e})")
+        # Written even on a cache hit so a run that only had one half fills the
+        # other, and so the Studio sees what the CLI just computed.
+        if video_path and (energy_data or events_data):
+            save_signals(video_path, energy_data=energy_data, events_data=events_data)
     else:
         print("  [2/4] Audio analysis skipped (--no-energy)")
 

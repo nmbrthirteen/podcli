@@ -168,6 +168,74 @@ def _preferred_caption_style(kb_dir: str) -> str:
     return DEFAULT_PRESET.get("caption_style", "branded")
 
 
+# Codex receives its prompt as an argv argument and silently truncates a long
+# one. Truncating the tail drops the end of the episode, which is exactly how a
+# run ends up with every clip in the opening minutes, so the transcript is
+# sampled across the whole timeline instead.
+CODEX_TRANSCRIPT_LIMIT = 48000
+
+
+def _sample_transcript(transcript_text: str, limit: int = CODEX_TRANSCRIPT_LIMIT) -> str:
+    """Thin a transcript to roughly `limit` characters, keeping its full span."""
+    if len(transcript_text) <= limit:
+        return transcript_text
+    lines = transcript_text.split("\n")
+    if len(lines) < 3:
+        return transcript_text[:limit]
+    keep_every = max(2, -(-len(transcript_text) // limit))
+    sampled = lines[::keep_every]
+    # The last line anchors the end of the timeline, which is the half a tail
+    # truncation would have thrown away.
+    if lines[-1] not in sampled[-1:]:
+        sampled.append(lines[-1])
+    return "\n".join(sampled)
+
+
+def _codex_adapter(transcript_text: str):
+    """An `adapt` callback that thins the transcript for Codex only."""
+    def adapt(engine: str, prompt: str) -> str:
+        if engine != "codex" or not transcript_text:
+            return prompt
+        sampled = _sample_transcript(transcript_text)
+        if sampled == transcript_text:
+            return prompt
+        note = (
+            "\n\nNOTE: this transcript is sampled across the full episode, so "
+            "consecutive lines may skip ahead. Timestamps remain exact.\n"
+        )
+        return prompt.replace(transcript_text, note + sampled, 1)
+
+    return adapt
+
+
+def _total_score(clip: dict) -> float:
+    """Sum the model's per-dimension scores, tolerating a malformed one.
+
+    The values are whatever the model emitted. A single string in there used to
+    raise TypeError inside the normalization loop and take down the whole
+    suggestion run rather than costing one clip.
+    """
+    scores = clip.get("scores")
+    if isinstance(scores, dict) and scores:
+        total = 0.0
+        usable = False
+        for value in scores.values():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    continue
+            total += float(value)
+            usable = True
+        if usable:
+            return total
+    fallback = clip.get("total_score", 0)
+    try:
+        return float(fallback)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 MAX_REACTION_ANCHORS = 40
 
 
@@ -506,12 +574,12 @@ Transcript:
     try:
         data, _result = ai_provider.generate_json(
             prompt, timeout=900, project_dir=project_dir, on_attempt=announce,
+            adapt=_codex_adapter(transcript_text),
         )
         if data:
             found = []
             for c in data.get("clips", []):
-                scores = c.get("scores", {})
-                total = sum(scores.values()) if scores else c.get("total_score", 0)
+                total = _total_score(c)
                 keep_segments = []
                 for seg in c.get("segments", []):
                     s = round(float(seg.get("start", 0)), 1)
@@ -660,6 +728,7 @@ def suggest_with_claude(
         # Local backends keep the prompt exactly as it has always been built;
         # only the cloud sees the split form.
         local_prompt=prompt,
+        adapt=_codex_adapter(transcript_text),
     )
 
     if not attempt.ok:
@@ -707,9 +776,7 @@ def suggest_with_claude(
     caption_style = _preferred_caption_style(paths["knowledge"])
     normalized = []
     for c in clips:
-        scores = c.get("scores")
-        scores = scores if isinstance(scores, dict) else {}
-        total = sum(scores.values()) if scores else c.get("total_score", 0)
+        total = _total_score(c)
 
         raw_segments = c.get("segments")
         raw_segments = raw_segments if isinstance(raw_segments, list) else []

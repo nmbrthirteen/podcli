@@ -27,6 +27,16 @@ SETTINGS = [
         "placeholder": "aai_...",
     },
     {
+        "key": "ANTHROPIC_API_KEY",
+        "label": "Anthropic API key",
+        "help": "The last resort in the AI chain, after a podcli Pro session and "
+        "a locally installed Claude Code or Codex. Only needed if you have "
+        "neither.",
+        "url": "https://console.anthropic.com/settings/keys",
+        "secret": True,
+        "placeholder": "sk-ant-...",
+    },
+    {
         "key": "PODCLI_YTDLP_BROWSER",
         "label": "Browser for download cookies",
         "help": "Read cookies from this browser so yt-dlp can fetch members-only, "
