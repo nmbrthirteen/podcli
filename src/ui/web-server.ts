@@ -1089,6 +1089,16 @@ app.post("/api/transcribe", async (req, res) => {
     });
 });
 
+/** The session transcript, for callers that render without passing words.
+ *
+ * A caller that omits transcript_words used to get a silently uncaptioned
+ * clip. /api/export already falls back this way; these two did not, so a
+ * studio session whose client state had dropped the transcript shipped clips
+ * with no captions and no error. */
+function sessionWords(): unknown[] {
+  return Array.isArray(uiState.transcript?.words) ? uiState.transcript.words : [];
+}
+
 /**
  * POST /api/create-clip — Start clip creation job
  */
@@ -1100,7 +1110,7 @@ app.post("/api/create-clip", async (req, res) => {
     caption_style = "hormozi",
     crop_strategy = "speaker",
     format = "vertical",
-    transcript_words = [],
+    transcript_words = sessionWords(),
     title = "clip",
     clean_fillers = false,
     allow_ass_fallback = false,
@@ -1288,7 +1298,7 @@ app.post("/api/batch-clips", async (req, res) => {
   const {
     video_path,
     clips,
-    transcript_words = [],
+    transcript_words = sessionWords(),
     clean_fillers = false,
     keep_caption_overlay = false,
     format = "vertical",
