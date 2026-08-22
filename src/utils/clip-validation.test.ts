@@ -157,3 +157,22 @@ describe("validateSuggestionContext", () => {
     expect(isSelfContained("who the guest is")).toBe(false);
   });
 });
+
+describe("findOrphanOpener on 'so' and contrastives", () => {
+  it("lets 'so' start a thought", () => {
+    expect(findOrphanOpener("So actually, did you try to help him out?")).toBeNull();
+    expect(findOrphanOpener("So if you look at the latest NVIDIA GPUs, they run a thousand watts.")).toBeNull();
+    expect(findOrphanOpener("So many founders quit at month six.")).toBeNull();
+  });
+
+  it("still flags 'so' when the next word points back", () => {
+    expect(findOrphanOpener("So that's why we shut it down.")).toBe("so that");
+    expect(findOrphanOpener("So they never shipped it.")).toBe("so they");
+  });
+
+  it("flags contrastives that answer something the viewer never heard", () => {
+    expect(findOrphanOpener("However, we asked Claude to do unrelated tasks.")).toBe("however");
+    expect(findOrphanOpener("Instead, they went with graphene.")).toBe("instead");
+    expect(findOrphanOpener("Though it did not work out that way.")).toBe("though");
+  });
+});
