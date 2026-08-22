@@ -78,9 +78,21 @@ const SELF_CONTAINED = new Set([
  */
 const ORPHAN_OPENERS = new Set([
   "absolutely", "also", "and", "anyway", "because", "but", "cause", "exactly",
-  "he", "her", "his", "it", "no", "nope", "ok", "okay", "plus", "right", "she",
-  "so", "sure", "that", "their", "them", "they", "those", "totally", "well",
-  "which", "yeah", "yep", "yes",
+  "he", "her", "his", "however", "instead", "it", "meanwhile", "no", "nope",
+  "ok", "okay", "otherwise", "plus", "right", "she", "sure", "that", "their",
+  "them", "they", "those", "though", "totally", "well", "which", "yeah", "yep",
+  "yes",
+]);
+
+/**
+ * "so" is the one opener that swings both ways. "So actually, did you try that"
+ * and "So if you look at the numbers" start a thought; "So that's why we quit"
+ * points back. Flag it only when the word after it is itself backward-pointing,
+ * rather than rejecting every clip that opens on a speaker gathering themselves.
+ */
+const SO_POINTS_BACK = new Set([
+  "he", "his", "it", "its", "she", "that", "their", "them", "they", "this",
+  "those", "we",
 ]);
 
 /**
@@ -89,7 +101,6 @@ const ORPHAN_OPENERS = new Set([
  */
 const SELF_CONTAINED_STARTS = new Set([
   "it costs", "it takes", "it turns", "no idea", "no matter", "no one",
-  "so few", "so long", "so many", "so much",
 ]);
 
 /** Lowercase, punctuation-stripped, single-spaced. Unicode-aware: a Georgian
@@ -126,6 +137,11 @@ export function findOrphanOpener(previewText: unknown): string | null {
   if (SELF_CONTAINED_STARTS.has(words.slice(0, 2).join(" "))) return null;
   // "I mean" is only a stall when the sentence leads with it.
   if (words[0] === "i" && words[1] === "mean") return "i mean";
+  if (words[0] === "so") {
+    // "that's" and "they're" have to match "that" and "they".
+    const next = (words[1] ?? "").replace(/'(s|d|ll|re|ve)$/, "");
+    return SO_POINTS_BACK.has(next) ? `so ${next}` : null;
+  }
   return ORPHAN_OPENERS.has(words[0]) ? words[0] : null;
 }
 
