@@ -126,7 +126,7 @@ KB_FILES = [
 # Bump when the selection rules in _build_prompt change. Folded into the
 # suggestion cache key for the same reason the knowledge base is: replaying old
 # picks under new rules teaches people the rules do nothing.
-PROMPT_VERSION = 2
+PROMPT_VERSION = 3
 
 
 def kb_signature() -> str:
@@ -349,7 +349,10 @@ MOMENT SELECTION ({b.lens}):
 CONTEXT RULES (CRITICAL):
 - State the PAYOFF first: one sentence, second person, on what the viewer walks away with.
   If you cannot state it in one sentence, the moment is not a clip. Skip it.
-- The title comes off the payoff, not off the transcript wording.
+- WRITE the title from the payoff. Never copy the first sentence of the moment into
+  it. A transcript fragment is not a title: "Is it having a big?" and "Was not working
+  so well" are what copying produces, and they promise the viewer nothing.
+- The title must be a complete thought that reads on its own, under 60 characters.
 - In "needs", name what the viewer must already know. Write "nothing" when the clip
   carries its own setup.
 - If "needs" is anything other than "nothing", either move start_second back to cover it
@@ -367,7 +370,7 @@ Return this exact JSON structure:
 {{
   "clips": [
     {{
-      "title": "First strong sentence from the moment",
+      "title": "Written from the payoff, never copied from the transcript",
       "start_second": 123.4,
       "end_second": 168.4,
       "segments": [
@@ -570,7 +573,7 @@ Return this JSON:
 {{
   "clips": [
     {{
-      "title": "First sentence of the moment",
+      "title": "Written for the viewer, never copied from the transcript",
       "start_second": 123.4,
       "end_second": 158.4,
       "segments": [{{"start": 123.4, "end": 158.4}}],
