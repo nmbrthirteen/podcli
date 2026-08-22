@@ -1495,6 +1495,7 @@ def _track_and_crop(
             work_dir = os.path.dirname(output_path) or "."
             xfade_dur = 0.18  # Short dissolve
             part_paths = []
+            cut_paths = []
             # (path, measured duration, padding it carries). Offsets are built
             # from what ffmpeg actually wrote, not from what was asked for: a
             # skipped short run or a seek landing a few frames off used to
@@ -1538,76 +1539,119 @@ def _track_and_crop(
                     part_specs[-1] = (last_path, last_len, 0.0)
 
                 if len(part_paths) < 2:
-                    # Fallback to static crop of longest run
-                    best_run = max(runs, key=lambda r: r[1] - r[0])
-                    crop_x = _crop_for(best_run[2])
-                    vf = f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={target_w}:{target_h}"
-                    return _run_ffmpeg_with_fallback(
-                        cmd_parts_before_enc=["ffmpeg", "-y", "-i", input_path, "-vf", vf],
-                        cmd_parts_after_enc=["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-movflags", "+faststart"],
-                        output_path=output_path, label="crop_mixed_fallback",
-                    )
+                    log_event("crop", "fallback", reason="mixed_too_few_parts",
+                              parts=len(part_paths), to="hard-cuts")
+                else:
+                    # Where each part's own content begins in the output: the
+                    # running total of the parts before it, each counted without
+                    # the padding that only exists to give the dissolve
+                    # somewhere to happen. Counting the padding, or subtracting
+                    # the dissolve a second time, is what made the video end
+                    # early and drift against its own audio.
+                    offsets = []
+                    running = 0.0
+                    for _path, part_len, part_pad in part_specs[:-1]:
+                        running += max(0.01, part_len - part_pad)
+                        offsets.append(running)
 
-                # Chain xfade filters between all segments
-                # Where each part's own content begins in the output: the
-                # running total of the parts before it, each counted without
-                # the padding that only exists to give the dissolve somewhere
-                # to happen. Counting the padding, or subtracting the dissolve
-                # a second time, is what made the video end early.
-                offsets = []
-                running = 0.0
-                for _path, part_len, part_pad in part_specs[:-1]:
-                    running += max(0.01, part_len - part_pad)
-                    offsets.append(running)
+                    # Dissolve the picture, and take the sound straight from the
+                    # source. Cross-fading each part's re-encoded audio slurred
+                    # about a quarter of a second of speech across the joins for
+                    # no benefit: both sides of every dissolve are the same
+                    # moment of the same recording.
+                    inputs = []
+                    for path in part_paths:
+                        inputs.extend(["-i", path])
+                    inputs.extend(["-i", input_path])
+                    source_index = len(part_paths)
 
-                # Dissolve the picture, and take the sound straight from the
-                # source. Cross-fading each part's own audio re-encoded the
-                # track in pieces and slurred about a quarter of a second of
-                # speech across the joins, for no benefit: both sides of every
-                # dissolve are the same moment of the same recording.
-                inputs = []
-                for path in part_paths:
-                    inputs.extend(["-i", path])
-                inputs.extend(["-i", input_path])
-                source_index = len(part_paths)
+                    filter_parts = []
+                    prev_label = "[0:v]"
+                    for i in range(1, len(part_paths)):
+                        out_label = f"[v{i}]" if i < len(part_paths) - 1 else "[v]"
+                        filter_parts.append(
+                            f"{prev_label}[{i}:v]xfade=transition=fade"
+                            f":duration={xfade_dur}:offset={offsets[i-1]:.3f}{out_label}"
+                        )
+                        prev_label = out_label
 
-                filter_parts = []
-                prev_label = "[0:v]"
-                for i in range(1, len(part_paths)):
-                    out_label = f"[v{i}]" if i < len(part_paths) - 1 else "[v]"
-                    filter_parts.append(
-                        f"{prev_label}[{i}:v]xfade=transition=fade"
-                        f":duration={xfade_dur}:offset={offsets[i-1]:.3f}{out_label}"
-                    )
-                    prev_label = out_label
+                    cmd = ["ffmpeg", "-y"] + inputs + [
+                        "-filter_complex", ";".join(filter_parts),
+                        "-map", "[v]",
+                    ]
+                    if _has_audio_stream(input_path):
+                        cmd += ["-map", f"{source_index}:a", "-c:a", "aac", "-b:a", "192k"]
+                    cmd += [
+                        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                        "-movflags", "+faststart",
+                        "-shortest",
+                        output_path,
+                    ]
+                    r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
+                    if r.returncode == 0:
+                        return output_path
 
-                cmd = ["ffmpeg", "-y"] + inputs + [
-                    "-filter_complex", ";".join(filter_parts),
-                    "-map", "[v]",
-                ]
-                if _has_audio_stream(input_path):
-                    cmd += ["-map", f"{source_index}:a", "-c:a", "aac", "-b:a", "192k"]
-                cmd += [
-                    "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-                    "-movflags", "+faststart",
-                    "-shortest",
-                    output_path,
-                ]
-                r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
-                if r.returncode == 0:
-                    return output_path
+                    log_event("crop", "fallback", reason="mixed_xfade_failed",
+                              parts=len(part_paths), to="hard-cuts")
+                # The dissolve is the only thing that failed, so drop the
+                # dissolve and keep the framing: one cut per run, joined end to
+                # end. This used to fall back to a static crop of the longest
+                # run, which is right for that run and wrong for every other
+                # layout in the clip — on a recording that cuts to a fullscreen
+                # shot, a hold on the wall for a third of its length.
+                for ri, (r_start, r_end, r_cx) in enumerate(runs):
+                    seg_start = max(0.0, r_start)
+                    seg_end = min(duration, r_end)
+                    if seg_end - seg_start < 0.05:
+                        continue
+                    cut_path = os.path.join(work_dir, f"_mixed_cut_{ri}.mp4")
+                    cut_cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", str(seg_start), "-t", str(seg_end - seg_start),
+                        "-i", input_path,
+                        "-vf", (f"crop={crop_w}:{crop_h}:{_crop_for(r_cx)}:{crop_y},"
+                                f"scale={target_w}:{target_h}"),
+                        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                        "-avoid_negative_ts", "make_zero",
+                        cut_path,
+                    ]
+                    if proc_run(cut_cmd, timeout=_FFMPEG_TIMEOUT, check=False).returncode == 0:
+                        cut_paths.append(cut_path)
 
-                # If xfade failed, fall back to static
+                if len(cut_paths) >= 2:
+                    list_path = os.path.join(work_dir, "_mixed_cuts.txt")
+                    with open(list_path, "w", encoding="utf-8") as fh:
+                        for cut in cut_paths:
+                            fh.write(f"file '{os.path.abspath(cut)}'\n")
+                    concat_cmd = [
+                        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                        "-i", list_path, "-c", "copy",
+                        "-movflags", "+faststart", output_path,
+                    ]
+                    concat_ok = proc_run(
+                        concat_cmd, timeout=_FFMPEG_TIMEOUT, check=False,
+                    ).returncode == 0
+                    if os.path.exists(list_path):
+                        os.remove(list_path)
+                    if concat_ok:
+                        log_event("crop", "chose=mixed-hard-cuts", runs=len(cut_paths))
+                        return output_path
+
+                # Every joining strategy failed. Hold the run that keeps the
+                # most faces in frame rather than the longest one.
                 best_run = max(runs, key=lambda r: r[1] - r[0])
                 crop_x = _crop_for(best_run[2])
                 vf = f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={target_w}:{target_h}"
+                log_event("crop", "fallback", reason="mixed_join_failed", to="static")
                 return _run_ffmpeg_with_fallback(
                     cmd_parts_before_enc=["ffmpeg", "-y", "-i", input_path, "-vf", vf],
-                    cmd_parts_after_enc=["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-movflags", "+faststart"],
-                    output_path=output_path, label="crop_mixed_xfade_fallback",
+                    cmd_parts_after_enc=["-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                                         "-movflags", "+faststart"],
+                    output_path=output_path, label="crop_mixed_static_last_resort",
                 )
             finally:
-                for p in part_paths:
+                for p in part_paths + cut_paths:
                     if os.path.exists(p):
                         os.remove(p)
 
