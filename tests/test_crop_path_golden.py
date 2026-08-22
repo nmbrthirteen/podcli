@@ -332,3 +332,25 @@ class UseFaceMapSpeakerGuardTests(unittest.TestCase):
         fm = self._face_map(speaker_mappings={"SPEAKER_01": 1})
         words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_01"}]
         self.assertEqual(self._call(fm, words), "2357")
+
+
+class SaneSpeakerMappingsTests(unittest.TestCase):
+    """A stale face map must not hand a bad cluster index to the tracker."""
+
+    def _fm(self, mappings):
+        return {"clusters": [{"center_x": 100}, {"center_x": 900}], "speaker_mappings": mappings}
+
+    def test_drops_out_of_range_and_negative_indices(self):
+        out = vp._sane_speaker_mappings(self._fm({"A": 0, "B": 7, "C": -1}))
+        self.assertEqual(out["speaker_mappings"], {"A": 0})
+
+    def test_drops_booleans_which_python_counts_as_ints(self):
+        out = vp._sane_speaker_mappings(self._fm({"A": True, "B": 1}))
+        self.assertEqual(out["speaker_mappings"], {"B": 1})
+
+    def test_returns_the_same_object_when_nothing_is_wrong(self):
+        fm = self._fm({"A": 0, "B": 1})
+        self.assertIs(vp._sane_speaker_mappings(fm), fm)
+
+    def test_passes_none_through(self):
+        self.assertIsNone(vp._sane_speaker_mappings(None))

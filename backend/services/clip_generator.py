@@ -959,14 +959,21 @@ def generate_clip(
                     if w["end"] > start_second and w["start"] < end_second
                 ]
 
+            words_in_range = len(clip_words)
+
             # Clean filler words
             if clean_fillers:
                 clip_words = _clean_transcript_words(clip_words)
 
             if not clip_words:
                 caption_warning = (
-                    f"rendered without captions: no transcript words fall between "
-                    f"{start_second:.1f}s and {end_second:.1f}s"
+                    "rendered without captions: filler cleaning removed every one of "
+                    f"the {words_in_range} words in range"
+                    if words_in_range
+                    else (
+                        "rendered without captions: no transcript words fall between "
+                        f"{start_second:.1f}s and {end_second:.1f}s"
+                    )
                 )
                 print(f"  {caption_warning}", file=sys.stderr, flush=True)
 

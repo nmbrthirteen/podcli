@@ -17,12 +17,18 @@ import type { TranscriptResult } from "../models/index.js";
  */
 export function hasSpeakerLabels(transcript: unknown): boolean {
   const t = transcript as {
-    speakers?: { num_speakers?: number };
-    speaker_segments?: unknown[];
+    speaker_segments?: Array<{ speaker?: unknown }>;
+    words?: Array<{ speaker?: unknown }>;
   } | null;
   if (!t) return false;
-  if (Array.isArray(t.speaker_segments) && t.speaker_segments.length > 0) return true;
-  return (t.speakers?.num_speakers ?? 0) > 0;
+  // Read the labels, not the count. A summary can report two speakers while
+  // the segments and per-word fields are both empty, and the packer then emits
+  // "S?" on every line. Trusting the count would serve that cache back to a
+  // request that asked for speakers.
+  const labelled = (items?: Array<{ speaker?: unknown }>) =>
+    items?.some((i) => typeof i.speaker === "string" && i.speaker.trim().length > 0) ??
+    false;
+  return labelled(t.speaker_segments) || labelled(t.words);
 }
 
 export class TranscriptCache {

@@ -92,12 +92,26 @@ describe("hasSpeakerLabels", () => {
     expect(hasSpeakerLabels({ speaker_segments: [{ speaker: "S0", start: 0, end: 1 }] })).toBe(true);
   });
 
-  it("accepts a transcript whose summary counts speakers", () => {
-    expect(hasSpeakerLabels({ speakers: { num_speakers: 2 } })).toBe(true);
+  it("accepts a transcript whose words carry speakers", () => {
+    expect(hasSpeakerLabels({ words: [{ word: "hi", speaker: "SPEAKER_00" }] })).toBe(true);
+  });
+
+  it("rejects a count with no labels behind it", () => {
+    // The packer emits "S?" on every line for this shape, so serving it back
+    // to a request for speakers would make re-transcribing a no-op.
+    expect(
+      hasSpeakerLabels({ speakers: { num_speakers: 2 }, speaker_segments: [], words: [] }),
+    ).toBe(false);
   });
 
   it("rejects the shape a whisper.cpp run leaves behind", () => {
-    expect(hasSpeakerLabels({ speakers: { num_speakers: 0 }, speaker_segments: [] })).toBe(false);
+    expect(
+      hasSpeakerLabels({
+        speakers: { num_speakers: 0 },
+        speaker_segments: [],
+        words: [{ word: "hi", speaker: null }],
+      }),
+    ).toBe(false);
   });
 
   it("rejects missing and empty input", () => {
