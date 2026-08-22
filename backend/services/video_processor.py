@@ -77,6 +77,35 @@ def _manual_crop_x_expr(keyframes: list, crop_w: int, width: int) -> str:
     return expr
 
 
+def _sane_speaker_mappings(face_map: Optional[dict]) -> Optional[dict]:
+    """Drop speaker to cluster entries that do not point at a real cluster.
+
+    A stale or partial face map can carry an index past the end of clusters, or
+    a -1 that would quietly select clusters[-1]. isinstance(True, int) is True
+    in Python, so a bool has to be excluded by type identity rather than by
+    isinstance. Every consumer downstream reads speaker_mappings directly, so
+    this runs once at the entry point instead of at each of them.
+    """
+    if not face_map:
+        return face_map
+    clusters = face_map.get("clusters") or []
+    mappings = face_map.get("speaker_mappings") or {}
+    clean = {
+        sp: ci
+        for sp, ci in mappings.items()
+        if type(ci) is int and 0 <= ci < len(clusters)
+    }
+    if clean == mappings:
+        return face_map
+    log_event(
+        "crop", "speaker_mappings_sanitized",
+        dropped=len(mappings) - len(clean), kept=len(clean),
+    )
+    out = dict(face_map)
+    out["speaker_mappings"] = clean
+    return out
+
+
 def crop_to_vertical(
     input_path: str,
     output_path: str,
@@ -103,6 +132,7 @@ def crop_to_vertical(
     clip_start: The start time of this clip in the original video (for timestamp alignment).
     """
     width, height = get_dimensions(input_path)
+    face_map = _sane_speaker_mappings(face_map)
     target_w, target_h = target_dims
     target_ratio = target_w / target_h  # 0.5625 for the vertical default
 
@@ -2102,6 +2132,25 @@ def _use_face_map(
     speakers_in_clip = set()
     if transcript_words:
         speakers_in_clip = set(w.get("speaker") for w in transcript_words if w.get("speaker"))
+
+    # No speaker labels at all is not the same as one speaker, and a labelled
+    # speaker with no cluster behind it is just as unusable. With two faces on
+    # screen and nothing that resolves who is talking, any single cluster is a
+    # guess, and clusters[0] is a guess by list order. Returning None drops the
+    # caller through to per-frame tracking, which at least follows whoever the
+    # source is actually showing.
+    unmapped = {
+        sp for sp in speakers_in_clip
+        if type(speaker_mappings.get(sp)) is not int
+        or not 0 <= speaker_mappings[sp] < len(clusters)
+    }
+    if len(clusters) >= 2 and (not speakers_in_clip or unmapped):
+        log_event(
+            "crop", "face_map_declined",
+            reason="no_speaker_labels" if not speakers_in_clip else "unmapped_speakers",
+            clusters=len(clusters), unmapped=len(unmapped),
+        )
+        return None
 
     if len(speakers_in_clip) < 2 or len(clusters) < 2:
         # Single speaker — use their cluster or the dominant one

@@ -38,6 +38,9 @@ SILENCE_SPLIT_SEC = 0.5      # split a phrase on word gap >= this
 SILENCE_GAP_REPORT_SEC = 0.6 # list gaps >= this in the silence section
 PHRASE_MAX_SEC = 12.0
 PHRASE_MAX_CHARS = 160
+# Below this a "." is more likely an abbreviation than a sentence end, so only
+# longer phrases get split on one. Question marks always split.
+SENTENCE_SPLIT_MIN_CHARS = 25
 ENERGY_PEAKS_TO_REPORT = 20
 REACTIONS_TO_REPORT = 20
 REACTION_REPORT_THRESHOLD = 0.15
@@ -204,6 +207,12 @@ def _speaker_at(speaker_segments: list[dict], t: float, last_known: Optional[str
     return last_known
 
 
+def _ends_sentence(text: str, mark_only: bool = False) -> bool:
+    """True when a word closes a sentence, ignoring trailing quotes/brackets."""
+    stripped = text.rstrip().rstrip("\"')]}\u2019\u201d")
+    return stripped.endswith("?") if mark_only else stripped.endswith(("?", ".", "!"))
+
+
 def _build_phrases(
     words: list[dict],
     short: dict[str, str],
@@ -214,6 +223,12 @@ def _build_phrases(
     Uses speaker_segments as authoritative for speaker attribution — per-word
     speaker fields are often noisy at segment boundaries, causing single-word
     fragments that make the transcript unreadable.
+
+    Sentence ends close a phrase once it is long enough to not be an
+    abbreviation. Boundaries the selector can cut on have to be boundaries a
+    listener hears, and a phrase that runs "...in the Amazon. Why did you want
+    to" gives it nowhere clean to start. Diarization drifts a word or two at a
+    turn, so this matters most exactly where speaker labels exist.
     """
     phrases: list[dict] = []
     current: Optional[dict] = None
@@ -232,9 +247,15 @@ def _build_phrases(
         last_known = raw_spk
         spk = short.get(raw_spk, "S?")
 
+        broke_sentence = current is not None and _ends_sentence(
+            current["text"],
+            mark_only=len(current["text"]) < SENTENCE_SPLIT_MIN_CHARS,
+        )
+
         should_split = (
             current is None
             or current["speaker"] != spk
+            or broke_sentence
             or (start - current["end"]) >= SILENCE_SPLIT_SEC
             or (end - current["start"]) >= PHRASE_MAX_SEC
             or (len(current["text"]) + len(text) + 1) >= PHRASE_MAX_CHARS
@@ -298,6 +319,10 @@ def pack_transcript(
     short = _speaker_short_map(speakers_block)
     speaker_segments = transcript.get("speaker_segments", []) or []
     phrases = _build_phrases(words, short, speaker_segments)
+    # Derived from what was emitted, not from num_speakers: a summary can claim
+    # two speakers while the segments and per-word labels are both missing, and
+    # then every line still reads "S?" with no warning to say so.
+    no_speaker_labels = bool(phrases) and all(p["speaker"] == "S?" for p in phrases)
     gaps = _find_silence_gaps(words, SILENCE_GAP_REPORT_SEC)
 
     lines: list[str] = []
@@ -326,6 +351,14 @@ def pack_transcript(
 
     # Transcript phrases
     lines.append("## Transcript")
+    if no_speaker_labels:
+        lines.append(
+            "> No speaker labels for this transcript, so every line reads S? and lines "
+            "break at sentence ends rather than at speaker turns. You cannot tell who "
+            "is asking from who is answering here: do not guess. Re-run transcription "
+            "with speaker detection on before selecting clips that depend on it."
+        )
+        lines.append("")
     for p in phrases:
         lines.append(
             f"[{_fmt_ts(p['start'])}-{_fmt_ts(p['end'])}] {p['speaker']} {p['text']}"

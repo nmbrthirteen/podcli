@@ -49,7 +49,7 @@ Dispatch subagents in parallel, each owning one dimension. Each returns a findin
 | **Voice Check** | Coffee Test, tone fingerprint match | Yes |
 | **Banned Words** | Exact scan against `02-voice-and-tone.md` | Yes |
 | **Title Review** | Length, keyword-first, shape, anchor presence, no tension-without-payoff | If titles in package |
-| **Standalone Check** | Each short makes sense without the episode | If shorts in package |
+| **Standalone Check** | Each short makes sense without the episode: payoff is stated and is not the title again, nothing is required going in that the clip range itself does not cover, and the first line does not point back before the cut. A setup line is not coverage, since nothing renders it | If shorts in package |
 | **Clickbait Detector** | Title promises something the clip can't deliver | If titles + clips both in package |
 | **SEO / Hashtags** | Description hashtags count, show hashtag present, keyword coverage | If descriptions in package |
 | **Duplication Check** | Cross-reference `03-episodes-database.md` | If moments/shorts in package |

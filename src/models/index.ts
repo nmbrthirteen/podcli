@@ -99,6 +99,9 @@ export interface SuggestedClip {
   start_second: number;
   end_second: number;
   duration: number;
+  payoff?: string;
+  standalone?: string;
+  context_line?: string;
   reasoning: string;
   preview_text: string;
   segments?: Array<{ start: number; end: number }>;

@@ -31,7 +31,7 @@ import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
 import { PythonExecutor, terminateProcessTree } from "../services/python-executor.js";
-import { TranscriptCache } from "../services/transcript-cache.js";
+import { hasSpeakerLabels, TranscriptCache } from "../services/transcript-cache.js";
 import { FileManager } from "../services/file-manager.js";
 import { AssetManager, inferType, safeName } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
@@ -1002,7 +1002,7 @@ app.post("/api/transcribe", async (req, res) => {
     engine,
     assemblyai_api_key,
     language,
-    enable_diarization = false,
+    enable_diarization = true,
     num_speakers,
   } = req.body;
 
@@ -1010,8 +1010,11 @@ app.post("/api/transcribe", async (req, res) => {
     res.status(400).json({ error: "File not found" });
     return;
   }
-  // Check cache first
-  const cached = await cache.get(file_path, engine);
+  // Check cache first. A cached transcript without speakers cannot answer a
+  // request for them, so serving it makes re-transcribing look like a no-op.
+  const cachedRaw = await cache.get(file_path, engine);
+  const cached =
+    cachedRaw && enable_diarization && !hasSpeakerLabels(cachedRaw) ? null : cachedRaw;
   if (cached) {
     const jobId = uuidv4();
     sessionTranscripts.set(file_path, cached as unknown as ServerTranscript);
@@ -1089,6 +1092,16 @@ app.post("/api/transcribe", async (req, res) => {
     });
 });
 
+/** The session transcript, for callers that render without passing words.
+ *
+ * A caller that omits transcript_words used to get a silently uncaptioned
+ * clip. /api/export already falls back this way; these two did not, so a
+ * studio session whose client state had dropped the transcript shipped clips
+ * with no captions and no error. */
+function sessionWords(): unknown[] {
+  return Array.isArray(uiState.transcript?.words) ? uiState.transcript.words : [];
+}
+
 /**
  * POST /api/create-clip — Start clip creation job
  */
@@ -1100,7 +1113,7 @@ app.post("/api/create-clip", async (req, res) => {
     caption_style = "hormozi",
     crop_strategy = "speaker",
     format = "vertical",
-    transcript_words = [],
+    transcript_words = sessionWords(),
     title = "clip",
     clean_fillers = false,
     allow_ass_fallback = false,
@@ -1288,7 +1301,7 @@ app.post("/api/batch-clips", async (req, res) => {
   const {
     video_path,
     clips,
-    transcript_words = [],
+    transcript_words = sessionWords(),
     clean_fillers = false,
     keep_caption_overlay = false,
     format = "vertical",
@@ -2201,11 +2214,11 @@ app.get("/api/encoder-info", async (_req, res) => {
 // --- Speaker Detection Status ---
 app.get("/api/speaker-status", (_req, res) => {
   if (DEMO) { res.json({ configured: true, setup_url: "", token_url: "" }); return; }
-  const envPath = join(process.cwd(), ".env");
   let token = process.env.HF_TOKEN || "";
-  if (!token && existsSync(envPath)) {
-    const envContent = readFileSync(envPath, "utf-8");
-    const match = envContent.match(/^HF_TOKEN=(.+)$/m);
+  for (const envPath of [paths.envFile, join(process.cwd(), ".env")]) {
+    if (token) break;
+    if (!existsSync(envPath)) continue;
+    const match = readFileSync(envPath, "utf-8").match(/^HF_TOKEN=(.+)$/m);
     if (match) token = match[1].trim();
   }
   res.json({
@@ -3497,6 +3510,9 @@ app.post("/api/claude-suggest", async (req, res) => {
         duration: c.duration ?? c.end_second - c.start_second,
         segments: c.segments,
         reasoning: c.reasoning ?? "",
+        payoff: c.payoff ?? "",
+        standalone: c.standalone ?? "",
+        context_line: c.context_line ?? "",
         preview_text: c.preview_text ?? "",
         content_type: c.content_type,
         score: c.score,
@@ -3571,6 +3587,9 @@ app.post("/api/find-moment", async (req, res) => {
         duration: c.duration ?? c.end_second - c.start_second,
         segments: c.segments,
         reasoning: c.reasoning ?? "",
+        payoff: c.payoff ?? "",
+        standalone: c.standalone ?? "",
+        context_line: c.context_line ?? "",
         preview_text: c.preview_text ?? "",
         content_type: c.content_type,
         score: c.score,
@@ -4006,6 +4025,9 @@ app.post("/api/suggestions/modify", (req, res) => {
     if (typeof upd.title === "string") clip.title = upd.title;
     clip.start_second = nextStart;
     clip.end_second = nextEnd;
+    if (typeof upd.payoff === "string") clip.payoff = upd.payoff;
+    if (typeof upd.standalone === "string") clip.standalone = upd.standalone;
+    if (typeof upd.context_line === "string") clip.context_line = upd.context_line;
     if (typeof upd.reasoning === "string") clip.reasoning = upd.reasoning;
     if (typeof upd.preview_text === "string") clip.preview_text = upd.preview_text;
     if (typeof upd.suggested_caption_style === "string") {

@@ -260,3 +260,97 @@ class DumpCropPathTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UseFaceMapSpeakerGuardTests(unittest.TestCase):
+    """A face map without speaker labels must not pick a face by list order.
+
+    Two clusters and no diarization is the state whisper.cpp leaves behind. The
+    old code read that as "single speaker" and pinned the whole clip to
+    clusters[0], so the camera watched one person while the other talked.
+    """
+
+    def _face_map(self, **over):
+        fm = {
+            "clusters": [
+                {"center_x": 1006, "crop_x": 399, "count": 262},
+                {"center_x": 2964, "crop_x": 2357, "count": 236},
+            ],
+            "speaker_mappings": {},
+            "dominant_speaker": None,
+            "is_split_screen": True,
+            "video_width": 3840,
+        }
+        fm.update(over)
+        return fm
+
+    def _call(self, face_map, words):
+        return vp._use_face_map(
+            face_map=face_map,
+            transcript_words=words,
+            clip_start=0.0,
+            width=3840,
+            height=2160,
+            target_ratio=1080 / 1920,
+        )
+
+    def test_two_clusters_without_speakers_declines(self):
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": None}]
+        self.assertIsNone(self._call(self._face_map(), words))
+
+    def test_no_words_at_all_declines(self):
+        self.assertIsNone(self._call(self._face_map(), []))
+
+    def test_one_cluster_without_speakers_still_crops(self):
+        fm = self._face_map(
+            clusters=[{"center_x": 1006, "crop_x": 399, "count": 262}],
+            is_split_screen=False,
+        )
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": None}]
+        self.assertIsNotNone(self._call(fm, words))
+
+    def test_labelled_but_unmapped_speaker_declines(self):
+        # Exactly the state a diarized transcript is in before the face map is
+        # rebuilt: words carry speakers, speaker_mappings is still empty.
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_01"}]
+        self.assertIsNone(self._call(self._face_map(), words))
+
+    def test_partially_mapped_speakers_decline(self):
+        fm = self._face_map(speaker_mappings={"SPEAKER_00": 0})
+        words = [
+            {"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_00"},
+            {"word": "yes", "start": 1.0, "end": 1.4, "speaker": "SPEAKER_01"},
+        ]
+        self.assertIsNone(self._call(fm, words))
+
+    def test_out_of_range_cluster_index_declines(self):
+        fm = self._face_map(speaker_mappings={"SPEAKER_01": 7})
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_01"}]
+        self.assertIsNone(self._call(fm, words))
+
+    def test_single_labelled_speaker_uses_their_cluster(self):
+        fm = self._face_map(speaker_mappings={"SPEAKER_01": 1})
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_01"}]
+        self.assertEqual(self._call(fm, words), "2357")
+
+
+class SaneSpeakerMappingsTests(unittest.TestCase):
+    """A stale face map must not hand a bad cluster index to the tracker."""
+
+    def _fm(self, mappings):
+        return {"clusters": [{"center_x": 100}, {"center_x": 900}], "speaker_mappings": mappings}
+
+    def test_drops_out_of_range_and_negative_indices(self):
+        out = vp._sane_speaker_mappings(self._fm({"A": 0, "B": 7, "C": -1}))
+        self.assertEqual(out["speaker_mappings"], {"A": 0})
+
+    def test_drops_booleans_which_python_counts_as_ints(self):
+        out = vp._sane_speaker_mappings(self._fm({"A": True, "B": 1}))
+        self.assertEqual(out["speaker_mappings"], {"B": 1})
+
+    def test_returns_the_same_object_when_nothing_is_wrong(self):
+        fm = self._fm({"A": 0, "B": 1})
+        self.assertIs(vp._sane_speaker_mappings(fm), fm)
+
+    def test_passes_none_through(self):
+        self.assertIsNone(vp._sane_speaker_mappings(None))

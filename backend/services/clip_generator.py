@@ -837,6 +837,10 @@ def generate_clip(
             duration = end_second - start_second
 
     length_warning = None
+    # A clip that asks for captions and renders without them used to be
+    # indistinguishable from a clip that never wanted them. Two shipped clips
+    # went out silent that way.
+    caption_warning = None
     if duration > spec.dur_max:
         length_warning = f"{duration:.0f}s, over the {spec.dur_max}s {spec.name} target"
         print(f"  {length_warning}", file=sys.stderr, flush=True)
@@ -936,6 +940,13 @@ def generate_clip(
                 )
 
         # Step 3: Render captions (Remotion-first; ASS fallback optional)
+        if not transcript_words:
+            caption_warning = (
+                f"rendered without captions: no transcript words were passed, so the "
+                f"{caption_style} style had nothing to draw"
+            )
+            print(f"  {caption_warning}", file=sys.stderr, flush=True)
+
         if transcript_words:
             if progress_callback:
                 progress_callback(50, f"Adding {caption_style} captions (3/{total_steps})")
@@ -948,9 +959,23 @@ def generate_clip(
                     if w["end"] > start_second and w["start"] < end_second
                 ]
 
+            words_in_range = len(clip_words)
+
             # Clean filler words
             if clean_fillers:
                 clip_words = _clean_transcript_words(clip_words)
+
+            if not clip_words:
+                caption_warning = (
+                    "rendered without captions: filler cleaning removed every one of "
+                    f"the {words_in_range} words in range"
+                    if words_in_range
+                    else (
+                        "rendered without captions: no transcript words fall between "
+                        f"{start_second:.1f}s and {end_second:.1f}s"
+                    )
+                )
+                print(f"  {caption_warning}", file=sys.stderr, flush=True)
 
             if clip_words:
                 if progress_callback:
@@ -1097,8 +1122,9 @@ def generate_clip(
             "crop_strategy": crop_strategy,
             "format": spec.name,
         }
-        if length_warning:
-            out["warning"] = length_warning
+        warnings = [w for w in (caption_warning, length_warning) if w]
+        if warnings:
+            out["warning"] = "; ".join(warnings)
         if keep_caption_overlay and caption_overlay_path and os.path.exists(caption_overlay_path):
             # Copy out of work_dir before cleanup so the returned paths survive.
             base, _ = os.path.splitext(final_path)

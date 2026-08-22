@@ -6,7 +6,83 @@
  */
 
 import { randomUUID } from "crypto";
-import { validateSuggestionRange } from "../utils/clip-validation.js";
+import { z } from "zod";
+import {
+  validateSuggestionContext,
+  validateSuggestionRange,
+} from "../utils/clip-validation.js";
+
+const suggestionSchema = z.object({
+  title: z.string().describe("Short catchy title for the clip"),
+  start_second: z
+    .number()
+    .describe(
+      "Start timestamp in seconds. If the moment is an answer, move this back " +
+        "to include the question that prompted it.",
+    ),
+  end_second: z.number().describe("End timestamp in seconds"),
+  segments: z
+    .array(z.object({ start: z.number(), end: z.number() }))
+    .optional()
+    .describe(
+      "Multi-cut keep-ranges within the clip. Use to cut out filler/tangents " +
+        "in the middle. Omit for a single continuous clip.",
+    ),
+  payoff: z
+    .string()
+    .describe(
+      "What the viewer walks away with. One sentence, second person, e.g. " +
+        '"You learn why raising a seed round early cost them control of pricing." ' +
+        "Not a description of the clip and not a restatement of the title.",
+    ),
+  standalone: z
+    .string()
+    .describe(
+      "What a viewer who never heard this episode must already know to follow " +
+        'the clip. Write "nothing" when the clip carries its own setup.',
+    ),
+  context_line: z
+    .string()
+    .optional()
+    .describe(
+      "The question or setup that makes the clip land, in one line, for an editor " +
+        "to place. Nothing renders it yet, so it does NOT satisfy the standalone " +
+        "check: the clip range itself must still contain the setup.",
+    ),
+  reasoning: z
+    .string()
+    .describe("Why this earns 30 seconds of a stranger's attention"),
+  preview_text: z
+    .string()
+    .describe(
+      "The first sentence or two the viewer actually hears, verbatim from " +
+        "start_second. This is what the standalone check reads, so it has to be " +
+        "the real opening line, not a paraphrase.",
+    ),
+  content_type: z
+    .string()
+    .optional()
+    .describe(
+      "Content classification: guest_story, technical_insight, market_landscape, business_strategy, hot_take",
+    ),
+  score: z
+    .number()
+    .optional()
+    .describe(
+      "Virality score (0-20). Sum of standalone + hook + relevance + quotability (each 1-5).",
+    ),
+  suggested_caption_style: z
+    .enum(["hormozi", "karaoke", "subtle", "branded"])
+    .optional()
+    .describe("Recommended caption style for this clip"),
+});
+
+/** Single source of truth for the tool's arguments; server.ts registers this. */
+export const suggestClipsInputShape = {
+  suggestions: z
+    .array(suggestionSchema)
+    .describe("Array of suggested clip moments"),
+};
 
 export const suggestClipsToolDef = {
   name: "suggest_clips",
@@ -14,87 +90,16 @@ export const suggestClipsToolDef = {
     "STEP 2 — Submit your clip suggestions after analyzing the transcript.\n\n" +
     "Before calling this: read the transcript via get_ui_state(include_transcript: true) " +
     "and identify the best viral moments.\n\n" +
+    "Every suggestion must carry its own context. A clip that opens on an answer " +
+    "whose question stayed behind the cut is rejected: widen start_second so the " +
+    "question is inside the clip.\n\n" +
     "What it does: Stores your suggestions, assigns clip numbers (#1, #2, etc.), " +
     "and pushes them to the Web UI for the user to review.\n\n" +
     "After this: the user reviews in the UI. Then export with " +
     "batch_create_clips(export_selected: true) or create_clip(clip_number: N).",
-  inputSchema: {
-    type: "object" as const,
-    properties: {
-      suggestions: {
-        type: "array",
-        description: "Array of suggested clip moments",
-        items: {
-          type: "object",
-          properties: {
-            title: {
-              type: "string",
-              description: "Short catchy title for the clip",
-            },
-            start_second: {
-              type: "number",
-              description: "Start timestamp in seconds",
-            },
-            end_second: {
-              type: "number",
-              description: "End timestamp in seconds",
-            },
-            segments: {
-              type: "array",
-              description:
-                "Multi-cut keep-ranges within the clip. Use to cut out filler/tangents " +
-                "in the middle. If omitted, the full start→end range is used.",
-              items: {
-                type: "object",
-                properties: {
-                  start: { type: "number" },
-                  end: { type: "number" },
-                },
-                required: ["start", "end"],
-              },
-            },
-            reasoning: {
-              type: "string",
-              description: "Why this moment is viral-worthy",
-            },
-            preview_text: {
-              type: "string",
-              description: "Brief text preview of what's said",
-            },
-            content_type: {
-              type: "string",
-              description:
-                "Content classification: guest_story, technical_insight, market_landscape, business_strategy, hot_take",
-            },
-            score: {
-              type: "number",
-              description: "Virality score (0-20). Sum of standalone + hook + relevance + quotability (each 1-5).",
-            },
-            suggested_caption_style: {
-              type: "string",
-              enum: ["hormozi", "karaoke", "subtle", "branded"],
-              description: "Recommended caption style for this clip",
-            },
-          },
-          required: ["title", "start_second", "end_second", "reasoning"],
-        },
-      },
-    },
-    required: ["suggestions"],
-  },
 };
 
-export interface RawSuggestion {
-  title: string;
-  start_second: number;
-  end_second: number;
-  segments?: Array<{ start: number; end: number }>;
-  reasoning: string;
-  preview_text?: string;
-  content_type?: string;
-  score?: number;
-  suggested_caption_style?: string;
-}
+export type RawSuggestion = z.infer<typeof suggestionSchema>;
 
 export interface SuggestClipsInput {
   suggestions: RawSuggestion[];
@@ -103,12 +108,22 @@ export interface SuggestClipsInput {
 export async function handleSuggestClips(input: SuggestClipsInput): Promise<string> {
   const suggestions = input.suggestions;
 
+  const problems: string[] = [];
   for (let i = 0; i < suggestions.length; i++) {
     const s = suggestions[i];
-    const rangeError = validateSuggestionRange(s.start_second, s.end_second);
-    if (rangeError) {
-      throw new Error(`Suggestion ${i + 1} ("${s.title}"): ${rangeError}`);
+    const errors = [
+      validateSuggestionRange(s.start_second, s.end_second),
+      validateSuggestionContext(s),
+    ].filter((e): e is string => e !== null);
+    for (const error of errors) {
+      problems.push(`Suggestion ${i + 1} ("${s.title}"): ${error}`);
     }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `${problems.length} of ${suggestions.length} suggestions need work. ` +
+        `Fix them and call suggest_clips again with the full list.\n\n${problems.join("\n")}`,
+    );
   }
 
   // Validate and enrich suggestions
@@ -127,6 +142,9 @@ export async function handleSuggestClips(input: SuggestClipsInput): Promise<stri
       end_second: s.end_second,
       segments: segments.length > 0 ? segments : [{ start: s.start_second, end: s.end_second }],
       duration: Math.round(keptDuration * 10) / 10,
+      payoff: s.payoff,
+      standalone: s.standalone,
+      context_line: s.context_line || "",
       reasoning: s.reasoning,
       preview_text: s.preview_text || "",
       content_type: s.content_type || "unknown",
