@@ -8,7 +8,7 @@ const tmp = mkdtempSync(join(tmpdir(), "podcli-cache-test-"));
 process.env.PODCLI_HOME = tmp;
 process.env.PODCLI_DATA = tmp;
 
-const { TranscriptCache } = await import("./transcript-cache.js");
+const { TranscriptCache, hasSpeakerLabels } = await import("./transcript-cache.js");
 
 function makeFakeVideo(name: string, content: string): string {
   const p = join(tmp, name);
@@ -83,5 +83,25 @@ describe("TranscriptCache", () => {
     const hash = await cache.getFileHash(file);
     writeFileSync(join(tmp, "cache", "transcripts", `${hash}.json`), "this is not json");
     expect(await cache.get(file)).toBeNull();
+  });
+});
+
+
+describe("hasSpeakerLabels", () => {
+  it("accepts a transcript with speaker segments", () => {
+    expect(hasSpeakerLabels({ speaker_segments: [{ speaker: "S0", start: 0, end: 1 }] })).toBe(true);
+  });
+
+  it("accepts a transcript whose summary counts speakers", () => {
+    expect(hasSpeakerLabels({ speakers: { num_speakers: 2 } })).toBe(true);
+  });
+
+  it("rejects the shape a whisper.cpp run leaves behind", () => {
+    expect(hasSpeakerLabels({ speakers: { num_speakers: 0 }, speaker_segments: [] })).toBe(false);
+  });
+
+  it("rejects missing and empty input", () => {
+    expect(hasSpeakerLabels(null)).toBe(false);
+    expect(hasSpeakerLabels({})).toBe(false);
   });
 });

@@ -31,7 +31,7 @@ import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
 import { PythonExecutor, terminateProcessTree } from "../services/python-executor.js";
-import { TranscriptCache } from "../services/transcript-cache.js";
+import { hasSpeakerLabels, TranscriptCache } from "../services/transcript-cache.js";
 import { FileManager } from "../services/file-manager.js";
 import { AssetManager, inferType, safeName } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
@@ -1010,8 +1010,11 @@ app.post("/api/transcribe", async (req, res) => {
     res.status(400).json({ error: "File not found" });
     return;
   }
-  // Check cache first
-  const cached = await cache.get(file_path, engine);
+  // Check cache first. A cached transcript without speakers cannot answer a
+  // request for them, so serving it makes re-transcribing look like a no-op.
+  const cachedRaw = await cache.get(file_path, engine);
+  const cached =
+    cachedRaw && enable_diarization && !hasSpeakerLabels(cachedRaw) ? null : cachedRaw;
   if (cached) {
     const jobId = uuidv4();
     sessionTranscripts.set(file_path, cached as unknown as ServerTranscript);

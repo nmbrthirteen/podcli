@@ -1,6 +1,6 @@
 import { basename } from "path";
 import { PythonExecutor } from "../services/python-executor.js";
-import { TranscriptCache } from "../services/transcript-cache.js";
+import { TranscriptCache, hasSpeakerLabels } from "../services/transcript-cache.js";
 import { webServerUrl } from "../config/server.js";
 import type { TranscriptResult } from "../models/index.js";
 
@@ -81,8 +81,11 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const enableDiarization = input.enable_diarization !== false;
   const numSpeakers = input.num_speakers;
 
-  // Check cache first
-  const cached = await cache.get(filePath, engine);
+  // Check cache first. A cached transcript without speakers cannot answer a
+  // request for them, so serving it makes re-transcribing look like a no-op.
+  const cachedRaw = await cache.get(filePath, engine);
+  const cached =
+    cachedRaw && enableDiarization && !hasSpeakerLabels(cachedRaw) ? null : cachedRaw;
   if (cached) {
     const packedEngine = cached.engine ?? engine;
     // Backfill packed view if this cache predates auto-packing.

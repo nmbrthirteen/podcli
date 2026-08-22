@@ -80,6 +80,18 @@ class NoSpeakerLabelsTests(unittest.TestCase):
         self.assertEqual(len(_phrase_lines(md)), 1)
 
 
+class ClaimedButUnlabelledTests(unittest.TestCase):
+    """A summary can claim speakers the phrases do not actually carry."""
+
+    def test_warns_when_the_count_is_two_but_every_line_is_unlabelled(self):
+        md = pack_transcript(
+            _transcript(_words("We shipped it in a week and it broke by Friday."), num_speakers=2),
+            "test.mp4",
+        )
+        self.assertIn("No speaker labels", md)
+        self.assertTrue(all(" S? " in ln for ln in _phrase_lines(md)))
+
+
 class WithSpeakerLabelsTests(unittest.TestCase):
     """Diarized transcripts keep speaker splits and gain the sentence split."""
 

@@ -9,6 +9,22 @@ import type { TranscriptResult } from "../models/index.js";
  * Caches transcripts by file hash so we don't re-transcribe
  * the same podcast when creating multiple clips.
  */
+/** Whether a cached transcript actually carries speaker labels.
+ *
+ * The cache is keyed by file hash and engine, not by diarization, so a request
+ * that asks for speaker labels is otherwise answered with the speaker-less
+ * transcript that is already on disk. Re-transcribing then looks like a no-op.
+ */
+export function hasSpeakerLabels(transcript: unknown): boolean {
+  const t = transcript as {
+    speakers?: { num_speakers?: number };
+    speaker_segments?: unknown[];
+  } | null;
+  if (!t) return false;
+  if (Array.isArray(t.speaker_segments) && t.speaker_segments.length > 0) return true;
+  return (t.speakers?.num_speakers ?? 0) > 0;
+}
+
 export class TranscriptCache {
   private cacheDir: string;
 

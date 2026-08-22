@@ -309,6 +309,25 @@ class UseFaceMapSpeakerGuardTests(unittest.TestCase):
         words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": None}]
         self.assertIsNotNone(self._call(fm, words))
 
+    def test_labelled_but_unmapped_speaker_declines(self):
+        # Exactly the state a diarized transcript is in before the face map is
+        # rebuilt: words carry speakers, speaker_mappings is still empty.
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_01"}]
+        self.assertIsNone(self._call(self._face_map(), words))
+
+    def test_partially_mapped_speakers_decline(self):
+        fm = self._face_map(speaker_mappings={"SPEAKER_00": 0})
+        words = [
+            {"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_00"},
+            {"word": "yes", "start": 1.0, "end": 1.4, "speaker": "SPEAKER_01"},
+        ]
+        self.assertIsNone(self._call(fm, words))
+
+    def test_out_of_range_cluster_index_declines(self):
+        fm = self._face_map(speaker_mappings={"SPEAKER_01": 7})
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_01"}]
+        self.assertIsNone(self._call(fm, words))
+
     def test_single_labelled_speaker_uses_their_cluster(self):
         fm = self._face_map(speaker_mappings={"SPEAKER_01": 1})
         words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_01"}]

@@ -126,7 +126,7 @@ KB_FILES = [
 # Bump when the selection rules in _build_prompt change. Folded into the
 # suggestion cache key for the same reason the knowledge base is: replaying old
 # picks under new rules teaches people the rules do nothing.
-PROMPT_VERSION = 3
+PROMPT_VERSION = 4
 
 
 def kb_signature() -> str:
@@ -568,6 +568,13 @@ RULES:
 - Duration target: {bounds.target_min}-{bounds.target_max} seconds, max {bounds.dur_max} seconds
 - Cut tight: start at the hook, end when the point lands
 - Use segments to cut filler if needed
+- If the moment is an ANSWER, start on the QUESTION that prompted it. A question is
+  not preamble. Only leave it out when it rambles past ~8 seconds, and then put it in
+  "context_line" instead.
+- State the PAYOFF: one sentence, second person, on what the viewer walks away with.
+  Write the title from it. Never copy the first sentence of the moment into the title.
+- In "needs", name what the viewer must already know, or "nothing". If it is anything
+  else, move start_second back to cover it or write "context_line".
 
 Return this JSON:
 {{
@@ -582,6 +589,9 @@ Return this JSON:
       "scores": {{"standalone": 4, "hook": 5, "relevance": 4, "quotability": 3}},
       "total_score": 16,
       "quote": "The key quote",
+      "payoff": "What the viewer walks away with, one sentence, second person",
+      "needs": "nothing",
+      "context_line": "",
       "why": "Why this matches what the user asked for"
     }}
   ]

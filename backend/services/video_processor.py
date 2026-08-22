@@ -2103,15 +2103,22 @@ def _use_face_map(
     if transcript_words:
         speakers_in_clip = set(w.get("speaker") for w in transcript_words if w.get("speaker"))
 
-    # No speaker labels at all is not the same as one speaker. With two faces
-    # on screen and nothing saying who is talking, any single cluster is a
+    # No speaker labels at all is not the same as one speaker, and a labelled
+    # speaker with no cluster behind it is just as unusable. With two faces on
+    # screen and nothing that resolves who is talking, any single cluster is a
     # guess, and clusters[0] is a guess by list order. Returning None drops the
     # caller through to per-frame tracking, which at least follows whoever the
     # source is actually showing.
-    if not speakers_in_clip and len(clusters) >= 2:
+    unmapped = {
+        sp for sp in speakers_in_clip
+        if not isinstance(speaker_mappings.get(sp), int)
+        or not 0 <= speaker_mappings[sp] < len(clusters)
+    }
+    if len(clusters) >= 2 and (not speakers_in_clip or unmapped):
         log_event(
             "crop", "face_map_declined",
-            reason="no_speaker_labels", clusters=len(clusters),
+            reason="no_speaker_labels" if not speakers_in_clip else "unmapped_speakers",
+            clusters=len(clusters), unmapped=len(unmapped),
         )
         return None
 

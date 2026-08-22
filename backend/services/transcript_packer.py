@@ -318,10 +318,11 @@ def pack_transcript(
 
     short = _speaker_short_map(speakers_block)
     speaker_segments = transcript.get("speaker_segments", []) or []
-    # With no diarization every line reads "S?", so sentence ends are the only
-    # turn proxy left and the reader has to be told not to infer more.
-    no_speaker_labels = not speaker_segments and not num_speakers
     phrases = _build_phrases(words, short, speaker_segments)
+    # Derived from what was emitted, not from num_speakers: a summary can claim
+    # two speakers while the segments and per-word labels are both missing, and
+    # then every line still reads "S?" with no warning to say so.
+    no_speaker_labels = bool(phrases) and all(p["speaker"] == "S?" for p in phrases)
     gaps = _find_silence_gaps(words, SILENCE_GAP_REPORT_SEC)
 
     lines: list[str] = []
