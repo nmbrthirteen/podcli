@@ -44,6 +44,7 @@ def analyze_faces(
         import cv2
         import numpy as np
         from services.face_detector import create_detector, detect_faces
+        from services.face_track_helpers import seats_from_frames
     except ImportError:
         print("Warning: OpenCV not available, skipping face analysis", file=sys.stderr)
         return None
@@ -74,12 +75,19 @@ def analyze_faces(
     if progress_callback:
         progress_callback(10, f"Scanning {sample_count} frames for faces...")
 
-    # We compare each face's mouth ROI against the SAME face's mouth ROI
-    # from the previous sample. High frame-to-frame difference = the
-    # mouth is moving = this person is speaking. Listeners stay static.
-    # Matching is done by nearest cx — good enough for a split-screen
-    # where faces don't move between samples.
-    prev_mouth_gray: dict[int, "np.ndarray"] = {}
+    # We compare each face's mouth ROI against the same face's mouth ROI one
+    # frame later. High difference = the mouth is moving = this person is
+    # speaking. Listeners stay static.
+    #
+    # The pair has to be adjacent frames. This used to diff against the
+    # previous *sample*, and sample_count is capped at 300, so on a 60-minute
+    # episode the two frames were 12 seconds apart and the difference measured
+    # nothing but the passage of time. Every split-screen episode over about
+    # two and a half minutes was choosing its speaker from noise.
+
+    # Per sampled frame, the x of every face in it. Clustering needs to know
+    # which positions were simultaneous, which a flat observation list cannot say.
+    frame_positions: list[list[int]] = []
 
     def _mouth_roi_gray(frame, cx: int, cy: int, fw: int, fh: int):
         """Return a small downsampled grayscale of the mouth area,
@@ -123,8 +131,19 @@ def analyze_faces(
         pos_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
         t = pos_ms / 1000.0 if pos_ms and pos_ms > 0 else frame_idx / fps
 
+        # The very next frame, decoded but never detected on: the face boxes
+        # from this frame are still accurate one frame later, so the second
+        # decode buys the mouth diff and costs no inference. Skipped when the
+        # sampler is already taking every frame, where borrowing one would
+        # halve the sample count.
+        next_frame = None
+        if step > 1 and cap.grab():
+            frame_idx += 1
+            got_next, candidate = cap.retrieve()
+            if got_next:
+                next_frame = candidate
+
         faces = detect_faces(detector, frame, width, height)
-        current_mouth_gray: dict[int, "np.ndarray"] = {}
 
         frame_faces = 0
         for f in faces:
@@ -132,14 +151,10 @@ def analyze_faces(
             mouth = _mouth_roi_gray(frame, f["cx"], f["cy"], f["fw"], fh)
 
             activity = 0.0
-            if mouth is not None:
-                # Bucket faces by cluster-ish column (left/right half here).
-                # We'll refine to proper clusters after they're built.
-                key = 0 if f["cx"] < width // 2 else 1
-                prev = prev_mouth_gray.get(key)
-                if prev is not None and prev.shape == mouth.shape:
-                    activity = float(np.mean(np.abs(mouth - prev)))
-                current_mouth_gray[key] = mouth
+            if mouth is not None and next_frame is not None:
+                later = _mouth_roi_gray(next_frame, f["cx"], f["cy"], f["fw"], fh)
+                if later is not None and later.shape == mouth.shape:
+                    activity = float(np.mean(np.abs(later - mouth)))
 
             observations.append({
                 "time": round(t, 3),
@@ -151,8 +166,8 @@ def analyze_faces(
             })
             frame_faces += 1
 
-        prev_mouth_gray = current_mouth_gray
         faces_per_frame.append(frame_faces)
+        frame_positions.append([f["cx"] for f in faces])
 
         if progress_callback and sampled % 20 == 0:
             pct = 10 + int(60 * sampled / sample_count)
@@ -167,34 +182,44 @@ def analyze_faces(
     if progress_callback:
         progress_callback(75, "Clustering face positions...")
 
-    # Cluster faces by left/right half split (consistent with _build_speaker_aware_crop)
+    # Cluster faces into seats — the fixed positions a person occupies.
+    #
+    # Two seats mean two people on screen at once, and the only evidence for
+    # that is a frame holding both. Splitting a flat list of positions at the
+    # midline cannot tell two people apart from one person who leaned across
+    # it: three sampled frames on the far side were enough to mint a second
+    # seat. Every speaker mapped to that invented seat then rendered as a hold
+    # on empty wall for the length of their turn.
     target_ratio = 1080 / 1920  # 9:16
     crop_w = int(height * target_ratio)
     positions = np.array([o["face_center_x"] for o in observations])
     mid_x = width // 2
     seam_margin = 20
 
-    left_pos = positions[positions < mid_x]
-    right_pos = positions[positions >= mid_x]
+    seats = seats_from_frames(frame_positions, width)
 
     clusters_list = []
-    if len(left_pos) >= 3:
-        cx = int(np.median(left_pos))
+    if seats:
+        left_seat, right_seat = seats
+        clusters_list.append({
+            "center_x": left_seat,
+            "count": sum(1 for x in positions if x < mid_x),
+            "crop_x": max(0, min(left_seat - crop_w // 2, mid_x - crop_w - seam_margin)),
+        })
+        clusters_list.append({
+            "center_x": right_seat,
+            "count": sum(1 for x in positions if x >= mid_x),
+            "crop_x": max(mid_x + seam_margin, min(right_seat - crop_w // 2, width - crop_w)),
+        })
+    else:
+        # One seat. Not "one speaker" — the guest may be off camera entirely,
+        # and the render should stay on the person it can actually see.
+        cx = int(np.median(positions))
         clusters_list.append({
             "center_x": cx,
-            "count": len(left_pos),
-            "crop_x": max(0, min(cx - crop_w // 2, mid_x - crop_w - seam_margin)),
+            "count": len(positions),
+            "crop_x": max(0, min(cx - crop_w // 2, width - crop_w)),
         })
-    if len(right_pos) >= 3:
-        cx = int(np.median(right_pos))
-        clusters_list.append({
-            "center_x": cx,
-            "count": len(right_pos),
-            "crop_x": max(mid_x + seam_margin, min(cx - crop_w // 2, width - crop_w)),
-        })
-
-    if not clusters_list:
-        return None
 
     clusters_list.sort(key=lambda c: c["center_x"])
 

@@ -354,3 +354,50 @@ class SaneSpeakerMappingsTests(unittest.TestCase):
 
     def test_passes_none_through(self):
         self.assertIsNone(vp._sane_speaker_mappings(None))
+
+
+class MixedLayoutDetectionTests(unittest.TestCase):
+    """A clip that switches between a split screen and a fullscreen shot must
+    be recognised from its own frames.
+
+    The layout used to be read only from the episode-wide face_map, and
+    face_maps cached by a podcli older than the mixed-layout work carry no
+    is_mixed_layout key at all. `.get(..., False)` turned those into "not
+    mixed", which sent the clip down the keyframe path. That path holds one
+    camera position across a layout change, so on a Riverside recording every
+    fullscreen stretch rendered as the wall beside the speaker.
+    """
+
+    def _decide(self, detections, face_map=None):
+        return vp._clip_layout_is_mixed(detections, face_map)
+
+    def _frames(self, n_split, n_single):
+        det = [(i * 0.1, [{"cx": 1181}, {"cx": 2909}]) for i in range(n_split)]
+        det += [((n_split + i) * 0.1, [{"cx": 2050}]) for i in range(n_single)]
+        return det
+
+    def test_riverside_shape_is_mixed_without_any_face_map(self):
+        # The real proportions from the reported episode: 55 split-screen
+        # frames and 28 fullscreen frames in one 41s clip.
+        self.assertTrue(self._decide(self._frames(55, 28)))
+
+    def test_stale_face_map_does_not_override_the_clip(self):
+        stale = {"clusters": [{"center_x": 1006}, {"center_x": 2964}]}  # no key
+        self.assertTrue(self._decide(self._frames(55, 28), stale))
+
+    def test_pure_split_screen_is_not_mixed(self):
+        self.assertFalse(self._decide(self._frames(80, 0)))
+
+    def test_pure_fullscreen_is_not_mixed(self):
+        self.assertFalse(self._decide(self._frames(0, 80)))
+
+    def test_a_few_missed_second_faces_are_not_a_layout(self):
+        # 4 dropped detections in 80 frames is detector noise, not a switch to
+        # a fullscreen shot. Counting them would route almost every clip
+        # through the mixed path.
+        self.assertFalse(self._decide(self._frames(76, 4)))
+
+    def test_face_map_flag_still_wins_when_the_clip_looks_uniform(self):
+        # A clip that sits entirely inside one layout still belongs to a mixed
+        # episode; the episode-wide flag remains a valid hint.
+        self.assertTrue(self._decide(self._frames(80, 0), {"is_mixed_layout": True}))

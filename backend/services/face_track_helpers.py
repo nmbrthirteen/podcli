@@ -173,3 +173,163 @@ def upgrade_speaker_mappings(face_map: dict) -> dict:
     face_map["speaker_mappings"] = {}
     face_map["_mappings_v2"] = True
     return face_map
+
+
+def crop_center_keeping_faces_visible(
+    face_xs: list[float],
+    crop_w: int,
+    video_width: int,
+    margin_ratio: float = 0.15,
+) -> float:
+    """Pick the crop center that leaves the most sampled faces in frame.
+
+    The median of a run of face positions is only the right answer when
+    those positions are unimodal. When a run mixes two layouts — a
+    fullscreen shot at 960 and a split-screen tile at 1440 — the median
+    lands at 1200, which on a 607-wide crop is the wall between them, and
+    the render holds on nothing for the length of the run.
+
+    So score candidate centers by how many faces they actually keep inside
+    the crop, and only fall back to closeness as a tiebreak. On a unimodal
+    run every candidate keeps every face and this returns the median, which
+    is what the caller wanted in the first place.
+    """
+    if not face_xs:
+        return float(video_width) / 2
+
+    from statistics import median
+
+    max_crop_x = max(0, video_width - crop_w)
+    margin = crop_w * margin_ratio
+
+    def _center_of(candidate: float) -> float:
+        crop_x = min(max(candidate - crop_w / 2.0, 0.0), float(max_crop_x))
+        return crop_x + crop_w / 2.0
+
+    def _score(candidate: float) -> tuple[int, float]:
+        center = _center_of(candidate)
+        low = center - crop_w / 2.0 + margin
+        high = center + crop_w / 2.0 - margin
+        inside = [x for x in face_xs if low <= x <= high]
+        if not inside:
+            return 0, -float("inf")
+        spread = sum(abs(x - center) for x in inside) / len(inside)
+        return len(inside), -spread
+
+    candidates = list(face_xs) + [float(median(face_xs))]
+    best = max(candidates, key=_score)
+    return _center_of(best)
+
+
+def seats_from_frames(
+    frame_positions: list[list[float]],
+    video_width: int,
+    min_paired_frames: int = 3,
+    min_separation_ratio: float = 0.20,
+    min_paired_share: float = 0.10,
+) -> tuple[int, int] | None:
+    """Find the two fixed positions people occupy, or None if there is one.
+
+    Takes the x of every face in every sampled frame, grouped by frame. Two
+    seats are only real if some frame held two faces at once and they sat far
+    enough apart to be two people rather than two heads sharing one camera.
+
+    Counting a flat list of positions either side of the midline cannot make
+    that distinction, and mistaking one person for two is expensive: the
+    invented seat is empty wall, and every speaker mapped to it renders as a
+    hold on nothing.
+    """
+    from statistics import median
+
+    paired = [sorted(xs) for xs in frame_positions if len(xs) >= 2]
+    with_faces = sum(1 for xs in frame_positions if xs)
+    # A share as well as a count, so a handful of false positives — a face in a
+    # photo on the shelf behind someone — cannot seat a second person.
+    if len(paired) < max(min_paired_frames, with_faces * min_paired_share):
+        return None
+
+    left = int(median([xs[0] for xs in paired]))
+    right = int(median([xs[-1] for xs in paired]))
+    if (right - left) <= video_width * min_separation_ratio:
+        return None
+    return left, right
+
+
+def clip_layout_is_mixed(
+    detections: list,
+    face_map: dict | None = None,
+    min_share: float = 0.15,
+    min_frames: int = 3,
+) -> bool:
+    """Does this clip switch between a split screen and a fullscreen shot?
+
+    Judged on the clip's own frames first. The layout used to be read only
+    from the episode-wide face_map, and a face_map cached by a podcli older
+    than the mixed-layout work carries no is_mixed_layout key at all, so the
+    default turned those into "not mixed". That sent Riverside recordings down
+    a path that holds one camera position across a layout change, and every
+    fullscreen stretch rendered as the wall beside the speaker.
+
+    Both layouts must hold a real share of the frames. A count alone would
+    call a few frames with a missed second face a layout change and route
+    almost every clip through the mixed path.
+    """
+    split_frames = sum(1 for _, faces in detections if len(faces) >= 2)
+    single_frames = sum(1 for _, faces in detections if len(faces) == 1)
+    layout_frames = split_frames + single_frames
+
+    if layout_frames and (
+        split_frames >= max(min_frames, layout_frames * min_share)
+        and single_frames >= max(min_frames, layout_frames * min_share)
+    ):
+        return True
+
+    # A clip sitting entirely inside one layout still belongs to a mixed
+    # episode, so the episode-wide flag stays a valid hint.
+    return bool(face_map and face_map.get("is_mixed_layout", False))
+
+
+def followed_face_cx_at(
+    t_target: float,
+    tracked_detections: list,
+    segment_tracks: list,
+    fallback_track_id: int | None = None,
+    window: float = 1.5,
+) -> float | None:
+    """Where the speaker the camera is following actually is at a given time.
+
+    Used to check a planned crop still holds its subject. It has to ask about
+    the followed track, not the biggest face in the frame: on a split screen
+    the biggest face is whoever sits closest to their own camera, and on the
+    recording this was written for one speaker measures 845px across against
+    the other's 518. Taking the larger one made every correct crop onto the
+    quieter side look like a crop onto nobody, so each keyframe was pulled
+    back to the same person and the camera stopped switching.
+
+    Falls back to the most prominent face only when the followed speaker is
+    not on screen anywhere near this moment, where any face beats none.
+    """
+    track_id = None
+    for start_t, end_t, _speaker, tid, *_rest in segment_tracks:
+        if start_t <= t_target <= end_t:
+            track_id = tid
+            break
+    if track_id is None:
+        track_id = fallback_track_id
+
+    best_cx = best_dt = None
+    fallback_cx, fallback_dt = None, None
+    for t, faces in tracked_detections:
+        dt = abs(t - t_target)
+        if dt > window or not faces:
+            continue
+        if fallback_dt is None or dt < fallback_dt:
+            fallback_cx = float(max(faces, key=lambda f: f["fw"])["cx"])
+            fallback_dt = dt
+        if track_id is None:
+            continue
+        face = next((f for f in faces if f["track_id"] == track_id), None)
+        if face is not None and (best_dt is None or dt < best_dt):
+            best_cx, best_dt = float(face["cx"]), dt
+
+    return best_cx if best_cx is not None else fallback_cx
