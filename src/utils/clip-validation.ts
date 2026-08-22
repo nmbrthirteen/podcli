@@ -155,21 +155,23 @@ export function validateSuggestionContext(s: SuggestionContext): string | null {
     return 'standalone is required: what the viewer must already know to follow this clip, or "nothing".';
   }
 
-  const contextLine =
-    typeof s.context_line === "string" ? s.context_line.trim() : "";
-
-  if (!isSelfContained(standalone) && !contextLine) {
+  // context_line is not consulted here on purpose. Nothing burns it into the
+  // video yet, so treating it as coverage would pass clips whose viewer still
+  // has no setup, which is the exact failure these checks exist to catch. It
+  // stays on the suggestion as editor metadata until the renderer draws it.
+  if (!isSelfContained(standalone)) {
     return (
-      `standalone says the viewer needs to know "${standalone}", but context_line is empty. ` +
-      "Either move start_second back to include that setup on camera, or put it in context_line as one line."
+      `standalone says the viewer needs to know "${standalone}". Move start_second back ` +
+      "so the clip itself contains that setup on camera. A context_line does not cover it: " +
+      "nothing renders it yet."
     );
   }
 
   const orphan = findOrphanOpener(s.preview_text);
-  if (orphan && !contextLine) {
+  if (orphan) {
     return (
       `preview_text opens on "${orphan}", which points at something said before the cut. ` +
-      "Either move start_second back to include the question, or set context_line to that setup in one line."
+      "Move start_second back so the question is inside the clip."
     );
   }
 

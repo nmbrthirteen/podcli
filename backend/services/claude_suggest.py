@@ -126,7 +126,7 @@ KB_FILES = [
 # Bump when the selection rules in _build_prompt change. Folded into the
 # suggestion cache key for the same reason the knowledge base is: replaying old
 # picks under new rules teaches people the rules do nothing.
-PROMPT_VERSION = 4
+PROMPT_VERSION = 5
 
 
 def kb_signature() -> str:
@@ -322,7 +322,7 @@ CUTTING RULES (CRITICAL):
 - Start at the exact moment the hook hits — no preamble, no "so", no "well"
 - ONE EXCEPTION: if the moment is an ANSWER, start on the QUESTION that prompted it.
   A question is not preamble, it is the setup the viewer needs. Only leave it out when
-  it rambles past ~8 seconds, and then put it in "context_line" instead.
+  it rambles past ~8 seconds, and then cut the rambling with "segments" or skip the moment.
 - End the MOMENT the point lands with a complete thought — don't trail off
 - NEVER cut mid-sentence or mid-thought. The viewer must feel closure.
 - The last sentence must feel like a natural ending, a punchline, or a mic-drop
@@ -334,7 +334,7 @@ MOMENT SELECTION ({b.lens}):
 - First 3 seconds must HOOK — a bold claim, shocking number, or provocative question
 - Must make complete sense standalone — no "as I mentioned" or "going back to"
 - Must not OPEN on a word pointing back before the cut: "that", "it", "they", "yeah",
-  "so", "exactly", "right", "which is why". Widen the start or write a "context_line".
+  "so", "exactly", "right", "which is why". Widen the start until it is inside the clip.
 - Must end on a COMPLETE THOUGHT — sentence boundary, natural pause, or mic-drop moment
 - Single focused idea — one concept, fully delivered, no loose threads
 - Prioritize: controversial takes, surprising numbers, founder war stories, "wait what?" moments, emotional peaks
@@ -355,8 +355,9 @@ CONTEXT RULES (CRITICAL):
 - The title must be a complete thought that reads on its own, under 60 characters.
 - In "needs", name what the viewer must already know. Write "nothing" when the clip
   carries its own setup.
-- If "needs" is anything other than "nothing", either move start_second back to cover it
-  on camera, or write "context_line": that setup rewritten to one line for on-screen text.
+- If "needs" is anything other than "nothing", move start_second back until the clip
+  covers it on camera. "context_line" is a note for the editor, not a fix: nothing burns
+  it into the video, so a clip that leans on it still ships with no setup.
 
 Score each moment on 4 dimensions (1-5 each):
 - standalone: Makes sense without episode context?
@@ -569,12 +570,12 @@ RULES:
 - Cut tight: start at the hook, end when the point lands
 - Use segments to cut filler if needed
 - If the moment is an ANSWER, start on the QUESTION that prompted it. A question is
-  not preamble. Only leave it out when it rambles past ~8 seconds, and then put it in
-  "context_line" instead.
+  not preamble. If it rambles past ~8 seconds, cut the rambling with "segments".
 - State the PAYOFF: one sentence, second person, on what the viewer walks away with.
   Write the title from it. Never copy the first sentence of the moment into the title.
 - In "needs", name what the viewer must already know, or "nothing". If it is anything
-  else, move start_second back to cover it or write "context_line".
+  else, move start_second back until the clip covers it. "context_line" is a note for
+  the editor, not a fix: nothing burns it into the video.
 
 Return this JSON:
 {{

@@ -1777,6 +1777,7 @@ const onKeyActivate = (fn) => (e) => {
               payoff: c.payoff || '',
               standalone: c.standalone || '',
               context_line: c.context_line || '',
+              preview_text: c.preview_text || '',
               segments: c.segments,
               duration: c.duration ?? Math.round((c.end_second || 0) - (c.start_second || 0)),
             }));

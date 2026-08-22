@@ -110,20 +110,32 @@ describe("validateSuggestionContext", () => {
     );
   });
 
-  it("demands a context_line when the viewer needs prior knowledge", () => {
+  it("rejects a clip whose viewer needs prior knowledge", () => {
     const needsSetup = { ...good, standalone: "that the company had just been acquired" };
-    expect(validateSuggestionContext(needsSetup)).toMatch(/context_line is empty/);
-    expect(
-      validateSuggestionContext({ ...needsSetup, context_line: "Right after the acquisition:" }),
-    ).toBeNull();
+    expect(validateSuggestionContext(needsSetup)).toMatch(/Move start_second back/);
   });
 
   it("catches an orphaned answer even when standalone claims nothing", () => {
     const orphan = { ...good, preview_text: "Yeah, and that's exactly why we shut it down." };
     expect(validateSuggestionContext(orphan)).toMatch(/points at something said before the cut/);
-    expect(
-      validateSuggestionContext({ ...orphan, context_line: "Why did you kill the product?" }),
-    ).toBeNull();
+  });
+
+  it("does not let a context_line stand in for setup nothing renders", () => {
+    // The renderer does not draw context_line, so accepting it here would pass
+    // a clip whose viewer still has no idea what the question was.
+    const needsSetup = {
+      ...good,
+      standalone: "that the company had just been acquired",
+      context_line: "Right after the acquisition:",
+    };
+    expect(validateSuggestionContext(needsSetup)).toMatch(/nothing renders it yet/);
+
+    const orphan = {
+      ...good,
+      preview_text: "Yeah, and that's exactly why we shut it down.",
+      context_line: "Why did you kill the product?",
+    };
+    expect(validateSuggestionContext(orphan)).toMatch(/Move start_second back/);
   });
 
   it("accepts a payoff in a language that does not use the Latin alphabet", () => {

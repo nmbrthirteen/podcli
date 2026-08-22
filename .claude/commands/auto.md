@@ -83,8 +83,9 @@ Work inside one topic at a time. Set boundaries by meaning, not by the clock.
 
 - Land on the first sentence of the core statement. Drop the throat-clearing in front of it.
 - If the moment is an answer, move the start back to include the question. Otherwise the clip opens on a reply to nothing and the viewer bounces.
-- When that question rambles past roughly 8 seconds, leave it out and write `context_line` instead: the question rewritten to one line for on-screen text.
-- Never open on a word pointing back before the cut: "that", "it", "they", "yeah", "so", "exactly", "right", "which is why". Either widen the start or supply `context_line`.
+- The question has to be inside the clip. `context_line` is a note for the editor, not a fix: nothing burns it into the video yet, so a clip that relies on it still ships with no setup.
+- If the question rambles past roughly 8 seconds, use `segments` to keep the asked part and cut the rambling, or drop the moment.
+- Never open on a word pointing back before the cut: "that", "it", "they", "yeah", "so", "exactly", "right", "which is why". Widen the start until the reference is inside the clip.
 
 **end_second**
 
@@ -106,7 +107,7 @@ Work inside one topic at a time. Set boundaries by meaning, not by the clock.
 | Business / strategy | A number, a trade-off, or a decision with a cost | The advice would fit any company in any year |
 | Hot take | A claim a reasonable person would argue with, plus the reason | It is only a strong tone with no claim under it |
 
-**Run the standalone check.** Name what the viewer must already know. If that is anything other than "nothing", it goes into `context_line` or the start moves back to cover it. If neither works, drop the moment.
+**Run the standalone check.** Name what the viewer must already know. If that is anything other than "nothing", the start moves back until the clip covers it. If it cannot, drop the moment.
 
 ### Phase 4 — Strategy Proposal (GATE)
 

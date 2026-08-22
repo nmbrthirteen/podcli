@@ -45,9 +45,9 @@ const suggestionSchema = z.object({
     .string()
     .optional()
     .describe(
-      "The question or setup that makes the clip land, rewritten to one line " +
-        "for on-screen text. Required whenever standalone is not \"nothing\", " +
-        "or the clip opens on a word pointing back before the cut.",
+      "The question or setup that makes the clip land, in one line, for an editor " +
+        "to place. Nothing renders it yet, so it does NOT satisfy the standalone " +
+        "check: the clip range itself must still contain the setup.",
     ),
   reasoning: z
     .string()
@@ -91,8 +91,8 @@ export const suggestClipsToolDef = {
     "Before calling this: read the transcript via get_ui_state(include_transcript: true) " +
     "and identify the best viral moments.\n\n" +
     "Every suggestion must carry its own context. A clip that opens on an answer " +
-    "whose question stayed behind the cut is rejected. Either widen start_second " +
-    "to include the question, or supply context_line.\n\n" +
+    "whose question stayed behind the cut is rejected: widen start_second so the " +
+    "question is inside the clip.\n\n" +
     "What it does: Stores your suggestions, assigns clip numbers (#1, #2, etc.), " +
     "and pushes them to the Web UI for the user to review.\n\n" +
     "After this: the user reviews in the UI. Then export with " +
@@ -111,10 +111,13 @@ export async function handleSuggestClips(input: SuggestClipsInput): Promise<stri
   const problems: string[] = [];
   for (let i = 0; i < suggestions.length; i++) {
     const s = suggestions[i];
-    const error =
-      validateSuggestionRange(s.start_second, s.end_second) ||
-      validateSuggestionContext(s);
-    if (error) problems.push(`Suggestion ${i + 1} ("${s.title}"): ${error}`);
+    const errors = [
+      validateSuggestionRange(s.start_second, s.end_second),
+      validateSuggestionContext(s),
+    ].filter((e): e is string => e !== null);
+    for (const error of errors) {
+      problems.push(`Suggestion ${i + 1} ("${s.title}"): ${error}`);
+    }
   }
   if (problems.length > 0) {
     throw new Error(

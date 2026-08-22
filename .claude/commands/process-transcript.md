@@ -81,7 +81,7 @@ Before scoring, fix each flagged moment's edges and state its payoff.
 
 - Open on the first sentence of the core statement. Drop the throat-clearing in front of it.
 - If the moment is an answer, pull the start back to include the question. A clip that opens on a reply to nothing loses the viewer in two seconds.
-- When that question rambles past roughly 8 seconds, leave it out and write a **setup line** instead: the question rewritten to one line for on-screen text.
+- The question has to be inside the clip. A setup line is a note for the editor, not a fix: nothing renders it into the video yet. If the question rambles past roughly 8 seconds, cut the rambling out of the middle or drop the moment.
 - Never open on a word pointing back before the cut: "that", "it", "they", "yeah", "so", "exactly", "right", "which is why".
 
 **End**
@@ -94,7 +94,7 @@ Before scoring, fix each flagged moment's edges and state its payoff.
 
 **Then write the payoff, before any title.** One sentence, second person, on what the viewer walks away with. The title is derived from the payoff, never from transcript wording. A moment with no payoff you can state in one sentence is not a short. Drop it.
 
-**Then run the standalone check.** Name what the viewer must already know. If it is anything other than nothing, it goes into the setup line or the start moves back to cover it. If neither works, drop the moment.
+**Then run the standalone check.** Name what the viewer must already know. If it is anything other than nothing, the start moves back until the clip covers it. If it cannot, drop the moment.
 
 ### Phase 4: Score Each Moment
 
@@ -209,7 +209,7 @@ Format: comma-separated, under 500 characters.
 For every moment included:
 - [ ] Makes sense without the full episode
 - [ ] Payoff states what the viewer gets, and is not a restatement of the title
-- [ ] Does not open on a word pointing back before the cut, or a setup line covers it
+- [ ] Does not open on a word pointing back before the cut
 - [ ] Has a clear start and satisfying end
 - [ ] Hook lands in first 3 seconds
 - [ ] Single focused idea, fully delivered
