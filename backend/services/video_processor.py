@@ -41,6 +41,9 @@ from services.motion_filters import (
 from services.face_track_helpers import (
     choose_camera_speaker as _choose_camera_speaker,
     clamp_away_from_dead_zone as _clamp_away_from_dead_zone,
+    clip_layout_is_mixed as _clip_layout_is_mixed,
+    crop_center_keeping_faces_visible as _crop_center_keeping_faces_visible,
+    followed_face_cx_at as _followed_face_cx_at,
     safe_default_center as _safe_default_center,
     update_tripod_camera as _update_tripod_camera,
     upgrade_speaker_mappings as _upgrade_speaker_mappings,
@@ -809,6 +812,35 @@ def _choose_track_segment_targets(
 
         return trimmed
 
+    def _anchored_center_with_a_face(
+        anchor_x: float, start_t: float, end_t: float,
+    ) -> float:
+        """Keep the anchor if a detected face sits inside the crop it implies,
+        otherwise return a center that holds the faces this clip really has.
+
+        Searches the segment first, then widens to the whole clip, because a
+        speaker turn with no detections at all still has to point somewhere,
+        and anywhere a face was seen beats a position from another render.
+        """
+        in_segment = [
+            float(face["cx"])
+            for t, faces in tracked_detections
+            if start_t <= t <= end_t
+            for face in faces
+        ]
+        nearby = in_segment or [
+            float(face["cx"]) for _t, faces in tracked_detections for face in faces
+        ]
+        if not nearby:
+            return anchor_x
+
+        anchor_crop_x = _crop_x_for_center(anchor_x)
+        low = anchor_crop_x + crop_w * 0.15
+        high = anchor_crop_x + crop_w * 0.85
+        if any(low <= cx <= high for cx in nearby):
+            return anchor_x
+        return _crop_center_keeping_faces_visible(nearby, crop_w, width)
+
     local_confirmation_seen = set()
     max_anchor_only_segment = 2.5
     is_first_segment = True
@@ -862,7 +894,15 @@ def _choose_track_segment_targets(
             )
             and (is_first_segment or (end_t - start_t) <= max_anchor_only_segment)
         ):
-            center_x = float(speaker_anchor_x[speaker])
+            # The anchor is an episode-wide position, and nothing so far has
+            # checked that anybody is standing on it in this clip. Holding an
+            # unchecked anchor is how a turn renders as seconds of empty wall:
+            # the first segment used to take one at any length. Only keep it
+            # when a face the clip actually saw lands inside the crop it asks
+            # for; otherwise go where the faces are.
+            center_x = _anchored_center_with_a_face(
+                float(speaker_anchor_x[speaker]), start_t, end_t,
+            )
             segment_targets.append((start_t, end_t, _crop_x_for_center(center_x), speaker))
             is_first_segment = False
         else:
@@ -1352,7 +1392,7 @@ def _track_and_crop(
     # pipeline assumes stable face positions within a turn, which
     # breaks on every layout transition. For mixed layouts, use
     # simple per-frame largest-face following instead.
-    is_mixed = face_map.get("is_mixed_layout", False) if face_map else False
+    is_mixed = _clip_layout_is_mixed(detections, face_map)
     if is_mixed:
         # Build a time→speaker lookup from segments
         def _speaker_at(t_sec: float) -> str | None:
@@ -1396,21 +1436,35 @@ def _track_and_crop(
 
         if face_points:
             jump_thresh = max(180.0, crop_w * 0.35)
-            runs = []  # [(start_t, end_t, median_cx), ...]
-            run_start = face_points[0][0]
+            # A run's camera position must keep that run's faces in frame. The
+            # median only does when the run is unimodal, and a run that spans a
+            # layout change is not: the median of a fullscreen shot and a
+            # split-screen tile is the wall between them.
+            def _run_center(cxs: list[float]) -> float:
+                return _crop_center_keeping_faces_visible(cxs, crop_w, width)
+
+            runs = []  # [(start_t, end_t, center_cx), ...]
+            # From 0, not from the first detection. Runs bound the segments
+            # this path cuts and cross-dissolves back together, so a first run
+            # that starts late and a last run that ends early drop that video
+            # from the render: the clip came out short and lost its last word.
+            run_start = 0.0
             run_cxs = [face_points[0][1]]
 
             for i in range(1, len(face_points)):
                 t, cx = face_points[i]
                 run_median = float(median(run_cxs))
                 if abs(cx - run_median) > jump_thresh:
-                    # Layout changed — close current run, start new one
-                    runs.append((run_start, face_points[i-1][0], float(median(run_cxs))))
+                    # Layout changed — close current run, start new one.
+                    # Close it where the next one opens, not at the previous
+                    # sample: the sampler runs at about 12 Hz, so ending a run
+                    # one sample early threw away 80ms of video at every cut.
+                    runs.append((run_start, t, _run_center(run_cxs)))
                     run_start = t
                     run_cxs = [cx]
                 else:
                     run_cxs.append(cx)
-            runs.append((run_start, face_points[-1][0], float(median(run_cxs))))
+            runs.append((run_start, duration, _run_center(run_cxs)))
 
             # Merge very short runs (<0.8s) into their neighbors
             if len(runs) > 1:
@@ -1438,10 +1492,16 @@ def _track_and_crop(
 
             # Multiple layouts — crop each segment separately, join
             # with cross-dissolve so transitions feel editorial.
-            import tempfile
             work_dir = os.path.dirname(output_path) or "."
             xfade_dur = 0.18  # Short dissolve
             part_paths = []
+            cut_paths = []
+            # (path, measured duration, padding it carries). Offsets are built
+            # from what ffmpeg actually wrote, not from what was asked for: a
+            # skipped short run or a seek landing a few frames off used to
+            # shift every later transition, and the drift showed up as a clip
+            # whose video ran shorter than its own audio.
+            part_specs = []
 
             try:
                 for ri, (r_start, r_end, r_cx) in enumerate(runs):
@@ -1460,8 +1520,8 @@ def _track_and_crop(
                         "-ss", str(seg_start), "-t", str(seg_end - seg_start),
                         "-i", input_path,
                         "-vf", seg_vf,
+                        "-an",
                         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-                        "-c:a", "aac", "-b:a", "192k",
                         "-avoid_negative_ts", "make_zero",
                         part_path,
                     ]
@@ -1469,88 +1529,129 @@ def _track_and_crop(
                     if r.returncode != 0:
                         continue
                     part_paths.append(part_path)
+                    measured = _get_media_duration_seconds(part_path) or (seg_end - seg_start)
+                    part_specs.append((part_path, measured, pad))
+
+                # The last part carries no padding whichever run it came from,
+                # so a dropped final run does not leave a dangling overlap.
+                if part_specs:
+                    last_path, last_len, _ = part_specs[-1]
+                    part_specs[-1] = (last_path, last_len, 0.0)
 
                 if len(part_paths) < 2:
-                    # Fallback to static crop of longest run
-                    best_run = max(runs, key=lambda r: r[1] - r[0])
-                    crop_x = _crop_for(best_run[2])
-                    vf = f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={target_w}:{target_h}"
-                    return _run_ffmpeg_with_fallback(
-                        cmd_parts_before_enc=["ffmpeg", "-y", "-i", input_path, "-vf", vf],
-                        cmd_parts_after_enc=["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-movflags", "+faststart"],
-                        output_path=output_path, label="crop_mixed_fallback",
-                    )
-
-                # Chain xfade filters between all segments
-                if len(part_paths) == 2:
-                    # Simple 2-segment xfade
-                    offset = max(0.01, (runs[0][1] - runs[0][0]) - xfade_dur)
-                    cmd = [
-                        "ffmpeg", "-y",
-                        "-i", part_paths[0], "-i", part_paths[1],
-                        "-filter_complex",
-                        f"[0:v][1:v]xfade=transition=fade:duration={xfade_dur}:offset={offset:.3f}[v];"
-                        f"[0:a][1:a]acrossfade=d={xfade_dur}[a]",
-                        "-map", "[v]", "-map", "[a]",
-                        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-                        "-c:a", "aac", "-b:a", "192k",
-                        "-movflags", "+faststart",
-                        output_path,
-                    ]
-                    r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
-                    if r.returncode == 0:
-                        return output_path
+                    log_event("crop", "fallback", reason="mixed_too_few_parts",
+                              parts=len(part_paths), to="hard-cuts")
                 else:
-                    # 3+ segments: chain xfades
+                    # Where each part's own content begins in the output: the
+                    # running total of the parts before it, each counted without
+                    # the padding that only exists to give the dissolve
+                    # somewhere to happen. Counting the padding, or subtracting
+                    # the dissolve a second time, is what made the video end
+                    # early and drift against its own audio.
+                    offsets = []
+                    running = 0.0
+                    for _path, part_len, part_pad in part_specs[:-1]:
+                        running += max(0.01, part_len - part_pad)
+                        offsets.append(running)
+
+                    # Dissolve the picture, and take the sound straight from the
+                    # source. Cross-fading each part's re-encoded audio slurred
+                    # about a quarter of a second of speech across the joins for
+                    # no benefit: both sides of every dissolve are the same
+                    # moment of the same recording.
                     inputs = []
-                    for p in part_paths:
-                        inputs.extend(["-i", p])
+                    for path in part_paths:
+                        inputs.extend(["-i", path])
+                    inputs.extend(["-i", input_path])
+                    source_index = len(part_paths)
 
-                    # Build filter chain: xfade each pair
                     filter_parts = []
-                    audio_parts = []
                     prev_label = "[0:v]"
-                    prev_audio = "[0:a]"
-                    cumulative_offset = 0.0
-
                     for i in range(1, len(part_paths)):
-                        seg_dur = runs[i-1][1] - runs[i-1][0]
-                        cumulative_offset += max(0.01, seg_dur - xfade_dur)
                         out_label = f"[v{i}]" if i < len(part_paths) - 1 else "[v]"
-                        out_audio = f"[a{i}]" if i < len(part_paths) - 1 else "[a]"
                         filter_parts.append(
-                            f"{prev_label}[{i}:v]xfade=transition=fade:duration={xfade_dur}:offset={cumulative_offset:.3f}{out_label}"
-                        )
-                        audio_parts.append(
-                            f"{prev_audio}[{i}:a]acrossfade=d={xfade_dur}{out_audio}"
+                            f"{prev_label}[{i}:v]xfade=transition=fade"
+                            f":duration={xfade_dur}:offset={offsets[i-1]:.3f}{out_label}"
                         )
                         prev_label = out_label
-                        prev_audio = out_audio
 
-                    filter_complex = ";".join(filter_parts + audio_parts)
                     cmd = ["ffmpeg", "-y"] + inputs + [
-                        "-filter_complex", filter_complex,
-                        "-map", "[v]", "-map", "[a]",
+                        "-filter_complex", ";".join(filter_parts),
+                        "-map", "[v]",
+                    ]
+                    if _has_audio_stream(input_path):
+                        cmd += ["-map", f"{source_index}:a", "-c:a", "aac", "-b:a", "192k"]
+                    cmd += [
                         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-                        "-c:a", "aac", "-b:a", "192k",
                         "-movflags", "+faststart",
+                        "-shortest",
                         output_path,
                     ]
                     r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
                     if r.returncode == 0:
                         return output_path
 
-                # If xfade failed, fall back to static
+                    log_event("crop", "fallback", reason="mixed_xfade_failed",
+                              parts=len(part_paths), to="hard-cuts")
+                # The dissolve is the only thing that failed, so drop the
+                # dissolve and keep the framing: one cut per run, joined end to
+                # end. This used to fall back to a static crop of the longest
+                # run, which is right for that run and wrong for every other
+                # layout in the clip — on a recording that cuts to a fullscreen
+                # shot, a hold on the wall for a third of its length.
+                for ri, (r_start, r_end, r_cx) in enumerate(runs):
+                    seg_start = max(0.0, r_start)
+                    seg_end = min(duration, r_end)
+                    if seg_end - seg_start < 0.05:
+                        continue
+                    cut_path = os.path.join(work_dir, f"_mixed_cut_{ri}.mp4")
+                    cut_cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", str(seg_start), "-t", str(seg_end - seg_start),
+                        "-i", input_path,
+                        "-vf", (f"crop={crop_w}:{crop_h}:{_crop_for(r_cx)}:{crop_y},"
+                                f"scale={target_w}:{target_h}"),
+                        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                        "-avoid_negative_ts", "make_zero",
+                        cut_path,
+                    ]
+                    if proc_run(cut_cmd, timeout=_FFMPEG_TIMEOUT, check=False).returncode == 0:
+                        cut_paths.append(cut_path)
+
+                if len(cut_paths) >= 2:
+                    list_path = os.path.join(work_dir, "_mixed_cuts.txt")
+                    with open(list_path, "w", encoding="utf-8") as fh:
+                        for cut in cut_paths:
+                            fh.write(f"file '{os.path.abspath(cut)}'\n")
+                    concat_cmd = [
+                        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                        "-i", list_path, "-c", "copy",
+                        "-movflags", "+faststart", output_path,
+                    ]
+                    concat_ok = proc_run(
+                        concat_cmd, timeout=_FFMPEG_TIMEOUT, check=False,
+                    ).returncode == 0
+                    if os.path.exists(list_path):
+                        os.remove(list_path)
+                    if concat_ok:
+                        log_event("crop", "chose=mixed-hard-cuts", runs=len(cut_paths))
+                        return output_path
+
+                # Every joining strategy failed. Hold the run that keeps the
+                # most faces in frame rather than the longest one.
                 best_run = max(runs, key=lambda r: r[1] - r[0])
                 crop_x = _crop_for(best_run[2])
                 vf = f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={target_w}:{target_h}"
+                log_event("crop", "fallback", reason="mixed_join_failed", to="static")
                 return _run_ffmpeg_with_fallback(
                     cmd_parts_before_enc=["ffmpeg", "-y", "-i", input_path, "-vf", vf],
-                    cmd_parts_after_enc=["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-movflags", "+faststart"],
-                    output_path=output_path, label="crop_mixed_xfade_fallback",
+                    cmd_parts_after_enc=["-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                                         "-movflags", "+faststart"],
+                    output_path=output_path, label="crop_mixed_static_last_resort",
                 )
             finally:
-                for p in part_paths:
+                for p in part_paths + cut_paths:
                     if os.path.exists(p):
                         os.remove(p)
 
@@ -1688,21 +1789,14 @@ def _track_and_crop(
     if keyframes_x and len(keyframes_x) >= 2:
         max_crop_x = max(0, width - crop_w)
 
-        # Build a time→nearest-face-cx lookup from detections
-        def _nearest_face_cx(t_target: float, window: float = 1.5) -> float | None:
-            best_cx, best_dt = None, window + 1
-            for t, faces in detections:
-                dt = abs(t - t_target)
-                if dt > window or not faces:
-                    continue
-                if dt < best_dt:
-                    best_cx = float(max(faces, key=lambda f: f["fw"])["cx"])
-                    best_dt = dt
-            return best_cx
+        def _face_cx_for(kf_t: float) -> float | None:
+            return _followed_face_cx_at(
+                kf_t, tracked_detections, segment_tracks, fallback_track_id,
+            )
 
         validated = []
         for kf_t, kf_x in keyframes_x:
-            face_cx = _nearest_face_cx(kf_t)
+            face_cx = _face_cx_for(kf_t)
             if face_cx is not None:
                 # Check if face is inside the crop window
                 crop_left = kf_x

@@ -298,6 +298,75 @@ class UpgradeSpeakerMappingsTests(unittest.TestCase):
         self.assertEqual(original["speaker_mappings"], {"A": 0})
 
 
+class CropCenterKeepingFacesVisibleTests(unittest.TestCase):
+    CROP_W = 607   # 9:16 out of a 1920x1080 source
+    WIDTH = 1920
+
+    def _center(self, xs):
+        return fth.crop_center_keeping_faces_visible(xs, self.CROP_W, self.WIDTH)
+
+    def test_unimodal_run_lands_on_the_group(self):
+        xs = [940, 950, 960, 970, 980]
+        center = self._center(xs)
+        self.assertLess(abs(center - 960), 30)
+
+    def test_bimodal_run_picks_the_bigger_side_not_the_gap(self):
+        # A run that spans a layout change: four samples fullscreen at 960,
+        # two on a split-screen tile at 1500. The median is 1230, which on a
+        # 607-wide crop holds on the wall between them and shows no one.
+        xs = [960, 955, 965, 950, 1500, 1505]
+        center = self._center(xs)
+        self.assertGreaterEqual(
+            sum(1 for x in xs if abs(x - center) < self.CROP_W / 2), 4
+        )
+        self.assertLess(abs(center - 960), 60)
+
+    def test_never_returns_a_center_with_nobody_in_frame(self):
+        # The exact shape that rendered as a hold on empty wall: two tiles far
+        # apart, nothing between them.
+        xs = [480, 470, 490, 1440, 1450, 1430]
+        center = self._center(xs)
+        self.assertTrue(any(abs(x - center) < self.CROP_W / 2 for x in xs))
+
+    def test_clamps_into_the_frame(self):
+        center = self._center([20, 25, 30])
+        self.assertGreaterEqual(center - self.CROP_W / 2, 0)
+
+    def test_no_faces_falls_back_to_center(self):
+        self.assertEqual(self._center([]), self.WIDTH / 2)
+
+
+class SeatsFromFramesTests(unittest.TestCase):
+    WIDTH = 1920
+
+    def test_two_tiles_are_two_seats(self):
+        frames = [[480, 1440]] * 20
+        self.assertEqual(fth.seats_from_frames(frames, self.WIDTH), (480, 1440))
+
+    def test_one_person_wandering_across_the_midline_is_one_seat(self):
+        # The bug this replaced: 40 solo frames, some left of centre and some
+        # right of it, were counted as two people and rendered as a cut
+        # between a face and a wall.
+        frames = [[900]] * 20 + [[1020]] * 20
+        self.assertIsNone(fth.seats_from_frames(frames, self.WIDTH))
+
+    def test_two_heads_sharing_one_camera_are_one_seat(self):
+        frames = [[900, 1050]] * 20
+        self.assertIsNone(fth.seats_from_frames(frames, self.WIDTH))
+
+    def test_a_few_false_positives_cannot_seat_a_second_person(self):
+        frames = [[960]] * 100 + [[300, 1600]] * 3
+        self.assertIsNone(fth.seats_from_frames(frames, self.WIDTH))
+
+    def test_mixed_layout_still_finds_both_seats(self):
+        # Riverside-style: sometimes both tiles, sometimes one fullscreen.
+        frames = ([[480, 1440]] * 15) + ([[960]] * 25)
+        self.assertEqual(fth.seats_from_frames(frames, self.WIDTH), (480, 1440))
+
+    def test_no_frame_ever_held_two_faces(self):
+        self.assertIsNone(fth.seats_from_frames([[960]] * 50, self.WIDTH))
+
+
 class ReExportTests(unittest.TestCase):
     def test_video_processor_reexports_all_helpers(self):
         from services import video_processor as vp
@@ -306,7 +375,66 @@ class ReExportTests(unittest.TestCase):
         self.assertIs(vp._safe_default_center, fth.safe_default_center)
         self.assertIs(vp._clamp_away_from_dead_zone, fth.clamp_away_from_dead_zone)
         self.assertIs(vp._upgrade_speaker_mappings, fth.upgrade_speaker_mappings)
+        self.assertIs(
+            vp._crop_center_keeping_faces_visible,
+            fth.crop_center_keeping_faces_visible,
+        )
+        self.assertIs(vp._clip_layout_is_mixed, fth.clip_layout_is_mixed)
+        self.assertIs(vp._followed_face_cx_at, fth.followed_face_cx_at)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FollowedFaceCxAtTests(unittest.TestCase):
+    """The crop validator must ask where the *followed speaker* is, not where
+    the biggest face is.
+
+    On the recording this was written for, the two speakers sit at very
+    different distances from their own cameras: 845px of face against 518px.
+    Taking the larger one made a correct crop onto the quieter speaker look
+    like a crop onto nobody, so the validator pulled every keyframe back onto
+    the same person and the camera stopped switching for a 29-second turn.
+    """
+
+    def _split(self, duration=10.0, fps=10):
+        # Left speaker has the much larger face, as the real recording does.
+        return [
+            (i / fps, [
+                {"cx": 950, "fw": 845, "track_id": 0},
+                {"cx": 2880, "fw": 518, "track_id": 1},
+            ])
+            for i in range(int(duration * fps) + 1)
+        ]
+
+    def test_follows_the_smaller_face_when_it_is_the_speaker(self):
+        tracks = [(0.0, 10.0, "SPEAKER_R", 1, 2880.0)]
+        cx = fth.followed_face_cx_at(5.0, self._split(), tracks)
+        self.assertEqual(cx, 2880.0)
+
+    def test_follows_the_larger_face_when_it_is_the_speaker(self):
+        tracks = [(0.0, 10.0, "SPEAKER_L", 0, 950.0)]
+        cx = fth.followed_face_cx_at(5.0, self._split(), tracks)
+        self.assertEqual(cx, 950.0)
+
+    def test_picks_the_track_for_the_turn_that_covers_the_time(self):
+        tracks = [(0.0, 4.0, "SPEAKER_L", 0, 950.0), (4.0, 10.0, "SPEAKER_R", 1, 2880.0)]
+        self.assertEqual(fth.followed_face_cx_at(2.0, self._split(), tracks), 950.0)
+        self.assertEqual(fth.followed_face_cx_at(8.0, self._split(), tracks), 2880.0)
+
+    def test_falls_back_to_the_prominent_face_when_the_speaker_is_absent(self):
+        # Followed track 1 is never on screen; any face beats none.
+        detections = [(i / 10, [{"cx": 950, "fw": 845, "track_id": 0}]) for i in range(50)]
+        tracks = [(0.0, 5.0, "SPEAKER_R", 1, 2880.0)]
+        self.assertEqual(fth.followed_face_cx_at(2.0, detections, tracks), 950.0)
+
+    def test_uses_the_fallback_track_outside_every_turn(self):
+        tracks = [(0.0, 2.0, "SPEAKER_L", 0, 950.0)]
+        cx = fth.followed_face_cx_at(6.0, self._split(), tracks, fallback_track_id=1)
+        self.assertEqual(cx, 2880.0)
+
+    def test_no_detections_nearby_gives_nothing(self):
+        detections = [(0.0, [{"cx": 950, "fw": 845, "track_id": 0}])]
+        tracks = [(0.0, 10.0, "SPEAKER_L", 0, 950.0)]
+        self.assertIsNone(fth.followed_face_cx_at(9.0, detections, tracks))
