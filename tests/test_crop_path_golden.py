@@ -258,8 +258,6 @@ class DumpCropPathTests(unittest.TestCase):
             vp._dump_crop_path(**self.KWARGS)  # must not raise
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class UseFaceMapSpeakerGuardTests(unittest.TestCase):
@@ -401,3 +399,41 @@ class MixedLayoutDetectionTests(unittest.TestCase):
         # A clip that sits entirely inside one layout still belongs to a mixed
         # episode; the episode-wide flag remains a valid hint.
         self.assertTrue(self._decide(self._frames(80, 0), {"is_mixed_layout": True}))
+
+
+class CropFailuresNeverFailTheClipTests(unittest.TestCase):
+    """A crop that cannot be computed must report "no crop", never raise.
+
+    Every caller reads None as "try something simpler" and falls through to a
+    face-map crop and then a centre crop. An exception skips all of that and
+    fails the clip. utils.proc.run raises on a timeout even with check=False,
+    so a single ffmpeg that hung took a whole render down and left every
+    moment in it showing "Did not render".
+    """
+
+    def test_an_exception_inside_tracking_becomes_none(self):
+        with mock.patch.object(
+            vp, "_track_and_crop_inner", side_effect=RuntimeError("ffmpeg hung"),
+        ):
+            self.assertIsNone(
+                vp._track_and_crop("in.mp4", "out.mp4", 1920, 1080, 1080, 1920)
+            )
+
+    def test_a_proc_timeout_becomes_none(self):
+        from utils.proc import ProcError
+        boom = ProcError(["ffmpeg"], -1, "timeout after 600s", 600.0)
+        with mock.patch.object(vp, "_track_and_crop_inner", side_effect=boom):
+            self.assertIsNone(
+                vp._track_and_crop("in.mp4", "out.mp4", 1920, 1080, 1080, 1920)
+            )
+
+    def test_a_working_track_is_returned_untouched(self):
+        with mock.patch.object(vp, "_track_and_crop_inner", return_value="out.mp4"):
+            self.assertEqual(
+                vp._track_and_crop("in.mp4", "out.mp4", 1920, 1080, 1080, 1920),
+                "out.mp4",
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

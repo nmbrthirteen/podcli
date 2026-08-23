@@ -203,7 +203,15 @@ def crop_to_vertical(
             and len(face_map.get("clusters") or []) == 2
         )
         if is_pure_split:
-            plan = _detect_local_speaker_reframe_plan(input_path, face_map)
+            # Same reasoning as _track_and_crop: this is one of several ways to
+            # find a crop, and the caller can do without it. An exception here
+            # would fail the clip instead of trying the next one.
+            try:
+                plan = _detect_local_speaker_reframe_plan(input_path, face_map)
+            except Exception as exc:
+                log_event("crop", "local_reframe_failed", level="warn",
+                          error=f"{type(exc).__name__}: {exc}")
+                plan = None
             if plan and plan["mode"] == "pan":
                 crop_y = max(0, (height - plan["crop_h"]) // 2)
                 vf = (
@@ -1175,6 +1183,39 @@ def _track_and_crop(
     clip_start: float = 0,
     face_map: dict = None,
 ) -> Optional[str]:
+    """Adaptive face tracking, with any failure reported as "no crop".
+
+    Every caller already treats None as "this did not work, try something
+    simpler", and the paths behind that are a plain face-map crop and a centre
+    crop. Letting an exception out instead skips all of them and fails the
+    clip: proc.run raises on a timeout even with check=False, so one ffmpeg
+    that hung took a whole render down and left every moment in it marked as
+    never rendered. A badly framed clip is recoverable, a missing one is not.
+    """
+    try:
+        return _track_and_crop_inner(
+            input_path, output_path, width, height, target_w, target_h,
+            transcript_words, clip_start, face_map,
+        )
+    except Exception as exc:
+        log_event(
+            "crop", "track_failed", level="warn",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return None
+
+
+def _track_and_crop_inner(
+    input_path: str,
+    output_path: str,
+    width: int,
+    height: int,
+    target_w: int,
+    target_h: int,
+    transcript_words: list = None,
+    clip_start: float = 0,
+    face_map: dict = None,
+) -> Optional[str]:
     """
     Adaptive face tracking with sticky visual tracks and heavy-tripod movement.
 
@@ -1584,7 +1625,14 @@ def _track_and_crop(
                     cmd += [
                         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
                         "-movflags", "+faststart",
-                        "-shortest",
+                        # An explicit length, not -shortest. The audio comes
+                        # from a plain input while the video comes out of a
+                        # filtergraph, and -shortest has to wait for both to
+                        # agree on where the end is; on some ffmpeg builds it
+                        # simply never does. A hung ffmpeg is worse than a
+                        # wrong one here, because proc.run turns a timeout into
+                        # an exception that takes the whole render down with it.
+                        "-t", f"{duration:.3f}",
                         output_path,
                     ]
                     r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
