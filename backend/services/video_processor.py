@@ -1179,9 +1179,9 @@ def _track_and_crop(
     height: int,
     target_w: int,
     target_h: int,
-    transcript_words: list = None,
+    transcript_words: Optional[list] = None,
     clip_start: float = 0,
-    face_map: dict = None,
+    face_map: Optional[dict] = None,
 ) -> Optional[str]:
     """Adaptive face tracking, with any failure reported as "no crop".
 
@@ -1212,9 +1212,9 @@ def _track_and_crop_inner(
     height: int,
     target_w: int,
     target_h: int,
-    transcript_words: list = None,
+    transcript_words: Optional[list] = None,
     clip_start: float = 0,
-    face_map: dict = None,
+    face_map: Optional[dict] = None,
 ) -> Optional[str]:
     """
     Adaptive face tracking with sticky visual tracks and heavy-tripod movement.
