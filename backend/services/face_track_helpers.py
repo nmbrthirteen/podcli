@@ -184,10 +184,10 @@ def crop_center_keeping_faces_visible(
     """Pick the crop center that leaves the most sampled faces in frame.
 
     The median of a run of face positions is only the right answer when
-    those positions are unimodal. When a run mixes two layouts — a
-    fullscreen shot at 960 and a split-screen tile at 1440 — the median
-    lands at 1200, which on a 607-wide crop is the wall between them, and
-    the render holds on nothing for the length of the run.
+    those positions are unimodal. When a run mixes two layouts, a
+    fullscreen shot at 960 and a split-screen tile at 1440, the median lands
+    at 1200, which on a 607-wide crop is the wall between them, and the
+    render holds on nothing for the length of the run.
 
     So score candidate centers by how many faces they actually keep inside
     the crop, and only fall back to closeness as a tiebreak. On a unimodal
@@ -243,8 +243,8 @@ def seats_from_frames(
 
     paired = [sorted(xs) for xs in frame_positions if len(xs) >= 2]
     with_faces = sum(1 for xs in frame_positions if xs)
-    # A share as well as a count, so a handful of false positives — a face in a
-    # photo on the shelf behind someone — cannot seat a second person.
+    # A share as well as a count, so a handful of false positives, a face in a
+    # photo on the shelf behind someone, cannot seat a second person.
     if len(paired) < max(min_paired_frames, with_faces * min_paired_share):
         return None
 

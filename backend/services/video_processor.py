@@ -1496,7 +1496,7 @@ def _track_and_crop_inner(
                 t, cx = face_points[i]
                 run_median = float(median(run_cxs))
                 if abs(cx - run_median) > jump_thresh:
-                    # Layout changed — close current run, start new one.
+                    # Layout changed, so close this run and start a new one.
                     # Close it where the next one opens, not at the previous
                     # sample: the sampler runs at about 12 Hz, so ending a run
                     # one sample early threw away 80ms of video at every cut.
@@ -1645,8 +1645,8 @@ def _track_and_crop_inner(
                 # dissolve and keep the framing: one cut per run, joined end to
                 # end. This used to fall back to a static crop of the longest
                 # run, which is right for that run and wrong for every other
-                # layout in the clip — on a recording that cuts to a fullscreen
-                # shot, a hold on the wall for a third of its length.
+                # layout in the clip. On a recording that cuts to a fullscreen
+                # shot, that is a hold on the wall for a third of its length.
                 for ri, (r_start, r_end, r_cx) in enumerate(runs):
                     seg_start = max(0.0, r_start)
                     seg_end = min(duration, r_end)

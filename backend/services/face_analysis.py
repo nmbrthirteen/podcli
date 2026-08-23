@@ -182,7 +182,7 @@ def analyze_faces(
     if progress_callback:
         progress_callback(75, "Clustering face positions...")
 
-    # Cluster faces into seats — the fixed positions a person occupies.
+    # Cluster faces into seats: the fixed positions a person occupies.
     #
     # Two seats mean two people on screen at once, and the only evidence for
     # that is a frame holding both. Splitting a flat list of positions at the
@@ -212,8 +212,9 @@ def analyze_faces(
             "crop_x": max(mid_x + seam_margin, min(right_seat - crop_w // 2, width - crop_w)),
         })
     else:
-        # One seat. Not "one speaker" — the guest may be off camera entirely,
-        # and the render should stay on the person it can actually see.
+        # One seat, which is not the same as one speaker. The guest may be
+        # off camera entirely, and the render should stay on the person it can
+        # actually see.
         cx = int(np.median(positions))
         clusters_list.append({
             "center_x": cx,
