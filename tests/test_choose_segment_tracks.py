@@ -201,7 +201,7 @@ class AnchorOnlySegmentTests(unittest.TestCase):
 
     def test_unstood_anchor_is_replaced_by_a_real_face(self):
         # One person at 1400 all clip. The turn's speaker has no track of
-        # their own and an anchor at 400 — the invented seat.
+        # their own and an anchor at 400, which is the invented seat.
         targets = self._targets(
             segment_tracks=[(0.0, 1.2, "SPEAKER_01", 7, 400.0)],
             detections=self._one_person(1400, 8.0),
