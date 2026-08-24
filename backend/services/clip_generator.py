@@ -454,14 +454,24 @@ def _build_tight_segments(
 _remotion_available = None  # True/False/None — environment availability, not per-clip success
 
 
-def _report_remotion_failure(stage: str, stdout: str | None, stderr: str | None) -> None:
+def _report_remotion_failure(
+    stage: str,
+    stdout: str | bytes | None,
+    stderr: str | bytes | None,
+) -> None:
     """Print why Remotion gave up, on the stream the worker reads.
 
     The fallback to burned-in ASS is silent by design and was silent about its
     cause too, so a render that never once used the caption components the
     studio previews with looked exactly like one that did.
+
+    Takes bytes as well as text. A killed render reaches this through
+    TimeoutExpired, which carries whatever the child had written and does not
+    honour text mode when it does.
     """
     for label, stream in (("out", stdout), ("err", stderr)):
+        if isinstance(stream, bytes):
+            stream = stream.decode("utf-8", "replace")
         lines = [line.strip() for line in (stream or "").strip().splitlines() if line.strip()]
         for line in lines[-3:]:
             print(f"  Remotion {stage} {label}: {line[:200]}", file=sys.stderr, flush=True)
@@ -656,7 +666,11 @@ def _render_with_remotion(
         print("  Remotion: falling back to ASS for this clip", file=sys.stderr, flush=True)
         return False, None
 
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        # Whatever the render said before it was killed, which is the half of a
+        # hang worth having: a browser that never came up looks the same from
+        # out here as a composition that took too long to draw.
+        _report_remotion_failure("render", exc.stdout, exc.stderr)
         print("  Remotion: timed out, using ASS for this clip", file=sys.stderr, flush=True)
         return False, None
     except Exception as exc:
