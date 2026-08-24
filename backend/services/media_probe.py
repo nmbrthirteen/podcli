@@ -40,6 +40,10 @@ CPU_FLAGS = [
     "-crf", _qp["crf"],
     "-preset", _qp["preset"],
     "-profile:v", "high",
+    # High profile is 4:2:0 only, so leaving the format to negotiation makes
+    # this command fail on any filtergraph that hands it 4:4:4. See
+    # services/encoder.py for the whole story.
+    "-pix_fmt", "yuv420p",
 ]
 
 

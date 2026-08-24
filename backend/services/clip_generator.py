@@ -225,6 +225,7 @@ def _apply_local_transition_smoothing(
         "-i", input_path,
         "-vf", vf,
         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+        "-pix_fmt", "yuv420p",
         "-c:a", "copy",
         "-movflags", "+faststart",
         output_path,
@@ -453,6 +454,19 @@ def _build_tight_segments(
 _remotion_available = None  # True/False/None — environment availability, not per-clip success
 
 
+def _report_remotion_failure(stage: str, stdout: str | None, stderr: str | None) -> None:
+    """Print why Remotion gave up, on the stream the worker reads.
+
+    The fallback to burned-in ASS is silent by design and was silent about its
+    cause too, so a render that never once used the caption components the
+    studio previews with looked exactly like one that did.
+    """
+    for label, stream in (("out", stdout), ("err", stderr)):
+        lines = [line.strip() for line in (stream or "").strip().splitlines() if line.strip()]
+        for line in lines[-3:]:
+            print(f"  Remotion {stage} {label}: {line[:200]}", file=sys.stderr, flush=True)
+
+
 def _kept_caption_overlay_path(output_path: str) -> str:
     base, _ = os.path.splitext(os.path.abspath(output_path))
     return f"{base}_captions.mov"
@@ -518,9 +532,12 @@ def _render_with_remotion(
             )
             if r.returncode != 0 or not os.path.exists(bundle_index):
                 _remotion_available = False
+                _report_remotion_failure("bundling", r.stdout, r.stderr)
                 return False, None
-        except Exception:
+        except Exception as exc:
             _remotion_available = False
+            print(f"  Remotion bundling: {type(exc).__name__}: {exc}",
+                  file=sys.stderr, flush=True)
             return False, None
 
     # Prepare words JSON (adjust timestamps by offset)
@@ -611,18 +628,20 @@ def _render_with_remotion(
         if keep_caption_overlay:
             cmd.append("--keep-overlay")
 
-        # Redirect stderr to devnull to suppress Chrome/FFmpeg noise
-        # (avoids buffer deadlock and terminal spam)
-        with open(os.devnull, "w") as _devnull:
-            result = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=_devnull,
-                text=True,
-                timeout=600,
-                cwd=project_root,
-                env=remotion_env,
-            )
+        # Both pipes are captured. subprocess.run drains them together, so the
+        # deadlock the old code avoided by pointing stderr at /dev/null could
+        # not happen, and what it threw away was the only description of the
+        # failure. Every clip on the Linux worker fell back to burned-in ASS
+        # for months and the reason went to /dev/null with the rest of it.
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=600,
+            cwd=project_root,
+            env=remotion_env,
+        )
 
         if result.returncode == 0 and os.path.exists(output_path):
             _remotion_available = True
@@ -633,19 +652,15 @@ def _render_with_remotion(
                     overlay_path = None
             return True, overlay_path
 
-        stdout = result.stdout or ""
-        if stdout:
-            lines = [l.strip() for l in stdout.strip().split("\n") if l.strip()]
-            if lines:
-                print(f"  Remotion: {lines[-1][:120]}", file=sys.stderr, flush=True)
-
+        _report_remotion_failure("render", result.stdout, result.stderr)
         print("  Remotion: falling back to ASS for this clip", file=sys.stderr, flush=True)
         return False, None
 
     except subprocess.TimeoutExpired:
         print("  Remotion: timed out, using ASS for this clip", file=sys.stderr, flush=True)
         return False, None
-    except Exception:
+    except Exception as exc:
+        print(f"  Remotion: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         print("  Remotion: render error, using ASS for this clip", file=sys.stderr, flush=True)
         return False, None
     finally:
