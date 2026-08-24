@@ -1563,6 +1563,7 @@ def _track_and_crop_inner(
                         "-vf", seg_vf,
                         "-an",
                         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                        "-pix_fmt", "yuv420p",
                         "-avoid_negative_ts", "make_zero",
                         part_path,
                     ]
@@ -1624,6 +1625,14 @@ def _track_and_crop_inner(
                         cmd += ["-map", f"{source_index}:a", "-c:a", "aac", "-b:a", "192k"]
                     cmd += [
                         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                        # xfade answers format negotiation with yuv444p even
+                        # when both of its inputs are yuv420p, and nothing here
+                        # asked for a format, so this wrote High 4:4:4
+                        # Predictive. Every later step pins profile high, which
+                        # is 4:2:0 only, so the caption burn aborted with
+                        # "high profile doesn't support 4:4:4" and the clip was
+                        # lost. The whole render exited 0 with nothing in it.
+                        "-pix_fmt", "yuv420p",
                         "-movflags", "+faststart",
                         # An explicit length, not -shortest. The audio comes
                         # from a plain input while the video comes out of a
@@ -1660,6 +1669,7 @@ def _track_and_crop_inner(
                         "-vf", (f"crop={crop_w}:{crop_h}:{_crop_for(r_cx)}:{crop_y},"
                                 f"scale={target_w}:{target_h}"),
                         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                        "-pix_fmt", "yuv420p",
                         "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                         "-avoid_negative_ts", "make_zero",
                         cut_path,
@@ -2176,6 +2186,7 @@ def _crop_split_screen(
                     "-i", input_path,
                     "-vf", vf,
                     "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                    "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-b:a", "192k",
                     "-avoid_negative_ts", "make_zero",
                     part_path,

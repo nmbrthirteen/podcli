@@ -38,6 +38,7 @@ def cut_segment(
         "-i", input_path,
         "-t", str(duration),
         "-c:v", "libx264", "-crf", "16", "-preset", "fast", "-profile:v", "high",
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",
         output_path,

@@ -102,12 +102,20 @@ def _get_encoder_flags(encoder: str) -> list[str]:
     """
     Get optimal FFmpeg flags for a given encoder.
     Kept minimal to avoid conflicts with filter_complex.
+
+    Every H.264 preset states yuv420p. Left unsaid, FFmpeg picks the output
+    format by negotiating with the filtergraph, and some filters answer with
+    4:4:4 even when every input is 4:2:0. xfade is one of them. The encoders
+    that ask for high profile then abort, because high is a 4:2:0-only profile,
+    and the ones that do not ask silently write High 4:4:4 Predictive, which
+    phones and every social platform refuse to play.
     """
     flags = {
         "h264_videotoolbox": [
             "-c:v", "h264_videotoolbox",
             "-b:v", "6M",              # 6 Mbps — plenty for 1080x1920 vertical
             "-profile:v", "high",
+            "-pix_fmt", "yuv420p",
             "-allow_sw", "1",          # Allow software fallback
         ],
         "h264_nvenc": [
@@ -115,6 +123,7 @@ def _get_encoder_flags(encoder: str) -> list[str]:
             "-preset", "p6",           # Slower = higher quality
             "-cq", "18",               # High quality
             "-profile:v", "high",
+            "-pix_fmt", "yuv420p",
         ],
         "h264_amf": [
             "-c:v", "h264_amf",
@@ -136,6 +145,7 @@ def _get_encoder_flags(encoder: str) -> list[str]:
             "-crf", "18",              # Near-lossless quality
             "-preset", "slow",         # Better compression at same quality
             "-profile:v", "high",
+            "-pix_fmt", "yuv420p",
         ],
     }
     return flags.get(encoder, flags["libx264"])
@@ -149,7 +159,8 @@ def get_video_encode_flags() -> list[str]:
     except Exception:
         # Absolute fallback — never let encoder detection break the pipeline
         print("Warning: encoder detection failed, using libx264", file=sys.stderr)
-        return ["-c:v", "libx264", "-crf", "18", "-preset", "slow", "-profile:v", "high"]
+        return ["-c:v", "libx264", "-crf", "18", "-preset", "slow",
+                "-profile:v", "high", "-pix_fmt", "yuv420p"]
 
 
 def _encoder_cache_path() -> str:
@@ -189,7 +200,8 @@ def get_encoder_info() -> dict:
         info = detect_encoders()
     except Exception:
         info = {"available": ["libx264"], "best": "libx264",
-                "best_flags": ["-c:v", "libx264", "-crf", "18", "-preset", "slow", "-profile:v", "high"],
+                "best_flags": ["-c:v", "libx264", "-crf", "18", "-preset", "slow",
+                               "-profile:v", "high", "-pix_fmt", "yuv420p"],
                 "system": platform.system()}
 
     try:

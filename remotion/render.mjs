@@ -17,7 +17,7 @@
  *   node remotion/render.mjs --prebundle   # Bundle only, no render
  */
 
-import { renderMedia, selectComposition } from "@remotion/renderer";
+import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";
 import { getCachedBundle } from "./bundle-cache.mjs";
 import path from "path";
 import fs from "fs";
@@ -196,6 +196,22 @@ async function main() {
     `Remotion: ${words.length} words, ${styleName}, ${renderW}x${renderH}, ${durationInFrames}f`
   );
 
+  // The browser the captions are drawn in. Left to itself Remotion downloads
+  // one on first use, next to whatever directory the process was started in,
+  // which on a container is a layer and not a volume: recreating it downloads
+  // 120MB again. PODCLI_BROWSER names one the machine already has instead.
+  //
+  // Stated up front rather than left to the render. ensureBrowser fails
+  // immediately and by name when the path is wrong, where the same mistake
+  // inside renderMedia surfaces as a frame that would not draw.
+  const browserExecutable = process.env.PODCLI_BROWSER || null;
+  // headless-shell is Remotion's own build and is driven with --headless=old.
+  // Chrome removed old headless in 132 and Debian trixie ships Chromium 151,
+  // so a browser we were handed rather than downloaded gets the flag that
+  // still exists.
+  const chromeMode = browserExecutable ? "chrome-for-testing" : "headless-shell";
+  await ensureBrowser({ browserExecutable, chromeMode });
+
   try {
     // Select composition
     const composition = await selectComposition({
@@ -203,6 +219,8 @@ async function main() {
       id: "CaptionedClip",
       inputProps,
       timeoutInMilliseconds: DELAY_RENDER_TIMEOUT_MS,
+      browserExecutable,
+      chromeMode,
     });
 
     const cpus = os.cpus().length;
@@ -226,6 +244,8 @@ async function main() {
         height: renderH,
       },
       serveUrl: bundleLocation,
+      browserExecutable,
+      chromeMode,
       codec: "prores",
       proResProfile: "4444",
       pixelFormat: "yuva444p10le",
@@ -249,7 +269,7 @@ async function main() {
     execSync(
       `ffmpeg -y -hide_banner -loglevel warning -i "${path.resolve(opts.video)}" -i "${captionOverlay}" ` +
       `-filter_complex "[0:v][1:v]overlay=0:0:shortest=1" ` +
-      `-c:v libx264 -crf 18 -preset fast -map 0:a -c:a copy "${opts.output}"`,
+      `-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -map 0:a -c:a copy "${opts.output}"`,
       { stdio: ["pipe", "pipe", "pipe"], timeout: 300000 }
     );
 

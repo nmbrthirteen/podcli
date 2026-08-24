@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import shutil
@@ -181,6 +182,22 @@ class ClipGeneratorTests(unittest.TestCase):
         self.assertEqual(second, (False, None))
         self.assertIsNone(cg._remotion_available)
         self.assertGreaterEqual(mock_run.call_count, 4)
+
+    def test_remotion_failure_report_takes_bytes_as_well_as_text(self):
+        # TimeoutExpired carries what the child had written and does not honour
+        # text mode when it does, so the reporter has to take either.
+        err = io.StringIO()
+        with mock.patch.object(cg.sys, "stderr", err):
+            cg._report_remotion_failure("render", b"bundled in 3.1s\n", "no browser found\n")
+        printed = err.getvalue()
+        self.assertIn("bundled in 3.1s", printed)
+        self.assertIn("no browser found", printed)
+
+    def test_remotion_failure_report_survives_undecodable_bytes(self):
+        err = io.StringIO()
+        with mock.patch.object(cg.sys, "stderr", err):
+            cg._report_remotion_failure("render", b"\xff\xfe broke", None)
+        self.assertIn("broke", err.getvalue())
 
     def test_trim_weak_opening_cuts_initial_dead_air(self):
         words = [
