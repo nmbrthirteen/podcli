@@ -48,10 +48,13 @@ def build_cam_expr(
         t1, x1 = keyframes[i + 1]
         dt = max(0.01, t1 - t0)
         jump = abs(x1 - x0)
-        # In split/mixed layouts, avoid both long pans and hard snaps.
-        # Force very short eased handoffs for virtually all jumps.
-        blurred_cut_jump = 100000 if is_split else 180
-        quick_reframe_jump = 24 if is_split else 90
+        # A split↔single layout change is already a source edit.  Moving the
+        # crop for even a few frames after that edit creates a second, very
+        # noticeable jump (usually a flash of wall or the split seam). Treat
+        # it as an editorial cut instead: discard the micro-pan and hold the
+        # new framing from the source cut onward.
+        blurred_cut_jump = 24 if is_split else 180
+        quick_reframe_jump = 90
 
         if jump < 2:
             # Negligible movement — hold.
