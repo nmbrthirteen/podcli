@@ -6,6 +6,7 @@ audio normalization, and final encoding.
 """
 
 import os
+import re
 import subprocess
 import json
 import math
@@ -107,6 +108,68 @@ def _sane_speaker_mappings(face_map: Optional[dict]) -> Optional[dict]:
     out = dict(face_map)
     out["speaker_mappings"] = clean
     return out
+
+
+def _source_cut_times(input_path: str, min_score: float = 0.25) -> list[float]:
+    """Times where the source itself cuts, by ffmpeg's own scene score.
+
+    Never raises: a crop that cannot read the cuts still crops, just without
+    snapping to them.
+    """
+    cmd = [
+        "ffmpeg", "-v", "error", "-i", input_path,
+        "-filter:v", f"select='gt(scene,{min_score})',metadata=print:file=-",
+        "-f", "null", "-",
+    ]
+    try:
+        r = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
+    except Exception:
+        return []
+    if r.returncode != 0:
+        return []
+    blob = (r.stdout or "") + (r.stderr or "")
+    return [float(m) for m in re.findall(r"pts_time:([0-9.]+)", blob)]
+
+
+def _snap_runs_to_source_cuts(runs: list, cuts: list, tolerance: float = 0.2) -> list:
+    """Move each run boundary onto the source cut it is trying to describe.
+
+    Runs close at the first sample that noticed the layout change, and the
+    sampler runs at about 12Hz, so a boundary sits up to 83ms past the cut it
+    belongs to. Two frames of the old crop then land on the new layout, which
+    is both the wall left in frame and a second scene change 83ms after the
+    source's own. That pair reads as clustered cuts and pulls the transition
+    blur onto a cut that did not need it.
+    """
+    if not cuts or len(runs) < 2:
+        return runs
+    snapped = list(runs)
+    for i in range(len(snapped) - 1):
+        boundary = snapped[i][1]
+        near = min(cuts, key=lambda c: abs(c - boundary))
+        if abs(near - boundary) > tolerance:
+            continue
+        if near <= snapped[i][0] or near >= snapped[i + 1][1]:
+            continue
+        snapped[i] = (snapped[i][0], near, snapped[i][2])
+        snapped[i + 1] = (near, snapped[i + 1][1], snapped[i + 1][2])
+    return snapped
+
+
+def _run_step_crop_x_expr(runs: list, crop_x_for) -> str:
+    """Hold each layout run's crop until the next run starts, then snap.
+
+    One expression evaluated over one pass, rather than a part per run joined
+    end to end. Cutting and concatenating re-encodes every part and every part
+    overshoots the length it was asked for, because -t keeps the frame that
+    starts before the cut and each part's audio carries its own encoder
+    padding. Measured across five runs that was 403ms of drift, and it left the
+    video ending 177ms before its own audio.
+    """
+    expr = str(crop_x_for(runs[0][2]))
+    for r_start, _r_end, r_cx in runs[1:]:
+        expr = f"if(gte(t\\,{r_start:.3f})\\,{crop_x_for(r_cx)}\\,{expr})"
+    return expr
 
 
 def crop_to_vertical(
@@ -1531,10 +1594,73 @@ def _track_and_crop_inner(
                     output_path=output_path, label="crop_mixed_static",
                 )
 
+            # A dissolve needs a window where both framings hold the
+            # speaker, and a layout change leaves none: the pad below runs this
+            # run's crop over the next run's content, so the subject has
+            # already moved out of it. Measured on a 3840-wide two-up that was
+            # 209ms of bare wall, 52 luma brighter than either speaker, fading
+            # into the right framing. The subject survives the pad only while
+            # the next centre is still inside this crop, half a window either
+            # side. Past that, snap between the framings in a single pass: the
+            # source cut in the same place, so the cut is invisible, and one
+            # pass cannot drift against its own audio the way cutting into
+            # parts and joining them does.
+            reach = crop_w / 2
+            if any(abs(runs[i + 1][2] - runs[i][2]) > reach
+                   for i in range(len(runs) - 1)):
+                widest = max(abs(runs[i + 1][2] - runs[i][2])
+                             for i in range(len(runs) - 1))
+                cuts = _source_cut_times(input_path)
+                snapped = _snap_runs_to_source_cuts(runs, cuts)
+                moved = sum(1 for a, b in zip(runs, snapped) if abs(a[1] - b[1]) > 0.001)
+                x_expr = _run_step_crop_x_expr(snapped, _crop_for)
+                vf = (f"crop={crop_w}:{crop_h}:x='{x_expr}':y={crop_y},"
+                      f"scale={target_w}:{target_h}")
+                log_event("crop", "chose=mixed-step-cuts", runs=len(runs),
+                          widest=int(widest), reach=int(reach),
+                          cuts=len(cuts), snapped=moved)
+                stepped = _run_ffmpeg_with_fallback(
+                    cmd_parts_before_enc=["ffmpeg", "-y", "-i", input_path, "-vf", vf],
+                    cmd_parts_after_enc=[
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                        "-movflags", "+faststart",
+                        # The same explicit length the dissolve pins itself to.
+                        # Without it the segment's audio runs past its own video
+                        # and the encoder's padding widens the gap further: 163ms
+                        # of audio with no picture under it.
+                        "-t", f"{duration:.3f}",
+                    ],
+                    output_path=output_path, label="crop_mixed_steps",
+                )
+                if stepped:
+                    return stepped
+                log_event("crop", "fallback", reason="mixed_steps_failed",
+                          to="dissolve")
+
             # Multiple layouts — crop each segment separately, join
             # with cross-dissolve so transitions feel editorial.
             work_dir = os.path.dirname(output_path) or "."
             xfade_dur = 0.18  # Short dissolve
+
+            # A dissolve needs 180ms where both framings hold the speaker, and
+            # a layout change leaves none: the padding below runs this run's
+            # crop over the next run's content, so the subject has already
+            # moved out of it. Measured on a 3840-wide two-up, that was 209ms
+            # of bare wall 52 luma brighter than either speaker, dissolving
+            # into the right framing. The subject survives the pad only while
+            # the next centre is still inside this crop, which is half a window
+            # either side; past that there is nothing to dissolve and the cut
+            # below is both correct and invisible, because the source cut too.
+            reach = crop_w / 2
+            dissolve_holds_subject = all(
+                abs(runs[i + 1][2] - runs[i][2]) <= reach for i in range(len(runs) - 1)
+            )
+            if not dissolve_holds_subject:
+                widest = max(
+                    abs(runs[i + 1][2] - runs[i][2]) for i in range(len(runs) - 1)
+                )
+                log_event("crop", "mixed_cuts", reason="layout_change",
+                          runs=len(runs), widest=int(widest), reach=int(reach))
             part_paths = []
             cut_paths = []
             # (path, measured duration, padding it carries). Offsets are built
@@ -1545,7 +1671,7 @@ def _track_and_crop_inner(
             part_specs = []
 
             try:
-                for ri, (r_start, r_end, r_cx) in enumerate(runs):
+                for ri, (r_start, r_end, r_cx) in enumerate(runs if dissolve_holds_subject else []):
                     r_crop_x = _crop_for(r_cx)
                     # Pad segment slightly for xfade overlap
                     pad = xfade_dur if ri < len(runs) - 1 else 0
@@ -1581,8 +1707,11 @@ def _track_and_crop_inner(
                     part_specs[-1] = (last_path, last_len, 0.0)
 
                 if len(part_paths) < 2:
-                    log_event("crop", "fallback", reason="mixed_too_few_parts",
-                              parts=len(part_paths), to="hard-cuts")
+                    # Only a surprise when a dissolve was actually attempted;
+                    # skipping it above is a decision, not a fallback.
+                    if dissolve_holds_subject:
+                        log_event("crop", "fallback", reason="mixed_too_few_parts",
+                                  parts=len(part_paths), to="hard-cuts")
                 else:
                     # Where each part's own content begins in the output: the
                     # running total of the parts before it, each counted without

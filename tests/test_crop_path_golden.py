@@ -10,6 +10,7 @@ No cv2, ffmpeg, or video files — the fixtures stand in for decoded frames.
 """
 
 import json
+import re
 import os
 import sys
 import tempfile
@@ -437,3 +438,113 @@ class CropFailuresNeverFailTheClipTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DissolveNeedsBothFramingsTests(unittest.TestCase):
+    """A dissolve across a layout change has nothing to dissolve.
+
+    The stitch pads each run by the dissolve length, which runs that run's crop
+    over the next run's content. The subject survives that pad only while the
+    next centre is still inside this crop, which is half a window either side.
+    On the episode this came from the widest boundary was 1167px against a
+    607px reach, and the dissolve showed 209ms of bare wall.
+    """
+
+    @staticmethod
+    def holds(runs, crop_w):
+        reach = crop_w / 2
+        return all(abs(runs[i + 1][2] - runs[i][2]) <= reach for i in range(len(runs) - 1))
+
+    def test_a_layout_change_is_too_wide_to_dissolve(self):
+        runs = [(0.0, 2.5, 1006), (2.5, 6.0, 2173)]  # 1167px apart
+        self.assertFalse(self.holds(runs, 1214))
+
+    def test_a_speaker_shifting_in_their_seat_still_dissolves(self):
+        runs = [(0.0, 2.5, 1006), (2.5, 6.0, 1300)]  # 294px apart
+        self.assertTrue(self.holds(runs, 1214))
+
+    def test_one_wide_boundary_settles_it_for_the_whole_clip(self):
+        runs = [(0.0, 2.0, 1006), (2.0, 4.0, 1200), (4.0, 6.0, 2400)]
+        self.assertFalse(self.holds(runs, 1214))
+
+
+class SteppedRunCropTests(unittest.TestCase):
+    """One expression over one pass, so a layout change cannot drift.
+
+    Cutting a run per layout and joining them re-encodes each part, and each
+    part overshoots the length it was asked for: 403ms across five runs, with
+    the video ending 177ms before its own audio.
+    """
+
+    RUNS = [(0.0, 2.629, 1021), (2.629, 6.386, 1940), (6.386, 10.393, 921)]
+    CROP = staticmethod(lambda cx: max(0, min(int(cx - 607), 3840 - 1214)))
+
+    def _at(self, expr, t):
+        """Evaluate the nested if(gte(t,T),a,b) the way FFmpeg would."""
+        expr = expr.replace("\\", "")
+        while expr.startswith("if("):
+            inner, depth, parts, cur = expr[3:-1], 0, [], ""
+            for ch in inner:
+                if ch == "(":
+                    depth += 1
+                if ch == ")":
+                    depth -= 1
+                if ch == "," and depth == 0:
+                    parts.append(cur)
+                    cur = ""
+                else:
+                    cur += ch
+            parts.append(cur)
+            cond, yes, no = parts
+            thr = float(re.search(r"gte\(t,([\d.]+)\)", cond).group(1))
+            expr = yes if t >= thr else no
+        return int(expr)
+
+    def test_each_run_holds_its_own_crop(self):
+        e = vp._run_step_crop_x_expr(self.RUNS, self.CROP)
+        for start, end, cx in self.RUNS:
+            mid = (start + end) / 2
+            self.assertEqual(self._at(e, mid), self.CROP(cx))
+
+    def test_it_snaps_at_the_boundary_rather_than_gliding(self):
+        e = vp._run_step_crop_x_expr(self.RUNS, self.CROP)
+        b = self.RUNS[1][0]
+        self.assertEqual(self._at(e, b - 0.001), self.CROP(self.RUNS[0][2]))
+        self.assertEqual(self._at(e, b), self.CROP(self.RUNS[1][2]))
+
+    def test_a_single_run_is_a_constant(self):
+        e = vp._run_step_crop_x_expr([self.RUNS[0]], self.CROP)
+        self.assertEqual(e, str(self.CROP(self.RUNS[0][2])))
+
+
+class SnapRunsToSourceCutsTests(unittest.TestCase):
+    """A boundary belongs on the cut it is describing, not near it.
+
+    The sampler runs at about 12Hz, so a run closes up to 83ms after the cut it
+    noticed. Those two frames of old crop on new layout are the wall left in
+    frame, and they register as a second scene change 83ms after the source's
+    own, which reads as clustered cuts and drags the transition blur onto a cut
+    that never needed it.
+    """
+
+    CUTS = [0.875, 7.792, 16.958, 23.458]
+
+    def test_a_late_boundary_moves_onto_the_cut(self):
+        runs = [(0.0, 7.87, 1000), (7.87, 17.04, 2000), (17.04, 33.4, 1000)]
+        out = vp._snap_runs_to_source_cuts(runs, self.CUTS)
+        self.assertAlmostEqual(out[0][1], 7.792, places=3)
+        self.assertAlmostEqual(out[1][0], 7.792, places=3)
+        self.assertAlmostEqual(out[1][1], 16.958, places=3)
+
+    def test_a_boundary_with_no_cut_near_it_is_left_alone(self):
+        runs = [(0.0, 12.0, 1000), (12.0, 33.4, 2000)]
+        self.assertEqual(vp._snap_runs_to_source_cuts(runs, self.CUTS), runs)
+
+    def test_it_never_collapses_a_run(self):
+        runs = [(0.0, 0.9, 1000), (0.9, 1.0, 2000), (1.0, 5.0, 1000)]
+        for a, b, _ in vp._snap_runs_to_source_cuts(runs, self.CUTS):
+            self.assertLess(a, b)
+
+    def test_no_cuts_detected_changes_nothing(self):
+        runs = [(0.0, 7.87, 1000), (7.87, 33.4, 2000)]
+        self.assertEqual(vp._snap_runs_to_source_cuts(runs, []), runs)
