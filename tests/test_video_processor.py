@@ -607,16 +607,17 @@ class VideoProcessorTests(unittest.TestCase):
         self.assertIn("if(between(t\\,0.000\\,0.180)\\,420\\,", expr)
         self.assertNotIn("100+((420-100)", expr)
 
-    def test_build_cam_expr_uses_short_eased_handoff_for_split_layout_jumps(self):
+    def test_build_cam_expr_cuts_split_layout_jumps_without_micro_pan(self):
         expr = vp._build_cam_expr(
             keyframes=[(0.0, 120), (0.20, 360), (1.0, 360)],
             duration=1.0,
             is_split=True,
         )
 
-        # Split transitions should avoid hard snaps and use a brief eased handoff.
-        self.assertNotIn("if(between(t\\,0.000\\,0.200)\\,360\\,", expr)
-        self.assertIn("120+((360-120)", expr)
+        # The source already changes layouts here. Do not add an 80ms crop pan
+        # on top of it: a direct cut removes the transient seam/wall frames.
+        self.assertIn("if(between(t\\,0.000\\,0.200)\\,360\\,", expr)
+        self.assertNotIn("120+((360-120)", expr)
 
     def test_build_motion_blur_filter_targets_only_short_reframes(self):
         blur = vp._build_motion_blur_filter(

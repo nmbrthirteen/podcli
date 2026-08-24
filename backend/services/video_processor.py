@@ -172,6 +172,55 @@ def _run_step_crop_x_expr(runs: list, crop_x_for) -> str:
     return expr
 
 
+def _replace_layout_flash_frames(video_path: str, cut_times: list[float], duration: float) -> bool:
+    """Replace the first frame at mixed-layout cuts with the prior clean frame.
+
+    Some Riverside switches briefly expose an empty tile.  This post-pass is
+    deliberately video-only: the clone occupies the same frame slot, so audio
+    and caption timing remain untouched.
+    """
+    if not cut_times:
+        return True
+    try:
+        info = get_video_info(video_path)
+        stream = next(s for s in info["streams"] if s.get("codec_type") == "video")
+        num, den = str(stream.get("r_frame_rate", "24/1")).split("/", 1)
+        frame = float(den) / float(num)
+    except Exception:
+        frame = 1 / 24
+    cuts = sorted({round(float(t), 3) for t in cut_times if frame < t < duration - frame})
+    if not cuts:
+        return True
+
+    split_labels = "".join(f"[s{i}]" for i in range(len(cuts) + 1))
+    parts, labels, cursor = [f"[0:v]split={len(cuts) + 1}{split_labels}"], [], 0.0
+    for i, cut in enumerate(cuts):
+        end = max(cursor + 0.001, cut - 0.001)
+        label = f"g{i}"
+        parts.append(
+            f"[s{i}]trim=start={cursor:.3f}:end={end:.3f},setpts=PTS-STARTPTS,"
+            f"tpad=stop_mode=clone:stop_duration={frame:.3f}[{label}]"
+        )
+        labels.append(f"[{label}]")
+        # Start just before the first stable frame after the discarded one.
+        # A rounded timestamp at cut + frame can skip that stable frame too,
+        # shortening video by one frame at every guarded transition.
+        cursor = min(duration, cut + frame - 0.002)
+    last = f"g{len(cuts)}"
+    parts.append(f"[s{len(cuts)}]trim=start={cursor:.3f}:end={duration:.3f},setpts=PTS-STARTPTS[{last}]")
+    labels.append(f"[{last}]")
+    parts.append("".join(labels) + f"concat=n={len(labels)}:v=1:a=0[v]")
+    temp = video_path + ".layout-guard.mp4"
+    cmd = ["ffmpeg", "-y", "-i", video_path, "-filter_complex", ";".join(parts),
+           "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p",
+           "-c:a", "copy", "-t", f"{duration:.3f}", "-movflags", "+faststart", temp]
+    result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
+    if result.returncode != 0 or not os.path.exists(temp):
+        return False
+    os.replace(temp, video_path)
+    return True
+
+
 def crop_to_vertical(
     input_path: str,
     output_path: str,
@@ -1633,6 +1682,12 @@ def _track_and_crop_inner(
                     output_path=output_path, label="crop_mixed_steps",
                 )
                 if stepped:
+                    guard_cuts = [
+                        snapped[i][1] for i in range(len(snapped) - 1)
+                        if abs(snapped[i][1] - runs[i][1]) > 0.001
+                    ]
+                    if not _replace_layout_flash_frames(stepped, guard_cuts, duration):
+                        log_event("crop", "layout_flash_guard_failed", level="warn")
                     return stepped
                 log_event("crop", "fallback", reason="mixed_steps_failed",
                           to="dissolve")

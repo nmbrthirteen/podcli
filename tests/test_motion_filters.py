@@ -44,6 +44,15 @@ class BuildCamExprTests(unittest.TestCase):
         self.assertIsNotNone(expr)
         self.assertIn("100", expr)
 
+    def test_split_layout_jump_is_an_immediate_cut(self):
+        expr = mf.build_cam_expr(
+            [(0.0, 120), (0.20, 360), (1.0, 360)],
+            duration=1.0,
+            is_split=True,
+        )
+        self.assertIn("if(between(t\\,0.000\\,0.200)\\,360\\,", expr)
+        self.assertNotIn("120+((360-120)", expr)
+
 
 class MotionWindowsFromKeyframesTests(unittest.TestCase):
     def test_no_keyframes_returns_empty(self):
