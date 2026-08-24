@@ -485,10 +485,15 @@ class SteppedRunCropTests(unittest.TestCase):
         while expr.startswith("if("):
             inner, depth, parts, cur = expr[3:-1], 0, [], ""
             for ch in inner:
-                if ch == "(": depth += 1
-                if ch == ")": depth -= 1
-                if ch == "," and depth == 0: parts.append(cur); cur = ""
-                else: cur += ch
+                if ch == "(":
+                    depth += 1
+                if ch == ")":
+                    depth -= 1
+                if ch == "," and depth == 0:
+                    parts.append(cur)
+                    cur = ""
+                else:
+                    cur += ch
             parts.append(cur)
             cond, yes, no = parts
             thr = float(re.search(r"gte\(t,([\d.]+)\)", cond).group(1))
