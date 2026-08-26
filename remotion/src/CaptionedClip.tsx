@@ -21,6 +21,7 @@ export interface CaptionedClipProps {
   nameCard?: NameCardProps | null;
   captionPosition?: CaptionPosition;
   logoPosition?: LogoPosition;
+  logoScale?: number;
   singleLine?: boolean;
   /** Per-part overrides; each part falls back to its style's own motion. */
   motion?: { captions?: Partial<Motion>; nameCard?: Partial<Motion> } | null;
@@ -34,6 +35,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   nameCard,
   captionPosition = "auto",
   logoPosition = "top-left",
+  logoScale = 1,
   singleLine = false,
   motion,
 }) => {
@@ -51,10 +53,10 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
 
   return (
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
-      <Watermark src={logoSrc} height={height} position={logoPosition} />
+      <Watermark src={logoSrc} height={height} position={logoPosition} scale={logoScale} />
       {style.name === "branded" ? (
         <BrandedCaptions words={words} style={style} logoSrc={logoSrc} faceY={faceY}
-          captionPosition={captionPosition} logoPosition={logoPosition} singleLine={singleLine} />
+          captionPosition={captionPosition} logoPosition={logoPosition} logoScale={logoScale} singleLine={singleLine} />
       ) : (
         <CaptionComponent words={words} style={style} singleLine={singleLine} motion={captionMotion} />
       )}

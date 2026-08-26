@@ -22,7 +22,9 @@ export const Watermark: React.FC<{
   src?: string;
   height: number;
   position?: LogoPosition;
-}> = ({ src, height, position = "top-left" }) => {
+  /** Multiplier supplied by a template. 1 preserves the original mark. */
+  scale?: number;
+}> = ({ src, height, position = "top-left", scale = 1 }) => {
   if (!src) return null;
   const s = captionScale(height);
 
@@ -37,8 +39,8 @@ export const Watermark: React.FC<{
           : position.endsWith("-right")
             ? { right: 108 * s }
             : { left: "50%", transform: "translateX(-50%)" }),
-        width: 255 * s,
-        height: LOGO_HEIGHT * s,
+        width: 255 * s * scale,
+        height: LOGO_HEIGHT * s * scale,
         objectFit: "contain",
       }}
     />

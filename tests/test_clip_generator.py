@@ -116,6 +116,16 @@ class ClipGeneratorTests(unittest.TestCase):
         payload = json.loads(argv[argv.index("--motion") + 1])
         self.assertEqual(payload["captions"]["enter"], "pop")
 
+    def test_layout_values_reach_remotion_unchanged(self):
+        argv = self._render_args(
+            caption_style="branded", caption_position="center", caption_font_scale=125,
+            logo_position="bottom-right", logo_scale=0.75,
+        )
+        self.assertEqual(argv[argv.index("--caption-position") + 1], "center")
+        self.assertEqual(argv[argv.index("--caption-font-scale") + 1], "125")
+        self.assertEqual(argv[argv.index("--logo-position") + 1], "bottom-right")
+        self.assertEqual(argv[argv.index("--logo-scale") + 1], "0.75")
+
     def test_remotion_runtime_failure_does_not_disable_future_clips(self):
         real_exists = os.path.exists
         fail_result = subprocess.CompletedProcess(

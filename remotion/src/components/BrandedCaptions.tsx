@@ -18,6 +18,7 @@ interface Props {
   faceY?: number | null; // normalized 0-1 (0=top, 1=bottom)
   captionPosition?: CaptionPosition;
   logoPosition?: LogoPosition;
+  logoScale?: number;
   singleLine?: boolean;
 }
 
@@ -120,6 +121,7 @@ export const BrandedCaptions: React.FC<Props> = ({
   faceY,
   captionPosition = "auto",
   logoPosition = "top-left",
+  logoScale = 1,
   singleLine = false,
 }) => {
   const frame = useCurrentFrame();
@@ -151,7 +153,7 @@ export const BrandedCaptions: React.FC<Props> = ({
   // A bottom-anchored logo spans 180-306 scaled units. Captions sitting inside
   // that band (captionPosition "lower" starts at 220) would render over it.
   if (logoSrc && logoPosition.startsWith("bottom-")) {
-    dynamicMargin = Math.max(dynamicMargin, (LOGO_INSET + LOGO_HEIGHT + LOGO_CAPTION_GAP) * s);
+    dynamicMargin = Math.max(dynamicMargin, (LOGO_INSET + LOGO_HEIGHT * logoScale + LOGO_CAPTION_GAP) * s);
   }
 
   return (

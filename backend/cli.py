@@ -466,8 +466,12 @@ def cmd_studio(args):
         env["ASSEMBLYAI_API_KEY"] = args.assemblyai_api_key
     cmd += [
         "--caption-style", args.caption_style,
+        "--caption-position", getattr(args, "caption_position", "auto"),
+        "--caption-scale", str(getattr(args, "caption_scale", 1.0)),
         "--crop", args.crop,
         "--format", getattr(args, "format", None) or "vertical",
+        "--logo-position", getattr(args, "logo_position", "top-left"),
+        "--logo-scale", str(getattr(args, "logo_scale", 1.0)),
         "--intro-seconds", str(args.intro_seconds),
         "--outro-seconds", str(args.outro_seconds),
     ]
@@ -483,6 +487,12 @@ def cmd_studio(args):
         cmd += ["--intro-title", args.intro_title]
     if args.handle:
         cmd += ["--handle", args.handle]
+    if getattr(args, "logo", None):
+        cmd += ["--logo", args.logo]
+    if getattr(args, "intro", None):
+        cmd += ["--intro", args.intro]
+    if getattr(args, "outro", None):
+        cmd += ["--outro", args.outro]
     if args.output:
         cmd += ["--output", os.path.abspath(args.output)]
     if args.no_intro:
@@ -619,6 +629,10 @@ def cmd_process(args):
         os.environ["ASSEMBLYAI_API_KEY"] = args.assemblyai_api_key
     if args.caption_style:
         config["caption_style"] = args.caption_style
+    if getattr(args, "caption_position", None):
+        config["caption_position"] = args.caption_position
+    if getattr(args, "caption_scale", None) is not None:
+        config["caption_font_scale"] = round(args.caption_scale * 100)
     if args.crop:
         config["crop_strategy"] = args.crop
     if getattr(args, "format", None):
@@ -658,6 +672,10 @@ def cmd_process(args):
         else:
             print(f"  Warning: Logo '{args.logo}' not found (checked assets and filesystem)", file=sys.stderr)
             config["logo_path"] = args.logo  # pass through anyway
+    if getattr(args, "logo_position", None):
+        config["logo_position"] = args.logo_position
+    if getattr(args, "logo_scale", None) is not None:
+        config["logo_scale"] = args.logo_scale
     if getattr(args, "no_outro", False):
         config["outro_path"] = ""
     elif args.outro:
@@ -1156,6 +1174,10 @@ def cmd_process(args):
                         start_second=clip["start_second"],
                         end_second=clip["end_second"],
                         caption_style=config.get("caption_style", "branded"),
+                        caption_position=config.get("caption_position", "auto"),
+                        caption_font_scale=config.get("caption_font_scale", 100),
+                        logo_position=config.get("logo_position", "top-left"),
+                        logo_scale=config.get("logo_scale", 1.0),
                         crop_strategy=config.get("crop_strategy", "face"),
                         format=config.get("format", "vertical"),
                         transcript_words=words,
@@ -1377,6 +1399,10 @@ def cmd_process(args):
                                 start_second=clip["start_second"],
                                 end_second=clip["end_second"],
                                 caption_style=config.get("caption_style", "branded"),
+                                caption_position=config.get("caption_position", "auto"),
+                                caption_font_scale=config.get("caption_font_scale", 100),
+                                logo_position=config.get("logo_position", "top-left"),
+                                logo_scale=config.get("logo_scale", 1.0),
                                 crop_strategy=config.get("crop_strategy", "face"),
                                 format=config.get("format", "vertical"),
                                 transcript_words=words,
@@ -4213,10 +4239,18 @@ def main():
                            "off keeps the pictures and leaves the video alone (default: start)")
     proc.add_argument("--template", help="Cut in a saved look (podcli Pro). Name or id.")
     proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
+    proc.add_argument("--caption-position", choices=["auto", "upper", "center", "lower"],
+                      help="Caption placement (default: follows the chosen style)")
+    proc.add_argument("--caption-scale", type=float, choices=[0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4, 1.45, 1.5],
+                      help="Caption size multiplier (default: 1)")
     proc.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
     proc.add_argument("--format", choices=["vertical", "horizontal", "square"], help="Output aspect ratio (default: vertical)")
     proc.add_argument("--profile", choices=["podcast", "party", "action"], help="Detection profile: podcast (transcript-first, default), party/action (laughter/energy highlights)")
     proc.add_argument("--logo", help="Logo image (asset name or path)")
+    proc.add_argument("--logo-position", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"],
+                      help="Logo placement (default: top-left)")
+    proc.add_argument("--logo-scale", type=float, choices=[0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4, 1.45, 1.5],
+                      help="Logo size multiplier (default: 1)")
     proc.add_argument("--outro", help="Outro video (asset name or path)")
     proc.add_argument("--name-card", dest="name_card",
                       help="Lower third naming the speaker, shown for the first seconds")
@@ -4280,11 +4314,17 @@ def main():
     studio.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], help="Transcription engine")
     studio.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai. Prefer ASSEMBLYAI_API_KEY; command-line secrets can appear in process listings.")
     studio.add_argument("--caption-style", choices=["hormozi", "karaoke", "subtle", "branded"], default="hormozi")
+    studio.add_argument("--caption-position", choices=["auto", "upper", "center", "lower"], default="auto")
+    studio.add_argument("--caption-scale", type=float, default=1.0)
     studio.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"], default="face")
     studio.add_argument("--format", choices=["vertical", "horizontal", "square"], default="vertical",
                         help="Output aspect ratio (default: vertical)")
     studio.add_argument("--template", help="Cut in a saved look (podcli Pro). Name or id.")
     studio.add_argument("--logo", help="Logo image (asset name or path)")
+    studio.add_argument("--logo-position", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"], default="top-left")
+    studio.add_argument("--logo-scale", type=float, default=1.0)
+    studio.add_argument("--intro", help="Intro video (asset name or path)")
+    studio.add_argument("--outro", help="Outro video (asset name or path)")
     studio.add_argument("--name-card", dest="name_card",
                         help="Lower third naming the speaker, shown for the first seconds")
     studio.add_argument("--name-card-sub", dest="name_card_sub",

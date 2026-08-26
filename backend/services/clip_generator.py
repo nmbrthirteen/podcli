@@ -495,6 +495,7 @@ def _render_with_remotion(
     caption_position: str = "auto",
     caption_font_scale: int = 100,
     logo_position: str = "top-left",
+    logo_scale: float = 1.0,
 ) -> tuple[bool, Optional[str]]:
     """
     Render captions using Remotion. Returns (success, optional_prores_overlay_path).
@@ -622,6 +623,7 @@ def _render_with_remotion(
             "--caption-position", caption_position,
             "--caption-font-scale", str(caption_font_scale),
             "--logo-position", logo_position,
+            "--logo-scale", str(logo_scale),
         ]
         if logo_path and os.path.exists(logo_path):
             cmd.extend(["--logo", os.path.abspath(logo_path)])
@@ -692,6 +694,7 @@ def generate_clip(
     caption_position: str = "auto",
     caption_font_scale: int = 100,
     logo_position: str = "top-left",
+    logo_scale: float = 1.0,
     crop_strategy: str = "face",
     format: str = "vertical",
     crop_keyframes: list[dict] = None,
@@ -1028,6 +1031,7 @@ def generate_clip(
                         caption_position=caption_position,
                         caption_font_scale=caption_font_scale,
                         logo_position=logo_position,
+                        logo_scale=logo_scale,
                     )
 
                 if not remotion_ok and not allow_ass_fallback:
