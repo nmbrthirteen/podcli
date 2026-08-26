@@ -51,6 +51,11 @@ function clampCaptionFontScale(raw) {
   return Number.isFinite(value) ? Math.min(160, Math.max(60, value)) : 100;
 }
 
+function clampLogoScale(raw) {
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.min(1.5, Math.max(0.5, value)) : 1;
+}
+
 
 // Remotion's 30s default is measured against the font delayRender in Root.tsx,
 // which competes with evaluating the whole bundle. That bundle has three
@@ -190,6 +195,7 @@ async function main() {
     captionPosition: opts["caption-position"] || "auto",
     captionFontScale: clampCaptionFontScale(opts["caption-font-scale"]),
     logoPosition: opts["logo-position"] || "top-left",
+    logoScale: clampLogoScale(opts["logo-scale"]),
   };
 
   console.log(

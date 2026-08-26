@@ -38,6 +38,7 @@ const inputProps = getInputProps() as {
   captionPosition?: CaptionPosition;
   captionFontScale?: number;
   logoPosition?: LogoPosition;
+  logoScale?: number;
   singleLine?: boolean;
   levels?: number[][];
   coverSrc?: string;
@@ -101,6 +102,7 @@ export const RemotionRoot: React.FC = () => {
           nameCard: inputProps.nameCard ?? null,
           captionPosition,
           logoPosition: inputProps.logoPosition || "top-left",
+          logoScale: Math.max(0.5, Math.min(1.5, inputProps.logoScale || 1)),
           singleLine: inputProps.singleLine === true,
           motion: inputProps.motion ?? null,
         }}

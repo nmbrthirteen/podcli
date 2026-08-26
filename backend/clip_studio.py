@@ -120,13 +120,17 @@ def _find_paragraph(words: list, phrase: str) -> tuple[float, float]:
 
 
 def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt="vertical",
-                     logo=None, name_card=None, motion=None):
+                     logo=None, name_card=None, motion=None, caption_position="auto",
+                     caption_scale=1.0, logo_position="top-left", logo_scale=1.0):
     """Render the fragment with face-crop + captions via the existing engine."""
     from services.clip_generator import generate_clip
     print(f"  [fragment] rendering {start:.1f}s–{end:.1f}s ({style}, crop={crop}, {fmt})", flush=True)
     res = generate_clip(
         video_path=video, start_second=start, end_second=end,
-        caption_style=style, crop_strategy=crop, format=fmt,
+        caption_style=style, caption_position=caption_position,
+        caption_font_scale=round(caption_scale * 100),
+        logo_position=logo_position, logo_scale=logo_scale,
+        crop_strategy=crop, format=fmt,
         transcript_words=words, title=title, output_dir=out_dir,
         logo_path=logo, name_card=name_card, motion=motion,
         clean_fillers=True, allow_ass_fallback=True,
@@ -216,10 +220,17 @@ def main():
     ap.add_argument("--language", default=None, help="Transcription language (e.g. es). Auto-detect if omitted.")
     ap.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], default=None, help="Transcription engine")
     ap.add_argument("--caption-style", default="hormozi", choices=["hormozi", "karaoke", "subtle", "branded"])
+    ap.add_argument("--caption-position", default="auto", choices=["auto", "upper", "center", "lower"])
+    ap.add_argument("--caption-scale", type=float, default=1.0)
     ap.add_argument("--crop", default="face", choices=["center", "face", "speaker", "speaker-hardcut"])
     ap.add_argument("--format", default="vertical", choices=["vertical", "horizontal", "square"],
                     help="Output aspect ratio (default: vertical)")
     ap.add_argument("--output", default=None, help="Final output path")
+    ap.add_argument("--logo", default=None, help="Logo image (asset name or path)")
+    ap.add_argument("--logo-position", default="top-left", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"])
+    ap.add_argument("--logo-scale", type=float, default=1.0)
+    ap.add_argument("--intro", default=None, help="Intro video (asset name or path)")
+    ap.add_argument("--outro", default=None, help="Outro video (asset name or path)")
     # bookends (defaults are None so we can tell what the user explicitly set;
     # unset values fall back to the saved brand config, then BRAND_DEFAULTS)
     ap.add_argument("--intro-title", default=None, help="Intro headline (default: derived from first words)")
@@ -277,7 +288,17 @@ def main():
     spec = get_format(args.format)
 
     # 1. Fragment
-    from services.asset_store import resolve_logo
+    from services.asset_store import resolve, resolve_logo
+
+    def media_path(value: str | None, kind: str) -> str | None:
+        if not value:
+            return None
+        found = resolve(value) or value
+        found = found if os.path.isabs(found) else os.path.join(_INVOKE_CWD, found)
+        found = os.path.abspath(found)
+        if not os.path.exists(found):
+            raise SystemExit(f"{kind.capitalize()} not found: {value}")
+        return found
 
     name_card = None
     if getattr(args, "name_card", None):
@@ -302,13 +323,20 @@ def main():
         logo=resolve_logo(getattr(args, "logo", None)),
         name_card=name_card,
         motion=motion,
+        caption_position=args.caption_position,
+        caption_scale=max(0.7, min(1.5, args.caption_scale)),
+        logo_position=args.logo_position,
+        logo_scale=max(0.5, min(1.5, args.logo_scale)),
     )
 
     platforms = [p.strip() for p in platforms_str.split(",") if p.strip()]
     parts = []
 
     # 2. Intro (optional)
-    if not args.no_intro:
+    external_intro = media_path(args.intro, "intro")
+    if external_intro and not args.no_intro:
+        parts.append(external_intro)
+    elif not args.no_intro:
         intro_title = args.intro_title
         if not intro_title:
             # derive a short headline from the first ~4 words of the fragment
@@ -324,7 +352,10 @@ def main():
     parts.append(fragment)
 
     # 3. Outro (optional)
-    if not args.no_outro:
+    external_outro = media_path(args.outro, "outro")
+    if external_outro and not args.no_outro:
+        parts.append(external_outro)
+    elif not args.no_outro:
         outro = _render_bookend(
             "outro", outro_title, handle, platforms,
             args.outro_seconds, os.path.join(out_dir, "_outro.mp4"), accent, bg,

@@ -77,6 +77,13 @@ class StudioFormatTests(unittest.TestCase):
         cmd = _run_studio(args)
         self.assertEqual(cmd[cmd.index("--format") + 1], "vertical")
 
+    def test_old_callers_keep_the_original_layout_defaults(self):
+        cmd = _run_studio(_studio_args())
+        self.assertEqual(cmd[cmd.index("--caption-position") + 1], "auto")
+        self.assertEqual(cmd[cmd.index("--caption-scale") + 1], "1.0")
+        self.assertEqual(cmd[cmd.index("--logo-position") + 1], "top-left")
+        self.assertEqual(cmd[cmd.index("--logo-scale") + 1], "1.0")
+
 
 class StudioCanvasTests(unittest.TestCase):
     """Each stage must be handed the canvas, and it must be the spec's."""
