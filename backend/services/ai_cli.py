@@ -441,7 +441,7 @@ def _run_ai_command(
         result = subprocess.run(
             [
                 cli_path, "exec",
-                "--full-auto",
+                "--sandbox", "read-only",
                 "-o", output_file,
                 prompt,
             ],
