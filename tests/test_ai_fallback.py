@@ -459,6 +459,40 @@ class AICliDiscoveryTests(unittest.TestCase):
             self.assertIn("stdin", kwargs)
             self.assertFalse(kwargs.get("shell"))
 
+    def test_codex_exec_uses_current_read_only_args(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt_file = os.path.join(tmp, "prompt.txt")
+            cli = os.path.join(tmp, "codex")
+
+            with mock.patch("services.ai_cli.subprocess.run") as run_mock:
+                run_mock.return_value = subprocess.CompletedProcess(
+                    args=[cli, "exec"],
+                    returncode=0,
+                    stdout="{}",
+                    stderr="",
+                )
+                ai._run_ai_command(
+                    cli_path=cli,
+                    engine="codex",
+                    prompt="find clips",
+                    prompt_file=prompt_file,
+                    project_dir=tmp,
+                    timeout=30,
+                )
+
+            args, kwargs = run_mock.call_args
+            self.assertEqual(
+                args[0],
+                [
+                    cli, "exec",
+                    "--sandbox", "read-only",
+                    "-o", prompt_file + ".out",
+                    "find clips",
+                ],
+            )
+            self.assertNotIn("--full-auto", args[0])
+            self.assertEqual(kwargs["cwd"], tmp)
+
 
 if __name__ == "__main__":
     unittest.main()
