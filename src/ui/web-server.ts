@@ -20,7 +20,7 @@ import {
   chmodSync,
   realpathSync,
 } from "fs";
-import { mkdir, readdir, unlink } from "fs/promises";
+import { copyFile, mkdir, readdir, rename, unlink } from "fs/promises";
 import path from "path";
 import { join, dirname, basename, extname, resolve } from "path";
 import { execSync, execFileSync, spawn } from "child_process";
@@ -2467,6 +2467,45 @@ function runPy(scriptAndArgs: string[]): Promise<{ code: number; stdout: string;
 const runCli = (args: string[]) =>
   runPy([join(paths.backendDir, "cli.py"), "--no-banner", ...args]);
 
+const LOGO_POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
+type LogoPosition = (typeof LOGO_POSITIONS)[number];
+
+function logoOverlayExpr(position: string, margin = 108): string {
+  const x = position.endsWith("right") ? `main_w-overlay_w-${margin}` : String(margin);
+  const y = position.startsWith("bottom") ? `main_h-overlay_h-${margin}` : String(margin);
+  return `${x}:${y}`;
+}
+
+function runFfmpeg(args: string[], timeoutMs = 120_000): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(paths.ffmpegPath, args, { detached: process.platform !== "win32" });
+    let stdout = "", stderr = "";
+    let settled = false;
+    const finish = (result: { code: number; stdout: string; stderr: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      terminateProcessTree(proc);
+      finish({ code: 1, stdout, stderr: `${stderr}\nTimed out after ${timeoutMs / 1000}s`.trim() });
+    }, timeoutMs);
+    proc.stdout.on("data", (d) => (stdout += d));
+    proc.stderr.on("data", (d) => (stderr += d));
+    proc.on("close", (code) => finish({ code: code ?? 1, stdout, stderr }));
+    proc.on("error", (e) => finish({ code: 1, stdout, stderr: String(e) }));
+  });
+}
+
+async function resolveLogoPath(input: unknown): Promise<string | null> {
+  const raw = String(input || "").trim();
+  if (!raw) return null;
+  const resolvedLogo = await assetManager.resolve(raw);
+  if (!resolvedLogo || !existsSync(resolvedLogo)) return null;
+  return resolvedLogo;
+}
+
 // Composite a thumbnail PNG onto the start of a clip. stripStart > 0 removes a
 // prior card first (avoids stacking on re-bake). Returns the bake's success.
 async function bakeThumbnailCard(clipPath: string, image: string, stripStart = 0): Promise<{ ok: boolean; error?: string }> {
@@ -2647,6 +2686,98 @@ app.post("/api/clips/:id/thumbnail/render", async (req, res) => {
   const edit = await runCli(["clips", "edit", String(clip.id), "--thumbnail-config", JSON.stringify(merged)]);
   if (edit.code !== 0) { res.status(500).json({ error: stripAnsi(edit.stderr || edit.stdout) || "thumbnail metadata update failed" }); return; }
   res.json({ ok: true, preview_path: outPath });
+});
+
+app.get("/api/clips/:id/logo/previews", async (req, res) => {
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
+  if (!clip.output_path || !existsSync(clip.output_path)) { res.status(400).json({ error: "rendered file missing" }); return; }
+  const logo = await resolveLogoPath(req.query.logo_path);
+  if (!logo) { res.status(400).json({ error: "select a logo first" }); return; }
+  const baseVideo = clip.logo_backup_path && existsSync(clip.logo_backup_path)
+    ? clip.logo_backup_path
+    : clip.output_path;
+  const outDir = join(paths.output, "logo-previews", String(clip.id));
+  await mkdir(outDir, { recursive: true });
+  const previews = [];
+  for (const position of LOGO_POSITIONS) {
+    const out = join(outDir, `${position}.jpg`);
+    const r = await runFfmpeg([
+      "-y",
+      "-ss", String(Math.max(0, Math.min(1, (clip.duration || 1) / 3))),
+      "-i", baseVideo,
+      "-i", logo,
+      "-filter_complex", `[1:v]scale=-1:126[logo];[0:v][logo]overlay=${logoOverlayExpr(position)}[v]`,
+      "-map", "[v]",
+      "-frames:v", "1",
+      "-q:v", "3",
+      out,
+    ]);
+    if (r.code !== 0 || !existsSync(out)) {
+      res.status(400).json({ error: stripAnsi(r.stderr) || "preview failed" });
+      return;
+    }
+    previews.push({ position, path: out });
+  }
+  res.json({ previews });
+});
+
+app.post("/api/clips/:id/logo", async (req, res) => {
+  if (DEMO) { res.json({ ok: true }); return; }
+  const clip = await clipsHistory.findById(req.params.id);
+  if (!clip) { res.status(404).json({ error: "clip not found" }); return; }
+  if (!clip.output_path || !existsSync(clip.output_path)) { res.status(400).json({ error: "rendered file missing" }); return; }
+  const action = String(req.body?.action || "apply");
+  if (action === "remove") {
+    const backup = clip.logo_backup_path;
+    if (!backup || !existsSync(backup)) {
+      res.status(400).json({ error: "no logo backup available" });
+      return;
+    }
+    await copyFile(backup, clip.output_path);
+    await clipsHistory.update(clip.id, { logo_path: "", logo_backup_path: "", logo_position: "" });
+    broadcastSSE("history-updated", { jobId: null, count: 1 });
+    res.json({ ok: true, restored_from: backup });
+    return;
+  }
+  const logo = await resolveLogoPath(req.body?.logo_path);
+  if (!logo) { res.status(400).json({ error: "select a logo first" }); return; }
+  const position = LOGO_POSITIONS.includes(req.body?.logo_position) ? req.body.logo_position as LogoPosition : "top-right";
+  const backup = clip.logo_backup_path && existsSync(clip.logo_backup_path)
+    ? clip.logo_backup_path
+    : `${clip.output_path}.pre-logo.mp4`;
+  if (!existsSync(backup)) await copyFile(clip.output_path, backup);
+  const baseVideo = existsSync(backup) ? backup : clip.output_path;
+  const tmp = `${clip.output_path}.logo-${process.pid}.mp4`;
+  const r = await runFfmpeg([
+    "-y",
+    "-i", baseVideo,
+    "-i", logo,
+    "-filter_complex", `[1:v]scale=-1:126[logo];[0:v][logo]overlay=${logoOverlayExpr(position)}[v]`,
+    "-map", "[v]",
+    "-map", "0:a?",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "18",
+    "-pix_fmt", "yuv420p",
+    "-c:a", "copy",
+    "-movflags", "+faststart",
+    tmp,
+  ], 15 * 60_000);
+  if (r.code !== 0 || !existsSync(tmp)) {
+    res.status(400).json({ error: stripAnsi(r.stderr) || "logo apply failed" });
+    return;
+  }
+  await rename(tmp, clip.output_path);
+  const size = statSync(clip.output_path).size / 1024 / 1024;
+  await clipsHistory.update(clip.id, {
+    logo_path: logo,
+    logo_backup_path: backup,
+    logo_position: position,
+    file_size_mb: Math.round(size * 10) / 10,
+  });
+  broadcastSSE("history-updated", { jobId: null, count: 1 });
+  res.json({ ok: true, logo_path: logo, logo_position: position, backup_path: backup });
 });
 
 // --- Thumbnail studio (standalone thumbnails, no clip required) ---

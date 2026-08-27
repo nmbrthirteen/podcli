@@ -6,6 +6,7 @@ import ClipPlayer from "./ClipPlayer";
 import { BackIcon } from "./icons";
 import ReframeEditor from "./ReframeEditor";
 import CopyButton from "./CopyButton";
+import AssetPicker from "./AssetPicker";
 
 interface ThumbnailConfig {
   text?: string;
@@ -28,6 +29,9 @@ interface Clip {
   duration: number;
   file_size_mb?: number;
   output_path: string;
+  logo_path?: string;
+  logo_backup_path?: string;
+  logo_position?: string;
   created_at: string;
   content_type?: string;
   transcript_slice?: string;
@@ -39,6 +43,7 @@ interface Clip {
 }
 
 const CAPTION_STYLES = ["branded", "hormozi", "karaoke", "subtle"];
+const LOGO_POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right"];
 const img = (p: string, bust: number) => `/api/image?path=${encodeURIComponent(p)}&t=${bust}`;
 
 export default function ClipDetail() {
@@ -63,6 +68,9 @@ export default function ClipDetail() {
   const [bust, setBust] = useState(1);
   const [davinciOn, setDavinciOn] = useState(false);
   const [reframing, setReframing] = useState(false);
+  const [logoPath, setLogoPath] = useState("");
+  const [logoPosition, setLogoPosition] = useState("top-right");
+  const [logoPreviews, setLogoPreviews] = useState<Array<{ position: string; path: string }>>([]);
 
   const load = () => {
     api("/history?limit=500")
@@ -72,6 +80,8 @@ export default function ClipDetail() {
         if (found) {
           setTitle(found.title);
           setCaptionStyle(found.caption_style);
+          setLogoPath(found.logo_path || "");
+          setLogoPosition(found.logo_position || "top-right");
           const tc = found.thumbnail_config || {};
           setLine1(tc.line1 ?? "");
           setLine2(tc.line2 ?? "");
@@ -140,6 +150,42 @@ export default function ClipDetail() {
       setBust(Date.now()); load();
       setMsg("Thumbnail generated"); setMsgErr(false);
     } catch (e: any) { setMsg(`Generate failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
+  };
+
+  const loadLogoPreviews = async () => {
+    if (!logoPath) { setMsg("Select a logo first"); setMsgErr(true); return; }
+    setBusy("logo-preview"); setMsg(null); setMsgErr(false);
+    try {
+      const r = await api(`/clips/${clip.id}/logo/previews?logo_path=${encodeURIComponent(logoPath)}`);
+      if (r.error) throw new Error(r.error);
+      setLogoPreviews(r.previews || []);
+      if (r.previews?.[0]?.position) setLogoPosition(r.previews[0].position);
+    } catch (e: any) { setMsg(`Logo previews failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
+  };
+
+  const applyLogo = async () => {
+    if (!logoPath) { setMsg("Select a logo first"); setMsgErr(true); return; }
+    setBusy("logo-apply"); setMsg(null); setMsgErr(false);
+    try {
+      const r = await api(`/clips/${clip.id}/logo`, {
+        method: "POST",
+        body: JSON.stringify({ action: "apply", logo_path: logoPath, logo_position: logoPosition }),
+      });
+      if (r.error) throw new Error(r.error);
+      setBust(Date.now()); load();
+      setMsg("Logo applied. Backup saved for removal"); setMsgErr(false);
+    } catch (e: any) { setMsg(`Logo apply failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
+  };
+
+  const removeLogo = async () => {
+    setBusy("logo-remove"); setMsg(null); setMsgErr(false);
+    try {
+      const r = await api(`/clips/${clip.id}/logo`, { method: "POST", body: JSON.stringify({ action: "remove" }) });
+      if (r.error) throw new Error(r.error);
+      setLogoPreviews([]);
+      setBust(Date.now()); load();
+      setMsg("Logo removed from backup"); setMsgErr(false);
+    } catch (e: any) { setMsg(`Logo remove failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   // Pull a different frame from the clip (cycles the ranked candidates) and
@@ -257,6 +303,43 @@ export default function ClipDetail() {
               <button className="btn btn-primary btn-sm" onClick={save} disabled={!dirty || busy !== null}>
                 {busy === "save" ? <div className="spinner sm" /> : "Save"}
               </button>
+            </div>
+          </div>
+
+          <div className="section">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>Logo</label>
+              {clip.logo_backup_path && <span className="hint">Backup ready</span>}
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <AssetPicker type="logo" value={logoPath} onChange={(p) => { setLogoPath(p); setLogoPreviews([]); }} disabled={busy !== null} />
+              <button className="btn btn-ghost btn-sm" onClick={loadLogoPreviews} disabled={busy !== null || !logoPath}>
+                {busy === "logo-preview" ? <><div className="spinner sm" /> Loading…</> : "Preview"}
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={applyLogo} disabled={busy !== null || !logoPath}>
+                {busy === "logo-apply" ? <div className="spinner sm" /> : "Apply"}
+              </button>
+              <button className="btn btn-danger btn-sm" onClick={removeLogo} disabled={busy !== null || !clip.logo_backup_path}>
+                {busy === "logo-remove" ? <div className="spinner sm" /> : "Remove"}
+              </button>
+            </div>
+            {logoPreviews.length > 0 ? (
+              <div className="thumb-variations" style={{ marginTop: 12 }}>
+                {logoPreviews.map((preview) => (
+                  <button key={preview.position} className={`thumb-variation ${logoPosition === preview.position ? "selected" : ""}`} onClick={() => setLogoPosition(preview.position)} disabled={busy !== null} title={preview.position}>
+                    <img src={img(preview.path, bust)} alt={preview.position} />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="hint" style={{ marginTop: 8 }}>Preview a few placements, select one, then apply.</div>
+            )}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+              {LOGO_POSITIONS.map((position) => (
+                <button key={position} className={`btn btn-ghost btn-sm ${logoPosition === position ? "selected" : ""}`} onClick={() => setLogoPosition(position)} disabled={busy !== null}>
+                  {position}
+                </button>
+              ))}
             </div>
           </div>
 

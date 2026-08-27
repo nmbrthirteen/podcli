@@ -308,6 +308,8 @@ export interface ClipHistoryEntry {
   created_at: string;
   content_type?: string;
   transcript_slice?: string;
+  logo_backup_path?: string;
+  logo_position?: string;
   keep_segments?: Array<{ start: number; end: number }>;
   thumbnail_config?: ClipThumbnailConfig;
   youtube_video_id?: string;
