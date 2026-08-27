@@ -486,6 +486,7 @@ class AICliDiscoveryTests(unittest.TestCase):
                 [
                     cli, "exec",
                     "--sandbox", "read-only",
+                    "--skip-git-repo-check",
                     "-o", prompt_file + ".out",
                     "find clips",
                 ],
