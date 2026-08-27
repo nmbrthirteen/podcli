@@ -442,6 +442,7 @@ def _run_ai_command(
             [
                 cli_path, "exec",
                 "--sandbox", "read-only",
+                "--skip-git-repo-check",
                 "-o", output_file,
                 prompt,
             ],
