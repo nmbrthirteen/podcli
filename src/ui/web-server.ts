@@ -3073,16 +3073,20 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
   // Editor sends source-absolute keyframes + trim; derive the render's clip-relative
   // crop keyframes from it, and persist the editor state so reopening shows it.
   const reframe = req.body?.reframe as { keyframes?: { tAbs: number; x_pct: number }[]; inSec?: number; outSec?: number } | undefined;
+  const trim = req.body?.trim as { inSec?: number; outSec?: number } | undefined;
   const startSecond = reframe && typeof reframe.inSec === "number" ? reframe.inSec
+    : trim && typeof trim.inSec === "number" ? trim.inSec
     : typeof req.body?.start_second === "number" ? req.body.start_second : clip.start_second;
   const endSecond = reframe && typeof reframe.outSec === "number" ? reframe.outSec
+    : trim && typeof trim.outSec === "number" ? trim.outSec
     : typeof req.body?.end_second === "number" ? req.body.end_second : clip.end_second;
   const keyframes = reframe?.keyframes
     ? reframe.keyframes
         .filter((k) => k.tAbs >= startSecond - 0.001 && k.tAbs <= endSecond + 0.001)
         .map((k) => ({ t: +Math.max(0, k.tAbs - startSecond).toFixed(3), x_pct: k.x_pct }))
     : req.body?.crop_keyframes;
-  if (!Array.isArray(keyframes) || keyframes.length === 0) {
+  const trimOnly = !!trim && !reframe && !Array.isArray(keyframes);
+  if (!trimOnly && (!Array.isArray(keyframes) || keyframes.length === 0)) {
     res.status(400).json({ error: "keyframes required" });
     return;
   }
@@ -3106,8 +3110,8 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       start_second: startSecond,
       end_second: endSecond,
       caption_style: req.body?.caption_style || (recipe.caption_style as string) || clip.caption_style,
-      crop_strategy: "manual",
-      crop_keyframes: keyframes,
+      crop_strategy: trimOnly ? (recipe.crop_strategy as string) || clip.crop_strategy || "face" : "manual",
+      ...(trimOnly ? {} : { crop_keyframes: keyframes }),
       transcript_words: words,
       logo_path: (recipe.logo_path as string) ?? clip.logo_path ?? null,
       outro_path: (recipe.outro_path as string) ?? clip.outro_path ?? null,
@@ -3135,10 +3139,11 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
     await clipsHistory.update(clip.id, {
       start_second: startSecond,
       end_second: endSecond,
-      crop_strategy: "manual",
+      crop_strategy: trimOnly ? (recipe.crop_strategy as string) || clip.crop_strategy || "face" : "manual",
       duration: result.data.duration ?? clip.duration,
       file_size_mb: result.data.file_size_mb ?? clip.file_size_mb,
       output_path: outPath,
+      ...(trimOnly ? { logo_backup_path: "" } : {}),
     });
     res.json({ ok: true, output_path: outPath, file_size_mb: result.data.file_size_mb, thumbnail_baked: thumbnailBaked });
   } catch (e: any) {

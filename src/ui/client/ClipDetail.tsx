@@ -68,6 +68,7 @@ export default function ClipDetail() {
   const [bust, setBust] = useState(1);
   const [davinciOn, setDavinciOn] = useState(false);
   const [reframing, setReframing] = useState(false);
+  const [trimming, setTrimming] = useState(false);
   const [logoPath, setLogoPath] = useState("");
   const [logoPosition, setLogoPosition] = useState("top-right");
   const [logoPreviews, setLogoPreviews] = useState<Array<{ position: string; path: string }>>([]);
@@ -280,7 +281,10 @@ export default function ClipDetail() {
       <div className="clip-detail">
         <div className="clip-detail-player">
           {clip.output_path ? <ClipPlayer key={previewUrl} src={previewUrl} poster={posterUrl} onTime={(t) => (playerTime.current = t)} /> : <div className="phone-empty">No rendered output</div>}
-          <button className="btn btn-ghost btn-sm" style={{ width: "100%", marginTop: 10 }} onClick={() => setReframing(true)}>Reframe (fix camera)</button>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={() => setTrimming(true)}>Trim length</button>
+            <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={() => setReframing(true)}>Reframe</button>
+          </div>
           <div className="clip-meta">
             <span>{fmt(clip.start_second)}-{fmt(clip.end_second)} · {clip.duration}s</span>
             <span>{clip.crop_strategy}</span>
@@ -496,6 +500,17 @@ export default function ClipDetail() {
           caption_style={clip.caption_style}
           onClose={() => setReframing(false)}
           onDone={() => { setReframing(false); setBust(Date.now()); setMsg("Reframed & re-rendered"); setMsgErr(false); load(); }}
+        />
+      )}
+      {trimming && (
+        <ReframeEditor
+          clipId={clip.id}
+          start={clip.start_second}
+          end={clip.end_second}
+          caption_style={clip.caption_style}
+          trimOnly
+          onClose={() => setTrimming(false)}
+          onDone={() => { setTrimming(false); setBust(Date.now()); setMsg("Trimmed & re-rendered"); setMsgErr(false); load(); }}
         />
       )}
     </div>

@@ -8,9 +8,10 @@ const FRAME = 1 / 30;
 const BUFFER = 7; // seconds of padding shown around the clip for trimming
 
 export default function ReframeEditor({
-  clipId, start, end, caption_style, onClose, onDone,
+  clipId, start, end, caption_style, trimOnly = false, onClose, onDone,
 }: {
   clipId: string; start: number; end: number; caption_style: string;
+  trimOnly?: boolean;
   onClose: () => void; onDone: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -126,7 +127,9 @@ export default function ReframeEditor({
     try {
       const r = await api(`/clips/${clipId}/rerender`, {
         method: "POST",
-        body: JSON.stringify({ caption_style, reframe: { keyframes: kf, inSec: +inSec.toFixed(3), outSec: +outSec.toFixed(3) } }),
+        body: JSON.stringify(trimOnly
+          ? { caption_style, trim: { inSec: +inSec.toFixed(3), outSec: +outSec.toFixed(3) } }
+          : { caption_style, reframe: { keyframes: kf, inSec: +inSec.toFixed(3), outSec: +outSec.toFixed(3) } }),
       });
       if (r.error) throw new Error(r.error);
       onDone();
@@ -137,14 +140,14 @@ export default function ReframeEditor({
     <div className="reframe-overlay" onClick={onClose}>
       <div className="reframe-modal" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <h3 style={{ margin: 0, fontSize: 16 }}>Reframe & trim</h3>
+          <h3 style={{ margin: 0, fontSize: 16 }}>{trimOnly ? "Trim length" : "Reframe & trim"}</h3>
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close"><CloseIcon /></button>
         </div>
 
-        <div ref={stageRef} className="reframe-stage" onPointerDown={pointer} onPointerMove={pointer}>
+        <div ref={stageRef} className="reframe-stage" onPointerDown={trimOnly ? undefined : pointer} onPointerMove={trimOnly ? undefined : pointer}>
           <video ref={videoRef} src={`/api/clips/${clipId}/source`} playsInline preload="auto"
             onLoadedMetadata={onMeta} onTimeUpdate={onTimeUpdate} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} />
-          <div className="reframe-box" style={{ left: `${centerPct - half}%`, width: `${boxPct}%` }} />
+          {!trimOnly && <div className="reframe-box" style={{ left: `${centerPct - half}%`, width: `${boxPct}%` }} />}
         </div>
 
         <div ref={trackRef} className="rf-track" onPointerDown={onTrackDown} onPointerMove={(e) => { if (e.buttons) applyDrag(e.clientX); }} onPointerUp={() => (dragMode.current = null)}>
@@ -152,12 +155,12 @@ export default function ReframeEditor({
           <div className="rf-handle rf-handle-in" style={{ left: `${pos(inSec)}%` }} />
           <div className="rf-handle rf-handle-out" style={{ left: `${pos(outSec)}%` }} />
           {cuts.map((c) => <div key={`cut-${c}`} className="rf-cut" style={{ left: `${pos(c)}%` }} title={`camera switch @ ${fmtMs(c)}`} />)}
-          {keyframes.map((k) => <div key={k.tAbs} className="rf-kf" style={{ left: `${pos(k.tAbs)}%` }} title={`${fmtMs(k.tAbs)} · ${Math.round(k.x_pct)}%`} />)}
+          {!trimOnly && keyframes.map((k) => <div key={k.tAbs} className="rf-kf" style={{ left: `${pos(k.tAbs)}%` }} title={`${fmtMs(k.tAbs)} · ${Math.round(k.x_pct)}%`} />)}
           <div className="rf-playhead" style={{ left: `${pos(tAbs)}%` }} />
         </div>
 
         <div className="hint" style={{ marginTop: 6 }}>
-          {detectingCuts ? "Detecting camera switches…" : cuts.length ? `${cuts.length} camera switch${cuts.length > 1 ? "es" : ""} detected. A keyframe near one snaps to it.` : "No camera switches detected"}
+          {trimOnly ? "Drag the handles to extend or shorten. Face detection stays on." : detectingCuts ? "Detecting camera switches…" : cuts.length ? `${cuts.length} camera switch${cuts.length > 1 ? "es" : ""} detected. A keyframe near one snaps to it.` : "No camera switches detected"}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
@@ -168,10 +171,10 @@ export default function ReframeEditor({
           <button className="btn btn-ghost btn-sm" title="Next camera switch" onClick={() => jumpCut(1)} disabled={!cuts.length}><CutForwardIcon /></button>
           <span style={{ fontSize: 12, color: "var(--text)", fontVariantNumeric: "tabular-nums", marginLeft: 4 }}>{fmtMs(tAbs)}</span>
           <span style={{ flex: 1 }} />
-          <button className="btn btn-primary btn-sm" onClick={addKeyframe}>+ Keyframe</button>
+          {!trimOnly && <button className="btn btn-primary btn-sm" onClick={addKeyframe}>+ Keyframe</button>}
         </div>
 
-        {keyframes.length > 0 && (
+        {!trimOnly && keyframes.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
             {keyframes.map((k) => (
               <span key={k.tAbs} className="pill" style={{ fontSize: 11, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }} onClick={() => seek(k.tAbs)}>
