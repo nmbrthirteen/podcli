@@ -3091,8 +3091,6 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
     return;
   }
   if (reframe) await clipsHistory.saveReframe(clip.id, reframe);
-  // Replay the original render recipe (logo/outro/captions/fillers) with the new
-  // manual crop, so brand elements survive the reframe.
   const recipe = (await clipsHistory.loadRecipe(clip.id)) || {};
   let allWords = (recipe.transcript_words as any[]) || (await clipsHistory.loadWords(clip.id)) || [];
   if (!allWords.length) {
@@ -3114,9 +3112,8 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       ...(trimOnly ? {} : { crop_keyframes: keyframes }),
       transcript_words: words,
       logo_path: (recipe.logo_path as string) ?? clip.logo_path ?? null,
-      outro_path: (recipe.outro_path as string) ?? clip.outro_path ?? null,
-      // Honor an explicit null in the recipe (intro removed), not the stale clip value.
-      intro_path: "intro_path" in recipe ? (recipe.intro_path ?? null) : (clip.intro_path ?? null),
+      outro_path: trimOnly ? null : (recipe.outro_path as string) ?? clip.outro_path ?? null,
+      intro_path: trimOnly ? null : ("intro_path" in recipe ? (recipe.intro_path ?? null) : (clip.intro_path ?? null)),
       clean_fillers: recipe.clean_fillers !== undefined ? recipe.clean_fillers : true,
       ...(recipe.keep_segments ? { keep_segments: recipe.keep_segments } : {}),
       title: clip.title,
@@ -3143,7 +3140,7 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       duration: result.data.duration ?? clip.duration,
       file_size_mb: result.data.file_size_mb ?? clip.file_size_mb,
       output_path: outPath,
-      ...(trimOnly ? { logo_backup_path: "" } : {}),
+      ...(trimOnly ? { intro_path: "", outro_path: "", logo_backup_path: "" } : {}),
     });
     res.json({ ok: true, output_path: outPath, file_size_mb: result.data.file_size_mb, thumbnail_baked: thumbnailBaked });
   } catch (e: any) {
