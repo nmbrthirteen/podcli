@@ -3114,8 +3114,9 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       logo_path: (recipe.logo_path as string) ?? clip.logo_path ?? null,
       outro_path: trimOnly ? null : (recipe.outro_path as string) ?? clip.outro_path ?? null,
       intro_path: trimOnly ? null : ("intro_path" in recipe ? (recipe.intro_path ?? null) : (clip.intro_path ?? null)),
-      clean_fillers: recipe.clean_fillers !== undefined ? recipe.clean_fillers : true,
-      ...(recipe.keep_segments ? { keep_segments: recipe.keep_segments } : {}),
+      clean_fillers: trimOnly ? false : (recipe.clean_fillers !== undefined ? recipe.clean_fillers : true),
+      trim_opening: trimOnly ? false : undefined,
+      ...(trimOnly ? {} : recipe.keep_segments ? { keep_segments: recipe.keep_segments } : {}),
       title: clip.title,
       output_dir: dirname(clip.output_path),
     });
