@@ -188,6 +188,7 @@ def handle_create_clip(task_id: str, params: dict):
         face_map=params.get("face_map"),
         keep_segments=params.get("keep_segments"),
         trim_opening=params.get("trim_opening"),
+        preserve_timing=params.get("preserve_timing", False),
         allow_ass_fallback=params.get("allow_ass_fallback", False),
         use_ass_captions=params.get("use_ass_captions", False),
         keep_caption_overlay=params.get("keep_caption_overlay", False),

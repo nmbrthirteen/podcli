@@ -321,6 +321,28 @@ class TransitionAutofixGatingTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"PODCLI_TRANSITION_AUTOFIX_PASSES": "junk"}):
             self.assertEqual(cg._transition_autofix_passes(True), 2)
 
+    def test_preserve_timing_skips_transition_autofix(self):
+        with mock.patch.dict(os.environ, {"PODCLI_TRANSITION_AUTOFIX_PASSES": "2"}):
+            self.assertEqual(
+                cg._render_transition_autofix_passes(
+                    preserve_timing=True,
+                    reframe=True,
+                    crop_strategy="face",
+                ),
+                0,
+            )
+
+    def test_regular_face_crop_still_runs_transition_autofix(self):
+        with mock.patch.dict(os.environ, {"PODCLI_TRANSITION_AUTOFIX_PASSES": "2"}):
+            self.assertEqual(
+                cg._render_transition_autofix_passes(
+                    preserve_timing=False,
+                    reframe=True,
+                    crop_strategy="face",
+                ),
+                2,
+            )
+
 
 class OutputPathReservationTests(unittest.TestCase):
     def setUp(self):
