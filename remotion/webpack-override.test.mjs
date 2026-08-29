@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { webpackOverride } from "./webpack-override.mjs";
-import { hdCanvas, overlayFilter } from "./render.mjs";
 
 // TypeScript 7 dropped the JS compiler API, so @remotion/bundler's esbuild-loader dies
 // on `typescript.sys.readFile` the moment it can resolve a TypeScript it wasn't built
@@ -66,20 +65,5 @@ describe("webpackOverride", () => {
     });
     expect(config.module.rules[0].type).toBe("asset/inline");
     expect(config.module.rules[1].type).toBe("asset/resource");
-  });
-});
-
-describe("hd overlay canvas", () => {
-  it("authors vertical overlays at 1080x1920 even for 4k video", () => {
-    expect(hdCanvas(2160, 3840)).toEqual({ width: 1080, height: 1920 });
-    expect(hdCanvas(1080, 1920)).toEqual({ width: 1080, height: 1920 });
-  });
-
-  it("authors landscape overlays at 1920x1080", () => {
-    expect(hdCanvas(3840, 2160)).toEqual({ width: 1920, height: 1080 });
-  });
-
-  it("scales the whole overlay including logo to the export", () => {
-    expect(overlayFilter()).toContain("scale2ref");
   });
 });

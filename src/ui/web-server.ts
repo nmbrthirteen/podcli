@@ -2470,35 +2470,10 @@ const runCli = (args: string[]) =>
 const LOGO_POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
 type LogoPosition = (typeof LOGO_POSITIONS)[number];
 
-function overlayPx(value: number, videoHeight: number): number {
-  if (videoHeight <= 0) return Math.max(1, Math.round(value));
-  return Math.max(1, Math.round(value * (videoHeight / 1920)));
-}
-
-function probeHeight(videoPath: string): Promise<number> {
-  return new Promise((resolve) => {
-    const proc = spawn(paths.ffprobePath, [
-      "-v", "error", "-select_streams", "v:0",
-      "-show_entries", "stream=height", "-of", "csv=p=0",
-      videoPath,
-    ]);
-    let stdout = "";
-    proc.stdout.on("data", (d) => { stdout += d; });
-    proc.on("close", () => {
-      const height = Number.parseInt(stdout.trim(), 10);
-      resolve(Number.isFinite(height) && height > 0 ? height : 1920);
-    });
-    proc.on("error", () => resolve(1920));
-  });
-}
-
-async function logoFilter(position: string, videoPath: string): Promise<string> {
-  const videoHeight = await probeHeight(videoPath);
-  const logoH = overlayPx(126, videoHeight);
-  const margin = overlayPx(108, videoHeight);
+function logoOverlayExpr(position: string, margin = 108): string {
   const x = position.endsWith("right") ? `main_w-overlay_w-${margin}` : String(margin);
   const y = position.startsWith("bottom") ? `main_h-overlay_h-${margin}` : String(margin);
-  return `[1:v]scale=-1:${logoH}[logo];[0:v][logo]overlay=${x}:${y}[v]`;
+  return `${x}:${y}`;
 }
 
 function runFfmpeg(args: string[], timeoutMs = 120_000): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -2732,7 +2707,7 @@ app.get("/api/clips/:id/logo/previews", async (req, res) => {
       "-ss", String(Math.max(0, Math.min(1, (clip.duration || 1) / 3))),
       "-i", baseVideo,
       "-i", logo,
-      "-filter_complex", await logoFilter(position, baseVideo),
+      "-filter_complex", `[1:v]scale=-1:126[logo];[0:v][logo]overlay=${logoOverlayExpr(position)}[v]`,
       "-map", "[v]",
       "-frames:v", "1",
       "-q:v", "3",
@@ -2778,7 +2753,7 @@ app.post("/api/clips/:id/logo", async (req, res) => {
     "-y",
     "-i", baseVideo,
     "-i", logo,
-    "-filter_complex", await logoFilter(position, baseVideo),
+    "-filter_complex", `[1:v]scale=-1:126[logo];[0:v][logo]overlay=${logoOverlayExpr(position)}[v]`,
     "-map", "[v]",
     "-map", "0:a?",
     "-c:v", "libx264",

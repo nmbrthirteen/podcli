@@ -65,13 +65,9 @@ const inputProps = getInputProps() as {
     captions?: Record<string, unknown>;
     nameCard?: Record<string, unknown>;
   } | null;
-  canvasWidth?: number;
-  canvasHeight?: number;
 };
 
 export const RemotionRoot: React.FC = () => {
-  const canvasWidth = inputProps.canvasWidth || 1080;
-  const canvasHeight = inputProps.canvasHeight || 1920;
   const fps = inputProps.fps || 30;
   const durationInFrames = inputProps.durationInFrames || 900;
   const baseStyle = STYLES[inputProps.styleName || "branded"];
@@ -95,8 +91,8 @@ export const RemotionRoot: React.FC = () => {
         component={CaptionedClip}
         durationInFrames={durationInFrames}
         fps={fps}
-        width={canvasWidth}
-        height={canvasHeight}
+        width={1080}
+        height={1920}
         defaultProps={{
           videoSrc: inputProps.videoSrc || "",
           words: inputProps.words || [],
@@ -116,8 +112,8 @@ export const RemotionRoot: React.FC = () => {
         component={Audiogram}
         durationInFrames={durationInFrames}
         fps={fps}
-        width={canvasWidth}
-        height={canvasHeight}
+        width={1080}
+        height={1920}
         defaultProps={{
           words: inputProps.words || [],
           style,
@@ -134,8 +130,8 @@ export const RemotionRoot: React.FC = () => {
         component={Bookend}
         durationInFrames={durationInFrames}
         fps={fps}
-        width={canvasWidth}
-        height={canvasHeight}
+        width={1080}
+        height={1920}
         defaultProps={{
           mode: inputProps.bookendMode || "outro",
           title: inputProps.bookendTitle || "Follow for more",

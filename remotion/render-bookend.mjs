@@ -16,7 +16,6 @@
 
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { getCachedBundle } from "./bundle-cache.mjs";
-import { hdCanvas } from "./render.mjs";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -52,7 +51,6 @@ async function main() {
   const platforms = (opts.platforms || "tiktok,instagram,youtube,x")
     .split(",").map((s) => s.trim()).filter(Boolean);
 
-  const canvas = hdCanvas(width, height);
   const inputProps = {
     bookendMode: opts.mode,
     bookendTitle: opts.title || (opts.mode === "outro" ? "Follow for more" : ""),
@@ -60,8 +58,6 @@ async function main() {
     bookendPlatforms: platforms,
     bookendBg: opts.bg || "#0B0B0F",
     bookendAccent: opts.accent || "#FFE000",
-    canvasWidth: canvas.width,
-    canvasHeight: canvas.height,
   };
 
   const bundleLocation = await getCachedBundle({
@@ -73,10 +69,10 @@ async function main() {
   const id = crypto.createHash("md5").update(seed).digest("hex").slice(0, 12);
   const silentVideo = path.join(os.tmpdir(), `bookend_${id}.mp4`);
 
-  console.log(`Bookend: ${opts.mode}, "${inputProps.bookendTitle}", ${platforms.join("+")}, ${canvas.width}x${canvas.height}, ${durationInFrames}f`);
+  console.log(`Bookend: ${opts.mode}, "${inputProps.bookendTitle}", ${platforms.join("+")}, ${durationInFrames}f`);
 
   await renderMedia({
-    composition: { ...composition, durationInFrames, fps, width: canvas.width, height: canvas.height },
+    composition: { ...composition, durationInFrames, fps, width, height },
     serveUrl: bundleLocation,
     codec: "h264",
     outputLocation: silentVideo,

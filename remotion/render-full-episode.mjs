@@ -11,7 +11,6 @@
 
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { getCachedBundle } from "./bundle-cache.mjs";
-import { hdCanvas, overlayFilter } from "./render.mjs";
 import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -140,7 +139,6 @@ try {
 
   progress(2, "Preparing caption renderer");
   const bundle = await getCachedBundle({ onBundle: () => progress(3, "Preparing caption renderer") });
-  const canvas = hdCanvas(width, height);
   const inputProps = {
     videoSrc: "",
     words,
@@ -153,8 +151,6 @@ try {
     captionFontScale,
     logoPosition,
     singleLine: true,
-    canvasWidth: canvas.width,
-    canvasHeight: canvas.height,
   };
   const composition = await selectComposition({
     serveUrl: bundle,
@@ -162,7 +158,7 @@ try {
     inputProps,
     timeoutInMilliseconds: 120000,
   });
-  const renderComposition = { ...composition, durationInFrames, fps, width: canvas.width, height: canvas.height };
+  const renderComposition = { ...composition, durationInFrames, fps, width, height };
   const chunks = [];
   const chunkCount = Math.ceil(durationInFrames / framesPerChunk);
   const requestedConcurrency = Number.parseInt(process.env.PODCLI_REMOTION_CONCURRENCY || "", 10);
@@ -207,7 +203,7 @@ try {
       "-y", "-hide_banner", "-loglevel", "error",
       "-ss", startSeconds.toFixed(6), "-t", sectionDuration.toFixed(6), "-i", video,
       "-i", overlay,
-      "-filter_complex", `${overlayFilter()},format=yuv420p[v]`,
+      "-filter_complex", "[0:v][1:v]overlay=0:0:shortest=1,format=yuv420p[v]",
       "-map", "[v]", "-an",
       "-c:v", "libx264", "-crf", "18", "-preset", "fast",
       "-r", String(fps), "-g", String(fps * 2),

@@ -22,7 +22,7 @@ if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
 import cli as cli_mod
-from services.formats import export_dims, get_format, overlay_px
+from services.formats import get_format
 
 
 def _studio_args(**overrides):
@@ -150,29 +150,6 @@ class StudioCanvasTests(unittest.TestCase):
             spec = get_format(shape)
             self.assertGreater(spec.width, 0)
             self.assertGreater(spec.height, 0)
-
-
-class ExportDimsTests(unittest.TestCase):
-    def test_hd_source_stays_hd(self):
-        spec = get_format("vertical")
-        self.assertEqual(export_dims(spec, 1920, 1080), (1080, 1920))
-        self.assertEqual(overlay_px(126, 1920), 126)
-
-    def test_portrait_4k_keeps_its_pixels(self):
-        spec = get_format("vertical")
-        self.assertEqual(export_dims(spec, 2160, 3840), (2160, 3840))
-        self.assertEqual(overlay_px(126, 3840), 252)
-
-    def test_landscape_4k_vertical_crop_does_not_upsample_to_fake_4k(self):
-        spec = get_format("vertical")
-        w, h = export_dims(spec, 3840, 2160)
-        self.assertEqual(h, 2160)
-        self.assertLess(w, 2160)
-
-    def test_horizontal_4k_is_twice_hd(self):
-        spec = get_format("horizontal")
-        self.assertEqual(export_dims(spec, 3840, 2160), (3840, 2160))
-        self.assertEqual(overlay_px(126, 2160), 142)
 
 
 if __name__ == "__main__":
