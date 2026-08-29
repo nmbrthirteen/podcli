@@ -296,6 +296,25 @@ def _transition_autofix_passes(jumps_possible: bool) -> int:
     return 2 if jumps_possible else 0
 
 
+def _render_transition_autofix_passes(
+    preserve_timing: bool,
+    reframe: bool,
+    crop_strategy: str,
+    crop_keyframes: list = None,
+    keep_segments: list = None,
+) -> int:
+    if preserve_timing:
+        return 0
+    return _transition_autofix_passes(
+        _reframe_can_jump(
+            reframe=reframe,
+            crop_strategy=crop_strategy,
+            crop_keyframes=crop_keyframes,
+            keep_segments=keep_segments,
+        )
+    )
+
+
 def _auto_fix_transition_jumps(video_path: str, max_passes: int = 1) -> bool:
     """
     Bounded auto-fix for jumpy transitions. Never loops indefinitely.
@@ -711,6 +730,7 @@ def generate_clip(
     clean_fillers: bool = True,
     keep_segments: list[dict] = None,
     trim_opening: Optional[bool] = None,
+    preserve_timing: bool = False,
     allow_ass_fallback: bool = False,
     use_ass_captions: bool = False,
     keep_caption_overlay: bool = False,
@@ -1124,13 +1144,12 @@ def generate_clip(
 
         # Optional bounded QA/autofix pass for transition jumps.
         # Hard-capped to avoid any infinite rerender loop.
-        max_autofix_passes = _transition_autofix_passes(
-            _reframe_can_jump(
-                reframe=spec.reframe,
-                crop_strategy=crop_strategy,
-                crop_keyframes=crop_keyframes,
-                keep_segments=keep_segments,
-            )
+        max_autofix_passes = _render_transition_autofix_passes(
+            preserve_timing=preserve_timing,
+            reframe=spec.reframe,
+            crop_strategy=crop_strategy,
+            crop_keyframes=crop_keyframes,
+            keep_segments=keep_segments,
         )
         if max_autofix_passes > 0:
             if progress_callback:

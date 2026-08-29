@@ -3102,6 +3102,10 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
   }
   // If trimmed wider/narrower, keep only words inside the new bounds.
   const words = allWords.filter((w: any) => typeof w?.start !== "number" || (w.start >= startSecond && w.start < endSecond));
+  const recipeAsset = (key: "logo_path" | "outro_path" | "intro_path") => {
+    const value = recipe[key];
+    return typeof value === "string" && value.trim() ? value : undefined;
+  };
   try {
     const result = await executor.execute<ClipResult>("create_clip", {
       video_path: clip.source_video,
@@ -3111,11 +3115,12 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       crop_strategy: trimOnly ? (recipe.crop_strategy as string) || clip.crop_strategy || "face" : "manual",
       ...(trimOnly ? {} : { crop_keyframes: keyframes }),
       transcript_words: words,
-      logo_path: (recipe.logo_path as string) ?? clip.logo_path ?? null,
-      outro_path: trimOnly ? null : (recipe.outro_path as string) ?? clip.outro_path ?? null,
-      intro_path: trimOnly ? null : ("intro_path" in recipe ? (recipe.intro_path ?? null) : (clip.intro_path ?? null)),
+      logo_path: recipeAsset("logo_path") ?? clip.logo_path ?? null,
+      outro_path: recipeAsset("outro_path") ?? clip.outro_path ?? null,
+      intro_path: recipeAsset("intro_path") ?? clip.intro_path ?? null,
       clean_fillers: trimOnly ? false : (recipe.clean_fillers !== undefined ? recipe.clean_fillers : true),
       trim_opening: trimOnly ? false : undefined,
+      preserve_timing: trimOnly ? true : undefined,
       ...(trimOnly ? {} : recipe.keep_segments ? { keep_segments: recipe.keep_segments } : {}),
       title: clip.title,
       output_dir: dirname(clip.output_path),
@@ -3141,7 +3146,6 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       duration: result.data.duration ?? clip.duration,
       file_size_mb: result.data.file_size_mb ?? clip.file_size_mb,
       output_path: outPath,
-      ...(trimOnly ? { intro_path: "", outro_path: "", logo_backup_path: "" } : {}),
     });
     res.json({ ok: true, output_path: outPath, file_size_mb: result.data.file_size_mb, thumbnail_baked: thumbnailBaked });
   } catch (e: any) {
