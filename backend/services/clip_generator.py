@@ -30,9 +30,11 @@ from services.video_processor import (
     burn_captions,
     normalize_audio,
     concat_outro,
+    get_dimensions,
+    scale_to_frame,
 )
 from config.caption_styles import get_style
-from services.formats import get_format
+from services.formats import export_dims, get_format
 
 _FILLER_WORDS = frozenset([
     "um", "uh", "uhh", "uhm", "umm", "hmm", "hm", "mhm",
@@ -962,6 +964,8 @@ def generate_clip(
             progress_callback(30, f"Resizing for {spec.name} format (2/{total_steps})")
 
         cropped_path = os.path.join(work_dir, "cropped.mp4")
+        src_w, src_h = get_dimensions(segment_path)
+        canvas = export_dims(spec, src_w, src_h)
         with timed("render", "crop", strategy=crop_strategy if spec.reframe else "fit"):
             if spec.reframe:
                 crop_to_vertical(
@@ -971,10 +975,10 @@ def generate_clip(
                     clip_start=crop_clip_start,
                     face_map=face_map,
                     crop_keyframes=crop_keyframes,
-                    target_dims=spec.dims,
+                    target_dims=canvas,
                 )
             else:
-                fit_to_frame(segment_path, cropped_path, target_dims=spec.dims)
+                fit_to_frame(segment_path, cropped_path, target_dims=canvas)
 
         # Only Remotion draws the name card, and it is reached only when there
         # are words to caption. Refusing beats returning a clip that quietly
@@ -1109,7 +1113,6 @@ def generate_clip(
                 progress_callback(83, "Adding intro")
             # concat_outro outputs at its first arg's dimensions, so match the
             # intro to the clip's frame or a landscape intro reshapes the clip.
-            from services.video_processor import get_dimensions, scale_to_frame
             cw, ch = get_dimensions(final_video_path)
             intro_scaled = os.path.join(work_dir, "intro_scaled.mp4")
             scale_to_frame(intro_path, intro_scaled, cw, ch)
@@ -1122,8 +1125,15 @@ def generate_clip(
             if progress_callback:
                 progress_callback(85, f"Adding outro ({total_steps}/{total_steps})")
 
+            cw, ch = get_dimensions(final_video_path)
+            ow, oh = get_dimensions(outro_path)
+            to_join = outro_path
+            if (ow, oh) != (cw, ch):
+                outro_scaled = os.path.join(work_dir, "outro_scaled.mp4")
+                scale_to_frame(outro_path, outro_scaled, cw, ch)
+                to_join = outro_scaled
             with_outro_path = os.path.join(work_dir, "with_outro.mp4")
-            concat_outro(final_video_path, outro_path, with_outro_path,
+            concat_outro(final_video_path, to_join, with_outro_path,
                          crossfade_duration=bookend_fade)
             final_video_path = with_outro_path
 

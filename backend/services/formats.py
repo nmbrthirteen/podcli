@@ -77,6 +77,7 @@ FORMATS = {
 }
 
 DEFAULT_FORMAT = "vertical"
+REFERENCE_HEIGHT = 1920
 
 
 def get_format(name: str | None) -> FormatSpec:
@@ -85,3 +86,28 @@ def get_format(name: str | None) -> FormatSpec:
         # format doesn't silently render as vertical.
         print(f"[formats] unknown format {name!r}; using {DEFAULT_FORMAT}", file=sys.stderr)
     return FORMATS.get(name or DEFAULT_FORMAT, FORMATS[DEFAULT_FORMAT])
+
+
+def export_dims(spec: FormatSpec, source_width: int, source_height: int) -> tuple[int, int]:
+    hd_w, hd_h = spec.width, spec.height
+    if source_width <= 0 or source_height <= 0:
+        return hd_w, hd_h
+    ratio = spec.ratio
+    src_ratio = source_width / source_height
+    if src_ratio > ratio:
+        native_h = source_height
+        native_w = int(source_height * ratio)
+    else:
+        native_w = source_width
+        native_h = int(source_width / ratio)
+    scale = max(native_h / hd_h, native_w / hd_w, 1.0)
+    scale = min(scale, 2.0)
+    out_w = int(round(hd_w * scale))
+    out_h = int(round(hd_h * scale))
+    return out_w - out_w % 2, out_h - out_h % 2
+
+
+def overlay_px(value: float, video_height: int) -> int:
+    if video_height <= 0:
+        return max(1, int(round(value)))
+    return max(1, int(round(value * (video_height / REFERENCE_HEIGHT))))

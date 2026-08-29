@@ -23,6 +23,21 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import crypto from "crypto";
+import { fileURLToPath } from "url";
+
+export function hdCanvas(srcW, srcH) {
+  const w = Number(srcW);
+  const h = Number(srcH);
+  if (!(w > 0) || !(h > 0)) return { width: 1080, height: 1920 };
+  const ratio = w / h;
+  if (Math.abs(ratio - 16 / 9) < 0.08) return { width: 1920, height: 1080 };
+  if (Math.abs(ratio - 1) < 0.08) return { width: 1080, height: 1080 };
+  return { width: 1080, height: 1920 };
+}
+
+export function overlayFilter() {
+  return "[1:v][0:v]scale2ref=flags=lanczos[ov][base];[base][ov]overlay=0:0:shortest=1";
+}
 
 
 const BOOLEAN_FLAGS = new Set(["prebundle", "keep-overlay"]);
@@ -133,9 +148,8 @@ async function main() {
   const videoSrc = `http://127.0.0.1:${assetPort}/clip.mp4`;
   const logoSrc = opts.logo ? `http://127.0.0.1:${assetPort}/logo.png` : undefined;
 
-  // Probe video dimensions and duration
-  let renderW = 1080;
-  let renderH = 1920;
+  let videoW = 1080;
+  let videoH = 1920;
   let videoDuration = null;
   try {
     const { execSync } = await import("child_process");
@@ -145,8 +159,8 @@ async function main() {
     ).trim();
     const [w, h] = probe.split("x").map(Number);
     if (w > 0 && h > 0) {
-      renderW = w;
-      renderH = h;
+      videoW = w;
+      videoH = h;
     }
     const durStr = execSync(
       `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${path.resolve(opts.video)}"`,
@@ -182,6 +196,7 @@ async function main() {
     }
   }
 
+  const canvas = hdCanvas(videoW, videoH);
   const inputProps = {
     videoSrc,
     words,
@@ -196,10 +211,11 @@ async function main() {
     captionFontScale: clampCaptionFontScale(opts["caption-font-scale"]),
     logoPosition: opts["logo-position"] || "top-left",
     logoScale: clampLogoScale(opts["logo-scale"]),
+    canvasWidth: canvas.width,
+    canvasHeight: canvas.height,
   };
-
   console.log(
-    `Remotion: ${words.length} words, ${styleName}, ${renderW}x${renderH}, ${durationInFrames}f`
+    `Remotion: ${words.length} words, ${styleName}, overlay ${canvas.width}x${canvas.height} on ${videoW}x${videoH}, ${durationInFrames}f`
   );
 
   // The browser the captions are drawn in. Left to itself Remotion downloads
@@ -246,8 +262,8 @@ async function main() {
         ...composition,
         durationInFrames,
         fps,
-        width: renderW,
-        height: renderH,
+        width: canvas.width,
+        height: canvas.height,
       },
       serveUrl: bundleLocation,
       browserExecutable,
@@ -274,7 +290,7 @@ async function main() {
     process.stderr.write("  compositing...\n");
     execSync(
       `ffmpeg -y -hide_banner -loglevel warning -i "${path.resolve(opts.video)}" -i "${captionOverlay}" ` +
-      `-filter_complex "[0:v][1:v]overlay=0:0:shortest=1" ` +
+      `-filter_complex "${overlayFilter()}" ` +
       `-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -map 0:a -c:a copy "${opts.output}"`,
       { stdio: ["pipe", "pipe", "pipe"], timeout: 300000 }
     );
@@ -290,7 +306,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("Remotion render error:", err.message);
-  process.exit(1);
-});
+const isDirectRun = process.argv[1]
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
+  main().catch((err) => {
+    console.error("Remotion render error:", err.message);
+    process.exit(1);
+  });
+}

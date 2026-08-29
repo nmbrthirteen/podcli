@@ -15,7 +15,7 @@ from typing import Optional, Callable
 
 from utils.proc import run as proc_run
 from config.paths import paths
-from services.formats import get_format
+from services.formats import get_format, overlay_px
 
 
 def _sessions_dir() -> str:
@@ -217,8 +217,8 @@ def _cut(source: str, out_dir: str, idx: int, m: Moment, format: str, logo: str 
     cmd = ["ffmpeg", "-y", "-ss", str(m.start), "-i", source, "-t", str(m.duration)]
     if logo and os.path.exists(logo):
         spec = get_format(format)
-        logo_h = max(1, round(spec.height * 0.08))
-        margin = max(1, round(spec.height * 0.04))
+        logo_h = overlay_px(126, spec.height)
+        margin = overlay_px(108, spec.height)
         cmd += [
             "-i", logo, "-filter_complex",
             f"[0:v]{_scale_filter(format)}[base];[1:v]scale=-1:{logo_h}[lg];"

@@ -13,6 +13,7 @@ import sys
 from typing import Optional
 
 from services.encoder import get_video_encode_flags
+from services.formats import overlay_px
 from services.media_probe import (
     CPU_FLAGS,
     FFMPEG_TIMEOUT,
@@ -96,16 +97,20 @@ def burn_captions(
         current_label = "0:v"
 
     if logo_path and os.path.exists(logo_path):
+        _, video_h = get_dimensions(input_path)
+        h = overlay_px(logo_height, video_h)
+        mx = overlay_px(logo_margin_x, video_h)
+        my = overlay_px(logo_margin_y, video_h)
         inputs.extend(["-i", logo_path])
         logo_idx = input_idx
         input_idx += 1
-        filter_parts.append(f"[{logo_idx}:v]scale=-1:{logo_height}[logo]")
+        filter_parts.append(f"[{logo_idx}:v]scale=-1:{h}[logo]")
         logo_x = (
-            str(logo_margin_x) if logo_position.endswith("-left")
-            else f"main_w-overlay_w-{logo_margin_x}" if logo_position.endswith("-right")
+            str(mx) if logo_position.endswith("-left")
+            else f"main_w-overlay_w-{mx}" if logo_position.endswith("-right")
             else "(main_w-overlay_w)/2"
         )
-        logo_y = str(logo_margin_y) if logo_position.startswith("top-") else f"main_h-overlay_h-{logo_margin_y}"
+        logo_y = str(my) if logo_position.startswith("top-") else f"main_h-overlay_h-{my}"
         filter_parts.append(f"[{current_label}][logo]overlay={logo_x}:{logo_y}[withlogo]")
         current_label = "withlogo"
 

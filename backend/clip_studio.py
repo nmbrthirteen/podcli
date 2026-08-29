@@ -373,7 +373,9 @@ def main():
         import shutil
         shutil.copy(parts[0], final)
     else:
-        _concat(parts, final, width=spec.width, height=spec.height)
+        from services.media_probe import get_dimensions
+        frag_w, frag_h = get_dimensions(fragment)
+        _concat(parts, final, width=frag_w, height=frag_h)
 
     dur = _probe_duration(final)
     print(f"\n  ✓ DONE  {final}")
