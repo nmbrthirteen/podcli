@@ -475,6 +475,21 @@ def cmd_studio(args):
         "--intro-seconds", str(args.intro_seconds),
         "--outro-seconds", str(args.outro_seconds),
     ]
+    # Only when asked for, so a studio cut that names none of these is the
+    # same command it was before they existed.
+    if getattr(args, "topic", None):
+        cmd += ["--topic", args.topic,
+                "--topic-position", getattr(args, "topic_position", "top-left") or "top-left"]
+    if getattr(args, "progress", False):
+        cmd += ["--progress"]
+        if getattr(args, "progress_color", None):
+            cmd += ["--progress-color", args.progress_color]
+    if getattr(args, "cards", None):
+        cmd += ["--cards", args.cards]
+    if getattr(args, "brand", None):
+        cmd += ["--brand", args.brand]
+    if getattr(args, "font_family", None):
+        cmd += ["--font-family", args.font_family]
     if args.outro_title is not None:
         cmd += ["--outro-title", args.outro_title]
     if args.platforms is not None:
@@ -676,6 +691,26 @@ def cmd_process(args):
         config["logo_position"] = args.logo_position
     if getattr(args, "logo_scale", None) is not None:
         config["logo_scale"] = args.logo_scale
+    # Switched-on parts of the look. Absent stays absent: the renderer draws
+    # nothing for a key that is not here, which is what every render did before
+    # these flags existed.
+    if getattr(args, "topic", None):
+        config["topic"] = {
+            "label": args.topic,
+            "position": getattr(args, "topic_position", "top-left") or "top-left",
+        }
+    if getattr(args, "progress", False):
+        config["progress"] = (
+            {"color": args.progress_color} if getattr(args, "progress_color", None) else {}
+        )
+    if getattr(args, "brand", None):
+        try:
+            config["brand"] = json.loads(args.brand)
+        except (ValueError, TypeError):
+            print("  Warning: --brand is not valid JSON; using the default colours",
+                  file=sys.stderr)
+    if getattr(args, "font_family", None):
+        config["font_family"] = args.font_family
     if getattr(args, "no_outro", False):
         config["outro_path"] = ""
     elif args.outro:
@@ -1178,6 +1213,10 @@ def cmd_process(args):
                         caption_font_scale=config.get("caption_font_scale", 100),
                         logo_position=config.get("logo_position", "top-left"),
                         logo_scale=config.get("logo_scale", 1.0),
+                        topic=config.get("topic"),
+                        progress=config.get("progress"),
+                        brand=config.get("brand"),
+                        font_family=config.get("font_family"),
                         crop_strategy=config.get("crop_strategy", "face"),
                         format=config.get("format", "vertical"),
                         transcript_words=words,
@@ -1403,6 +1442,10 @@ def cmd_process(args):
                                 caption_font_scale=config.get("caption_font_scale", 100),
                                 logo_position=config.get("logo_position", "top-left"),
                                 logo_scale=config.get("logo_scale", 1.0),
+                                topic=config.get("topic"),
+                                progress=config.get("progress"),
+                                brand=config.get("brand"),
+                                font_family=config.get("font_family"),
                                 crop_strategy=config.get("crop_strategy", "face"),
                                 format=config.get("format", "vertical"),
                                 transcript_words=words,
@@ -4251,6 +4294,19 @@ def main():
                       help="Logo placement (default: top-left)")
     proc.add_argument("--logo-scale", type=float, choices=[0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4, 1.45, 1.5],
                       help="Logo size multiplier (default: 1)")
+    # The parts a show's look switches on. Each is off unless asked for, so a
+    # command that names none of them cuts exactly what it cut before.
+    proc.add_argument("--topic", help="Standing label saying what the clip is about")
+    proc.add_argument("--topic-position", dest="topic_position", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"],
+                      default="top-left", help="Where the topic label sits (default: top-left)")
+    proc.add_argument("--progress", action="store_true",
+                      help="Draw how much of the clip is left along the bottom edge")
+    proc.add_argument("--progress-color", dest="progress_color",
+                      help="Colour of the progress bar, e.g. '#3B9CFF'")
+    proc.add_argument("--brand", help="Show colours as JSON: "
+                                      '{"accent":"#4C9DF5","ink":"#FFFFFF","surface":"#0A0D14"}')
+    proc.add_argument("--font-family", dest="font_family",
+                      help="The show's own typeface, ahead of the built-in stack")
     proc.add_argument("--outro", help="Outro video (asset name or path)")
     proc.add_argument("--name-card", dest="name_card",
                       help="Lower third naming the speaker, shown for the first seconds")
@@ -4323,6 +4379,17 @@ def main():
     studio.add_argument("--logo", help="Logo image (asset name or path)")
     studio.add_argument("--logo-position", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"], default="top-left")
     studio.add_argument("--logo-scale", type=float, default=1.0)
+    studio.add_argument("--topic", help="Standing label saying what the clip is about")
+    studio.add_argument("--topic-position", dest="topic_position", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"],
+                        default="top-left")
+    studio.add_argument("--progress", action="store_true",
+                        help="Draw how much of the clip is left along the bottom edge")
+    studio.add_argument("--progress-color", dest="progress_color")
+    studio.add_argument("--cards", help="On-screen cards as JSON, each with kind/start/end")
+    studio.add_argument("--brand", help="Show colours as JSON: "
+                                        '{"accent":"#4C9DF5","ink":"#FFFFFF","surface":"#0A0D14"}')
+    studio.add_argument("--font-family", dest="font_family",
+                        help="The show's own typeface, ahead of the built-in stack")
     studio.add_argument("--intro", help="Intro video (asset name or path)")
     studio.add_argument("--outro", help="Outro video (asset name or path)")
     studio.add_argument("--name-card", dest="name_card",

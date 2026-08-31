@@ -16,7 +16,9 @@ interface Props {
   motion?: Motion;
 }
 
-export const HormoziCaptions: React.FC<Props> = ({ words, style, singleLine = false, motion }) => {
+export const HormoziCaptions: React.FC<Props> = ({
+  words, style, singleLine = false, motion,
+}) => {
   const frame = useCurrentFrame();
   const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
@@ -73,13 +75,19 @@ export const HormoziCaptions: React.FC<Props> = ({ words, style, singleLine = fa
           const text = style.uppercase
             ? word.word.toUpperCase()
             : word.word;
+          // The word being spoken still wins: the sweep is what this style is.
+          // Emphasis colours it for the rest of the chunk, which is the part
+          // somebody reads with the sound off.
+          const emphasis = word.emphasis
+            ? style.emphasisColor ?? style.activeColor
+            : null;
 
           return (
             <React.Fragment key={i}>
               {i > 0 ? " " : ""}
               <span
                 style={{
-                  color: isActive ? style.activeColor : style.color,
+                  color: isActive ? style.activeColor : emphasis ?? style.color,
                   textShadow: isActive
                     ? `0 0 30px ${style.activeColor}60, 0 0 60px ${style.activeColor}30`
                     : "none",

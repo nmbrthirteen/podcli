@@ -1,13 +1,7 @@
 import React from "react";
 import { Img, staticFile } from "remotion";
+import { captionScale, LOGO_EDGE, LOGO_HEIGHT, LOGO_INSET, LOGO_WIDTH } from "../types";
 import type { LogoPosition } from "../types";
-import { captionScale } from "../types";
-
-// Unscaled logo box, shared with BrandedCaptions' caption-margin guard so the
-// mark and the gap left for it cannot drift apart.
-export const LOGO_INSET = 180;
-export const LOGO_HEIGHT = 126;
-export const LOGO_CAPTION_GAP = 24;
 
 /**
  * The show's logo, on every clip.
@@ -22,7 +16,6 @@ export const Watermark: React.FC<{
   src?: string;
   height: number;
   position?: LogoPosition;
-  /** Multiplier supplied by a template. 1 preserves the original mark. */
   scale?: number;
 }> = ({ src, height, position = "top-left", scale = 1 }) => {
   if (!src) return null;
@@ -33,13 +26,15 @@ export const Watermark: React.FC<{
       src={src.startsWith("http") ? src : staticFile(src)}
       style={{
         position: "absolute",
-        ...(position.startsWith("top-") ? { top: LOGO_INSET * s } : { bottom: LOGO_INSET * s }),
+        ...(position.startsWith("top-")
+          ? { top: LOGO_INSET * s }
+          : { bottom: LOGO_INSET * s }),
         ...(position.endsWith("-left")
-          ? { left: 108 * s }
+          ? { left: LOGO_EDGE * s }
           : position.endsWith("-right")
-            ? { right: 108 * s }
+            ? { right: LOGO_EDGE * s }
             : { left: "50%", transform: "translateX(-50%)" }),
-        width: 255 * s * scale,
+        width: LOGO_WIDTH * s * scale,
         height: LOGO_HEIGHT * s * scale,
         objectFit: "contain",
       }}

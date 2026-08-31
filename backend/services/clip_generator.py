@@ -496,6 +496,15 @@ def _report_remotion_failure(
             print(f"  Remotion {stage} {label}: {line[:200]}", file=sys.stderr, flush=True)
 
 
+# Watermark.tsx's own numbers, so the ffmpeg fallback puts the mark where the
+# Remotion renderer would have put it. Authored against a 1920-tall frame and
+# scaled by the height a render actually produced, exactly as captionScale does.
+REMOTION_REFERENCE_HEIGHT = 1920
+REMOTION_LOGO_HEIGHT = 126
+REMOTION_LOGO_INSET = 180
+REMOTION_LOGO_EDGE = 108
+
+
 def _kept_caption_overlay_path(output_path: str) -> str:
     base, _ = os.path.splitext(os.path.abspath(output_path))
     return f"{base}_captions.mov"
@@ -515,6 +524,11 @@ def _render_with_remotion(
     caption_font_scale: int = 100,
     logo_position: str = "top-left",
     logo_scale: float = 1.0,
+    topic: Optional[dict] = None,
+    progress: Optional[dict] = None,
+    cards: Optional[list] = None,
+    brand: Optional[dict] = None,
+    font_family: Optional[str] = None,
 ) -> tuple[bool, Optional[str]]:
     """
     Render captions using Remotion. Returns (success, optional_prores_overlay_path).
@@ -656,6 +670,26 @@ def _render_with_remotion(
                 cmd.extend(["--name-card-accent", str(name_card["accent"])])
         if motion:
             cmd.extend(["--motion", json.dumps(motion)])
+        # The parts a template switches on. Each is only sent when it has a
+        # value, so a caller that passes none renders what it always rendered.
+        if topic and topic.get("label"):
+            cmd.extend(["--topic", str(topic["label"])])
+            if topic.get("position"):
+                cmd.extend(["--topic-position", str(topic["position"])])
+            if topic.get("color"):
+                cmd.extend(["--topic-color", str(topic["color"])])
+            if topic.get("background"):
+                cmd.extend(["--topic-background", str(topic["background"])])
+        if progress:
+            cmd.append("--progress")
+            if progress.get("color"):
+                cmd.extend(["--progress-color", str(progress["color"])])
+        if cards:
+            cmd.extend(["--cards", json.dumps(cards)])
+        if brand:
+            cmd.extend(["--brand", json.dumps(brand)])
+        if font_family:
+            cmd.extend(["--font-family", str(font_family)])
         if keep_caption_overlay:
             cmd.append("--keep-overlay")
 
@@ -734,6 +768,11 @@ def generate_clip(
     allow_ass_fallback: bool = False,
     use_ass_captions: bool = False,
     keep_caption_overlay: bool = False,
+    topic: Optional[dict] = None,
+    progress: Optional[dict] = None,
+    cards: Optional[list] = None,
+    brand: Optional[dict] = None,
+    font_family: Optional[str] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """
@@ -1052,6 +1091,11 @@ def generate_clip(
                         caption_font_scale=caption_font_scale,
                         logo_position=logo_position,
                         logo_scale=logo_scale,
+                        topic=topic,
+                        progress=progress,
+                        cards=cards,
+                        brand=brand,
+                        font_family=font_family,
                     )
 
                 if not remotion_ok and not allow_ass_fallback:
@@ -1076,6 +1120,21 @@ def generate_clip(
                     gradient_opacity = style_config.get("gradient_opacity", 0.6)
                     use_logo = bool(logo_path)
 
+                    """
+                    The mark, the size Remotion would have drawn it.
+
+                    This path burns a logo with ffmpeg because Remotion could
+                    not run, and it used a flat 80px in a fixed corner: it read
+                    neither the frame height nor the template's logo scale. The
+                    same clip therefore carried a different mark depending on
+                    which renderer happened to succeed, and the studio preview
+                    only ever showed the Remotion one. These are Watermark.tsx's
+                    own numbers against the frame this render actually produced.
+                    """
+                    from services.video_processor import get_dimensions
+                    _, out_h = get_dimensions(cropped_path)
+                    logo_s = (out_h or REMOTION_REFERENCE_HEIGHT) / REMOTION_REFERENCE_HEIGHT
+
                     burn_captions(
                         input_path=cropped_path,
                         ass_path=ass_path,
@@ -1083,9 +1142,9 @@ def generate_clip(
                         gradient_overlay=use_gradient,
                         gradient_opacity=gradient_opacity,
                         logo_path=logo_path if use_logo else None,
-                        logo_height=style_config.get("logo_height", 80),
-                        logo_margin_x=style_config.get("logo_margin_x", 30),
-                        logo_margin_y=style_config.get("logo_margin_y", 40),
+                        logo_height=round(REMOTION_LOGO_HEIGHT * logo_s * logo_scale),
+                        logo_margin_x=round(REMOTION_LOGO_EDGE * logo_s),
+                        logo_margin_y=round(REMOTION_LOGO_INSET * logo_s),
                         logo_position=logo_position,
                     )
             else:

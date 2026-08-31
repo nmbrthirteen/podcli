@@ -37,6 +37,11 @@ export const MOTION: Record<string, Motion> = {
   branded: { enter: "none", exit: "none", duration: 0, feel: "linear" },
   /** Names arrive, hold, and get out of the way. */
   nameCard: { enter: "rise", exit: "fade", duration: 8, feel: "soft" },
+  /**
+   * A card takes the frame, so it has to arrive quickly enough not to read as
+   * a slow wipe and leave without a gap where neither it nor the video is up.
+   */
+  card: { enter: "fade", exit: "fade", duration: 6, feel: "soft" },
   /** Always there, so it neither arrives nor leaves. */
   watermark: { enter: "none", exit: "none", duration: 0, feel: "linear" },
 };

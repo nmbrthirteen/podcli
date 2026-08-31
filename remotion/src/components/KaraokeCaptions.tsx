@@ -40,8 +40,17 @@ const KaraokeLine: React.FC<{
           <React.Fragment key={i}>
             {i > 0 ? " " : ""}
             <span style={{ position: "relative", display: "inline" }}>
-              {/* Base text (dim) */}
-              <span style={{ color: style.color }}>{word.word}</span>
+              {/* Base text (dim). Emphasis lifts it out of the dim state so a
+                  key word is legible before the sweep reaches it. */}
+              <span
+                style={{
+                  color: word.emphasis
+                    ? style.emphasisColor ?? style.activeColor
+                    : style.color,
+                }}
+              >
+                {word.word}
+              </span>
               {/* Active overlay (clips left to right) */}
               <span
                 style={{

@@ -13,7 +13,51 @@ interface Props {
   motion?: Motion;
 }
 
-export const SubtleCaptions: React.FC<Props> = ({ words, style, singleLine = false, motion }) => {
+/**
+ * One line of the caption, word by word.
+ *
+ * Drawn as spans rather than as a joined string so an emphasised word can be
+ * coloured; the line reads identically when nothing is emphasised.
+ */
+const Line: React.FC<{
+  words: Word[];
+  style: CaptionStyle;
+  scale: number;
+  nowrap?: boolean;
+}> = ({ words, style, scale, nowrap = false }) => (
+  <span
+    style={{
+      fontFamily: style.fontFamily,
+      fontSize: style.fontSize * scale,
+      fontWeight: 400,
+      color: style.color,
+      textShadow:
+        "0 1px 3px rgba(0,0,0,0.95), 0 0 20px rgba(0,0,0,0.6), 0 0 50px rgba(0,0,0,0.3)",
+      textAlign: "center",
+      lineHeight: 1.35,
+      whiteSpace: nowrap ? "nowrap" : undefined,
+    }}
+  >
+    {words.map((word, i) => (
+      <React.Fragment key={i}>
+        {i > 0 ? " " : ""}
+        <span
+          style={
+            word.emphasis
+              ? { color: style.emphasisColor ?? style.activeColor }
+              : undefined
+          }
+        >
+          {word.word}
+        </span>
+      </React.Fragment>
+    ))}
+  </span>
+);
+
+export const SubtleCaptions: React.FC<Props> = ({
+  words, style, singleLine = false, motion,
+}) => {
   const frame = useCurrentFrame();
   const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
@@ -41,9 +85,6 @@ export const SubtleCaptions: React.FC<Props> = ({ words, style, singleLine = fal
     Math.ceil(activeChunk.words.length / 2),
     singleLine,
   );
-  const text1 = line1.map((w) => w.word).join(" ");
-  const text2 = line2.map((w) => w.word).join(" ");
-
   return (
     <div
       style={{
@@ -59,37 +100,8 @@ export const SubtleCaptions: React.FC<Props> = ({ words, style, singleLine = fal
         transform: `translateY(${translateY}px)`,
       }}
     >
-      <span
-        style={{
-          fontFamily: style.fontFamily,
-          fontSize: style.fontSize * s,
-          fontWeight: 400,
-          color: style.color,
-          textShadow:
-            "0 1px 3px rgba(0,0,0,0.95), 0 0 20px rgba(0,0,0,0.6), 0 0 50px rgba(0,0,0,0.3)",
-          textAlign: "center",
-          lineHeight: 1.35,
-          whiteSpace: singleLine ? "nowrap" : undefined,
-        }}
-      >
-        {text1}
-      </span>
-      {text2 && (
-        <span
-          style={{
-            fontFamily: style.fontFamily,
-            fontSize: style.fontSize * s,
-            fontWeight: 400,
-            color: style.color,
-            textShadow:
-              "0 1px 3px rgba(0,0,0,0.95), 0 0 20px rgba(0,0,0,0.6), 0 0 50px rgba(0,0,0,0.3)",
-            textAlign: "center",
-            lineHeight: 1.35,
-          }}
-        >
-          {text2}
-        </span>
-      )}
+      <Line words={line1} style={style} scale={s} nowrap={singleLine} />
+      {line2.length > 0 && <Line words={line2} style={style} scale={s} />}
     </div>
   );
 };
