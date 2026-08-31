@@ -477,6 +477,8 @@ def cmd_studio(args):
     ]
     # Only when asked for, so a studio cut that names none of these is the
     # same command it was before they existed.
+    if getattr(args, "no_captions", False):
+        cmd += ["--no-captions"]
     if getattr(args, "topic", None):
         cmd += ["--topic", args.topic,
                 "--topic-position", getattr(args, "topic_position", "top-left") or "top-left"]
@@ -4379,6 +4381,9 @@ def main():
     studio.add_argument("--logo", help="Logo image (asset name or path)")
     studio.add_argument("--logo-position", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"], default="top-left")
     studio.add_argument("--logo-scale", type=float, default=1.0)
+    studio.add_argument("--no-captions", dest="no_captions", action="store_true",
+                        help="Draw the logo, chip, bar and cards, and burn no words. "
+                             "For footage that already carries its own captions.")
     studio.add_argument("--topic", help="Standing label saying what the clip is about")
     studio.add_argument("--topic-position", dest="topic_position", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"],
                         default="top-left")

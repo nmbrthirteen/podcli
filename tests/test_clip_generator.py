@@ -83,6 +83,94 @@ class ClipGeneratorTests(unittest.TestCase):
             argv = self._render_args(caption_style=style)
             self.assertIn("--logo", argv, f"{style} lost the logo")
 
+    def _render_words(self, **kwargs):
+        """The words payload one Remotion render was handed.
+
+        Read inside the call: the file is written next to the output and the
+        temporary directory holding it is gone by the time the helper returns.
+        """
+        real_exists = os.path.exists
+        seen = {}
+
+        def capture(argv, *a, **kw):
+            args = [str(part) for part in argv]
+            if "--words" in args:
+                with open(args[args.index("--words") + 1]) as fh:
+                    seen.update(json.load(fh))
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as td:
+            video_path = os.path.join(td, "video.mp4")
+            logo_path = os.path.join(td, "logo.png")
+            for path in (video_path, logo_path):
+                with open(path, "wb"):
+                    pass
+
+            with mock.patch.object(cg.os.path, "exists", side_effect=self._fake_exists(real_exists)), \
+                 mock.patch.object(cg.shutil, "which", return_value="/usr/bin/node"), \
+                 mock.patch("subprocess.run", side_effect=capture):
+                cg._render_with_remotion(
+                    video_path=video_path,
+                    words=[{"word": "hello", "start": 0.0, "end": 0.5}],
+                    output_path=os.path.join(td, "captioned.mp4"),
+                    logo_path=logo_path,
+                    **kwargs,
+                )
+        return seen.get("words")
+
+    def test_captions_off_still_draws_the_rest(self):
+        """Captions off is not "draw nothing".
+
+        The logo, the chip, the bar and the cards are drawn by the same pass
+        the captions ride on. Turning the words off used to take every one of
+        them with it, which is what an uploaded clip asks for by default: the
+        clip came back bare and nothing said why.
+        """
+        argv = self._render_args(caption_style="hormozi", captions=False,
+                                  topic={"label": "Fitness"})
+
+        self.assertIn("--logo", argv, "the logo went with the captions")
+        self.assertIn("--topic", argv, "the chip went with the captions")
+
+        # The pass runs; it is handed no words to draw.
+        self.assertEqual(
+            self._render_words(caption_style="hormozi", captions=False), [])
+
+    def test_a_failed_overlay_is_not_delivered_as_a_finished_clip(self):
+        """Silence is the failure mode this switch exists to stop.
+
+        Nothing but Remotion draws a chip, a bar or a card, so when it fails
+        there is no degraded version to hand back. Returning the bare cut would
+        report success for a clip missing everything it was asked for.
+        """
+        real_exists = os.path.exists
+        failed = subprocess.CompletedProcess(
+            args=["node"], returncode=1, stdout="", stderr="boom")
+
+        with tempfile.TemporaryDirectory() as td:
+            video_path = os.path.join(td, "video.mp4")
+            with open(video_path, "wb"):
+                pass
+
+            with mock.patch.object(cg.os.path, "exists",
+                                   side_effect=self._fake_exists(real_exists)), \
+                 mock.patch.object(cg.shutil, "which", return_value="/usr/bin/node"), \
+                 mock.patch("subprocess.run", return_value=failed):
+                ok, _ = cg._render_with_remotion(
+                    video_path=video_path,
+                    words=[],
+                    caption_style="hormozi",
+                    output_path=os.path.join(td, "captioned.mp4"),
+                    topic={"label": "Fitness"},
+                    captions=False,
+                )
+        self.assertFalse(ok, "a failed overlay render must not report success")
+
+    def test_captions_on_is_unchanged(self):
+        """The ordinary render must not have moved."""
+        words = self._render_words(caption_style="hormozi", captions=True)
+        self.assertEqual([w["word"] for w in words], ["hello"])
+
     def test_no_caption_style_gates_the_logo(self):
         """The gate that dropped it lived in the style config, so guard that.
 

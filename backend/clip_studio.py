@@ -133,7 +133,8 @@ def _json_arg(raw, name):
 def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt="vertical",
                      logo=None, name_card=None, motion=None, caption_position="auto",
                      caption_scale=1.0, logo_position="top-left", logo_scale=1.0,
-                     topic=None, progress=None, cards=None, brand=None, font_family=None):
+                     topic=None, progress=None, cards=None, brand=None, font_family=None,
+                     captions=True):
     """Render the fragment with face-crop + captions via the existing engine."""
     from services.clip_generator import generate_clip
     print(f"  [fragment] rendering {start:.1f}s–{end:.1f}s ({style}, crop={crop}, {fmt})", flush=True)
@@ -146,6 +147,7 @@ def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt=
         transcript_words=words, title=title, output_dir=out_dir,
         logo_path=logo, name_card=name_card, motion=motion,
         topic=topic, progress=progress, cards=cards, brand=brand, font_family=font_family,
+        captions=captions,
         clean_fillers=True, allow_ass_fallback=True,
         progress_callback=lambda p, m: print(f"    {p}% {m}", flush=True),
     )
@@ -242,6 +244,8 @@ def main():
     ap.add_argument("--logo", default=None, help="Logo image (asset name or path)")
     ap.add_argument("--logo-position", default="top-left", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"])
     ap.add_argument("--logo-scale", type=float, default=1.0)
+    ap.add_argument("--no-captions", dest="no_captions", action="store_true",
+                    help="Draw the overlay and burn no words")
     ap.add_argument("--topic", default=None,
                     help="Standing label saying what the clip is about")
     ap.add_argument("--topic-position", default="top-left",
@@ -362,6 +366,7 @@ def main():
         cards=_json_arg(args.cards, "--cards"),
         brand=_json_arg(args.brand, "--brand"),
         font_family=args.font_family,
+        captions=not args.no_captions,
     )
 
     platforms = [p.strip() for p in platforms_str.split(",") if p.strip()]
