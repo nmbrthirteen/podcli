@@ -142,23 +142,51 @@ async function main() {
   let renderW = 1080;
   let renderH = 1920;
   let videoDuration = null;
-  try {
-    const { execSync } = await import("child_process");
-    const probe = execSync(
-      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${path.resolve(opts.video)}"`,
-      { encoding: "utf-8", timeout: 5000 }
-    ).trim();
-    const [w, h] = probe.split("x").map(Number);
+  /*
+   * The shape the overlay is drawn at, measured rather than assumed.
+   *
+   * PODCLI_FFPROBE for the same reason the composite uses PODCLI_FFMPEG:
+   * nothing guarantees one on PATH beside a hermetic runtime. This used to
+   * swallow the failure whole, which left the defaults below standing: a
+   * horizontal clip then had a 1080x1920 overlay drawn over a 1920x1080
+   * frame, so every caption and the logo came out the wrong size and in the
+   * wrong place, and nothing anywhere said the measurement had not happened.
+   */
+  const { spawnSync } = await import("child_process");
+  const ffprobe = process.env.PODCLI_FFPROBE || "ffprobe";
+  const probeFor = (...entries) => {
+    const r = spawnSync(
+      ffprobe,
+      ["-v", "error", ...entries, path.resolve(opts.video)],
+      { encoding: "utf-8", timeout: 5000 },
+    );
+    if (r.error || r.status !== 0) return null;
+    return String(r.stdout ?? "").trim();
+  };
+
+  const size = probeFor(
+    "-select_streams", "v:0", "-show_entries", "stream=width,height",
+    "-of", "csv=s=x:p=0",
+  );
+  if (size) {
+    const [w, h] = size.split("x").map(Number);
     if (w > 0 && h > 0) {
       renderW = w;
       renderH = h;
     }
-    const durStr = execSync(
-      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${path.resolve(opts.video)}"`,
-      { encoding: "utf-8", timeout: 5000 }
-    ).trim();
-    videoDuration = parseFloat(durStr);
-  } catch {}
+  } else {
+    // Loud, because the fallback is a guess about the shape of the frame.
+    process.stderr.write(
+      `  could not measure the video with ${ffprobe}; drawing the overlay at `
+      + `${renderW}x${renderH}, which is wrong for anything else\n`,
+    );
+  }
+
+  const durStr = probeFor(
+    "-show_entries", "format=duration",
+    "-of", "default=noprint_wrappers=1:nokey=1",
+  );
+  if (durStr) videoDuration = parseFloat(durStr);
 
   // Calculate duration from video or word timing
   const lastWord = words[words.length - 1];
@@ -312,14 +340,37 @@ async function main() {
     });
 
     // Composite: overlay transparent captions (ProRes 4444 with alpha) onto video
-    const { execSync } = await import("child_process");
+    //
+    // PODCLI_FFMPEG, like every other module here. podcli provisions its own
+    // ffmpeg and nothing guarantees one on PATH: a container that carries the
+    // hermetic runtime and no system ffmpeg got "ffmpeg: not found" at this
+    // one step, which reads as a failed Remotion render. Every clip on such a
+    // box then fell back to burned-in ASS, looking nothing like the preview,
+    // and the only word for it was on a stream nobody was reading.
+    //
+    // Argv rather than a shell string: these are paths from the caller, and
+    // one with a space in it broke the quoting instead of the render.
     process.stderr.write("  compositing...\n");
-    execSync(
-      `ffmpeg -y -hide_banner -loglevel warning -i "${path.resolve(opts.video)}" -i "${captionOverlay}" ` +
-      `-filter_complex "[0:v][1:v]overlay=0:0:shortest=1" ` +
-      `-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -map 0:a -c:a copy "${opts.output}"`,
-      { stdio: ["pipe", "pipe", "pipe"], timeout: 300000 }
+    const ffmpeg = process.env.PODCLI_FFMPEG || "ffmpeg";
+    const composite = spawnSync(
+      ffmpeg,
+      [
+        "-y", "-hide_banner", "-loglevel", "warning",
+        "-i", path.resolve(opts.video),
+        "-i", captionOverlay,
+        "-filter_complex", "[0:v][1:v]overlay=0:0:shortest=1",
+        "-c:v", "libx264", "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p",
+        "-map", "0:a", "-c:a", "copy",
+        path.resolve(opts.output),
+      ],
+      { stdio: ["pipe", "pipe", "pipe"], timeout: 300000, encoding: "utf8" }
     );
+    if (composite.error || composite.status !== 0) {
+      const why = composite.error
+        ? `${composite.error.code === "ENOENT" ? `${ffmpeg} not found` : composite.error.message}`
+        : `exit ${composite.status}: ${(composite.stderr || "").trim().slice(-500)}`;
+      throw new Error(`compositing the captions failed (${why})`);
+    }
 
     if (opts["keep-overlay"]) {
       console.log(`PODCLI_OVERLAY_PATH=${captionOverlay}`);
