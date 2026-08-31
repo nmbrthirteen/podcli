@@ -84,7 +84,9 @@ async function main() {
   // Add a silent stereo audio track so concat/crossfade with the main clip
   // (which has audio) doesn't fail on a missing audio stream.
   const mux = spawnSync(
-    "ffmpeg",
+    // The provisioned one, for the same reason render.mjs uses it: nothing
+    // guarantees an ffmpeg on PATH beside a hermetic runtime.
+    process.env.PODCLI_FFMPEG || "ffmpeg",
     [
       "-y",
       "-i", silentVideo,
