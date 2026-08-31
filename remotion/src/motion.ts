@@ -12,7 +12,7 @@ import { interpolate, spring } from "remotion";
  * nothing renders exactly what it rendered before.
  */
 export type Motion = {
-  enter: "none" | "fade" | "rise" | "pop";
+  enter: "none" | "fade" | "rise" | "pop" | "slide";
   exit: "none" | "fade" | "sink";
   /** Frames at the composition's fps, for the fading half of the move. */
   duration: number;
@@ -35,8 +35,14 @@ export const MOTION: Record<string, Motion> = {
   karaoke: { enter: "none", exit: "none", duration: 0, feel: "linear" },
   /** The pill on the active word is the motion; the block holds still. */
   branded: { enter: "none", exit: "none", duration: 0, feel: "linear" },
-  /** Names arrive, hold, and get out of the way. */
-  nameCard: { enter: "rise", exit: "fade", duration: 8, feel: "soft" },
+  /**
+   * Names arrive, hold, and get out of the way.
+   *
+   * In from the edge rather than up from nothing: a lower third that slides is
+   * the move every broadcast makes, and it reads as a card being placed rather
+   * than as a caption that faded up in the wrong place.
+   */
+  nameCard: { enter: "slide", exit: "fade", duration: 8, feel: "soft" },
   /**
    * A card takes the frame, so it has to arrive quickly enough not to read as
    * a slow wipe and leave without a gap where neither it nor the video is up.
@@ -105,7 +111,7 @@ export function motionAt({
   motion: Motion;
   /** How far a rise or a sink travels, already scaled to the canvas. */
   scale?: number;
-}): { opacity: number; scale: number; shift: number } {
+}): { opacity: number; scale: number; shift: number; slide: number } {
   const startFrame = Math.round(start * fps);
   const since = frame - startFrame;
 
@@ -134,5 +140,21 @@ export function motionAt({
       })
     : 0;
 
-  return { opacity, scale, shift: entering + leaving };
+  /*
+   * How far in from its own edge a sliding part still is, as a fraction of its
+   * own width: -1 is entirely off, 0 is home.
+   *
+   * A fraction rather than pixels because the part knows its width and this
+   * does not, and an element anchored to an edge is only reliably off screen
+   * when it has been moved by its whole width. The caller turns it into a
+   * percentage translate, which stays right at any composition size.
+   */
+  const slide = motion.enter === "slide"
+    ? interpolate(since, [0, motion.duration + 1], [-1, 0], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      })
+    : 0;
+
+  return { opacity, scale, shift: entering + leaving, slide };
 }
