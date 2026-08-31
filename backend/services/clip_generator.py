@@ -1022,20 +1022,20 @@ def generate_clip(
             else:
                 fit_to_frame(segment_path, cropped_path, target_dims=spec.dims)
 
-        # Only Remotion draws the name card, and it is reached only when there
-        # are words to caption. Refusing beats returning a clip that quietly
-        # lacks the overlay that was asked for.
-        if name_card and name_card.get("title"):
-            if use_ass_captions or allow_ass_fallback:
-                raise ValueError(
-                    "A name card can only be drawn by the Remotion renderer. "
-                    "Drop --name-card, or drop --fast and --allow-ass-fallback."
-                )
-            if not transcript_words:
-                raise ValueError(
-                    "A name card needs the caption renderer, which only runs when "
-                    "there is a transcript. Drop --name-card for an uncaptioned render."
-                )
+        # Only Remotion draws the name card, and --fast forces the ASS renderer,
+        # which cannot. Refusing beats returning a clip that quietly lacks the
+        # overlay that was asked for.
+        #
+        # Permitting the fallback is no longer a reason to refuse: a card is an
+        # overlay, the pass that draws it runs for overlays whether or not there
+        # are words to caption, and a failure there raises rather than handing
+        # back a bare cut. Refusing on the permission alone meant every `studio`
+        # render, which always permits it, could never draw one.
+        if name_card and name_card.get("title") and use_ass_captions:
+            raise ValueError(
+                "A name card is drawn by the Remotion renderer, and --fast forces "
+                "the ASS one. Drop --name-card, or drop --fast."
+            )
 
         # Step 3: Render captions (Remotion-first; ASS fallback optional)
         #

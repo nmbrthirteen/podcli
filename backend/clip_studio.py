@@ -244,6 +244,16 @@ def main():
     ap.add_argument("--logo", default=None, help="Logo image (asset name or path)")
     ap.add_argument("--logo-position", default="top-left", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"])
     ap.add_argument("--logo-scale", type=float, default=1.0)
+    # Read out of args since name cards existed, and never declared, so the
+    # launcher had nowhere to hand them even once it started trying.
+    ap.add_argument("--name-card", dest="name_card", default=None,
+                    help="Lower third naming the speaker, shown for the first seconds")
+    ap.add_argument("--name-card-sub", dest="name_card_sub", default=None,
+                    help="Second line of the lower third")
+    ap.add_argument("--name-card-seconds", dest="name_card_seconds", type=float,
+                    default=None, help="How long the lower third holds")
+    ap.add_argument("--name-card-accent", dest="name_card_accent", default=None,
+                    help="Colour of the rule under the lower third")
     ap.add_argument("--no-captions", dest="no_captions", action="store_true",
                     help="Draw the overlay and burn no words")
     ap.add_argument("--topic", default=None,
@@ -337,7 +347,9 @@ def main():
             "title": args.name_card,
             "subtitle": getattr(args, "name_card_sub", None),
             "seconds": getattr(args, "name_card_seconds", None),
-            "accent": accent,
+            # The card's own rule, when one was named. Falls back to the
+            # show's accent, which is what it has always used.
+            "accent": getattr(args, "name_card_accent", None) or accent,
         }
 
     motion = None

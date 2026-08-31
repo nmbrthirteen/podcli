@@ -477,6 +477,17 @@ def cmd_studio(args):
     ]
     # Only when asked for, so a studio cut that names none of these is the
     # same command it was before they existed.
+    # Declared on this command since name cards existed and never handed to the
+    # script that draws them, so every `studio --name-card` accepted the words
+    # and rendered a clip without them.
+    if getattr(args, "name_card", None):
+        cmd += ["--name-card", args.name_card]
+        if getattr(args, "name_card_sub", None):
+            cmd += ["--name-card-sub", args.name_card_sub]
+        if getattr(args, "name_card_seconds", None) is not None:
+            cmd += ["--name-card-seconds", str(args.name_card_seconds)]
+    if getattr(args, "name_card_accent", None):
+        cmd += ["--name-card-accent", args.name_card_accent]
     if getattr(args, "no_captions", False):
         cmd += ["--no-captions"]
     if getattr(args, "topic", None):
@@ -4403,6 +4414,8 @@ def main():
                         help="Second line of the lower third")
     studio.add_argument("--name-card-seconds", dest="name_card_seconds", type=float,
                         help="How long the lower third holds (default 3)")
+    studio.add_argument("--name-card-accent", dest="name_card_accent",
+                        help="Colour of the rule under the lower third")
     studio.add_argument("--motion", dest="motion",
                         help='How each part arrives and leaves, as JSON: '
                              '{"captions":{"enter":"rise","exit":"fade","duration":5,"feel":"soft"}}')
