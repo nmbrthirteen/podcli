@@ -41,7 +41,7 @@ export const NameCard: React.FC<NameCardProps> = ({
 
   if (!title) return null;
 
-  const { opacity, shift } = motionAt({
+  const { opacity, shift, slide } = motionAt({
     frame, fps, start: 0, end: seconds,
     motion: motion ?? MOTION.nameCard,
     scale: 12 * s,
@@ -59,9 +59,15 @@ export const NameCard: React.FC<NameCardProps> = ({
         background,
         borderBottom: `${10 * s}px solid ${accent}`,
         opacity,
-        // Rises the last few pixels as it arrives, which reads as arriving
-        // rather than appearing.
-        transform: `translateY(${shift}px)`,
+        /*
+         * In from the edge it is anchored to, then the last few pixels up.
+         *
+         * The horizontal travel is a percentage of the card's own width, which
+         * is the only measure that has it entirely off screen at every
+         * composition size. Both are identity under a motion that says
+         * neither, so a card told to rise still only rises.
+         */
+        transform: `translateX(${slide * 100}%) translateY(${shift}px)`,
       }}
     >
       <div
