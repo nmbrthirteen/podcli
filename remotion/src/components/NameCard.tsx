@@ -1,6 +1,6 @@
 import React from "react";
 import { useCurrentFrame, useVideoConfig } from "remotion";
-import { captionScale } from "../types";
+import { captionScale, FONT } from "../types";
 import { MOTION, motionAt } from "../motion";
 import type { Motion } from "../motion";
 
@@ -40,7 +40,6 @@ export const NameCard: React.FC<NameCardProps> = ({
   const s = captionScale(height);
 
   if (!title) return null;
-  if (frame >= seconds * fps) return null;
 
   const { opacity, shift } = motionAt({
     frame, fps, start: 0, end: seconds,
@@ -67,7 +66,7 @@ export const NameCard: React.FC<NameCardProps> = ({
     >
       <div
         style={{
-          fontFamily: "'DM Sans', sans-serif",
+          fontFamily: FONT,
           fontSize: 44 * s,
           fontWeight: 700,
           lineHeight: 1.2,
@@ -79,7 +78,7 @@ export const NameCard: React.FC<NameCardProps> = ({
       {subtitle && (
         <div
           style={{
-            fontFamily: "'DM Sans', sans-serif",
+            fontFamily: FONT,
             fontSize: 38 * s,
             fontWeight: 400,
             lineHeight: 1.25,

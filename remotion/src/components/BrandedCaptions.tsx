@@ -5,20 +5,24 @@ import {
   spring,
 } from "remotion";
 import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "../types";
-import { captionScale } from "../types";
+import {
+  captionScale, LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET,
+} from "../types";
 import { buildChunks, activeChunkAt, splitCaptionLines } from "../chunks";
-import { LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET } from "./Watermark";
 
 interface Props {
   words: Word[];
   style: CaptionStyle;
-  // The logo is drawn by Watermark now, but the caption margin still has to
-  // know it is there.
-  logoSrc?: string;
   faceY?: number | null; // normalized 0-1 (0=top, 1=bottom)
   captionPosition?: CaptionPosition;
+  /**
+   * Whether a logo is on the frame, and where. The mark itself is drawn by
+   * Watermark one level up so all four styles carry it; this component still
+   * has to know, because a bottom-anchored logo and a low caption want the
+   * same band of pixels.
+   */
+  hasLogo?: boolean;
   logoPosition?: LogoPosition;
-  logoScale?: number;
   singleLine?: boolean;
 }
 
@@ -33,7 +37,8 @@ const WordWithPill: React.FC<{
   isActive: boolean;
   frame: number;
   fps: number;
-}> = ({ word, isActive, frame, fps }) => {
+  emphasisColor?: string;
+}> = ({ word, isActive, frame, fps, emphasisColor }) => {
   const { height } = useVideoConfig();
   const s = captionScale(height);
   const wordEntryFrame = Math.round(word.start * fps);
@@ -64,7 +69,15 @@ const WordWithPill: React.FC<{
         }}
       />
       {/* Word text — always inline, never shifts */}
-      <span style={{ position: "relative", zIndex: 1 }}>{word.word}</span>
+      <span
+        style={{
+          position: "relative",
+          zIndex: 1,
+          ...(word.emphasis && emphasisColor ? { color: emphasisColor } : {}),
+        }}
+      >
+        {word.word}
+      </span>
     </span>
   );
 };
@@ -106,6 +119,7 @@ const CaptionLine: React.FC<{
               isActive={isActive}
               frame={frame}
               fps={fps}
+              emphasisColor={style.emphasisColor}
             />
           </React.Fragment>
         );
@@ -117,11 +131,10 @@ const CaptionLine: React.FC<{
 export const BrandedCaptions: React.FC<Props> = ({
   words,
   style,
-  logoSrc,
   faceY,
   captionPosition = "auto",
+  hasLogo = false,
   logoPosition = "top-left",
-  logoScale = 1,
   singleLine = false,
 }) => {
   const frame = useCurrentFrame();
@@ -152,8 +165,8 @@ export const BrandedCaptions: React.FC<Props> = ({
   }
   // A bottom-anchored logo spans 180-306 scaled units. Captions sitting inside
   // that band (captionPosition "lower" starts at 220) would render over it.
-  if (logoSrc && logoPosition.startsWith("bottom-")) {
-    dynamicMargin = Math.max(dynamicMargin, (LOGO_INSET + LOGO_HEIGHT * logoScale + LOGO_CAPTION_GAP) * s);
+  if (hasLogo && logoPosition.startsWith("bottom-")) {
+    dynamicMargin = Math.max(dynamicMargin, (LOGO_INSET + LOGO_HEIGHT + LOGO_CAPTION_GAP) * s);
   }
 
   return (

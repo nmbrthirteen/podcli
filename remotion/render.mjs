@@ -12,6 +12,11 @@
  *     --style branded \
  *     --output /path/to/captioned.mp4 \
  *     [--logo /path/to/logo.png] \
+ *     [--topic "Fitness"] [--topic-position top-left] \
+ *     [--progress] [--progress-color '#3B9CFF'] \
+ *     [--cards '[{"kind":"stat","start":2,"end":6,"value":"70%"}]'] \
+ *     [--brand '{"accent":"#4C9DF5","ink":"#FFFFFF","surface":"#0A0D14"}'] \
+ *     [--font-family "Inter"] \
  *     [--fps 30]
  *
  *   node remotion/render.mjs --prebundle   # Bundle only, no render
@@ -25,7 +30,7 @@ import os from "os";
 import crypto from "crypto";
 
 
-const BOOLEAN_FLAGS = new Set(["prebundle", "keep-overlay"]);
+const BOOLEAN_FLAGS = new Set(["prebundle", "keep-overlay", "progress"]);
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -182,6 +187,38 @@ async function main() {
     }
   }
 
+  /*
+   * The parts a template switches on.
+   *
+   * Absent means null, and null draws nothing, so a caller that sends none of
+   * these renders exactly what it rendered before they existed. A malformed
+   * value is dropped with a line on stderr rather than failing the render: a
+   * clip without its chip is worth more than no clip.
+   */
+  const json = (name) => {
+    if (!opts[name]) return null;
+    try {
+      return JSON.parse(opts[name]);
+    } catch {
+      console.error(`Ignoring --${name}: not valid JSON`);
+      return null;
+    }
+  };
+
+  const cards = json("cards");
+  const brand = json("brand");
+  const topic = opts.topic
+    ? {
+        label: opts.topic,
+        position: opts["topic-position"] || "top-left",
+        ...(opts["topic-color"] ? { color: opts["topic-color"] } : {}),
+        ...(opts["topic-background"] ? { background: opts["topic-background"] } : {}),
+      }
+    : null;
+  const progress = opts.progress
+    ? { ...(opts["progress-color"] ? { color: opts["progress-color"] } : {}) }
+    : null;
+
   const inputProps = {
     videoSrc,
     words,
@@ -196,6 +233,11 @@ async function main() {
     captionFontScale: clampCaptionFontScale(opts["caption-font-scale"]),
     logoPosition: opts["logo-position"] || "top-left",
     logoScale: clampLogoScale(opts["logo-scale"]),
+    topic,
+    progress,
+    cards: Array.isArray(cards) ? cards : null,
+    brand: brand && typeof brand === "object" ? brand : null,
+    fontFamily: opts["font-family"] || null,
   };
 
   console.log(

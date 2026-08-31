@@ -119,9 +119,21 @@ def _find_paragraph(words: list, phrase: str) -> tuple[float, float]:
     return start, end
 
 
+def _json_arg(raw, name):
+    """A JSON argument, or nothing. Malformed loses the part, never the clip."""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        print(f"  Warning: {name} is not valid JSON; ignoring it", file=sys.stderr, flush=True)
+        return None
+
+
 def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt="vertical",
                      logo=None, name_card=None, motion=None, caption_position="auto",
-                     caption_scale=1.0, logo_position="top-left", logo_scale=1.0):
+                     caption_scale=1.0, logo_position="top-left", logo_scale=1.0,
+                     topic=None, progress=None, cards=None, brand=None, font_family=None):
     """Render the fragment with face-crop + captions via the existing engine."""
     from services.clip_generator import generate_clip
     print(f"  [fragment] rendering {start:.1f}s–{end:.1f}s ({style}, crop={crop}, {fmt})", flush=True)
@@ -133,6 +145,7 @@ def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt=
         crop_strategy=crop, format=fmt,
         transcript_words=words, title=title, output_dir=out_dir,
         logo_path=logo, name_card=name_card, motion=motion,
+        topic=topic, progress=progress, cards=cards, brand=brand, font_family=font_family,
         clean_fillers=True, allow_ass_fallback=True,
         progress_callback=lambda p, m: print(f"    {p}% {m}", flush=True),
     )
@@ -229,6 +242,20 @@ def main():
     ap.add_argument("--logo", default=None, help="Logo image (asset name or path)")
     ap.add_argument("--logo-position", default="top-left", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"])
     ap.add_argument("--logo-scale", type=float, default=1.0)
+    ap.add_argument("--topic", default=None,
+                    help="Standing label saying what the clip is about")
+    ap.add_argument("--topic-position", default="top-left",
+                    choices=["top-left", "top-center", "top-right",
+                             "bottom-left", "bottom-center", "bottom-right"])
+    ap.add_argument("--progress", action="store_true",
+                    help="Draw how much of the clip is left along the bottom edge")
+    ap.add_argument("--progress-color", default=None)
+    ap.add_argument("--cards", default=None,
+                    help="On-screen cards as JSON, each with kind/start/end")
+    ap.add_argument("--brand", default=None,
+                    help='Show colours as JSON: {"accent":"#4C9DF5","ink":"#FFF","surface":"#000"}')
+    ap.add_argument("--font-family", default=None,
+                    help="The show's own typeface, ahead of the built-in stack")
     ap.add_argument("--intro", default=None, help="Intro video (asset name or path)")
     ap.add_argument("--outro", default=None, help="Outro video (asset name or path)")
     # bookends (defaults are None so we can tell what the user explicitly set;
@@ -327,6 +354,14 @@ def main():
         caption_scale=max(0.7, min(1.5, args.caption_scale)),
         logo_position=args.logo_position,
         logo_scale=max(0.5, min(1.5, args.logo_scale)),
+        topic=({"label": args.topic, "position": args.topic_position} if args.topic else None),
+        progress=(
+            ({"color": args.progress_color} if args.progress_color else {})
+            if args.progress else None
+        ),
+        cards=_json_arg(args.cards, "--cards"),
+        brand=_json_arg(args.brand, "--brand"),
+        font_family=args.font_family,
     )
 
     platforms = [p.strip() for p in platforms_str.split(",") if p.strip()]
