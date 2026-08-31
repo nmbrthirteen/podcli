@@ -1120,23 +1120,29 @@ def generate_clip(
                         captions=captions,
                     )
 
-                if not remotion_ok and not allow_ass_fallback:
+                if not remotion_ok and not captions:
+                    # Nothing else can draw a chip, a bar or a card: the ASS
+                    # path burns words and an overlay is not words. Handing
+                    # back the bare cut here would report success for a clip
+                    # missing everything it was asked for, which is the failure
+                    # this whole switch exists to stop being silent.
+                    if wants_overlay:
+                        raise RuntimeError(
+                            "The overlay could not be drawn: the Remotion renderer "
+                            "failed and nothing else draws a logo, chip, bar or card. "
+                            "The clip is not being delivered without them."
+                        )
+                    # Only a trim and a reframe were asked for, and both are
+                    # already in the cut.
+                    captioned_path = cropped_path
+
+                if not remotion_ok and captions and not allow_ass_fallback:
                     raise RuntimeError(
                         "Remotion caption render failed. ASS fallback is disabled "
                         "(set allow_ass_fallback=true to permit fallback)."
                     )
 
-                if not remotion_ok and allow_ass_fallback and not captions:
-                    # The fallback burns words in. A clip that asked for none
-                    # would come back captioned by a renderer standing in for
-                    # the one that was told not to caption it, so it keeps the
-                    # frame it has and loses only the overlay Remotion failed on.
-                    print("  Remotion failed and captions are off; leaving the clip"
-                          " uncaptioned rather than burning words in",
-                          file=sys.stderr, flush=True)
-                    captioned_path = cropped_path
-
-                if not remotion_ok and allow_ass_fallback and captions:
+                if not remotion_ok and captions and allow_ass_fallback:
                     # Optional fallback: ASS subtitle burn-in
                     ass_path = os.path.join(work_dir, "captions.ass")
                     render_captions(

@@ -136,6 +136,36 @@ class ClipGeneratorTests(unittest.TestCase):
         self.assertEqual(
             self._render_words(caption_style="hormozi", captions=False), [])
 
+    def test_a_failed_overlay_is_not_delivered_as_a_finished_clip(self):
+        """Silence is the failure mode this switch exists to stop.
+
+        Nothing but Remotion draws a chip, a bar or a card, so when it fails
+        there is no degraded version to hand back. Returning the bare cut would
+        report success for a clip missing everything it was asked for.
+        """
+        real_exists = os.path.exists
+        failed = subprocess.CompletedProcess(
+            args=["node"], returncode=1, stdout="", stderr="boom")
+
+        with tempfile.TemporaryDirectory() as td:
+            video_path = os.path.join(td, "video.mp4")
+            with open(video_path, "wb"):
+                pass
+
+            with mock.patch.object(cg.os.path, "exists",
+                                   side_effect=self._fake_exists(real_exists)), \
+                 mock.patch.object(cg.shutil, "which", return_value="/usr/bin/node"), \
+                 mock.patch("subprocess.run", return_value=failed):
+                ok, _ = cg._render_with_remotion(
+                    video_path=video_path,
+                    words=[],
+                    caption_style="hormozi",
+                    output_path=os.path.join(td, "captioned.mp4"),
+                    topic={"label": "Fitness"},
+                    captions=False,
+                )
+        self.assertFalse(ok, "a failed overlay render must not report success")
+
     def test_captions_on_is_unchanged(self):
         """The ordinary render must not have moved."""
         words = self._render_words(caption_style="hormozi", captions=True)
