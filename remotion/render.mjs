@@ -186,7 +186,17 @@ async function main() {
     "-show_entries", "format=duration",
     "-of", "default=noprint_wrappers=1:nokey=1",
   );
-  if (durStr) videoDuration = parseFloat(durStr);
+  // Same silence as the shape, and the same cost: an overlay cut to the last
+  // word rather than to the file stops before the clip does.
+  const measured = Number.parseFloat(durStr ?? "");
+  if (Number.isFinite(measured) && measured > 0) {
+    videoDuration = measured;
+  } else {
+    process.stderr.write(
+      `  could not measure the duration with ${ffprobe}; falling back to the `
+      + `last word, so the overlay may end before the clip does\n`,
+    );
+  }
 
   // Calculate duration from video or word timing
   const lastWord = words[words.length - 1];
