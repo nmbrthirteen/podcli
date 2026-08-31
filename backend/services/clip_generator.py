@@ -529,6 +529,7 @@ def _render_with_remotion(
     cards: Optional[list] = None,
     brand: Optional[dict] = None,
     font_family: Optional[str] = None,
+    captions: bool = True,
 ) -> tuple[bool, Optional[str]]:
     """
     Render captions using Remotion. Returns (success, optional_prores_overlay_path).
@@ -585,8 +586,13 @@ def _render_with_remotion(
             return False, None
 
     # Prepare words JSON (adjust timestamps by offset)
+    #
+    # Captions off draws every other part and none of the words. The logo, the
+    # topic chip, the progress bar and the cards are all drawn by this one pass,
+    # so the alternative to an empty list here is skipping the pass and losing
+    # them with it, which is what "captions off" used to quietly mean.
     adjusted_words = []
-    for w in words:
+    for w in (words if captions else []):
         adjusted = {
             "word": w.get("word", ""),
             "start": round(w["start"] - time_offset, 3),
@@ -773,6 +779,7 @@ def generate_clip(
     cards: Optional[list] = None,
     brand: Optional[dict] = None,
     font_family: Optional[str] = None,
+    captions: bool = True,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """
@@ -1031,14 +1038,28 @@ def generate_clip(
                 )
 
         # Step 3: Render captions (Remotion-first; ASS fallback optional)
-        if not transcript_words:
+        #
+        # The drawn layer is not only the words. The logo, topic chip, progress
+        # bar and cards are drawn by the same Remotion pass, so a clip that
+        # wants any of them needs that pass to run whether or not it is being
+        # captioned. Without this, "captions off" silently meant "nothing on
+        # screen at all", and a clip that had cards to draw ran the pass and
+        # burned the default caption style over a file that had asked for none.
+        wants_overlay = bool(
+            logo_path or topic or progress or cards
+            or (name_card and name_card.get("title"))
+        )
+        if not captions and wants_overlay:
+            print("  drawing the overlay without captions", flush=True)
+
+        if not transcript_words and not wants_overlay:
             caption_warning = (
                 f"rendered without captions: no transcript words were passed, so the "
                 f"{caption_style} style had nothing to draw"
             )
             print(f"  {caption_warning}", file=sys.stderr, flush=True)
 
-        if transcript_words:
+        if transcript_words or wants_overlay:
             if progress_callback:
                 progress_callback(50, f"Adding {caption_style} captions (3/{total_steps})")
 
@@ -1046,7 +1067,7 @@ def generate_clip(
                 clip_words = remapped_words
             else:
                 clip_words = [
-                    w for w in transcript_words
+                    w for w in (transcript_words or [])
                     if w["end"] > start_second and w["start"] < end_second
                 ]
 
@@ -1068,7 +1089,7 @@ def generate_clip(
                 )
                 print(f"  {caption_warning}", file=sys.stderr, flush=True)
 
-            if clip_words:
+            if (clip_words and captions) or wants_overlay:
                 if progress_callback:
                     progress_callback(65, f"Rendering captions into video (3/{total_steps})")
 
@@ -1096,6 +1117,7 @@ def generate_clip(
                         cards=cards,
                         brand=brand,
                         font_family=font_family,
+                        captions=captions,
                     )
 
                 if not remotion_ok and not allow_ass_fallback:
@@ -1104,7 +1126,17 @@ def generate_clip(
                         "(set allow_ass_fallback=true to permit fallback)."
                     )
 
-                if not remotion_ok and allow_ass_fallback:
+                if not remotion_ok and allow_ass_fallback and not captions:
+                    # The fallback burns words in. A clip that asked for none
+                    # would come back captioned by a renderer standing in for
+                    # the one that was told not to caption it, so it keeps the
+                    # frame it has and loses only the overlay Remotion failed on.
+                    print("  Remotion failed and captions are off; leaving the clip"
+                          " uncaptioned rather than burning words in",
+                          file=sys.stderr, flush=True)
+                    captioned_path = cropped_path
+
+                if not remotion_ok and allow_ass_fallback and captions:
                     # Optional fallback: ASS subtitle burn-in
                     ass_path = os.path.join(work_dir, "captions.ass")
                     render_captions(
