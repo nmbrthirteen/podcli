@@ -10,6 +10,7 @@ brand-specific values live in .podcli/thumbnail-config.json.
 
 import json
 import os
+from pathlib import Path
 import re
 import shutil
 import subprocess
@@ -385,8 +386,12 @@ def _layer_html(layers) -> str:
             if not src:
                 continue
             # A path from this machine needs the scheme; a URL already has one.
+            #
+            # as_uri rather than a prefix: a Windows path is D:\tmp\x.png, and
+            # gluing "file://" to that gives a browser backslashes and a host
+            # where it wants a third slash and a drive.
             if not src.startswith(("http://", "https://", "file://", "data:")):
-                src = f"file://{os.path.abspath(src)}"
+                src = Path(os.path.abspath(src)).as_uri()
             css += " height:auto;"
             if layer.get("radius"):
                 css += f" border-radius:{esc(layer['radius'])};"

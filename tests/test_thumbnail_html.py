@@ -154,8 +154,15 @@ class LayerTests(unittest.TestCase):
         self.assertEqual(html, "")
 
     def test_a_local_path_is_given_the_scheme_a_browser_needs(self):
-        html = th._layer_html([{"kind": "image", "src": "/tmp/badge.png"}])
-        self.assertIn("file:///tmp/badge.png", html)
+        # Built from the path rather than asserted as one, because an absolute
+        # path is D:\tmp\badge.png on Windows and file:// glued to that is not
+        # a URI any browser will open.
+        from pathlib import Path
+
+        wanted = Path(os.path.abspath(os.path.join("tmp", "badge.png"))).as_uri()
+        html = th._layer_html([{"kind": "image", "src": os.path.join("tmp", "badge.png")}])
+        self.assertIn(wanted, html)
+        self.assertNotIn("\\", html)
 
     def test_text_cannot_close_the_attribute_it_sits_in(self):
         html = th._layer_html([
