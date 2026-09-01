@@ -123,5 +123,52 @@ class ThumbnailHtmlTests(unittest.TestCase):
         self.assertEqual(run_mock.call_args_list[0].args[0], ["node", "script", "a", "b", "1080", "1920", "1500"])
 
 
+class LayerTests(unittest.TestCase):
+    """
+    The parts a show adds itself, over a template whose anatomy is fixed.
+
+    A layer nobody can see is worse than one that fails to draw: the picture
+    goes out with a badge missing and nothing says so. Everything here is
+    about a layer either appearing where it was put or being skipped for a
+    reason.
+    """
+
+    def test_draws_a_badge_and_a_picture_in_the_order_given(self):
+        html = th._layer_html([
+            {"kind": "text", "text": "NEW", "top": "5%", "left": "6%", "size": 72},
+            {"kind": "image", "src": "https://example.com/badge.png", "width": "220px"},
+        ])
+        self.assertIn(">NEW<", html)
+        self.assertIn("https://example.com/badge.png", html)
+        # Later in the list is nearer the front, and both clear the logo.
+        self.assertLess(html.index("z-index:20"), html.index("z-index:21"))
+
+    def test_skips_what_it_cannot_draw_rather_than_drawing_it_wrong(self):
+        html = th._layer_html([
+            {"kind": "text", "text": "   "},
+            {"kind": "image", "src": ""},
+            {"kind": "sticker", "src": "x"},
+            {"kind": "text", "text": "off", "hidden": True},
+            "not a layer",
+        ])
+        self.assertEqual(html, "")
+
+    def test_a_local_path_is_given_the_scheme_a_browser_needs(self):
+        html = th._layer_html([{"kind": "image", "src": "/tmp/badge.png"}])
+        self.assertIn("file:///tmp/badge.png", html)
+
+    def test_text_cannot_close_the_attribute_it_sits_in(self):
+        html = th._layer_html([
+            {"kind": "text", "text": '"><script>alert(1)</script>'},
+            {"kind": "image", "src": 'x" onerror="alert(1)'},
+        ])
+        self.assertNotIn("<script>", html)
+        self.assertNotIn('onerror="', html)
+
+    def test_nothing_at_all_when_no_layers_were_set(self):
+        self.assertEqual(th._layer_html(None), "")
+        self.assertEqual(th._layer_html([]), "")
+
+
 if __name__ == "__main__":
     unittest.main()

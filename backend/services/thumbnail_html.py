@@ -314,6 +314,87 @@ def _prepare_thumbnail_lines(
     return _split_thumbnail_title(title, max_line_chars=max_line_chars)
 
 
+def _layer_html(layers) -> str:
+    """
+    The parts a show adds itself, drawn over the template.
+
+    The template is a fixed anatomy: a box, two lines, a logo, some shading.
+    It answers most thumbnails and none of the ones that need a badge, a
+    price, an arrow, or a second picture. Those are these: an ordered list,
+    each one placed by its own coordinates and drawn in the order given, so
+    the last in the list is the one on top.
+
+    Two kinds, because they cover what anybody actually reaches for. A layer
+    this does not understand is skipped rather than drawn wrong.
+    """
+    if not isinstance(layers, list):
+        return ""
+
+    def esc(value) -> str:
+        return (
+            str(value)
+            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
+
+    def place(layer) -> str:
+        # Percentages travel between canvas sizes; pixels are what a drag
+        # produces. Either is passed through as written.
+        css = "position:absolute;"
+        for edge in ("top", "right", "bottom", "left"):
+            if layer.get(edge) not in (None, ""):
+                css += f" {edge}:{esc(layer[edge])};"
+        if layer.get("width") not in (None, ""):
+            css += f" width:{esc(layer['width'])};"
+        if layer.get("rotate"):
+            css += f" transform:rotate({esc(layer['rotate'])}deg);"
+        opacity = layer.get("opacity")
+        if opacity is not None:
+            css += f" opacity:{esc(opacity)};"
+        return css
+
+    drawn = []
+    for index, layer in enumerate(layers):
+        if not isinstance(layer, dict) or layer.get("hidden"):
+            continue
+        # Later in the list is nearer the front. Above the logo, which is the
+        # topmost thing the template itself draws.
+        css = place(layer) + f" z-index:{20 + index};"
+        kind = layer.get("kind")
+
+        if kind == "text":
+            text = str(layer.get("text") or "").strip()
+            if not text:
+                continue
+            css += (
+                f" color:{esc(layer.get('color', '#FFFFFF'))};"
+                f" font-size:{esc(layer.get('size', 48))}px;"
+                f" font-weight:{esc(layer.get('weight', 700))};"
+                " line-height:1.15; white-space:pre-wrap;"
+            )
+            if layer.get("background"):
+                css += (
+                    f" background:{esc(layer['background'])};"
+                    f" padding:{esc(layer.get('padding', '10px 16px'))};"
+                    f" border-radius:{esc(layer.get('radius', '10px'))};"
+                )
+            drawn.append(f'<div style="{css}">{esc(text)}</div>')
+
+        elif kind == "image":
+            src = str(layer.get("src") or "").strip()
+            if not src:
+                continue
+            # A path from this machine needs the scheme; a URL already has one.
+            if not src.startswith(("http://", "https://", "file://", "data:")):
+                src = f"file://{os.path.abspath(src)}"
+            css += " height:auto;"
+            if layer.get("radius"):
+                css += f" border-radius:{esc(layer['radius'])};"
+            drawn.append(f'<img src="{esc(src)}" style="{css}" />')
+
+    return "\n    ".join(drawn)
+
+
 def _build_html(
     line1: str,
     line2: str,
@@ -396,6 +477,7 @@ def _build_html(
 
     # Logo
     logo_html = ""
+    layers_html = _layer_html(cfg.get("layers"))
     logo_pos = cfg.get("logo_position", "none")
     if logo_path and os.path.exists(logo_path) and logo_pos != "none":
         logo_uri = f"file://{os.path.abspath(logo_path)}"
@@ -595,6 +677,7 @@ body {{
         <div class="line2"><span>{l2}</span></div>
     </div>
     {logo_html}
+    {layers_html}
 </body>
 </html>"""
 
