@@ -66,6 +66,21 @@ const track = (fill: string) =>
 const TYPE = { label: 34, body: 46, item: 58, quote: 68, lead: 84, figure: 168 };
 
 /**
+ * How much of the frame a video card's footage takes.
+ *
+ * The arithmetic it has to fit: a 1920 canvas, roughly 470 reserved for the
+ * captions, 76 of gap, and the speaker's own floor of 820 above it. What is
+ * left is this. Asking for the literal half of the frame would push the band
+ * under that floor, and the card would answer by dropping the speaker
+ * altogether — the opposite of what a split screen is for.
+ *
+ * It shrinks before the speaker does, because a caption style with tall words
+ * has to take its room from somewhere and a face cut in half is worse than
+ * footage cropped a little tighter.
+ */
+const VIDEO_BAND = 540;
+
+/**
  * The least of the frame the speaker keeps.
  *
  * The band is whatever the card does not need rather than a fixed height: a
@@ -190,6 +205,9 @@ const Endpoint: React.FC<{
 const CardBody: React.FC<{ card: Card; scale: number; brand: Brand }> = ({
   card, scale: s, brand,
 }) => {
+  // Read before any of the branches below, so a card kind that never uses it
+  // does not change the order the hooks run in.
+  const { fps } = useVideoConfig();
   const accent = card.accent ?? brand.accent;
   const INK = brand.ink;
   const MUTED = muted(brand.ink);
@@ -491,6 +509,49 @@ const CardBody: React.FC<{ card: Card; scale: number; brand: Brand }> = ({
     );
   }
 
+  if (card.kind === "video") {
+    // The same split as the speaker above it: the player seeks a <video> per
+    // frame, and a render has no seekable player to drive.
+    const Frame = getRemotionEnvironment().isRendering ? OffthreadVideo : Video;
+    return (
+      <>
+        <Frame
+          src={card.src.startsWith("http") ? card.src : staticFile(card.src)}
+          startFrom={Math.max(0, Math.round((card.startAt ?? 0) * fps))}
+          muted
+          style={{
+            width: "100%",
+            height: VIDEO_BAND * s,
+            // Black rather than the surface tone: letterboxing that matches
+            // the card reads as a card drawn short, where black reads as the
+            // shape of the footage, which is what it is.
+            backgroundColor: "#000",
+            objectFit: card.fit === "fit" ? "contain" : "cover",
+          }}
+        />
+        {card.caption && (
+          <div
+            style={{
+              fontFamily: FONT,
+              fontSize: TYPE.label * s,
+              fontWeight: 400,
+              lineHeight: 1.3,
+              color: MUTED,
+              // Its own inset: the footage above it runs to both edges, and a
+              // caption that did the same would sit against the frame.
+              padding: `0 ${96 * s}px`,
+              marginTop: GAP.tight * s,
+            }}
+          >
+            {card.caption}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  if (card.kind !== "quote") return null;
+
   return (
     <>
       <div
@@ -555,6 +616,17 @@ const SpeakerBand: React.FC<{ src: string; startFrom: number; faceY?: number | n
   );
 };
 
+/**
+ * Every kind this build draws.
+ *
+ * Written out rather than derived from the union, because the point is to
+ * answer for a card that arrived from somewhere newer, and a type cannot.
+ */
+const KNOWN_KINDS = new Set([
+  "stat", "headline", "bullets", "compare", "change", "share", "entity", "quote",
+  "image", "video",
+]);
+
 export const Cards: React.FC<{
   cards: Card[];
   videoSrc?: string;
@@ -569,9 +641,20 @@ export const Cards: React.FC<{
   const { fps, height } = useVideoConfig();
   const s = captionScale(height);
 
-  // A picture whose file went missing is dropped here rather than drawn: the
-  // card is opaque, so rendering it anyway would cover the clip with nothing.
-  const usable = cards.filter((c) => c.kind !== "image" || Boolean(c.src));
+  /*
+   * Only the cards this build can actually draw.
+   *
+   * A picture or a piece of footage whose file went missing is dropped rather
+   * than drawn: the card is opaque, so rendering it anyway would cover the
+   * clip with nothing. A kind this build has never heard of goes the same
+   * way. An older engine handed a newer plan used to fall through to the
+   * quote branch and draw an empty slab over the speaker, which is the one
+   * failure that looks deliberate.
+   */
+  const usable = cards.filter((c) => (
+    KNOWN_KINDS.has(c.kind)
+    && (c.kind !== "image" && c.kind !== "video" ? true : Boolean(c.src))
+  ));
   const card = cardAt(usable, frame / fps);
   if (!card) return null;
 
@@ -619,7 +702,9 @@ export const Cards: React.FC<{
       )}
       <div
         style={{
-          padding: `${GAP.section * s}px ${96 * s}px 0`,
+          // Footage runs to both edges. An inset would draw it as a picture
+          // pasted on a card, where the point is a second half of the frame.
+          padding: `${GAP.section * s}px ${(card.kind === "video" ? 0 : 96) * s}px 0`,
           display: "flex",
           flexDirection: "column",
           /*
