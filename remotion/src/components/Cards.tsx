@@ -757,11 +757,14 @@ export const Cards: React.FC<{
    */
   const speakerTakes = Math.max(headNeeds, SPEAKER_MIN * s);
   const bodyRoom = (available: number) => Math.max(0, available - GAP.section * s);
+  // Asked of the union rather than of one kind: only some cards have a caption
+  // at all, and the fit arithmetic runs before anything has narrowed to one.
+  const hasCaption = "caption" in card && Boolean(card.caption);
   const withSpeaker = card.speaker !== null
     && Boolean(videoSrc)
     && room >= headNeeds
     && (!SHOWS_A_FILE.has(card.kind)
-      || mediaBand(card.kind, bodyRoom(room - speakerTakes), s, Boolean(card.caption))
+      || mediaBand(card.kind, bodyRoom(room - speakerTakes), s, hasCaption)
          >= MEDIA_MIN * s);
 
   return (
