@@ -98,8 +98,18 @@ const MEDIA_MIN = 260;
 /** The two kinds that show a file, and are given a height rather than take one. */
 const SHOWS_A_FILE = new Set(["image", "video"]);
 
+/**
+ * How many lines a card's own caption can run to.
+ *
+ * Two, because the API cuts a caption at ninety characters and ninety
+ * characters of label type do not fit on one line of this frame. Reserving one
+ * was reserving for the caption that happens to be short, and the second line
+ * of a long one came out of the band below it — which is the caption pill.
+ */
+const CAPTION_LINES_MEDIA = 2;
+
 /** What a card's own caption costs whatever is above it. */
-const CAPTION_ROW = TYPE.label * 1.3 + GAP.tight;
+const CAPTION_ROW = TYPE.label * 1.3 * CAPTION_LINES_MEDIA + GAP.tight;
 
 /**
  * How tall the file is in a body of this height.
@@ -736,12 +746,22 @@ export const Cards: React.FC<{
    * caption band, the card gives up the speaker and takes the whole frame,
    * which is what it would have done for a card too tall to share.
    */
+  /*
+   * What the speaker actually occupies, which is not always what it needs.
+   *
+   * A measured face gives the height a head wants, and on a wide shot that is
+   * less than the floor the band is drawn with. The layout hands the speaker
+   * the larger of the two, so the room left for a file is measured against
+   * that rather than against the smaller number, or the band is computed
+   * against space the speaker has already taken.
+   */
+  const speakerTakes = Math.max(headNeeds, SPEAKER_MIN * s);
   const bodyRoom = (available: number) => Math.max(0, available - GAP.section * s);
   const withSpeaker = card.speaker !== null
     && Boolean(videoSrc)
     && room >= headNeeds
     && (!SHOWS_A_FILE.has(card.kind)
-      || mediaBand(card.kind, bodyRoom(room - headNeeds), s, Boolean(card.caption))
+      || mediaBand(card.kind, bodyRoom(room - speakerTakes), s, Boolean(card.caption))
          >= MEDIA_MIN * s);
 
   return (
@@ -788,7 +808,7 @@ export const Cards: React.FC<{
           card={card}
           scale={s}
           brand={colours}
-          room={bodyRoom(withSpeaker ? room - headNeeds : room)}
+          room={bodyRoom(withSpeaker ? room - speakerTakes : room)}
         />
       </div>
     </div>
