@@ -80,31 +80,51 @@ const TYPE = { label: 34, body: 46, item: 58, quote: 68, lead: 84, figure: 168 }
  */
 const VIDEO_BAND = 540;
 
+/** A picture is capped a little shorter, having no motion to carry it. */
+const IMAGE_BAND = 520;
+
 /**
- * The least footage worth keeping the speaker for.
+ * The least a file is worth keeping the speaker for.
  *
  * Captions placed high on the frame reserve their band from the same 1920,
  * and what is left after a speaker can be a few dozen pixels. A letterbox
  * slit of a factory floor says nothing while still costing the frame it sits
- * in, so short of this the card takes the whole frame and the footage gets a
+ * in, so short of this the card takes the whole frame and the file gets a
  * size worth looking at. The same call the speaker's own floor makes, made
  * for the other half.
  */
-const VIDEO_MIN = 260;
+const MEDIA_MIN = 260;
 
-/** What a card's own caption costs whatever is above it. */
-const CAPTION_ROW = TYPE.label * 1.3 + GAP.tight;
+/** The two kinds that show a file, and are given a height rather than take one. */
+const SHOWS_A_FILE = new Set(["image", "video"]);
 
 /**
- * How tall the footage is in a body of this height.
+ * How many lines a card's own caption can run to.
+ *
+ * Two, because the API cuts a caption at ninety characters and ninety
+ * characters of label type do not fit on one line of this frame. Reserving one
+ * was reserving for the caption that happens to be short, and the second line
+ * of a long one came out of the band below it — which is the caption pill.
+ */
+const CAPTION_LINES_MEDIA = 2;
+
+/** What a card's own caption costs whatever is above it. */
+const CAPTION_ROW = TYPE.label * 1.3 * CAPTION_LINES_MEDIA + GAP.tight;
+
+/**
+ * How tall the file is in a body of this height.
  *
  * One formula, because two things ask: the card, to decide whether keeping
- * the speaker still leaves footage worth showing, and the body, to draw it.
+ * the speaker still leaves something worth showing, and the body, to draw it.
  * Asked twice and answered differently, the card keeps a speaker for a band
  * it then draws too short to read.
  */
-const videoBand = (bodyRoom: number, s: number, hasCaption: boolean) =>
-  Math.min(VIDEO_BAND * s, Math.max(0, bodyRoom - (hasCaption ? CAPTION_ROW * s : 0)));
+const mediaBand = (
+  kind: string, bodyRoom: number, s: number, hasCaption: boolean,
+) => Math.min(
+  (kind === "image" ? IMAGE_BAND : VIDEO_BAND) * s,
+  Math.max(0, bodyRoom - (hasCaption ? CAPTION_ROW * s : 0)),
+);
 
 /**
  * The least of the frame the speaker keeps.
@@ -520,7 +540,10 @@ const CardBody: React.FC<{
           src={card.src.startsWith("http") ? card.src : staticFile(card.src)}
           style={{
             width: "100%",
-            maxHeight: 520 * s,
+            // Capped by the room actually left rather than by a number alone:
+            // captions placed high reserve their band from the same frame, and
+            // a picture pinned to a fixed height drew over them.
+            maxHeight: mediaBand("image", room ?? IMAGE_BAND * s, s, Boolean(card.caption)),
             objectFit: card.fit === "fill" ? "cover" : "contain",
             borderRadius: 16 * s,
             // A screenshot's own edge is often near the surface tone behind it.
@@ -559,7 +582,7 @@ const CardBody: React.FC<{
           muted
           style={{
             width: "100%",
-            height: videoBand(room ?? VIDEO_BAND * s, s, Boolean(card.caption)),
+            height: mediaBand("video", room ?? VIDEO_BAND * s, s, Boolean(card.caption)),
             // Black rather than the surface tone: letterboxing that matches
             // the card reads as a card drawn short, where black reads as the
             // shape of the footage, which is what it is.
@@ -715,7 +738,7 @@ export const Cards: React.FC<{
   const room = height - (captionZone(style) + GAP.section) * s;
   const headNeeds = faceH ? faceH * HEAD_TO_FACE * height : SPEAKER_MIN * s;
   /*
-   * Footage keeps the speaker only while both still fit.
+   * A file keeps the speaker only while both still fit.
    *
    * The speaker's floor is the first claim on the frame and the captions are
    * reserved before either, so on a clip whose captions sit high there can be
@@ -723,12 +746,23 @@ export const Cards: React.FC<{
    * caption band, the card gives up the speaker and takes the whole frame,
    * which is what it would have done for a card too tall to share.
    */
+  /*
+   * What the speaker actually occupies, which is not always what it needs.
+   *
+   * A measured face gives the height a head wants, and on a wide shot that is
+   * less than the floor the band is drawn with. The layout hands the speaker
+   * the larger of the two, so the room left for a file is measured against
+   * that rather than against the smaller number, or the band is computed
+   * against space the speaker has already taken.
+   */
+  const speakerTakes = Math.max(headNeeds, SPEAKER_MIN * s);
   const bodyRoom = (available: number) => Math.max(0, available - GAP.section * s);
   const withSpeaker = card.speaker !== null
     && Boolean(videoSrc)
     && room >= headNeeds
-    && (card.kind !== "video"
-      || videoBand(bodyRoom(room - headNeeds), s, Boolean(card.caption)) >= VIDEO_MIN * s);
+    && (!SHOWS_A_FILE.has(card.kind)
+      || mediaBand(card.kind, bodyRoom(room - speakerTakes), s, Boolean(card.caption))
+         >= MEDIA_MIN * s);
 
   return (
     <div
@@ -774,7 +808,7 @@ export const Cards: React.FC<{
           card={card}
           scale={s}
           brand={colours}
-          room={bodyRoom(withSpeaker ? room - headNeeds : room)}
+          room={bodyRoom(withSpeaker ? room - speakerTakes : room)}
         />
       </div>
     </div>
