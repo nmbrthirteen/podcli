@@ -96,6 +96,35 @@ export type Card =
        */
       fit?: "fit" | "fill";
       caption?: string;
+    })
+  /**
+   * Footage in the band under the speaker.
+   *
+   * The split every phone already knows: the person talking above, the thing
+   * they are talking about below. It is the one card that shows rather than
+   * states, which is why it earns the frame where a slide would not.
+   *
+   * Silent, always, and not negotiable. The moment is somebody speaking, and
+   * a second soundtrack under them is what makes a clip unwatchable rather
+   * than merely busy.
+   *
+   * Footage shorter than the card's own window runs out inside it: there is
+   * no looping here, because the only component that can seek frame-perfectly
+   * during a render cannot loop, and a preview that loops where the render
+   * does not is a preview that lies. The window is the agreement.
+   */
+  | (CardBase & {
+      kind: "video";
+      /** A URL the renderer can reach, or a path inside the bundle. */
+      src: string;
+      /**
+       * "fill" crops to the band, which is what footage wants. "fit" shows
+       * the whole frame for a screen recording, where the edges are content.
+       */
+      fit?: "fit" | "fill";
+      /** Where in the file to start, in seconds. */
+      startAt?: number;
+      caption?: string;
     });
 
 /**
