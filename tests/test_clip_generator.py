@@ -37,12 +37,6 @@ class ClipGeneratorTests(unittest.TestCase):
         return _exists
 
     def _fake_popen(self, returncode=0, stdout="", stderr="", timeout=None):
-        """A Popen stand-in for _run_streaming: readable pipes, wait(), kill().
-
-        Fresh per call, because the streaming reader drains and closes the pipes.
-        A timeout makes the first wait() raise the way a real child would, and
-        the second, after kill(), return.
-        """
         proc = mock.Mock()
         proc.stdout = io.StringIO(stdout)
         proc.stderr = io.StringIO(stderr)
@@ -293,8 +287,6 @@ class ClipGeneratorTests(unittest.TestCase):
         self.assertEqual(second, (False, None))
         self.assertIsNone(cg._remotion_available)
         self.assertGreaterEqual(mock_run.call_count, 4)
-        # The whole group, not just node: Chromium and the compositor are its
-        # children and are what a timed-out render leaves busy.
         self.assertTrue(mock_killpg.called, "a timed-out render must signal its process group")
         self.assertEqual(mock_killpg.call_args_list[0].args, (4242, cg.signal.SIGTERM))
 

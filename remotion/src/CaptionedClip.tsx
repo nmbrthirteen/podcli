@@ -79,11 +79,6 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
    * surface, and it was the single biggest thing pushing the speaker's band
    * short enough to cut a face in half.
    */
-  /*
-   * A card waits out the name card's opening seconds rather than share the
-   * lower third with it; the two are drawn by the same pass on a render and
-   * neither knows about the other's window on its own.
-   */
   const nameCardSeconds = nameCard?.title ? (nameCard.seconds ?? 3) : 0;
   const pastNameCard = frame / fps >= nameCardSeconds;
   const cardUp = pastNameCard && Boolean(cards?.length) && Boolean(cardAt(cards ?? [], frame / fps));

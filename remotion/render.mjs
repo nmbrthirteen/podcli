@@ -65,33 +65,12 @@ function clampLogoScale(raw) {
 // Remotion's 30s default is measured against the font delayRender in Root.tsx,
 // which competes with evaluating the whole bundle. That bundle has three
 // compositions now, and the slowest CI runner does not finish inside 30s.
-//
-// A fixed cap on top of that was wrong in the other direction: a card-heavy
-// clip renders roughly 13x slower than realtime on the container's actual CPU
-// quota, not the few seconds a bundle load costs, and a 120s ceiling killed
-// the render itself mid-flight, not just a slow font load — the "delayRender
-// not cleared" it reported was a symptom of the whole page stalling under
-// load, not a broken font. Scaled to the clip so a 3-second clip still fails
-// fast and a full-length one gets the minutes it actually needs; overridable
-// for a box whose real throughput has already been measured.
 const timeoutFor = (durationSec) => {
   const override = parseInt(process.env.PODCLI_REMOTION_TIMEOUT_MS ?? "", 10);
   if (Number.isFinite(override)) return Math.max(1, override);
-  // durationSec is measured by ffprobe and rarely lands on a whole number;
-  // Remotion rejects a fractional timeoutInMilliseconds outright.
   return Math.round(Math.min(50 * 60_000, Math.max(120_000, 90_000 + durationSec * 15_000)));
 };
 
-/*
- * The compositor caches decoded <OffthreadVideo> frames, and left to itself
- * sizes that cache at half of the memory "available on the system": the host's,
- * not the container's cgroup limit, so a worker capped at 3GB was handed a
- * ~4GB cache target and the kernel killed the compositor at 2.7GB resident,
- * mid-render, on every clip that drew a card with the speaker still in frame.
- * A bound the container can actually honour makes peak memory a constant
- * rather than a function of whichever box the render happens to land on.
- * Overridable in MB for a box whose real headroom has been measured.
- */
 const videoCacheBytes = () => {
   const mb = parseInt(process.env.PODCLI_REMOTION_VIDEO_CACHE_MB ?? "", 10);
   return (Number.isFinite(mb) && mb > 0 ? mb : 512) * 1024 * 1024;
@@ -341,12 +320,6 @@ async function main() {
       chromeMode,
     });
 
-    // os.cpus() reads the host's core count, not the container's cgroup quota,
-    // so on a boxed worker it sizes a tab count the container was never given
-    // the CPU to actually run — the same mismatch PODCLI_WHISPER_THREADS
-    // exists to correct for Whisper. PODCLI_REMOTION_CONCURRENCY lets deploy
-    // config state the real number; unset, it falls back to the old guess for
-    // anywhere still running bare-metal.
     const cpus = os.cpus().length;
     const concurrency = process.env.PODCLI_REMOTION_CONCURRENCY
       ? Math.max(1, parseInt(process.env.PODCLI_REMOTION_CONCURRENCY, 10))
