@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import shutil
+import signal
 import subprocess
 import re
 import threading
@@ -473,6 +474,34 @@ def _build_tight_segments(
 _remotion_available = None  # True/False/None — environment availability, not per-clip success
 
 
+def _stop_process_tree(proc: subprocess.Popen) -> None:
+    """Stop a render and everything it spawned.
+
+    proc.kill() reaches only Node. Chromium and the compositor are its
+    children, and a render that has timed out is exactly the one whose
+    children are still busy, holding the CPU the next job needs. On POSIX the
+    child is started in its own session so the whole group can be signalled:
+    TERM first, which render.mjs handles by closing its server and deleting
+    the half-written overlay, then KILL for whatever ignored it.
+    """
+    if hasattr(os, "killpg"):
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=5)
+                return
+            except subprocess.TimeoutExpired:
+                pass
+            os.killpg(pgid, signal.SIGKILL)
+            proc.wait()
+            return
+        except OSError:
+            pass
+    proc.kill()
+    proc.wait()
+
+
 def _run_streaming(
     cmd: list[str],
     *,
@@ -499,6 +528,7 @@ def _run_streaming(
         text=True,
         cwd=cwd,
         env=env,
+        start_new_session=(os.name == "posix"),
     )
     captured: dict[str, list[str]] = {"out": [], "err": []}
 
@@ -519,8 +549,7 @@ def _run_streaming(
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        _stop_process_tree(proc)
         for t in threads:
             t.join(timeout=5)
         raise subprocess.TimeoutExpired(

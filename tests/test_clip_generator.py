@@ -272,6 +272,8 @@ class ClipGeneratorTests(unittest.TestCase):
 
             with mock.patch.object(cg.os.path, "exists", side_effect=self._fake_exists(real_exists)), \
                  mock.patch.object(cg.shutil, "which", return_value="/usr/bin/node"), \
+                 mock.patch.object(cg.os, "getpgid", return_value=4242, create=True), \
+                 mock.patch.object(cg.os, "killpg", create=True) as mock_killpg, \
                  mock.patch("subprocess.Popen",
                             side_effect=lambda *a, **kw: self._fake_popen(timeout=600)) as mock_run:
                 first = cg._render_with_remotion(
@@ -291,6 +293,10 @@ class ClipGeneratorTests(unittest.TestCase):
         self.assertEqual(second, (False, None))
         self.assertIsNone(cg._remotion_available)
         self.assertGreaterEqual(mock_run.call_count, 4)
+        # The whole group, not just node: Chromium and the compositor are its
+        # children and are what a timed-out render leaves busy.
+        self.assertTrue(mock_killpg.called, "a timed-out render must signal its process group")
+        self.assertEqual(mock_killpg.call_args_list[0].args, (4242, cg.signal.SIGTERM))
 
     def test_remotion_failure_report_takes_bytes_as_well_as_text(self):
         # TimeoutExpired carries what the child had written and does not honour
