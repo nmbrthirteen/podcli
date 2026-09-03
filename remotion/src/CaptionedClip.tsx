@@ -79,7 +79,14 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
    * surface, and it was the single biggest thing pushing the speaker's band
    * short enough to cut a face in half.
    */
-  const cardUp = Boolean(cards?.length) && Boolean(cardAt(cards ?? [], frame / fps));
+  /*
+   * A card waits out the name card's opening seconds rather than share the
+   * lower third with it; the two are drawn by the same pass on a render and
+   * neither knows about the other's window on its own.
+   */
+  const nameCardSeconds = nameCard?.title ? (nameCard.seconds ?? 3) : 0;
+  const pastNameCard = frame / fps >= nameCardSeconds;
+  const cardUp = pastNameCard && Boolean(cards?.length) && Boolean(cardAt(cards ?? [], frame / fps));
   const cardPlanned = Boolean(cards?.length);
   const captionShrink = cardUp ? 0.6 : cardPlanned ? 0.75 : 1;
   const baseCaptionStyle: CaptionStyle = cardUp
@@ -111,7 +118,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   return (
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
       {/* First, so everything below stays up while a card holds the frame. */}
-      {cards && cards.length > 0 && (
+      {cards && cards.length > 0 && pastNameCard && (
         <Cards
           cards={cards}
           videoSrc={videoSrc}
