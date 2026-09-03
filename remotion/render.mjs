@@ -309,8 +309,16 @@ async function main() {
       chromeMode,
     });
 
+    // os.cpus() reads the host's core count, not the container's cgroup quota,
+    // so on a boxed worker it sizes a tab count the container was never given
+    // the CPU to actually run — the same mismatch PODCLI_WHISPER_THREADS
+    // exists to correct for Whisper. PODCLI_REMOTION_CONCURRENCY lets deploy
+    // config state the real number; unset, it falls back to the old guess for
+    // anywhere still running bare-metal.
     const cpus = os.cpus().length;
-    const concurrency = Math.max(2, Math.min(cpus, 8));
+    const concurrency = process.env.PODCLI_REMOTION_CONCURRENCY
+      ? Math.max(1, parseInt(process.env.PODCLI_REMOTION_CONCURRENCY, 10))
+      : Math.max(2, Math.min(cpus, 8));
     if (opts["keep-overlay"]) {
       const outBase = opts.output.replace(/\.[^.]+$/, "");
       captionOverlay = `${outBase}_captions.mov`;
