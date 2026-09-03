@@ -77,7 +77,9 @@ function clampLogoScale(raw) {
 const timeoutFor = (durationSec) => {
   const override = parseInt(process.env.PODCLI_REMOTION_TIMEOUT_MS ?? "", 10);
   if (Number.isFinite(override)) return Math.max(1, override);
-  return Math.min(50 * 60_000, Math.max(120_000, 90_000 + durationSec * 15_000));
+  // durationSec is measured by ffprobe and rarely lands on a whole number;
+  // Remotion rejects a fractional timeoutInMilliseconds outright.
+  return Math.round(Math.min(50 * 60_000, Math.max(120_000, 90_000 + durationSec * 15_000)));
 };
 
 async function main() {
