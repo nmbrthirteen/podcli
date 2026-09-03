@@ -58,6 +58,15 @@ def _whispercpp_ready(model_size: str) -> bool:
     return _whispercpp_cli() is not None and os.path.exists(_whispercpp_model(model_size))
 
 
+def _whisper_threads() -> int:
+    raw = os.environ.get("PODCLI_WHISPER_THREADS", "").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 0
+    return n if n > 0 else 4
+
+
 def _transcribe_with_whispercpp(file_path, model_size, language, progress_callback, wav_path=None):
     from services import transcription_whispercpp as wcpp
 
@@ -81,6 +90,7 @@ def _transcribe_with_whispercpp(file_path, model_size, language, progress_callba
         vad=vad,
         vad_model=os.environ.get("PODCLI_WHISPERCPP_VAD_MODEL") or None,
         wav_path=wav_path,
+        threads=_whisper_threads(),
     )
     if progress_callback:
         progress_callback(50, "Transcription complete")
