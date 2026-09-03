@@ -82,6 +82,22 @@ const timeoutFor = (durationSec) => {
   return Math.round(Math.min(50 * 60_000, Math.max(120_000, 90_000 + durationSec * 15_000)));
 };
 
+/*
+ * The compositor caches decoded <OffthreadVideo> frames, and left to itself
+ * sizes that cache at half of the memory "available on the system": the host's,
+ * not the container's cgroup limit, so a worker capped at 3GB was handed a
+ * ~4GB cache target and the kernel killed the compositor at 2.7GB resident,
+ * mid-render, on every clip that drew a card with the speaker still in frame.
+ * A bound the container can actually honour makes peak memory a constant
+ * rather than a function of whichever box the render happens to land on.
+ * Overridable in MB for a box whose real headroom has been measured.
+ */
+const videoCacheBytes = () => {
+  const mb = parseInt(process.env.PODCLI_REMOTION_VIDEO_CACHE_MB ?? "", 10);
+  return (Number.isFinite(mb) && mb > 0 ? mb : 512) * 1024 * 1024;
+};
+const offthreadVideoCacheSizeInBytes = videoCacheBytes();
+
 async function main() {
   const opts = parseArgs();
 
@@ -320,6 +336,7 @@ async function main() {
       id: "CaptionedClip",
       inputProps,
       timeoutInMilliseconds: timeoutFor(durationSec),
+      offthreadVideoCacheSizeInBytes,
       browserExecutable,
       chromeMode,
     });
@@ -363,6 +380,7 @@ async function main() {
       inputProps,
       concurrency,
       timeoutInMilliseconds: timeoutFor(durationSec),
+      offthreadVideoCacheSizeInBytes,
       onProgress: ({ progress }) => {
         const pct = Math.round(progress * 100);
         if (pct > lastPct + 9) {
