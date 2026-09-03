@@ -36,6 +36,23 @@ class ClipGeneratorTests(unittest.TestCase):
             return real_exists(path)
         return _exists
 
+    def _fake_popen(self, returncode=0, stdout="", stderr="", timeout=None):
+        """A Popen stand-in for _run_streaming: readable pipes, wait(), kill().
+
+        Fresh per call, because the streaming reader drains and closes the pipes.
+        A timeout makes the first wait() raise the way a real child would, and
+        the second, after kill(), return.
+        """
+        proc = mock.Mock()
+        proc.stdout = io.StringIO(stdout)
+        proc.stderr = io.StringIO(stderr)
+        proc.returncode = returncode
+        if timeout is not None:
+            proc.wait.side_effect = [subprocess.TimeoutExpired(cmd=["node"], timeout=timeout), None]
+        else:
+            proc.wait.return_value = returncode
+        return proc
+
     def test_kept_caption_overlay_path_matches_remotion_contract(self):
         with tempfile.TemporaryDirectory() as td:
             output_path = os.path.join(td, "captioned.mp4")
@@ -46,7 +63,6 @@ class ClipGeneratorTests(unittest.TestCase):
     def _render_args(self, **kwargs):
         """The argv one Remotion render was invoked with."""
         real_exists = os.path.exists
-        ok = subprocess.CompletedProcess(args=["node"], returncode=0, stdout="", stderr="")
 
         with tempfile.TemporaryDirectory() as td:
             video_path = os.path.join(td, "video.mp4")
@@ -58,7 +74,7 @@ class ClipGeneratorTests(unittest.TestCase):
 
             with mock.patch.object(cg.os.path, "exists", side_effect=self._fake_exists(real_exists)), \
                  mock.patch.object(cg.shutil, "which", return_value="/usr/bin/node"), \
-                 mock.patch("subprocess.run", return_value=ok) as mock_run:
+                 mock.patch("subprocess.Popen", side_effect=lambda *a, **kw: self._fake_popen()) as mock_run:
                 cg._render_with_remotion(
                     video_path=video_path,
                     words=[{"word": "hello", "start": 0.0, "end": 0.5}],
@@ -97,7 +113,7 @@ class ClipGeneratorTests(unittest.TestCase):
             if "--words" in args:
                 with open(args[args.index("--words") + 1]) as fh:
                     seen.update(json.load(fh))
-            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+            return self._fake_popen()
 
         with tempfile.TemporaryDirectory() as td:
             video_path = os.path.join(td, "video.mp4")
@@ -108,7 +124,7 @@ class ClipGeneratorTests(unittest.TestCase):
 
             with mock.patch.object(cg.os.path, "exists", side_effect=self._fake_exists(real_exists)), \
                  mock.patch.object(cg.shutil, "which", return_value="/usr/bin/node"), \
-                 mock.patch("subprocess.run", side_effect=capture):
+                 mock.patch("subprocess.Popen", side_effect=capture):
                 cg._render_with_remotion(
                     video_path=video_path,
                     words=[{"word": "hello", "start": 0.0, "end": 0.5}],
@@ -144,8 +160,6 @@ class ClipGeneratorTests(unittest.TestCase):
         report success for a clip missing everything it was asked for.
         """
         real_exists = os.path.exists
-        failed = subprocess.CompletedProcess(
-            args=["node"], returncode=1, stdout="", stderr="boom")
 
         with tempfile.TemporaryDirectory() as td:
             video_path = os.path.join(td, "video.mp4")
@@ -155,7 +169,8 @@ class ClipGeneratorTests(unittest.TestCase):
             with mock.patch.object(cg.os.path, "exists",
                                    side_effect=self._fake_exists(real_exists)), \
                  mock.patch.object(cg.shutil, "which", return_value="/usr/bin/node"), \
-                 mock.patch("subprocess.run", return_value=failed):
+                 mock.patch("subprocess.Popen",
+                            side_effect=lambda *a, **kw: self._fake_popen(returncode=1, stderr="boom")):
                 ok, _ = cg._render_with_remotion(
                     video_path=video_path,
                     words=[],
@@ -216,12 +231,6 @@ class ClipGeneratorTests(unittest.TestCase):
 
     def test_remotion_runtime_failure_does_not_disable_future_clips(self):
         real_exists = os.path.exists
-        fail_result = subprocess.CompletedProcess(
-            args=["node"],
-            returncode=1,
-            stdout="Error: transient render failure",
-            stderr="",
-        )
 
         with tempfile.TemporaryDirectory() as td:
             video_path = os.path.join(td, "video.mp4")
@@ -231,7 +240,9 @@ class ClipGeneratorTests(unittest.TestCase):
 
             with mock.patch.object(cg.os.path, "exists", side_effect=self._fake_exists(real_exists)), \
                  mock.patch.object(cg.shutil, "which", return_value="/usr/bin/node"), \
-                 mock.patch("subprocess.run", return_value=fail_result) as mock_run:
+                 mock.patch("subprocess.Popen",
+                            side_effect=lambda *a, **kw: self._fake_popen(
+                                returncode=1, stdout="Error: transient render failure")) as mock_run:
                 first = cg._render_with_remotion(
                     video_path=video_path,
                     words=[{"word": "hello", "start": 0.0, "end": 0.5}],
@@ -259,10 +270,10 @@ class ClipGeneratorTests(unittest.TestCase):
             with open(video_path, "wb"):
                 pass
 
-            timeout_exc = subprocess.TimeoutExpired(cmd=["node"], timeout=600)
             with mock.patch.object(cg.os.path, "exists", side_effect=self._fake_exists(real_exists)), \
                  mock.patch.object(cg.shutil, "which", return_value="/usr/bin/node"), \
-                 mock.patch("subprocess.run", side_effect=timeout_exc) as mock_run:
+                 mock.patch("subprocess.Popen",
+                            side_effect=lambda *a, **kw: self._fake_popen(timeout=600)) as mock_run:
                 first = cg._render_with_remotion(
                     video_path=video_path,
                     words=[{"word": "hello", "start": 0.0, "end": 0.5}],
