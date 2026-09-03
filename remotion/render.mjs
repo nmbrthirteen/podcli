@@ -65,7 +65,20 @@ function clampLogoScale(raw) {
 // Remotion's 30s default is measured against the font delayRender in Root.tsx,
 // which competes with evaluating the whole bundle. That bundle has three
 // compositions now, and the slowest CI runner does not finish inside 30s.
-const DELAY_RENDER_TIMEOUT_MS = 120_000;
+//
+// A fixed cap on top of that was wrong in the other direction: a card-heavy
+// clip renders roughly 13x slower than realtime on the container's actual CPU
+// quota, not the few seconds a bundle load costs, and a 120s ceiling killed
+// the render itself mid-flight, not just a slow font load — the "delayRender
+// not cleared" it reported was a symptom of the whole page stalling under
+// load, not a broken font. Scaled to the clip so a 3-second clip still fails
+// fast and a full-length one gets the minutes it actually needs; overridable
+// for a box whose real throughput has already been measured.
+const timeoutFor = (durationSec) => {
+  const override = parseInt(process.env.PODCLI_REMOTION_TIMEOUT_MS ?? "", 10);
+  if (Number.isFinite(override)) return Math.max(1, override);
+  return Math.min(50 * 60_000, Math.max(120_000, 90_000 + durationSec * 15_000));
+};
 
 async function main() {
   const opts = parseArgs();
@@ -304,7 +317,7 @@ async function main() {
       serveUrl: bundleLocation,
       id: "CaptionedClip",
       inputProps,
-      timeoutInMilliseconds: DELAY_RENDER_TIMEOUT_MS,
+      timeoutInMilliseconds: timeoutFor(durationSec),
       browserExecutable,
       chromeMode,
     });
@@ -347,7 +360,7 @@ async function main() {
       outputLocation: captionOverlay,
       inputProps,
       concurrency,
-      timeoutInMilliseconds: DELAY_RENDER_TIMEOUT_MS,
+      timeoutInMilliseconds: timeoutFor(durationSec),
       onProgress: ({ progress }) => {
         const pct = Math.round(progress * 100);
         if (pct > lastPct + 9) {
