@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           EXTRA=""
-          if [ "${{ matrix.goos }}" = "darwin" ]; then EXTRA="-DGGML_METAL_EMBED_LIBRARY=ON"; fi
+          if [ "${{ matrix.goos }}" = "darwin" ]; then EXTRA="-DGGML_METAL_EMBED_LIBRARY=ON"; else EXTRA="-DGGML_NATIVE=OFF"; fi
           cmake -B build -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release $EXTRA
           cmake --build build --config Release --target whisper-cli -j
       - name: Stage asset
