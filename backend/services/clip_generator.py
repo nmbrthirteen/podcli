@@ -704,12 +704,17 @@ def _render_with_remotion(
         # not happen, and what it threw away was the only description of the
         # failure. Every clip on the Linux worker fell back to burned-in ASS
         # for months and the reason went to /dev/null with the rest of it.
+        #
+        # Above render.mjs's own worst-case delayRender budget (50 minutes),
+        # so a render that is genuinely just slow times out inside Remotion
+        # with an actionable message, rather than being hard-killed here first
+        # with nothing but "TimeoutExpired" to say why.
         result = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=600,
+            timeout=3300,
             cwd=project_root,
             env=remotion_env,
         )
