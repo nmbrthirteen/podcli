@@ -98,17 +98,31 @@ def _transcribe(video: str, language: str | None, engine: str | None):
 
 def _load_transcript(path: str) -> list:
     import json
-    with open(path, encoding="utf-8") as fh:
-        data = json.load(fh)
-    words = data.get("words", []) if isinstance(data, dict) else data
+    import math
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"--transcript {path}: {exc}")
+    if isinstance(data, dict):
+        if "words" not in data:
+            raise SystemExit(f"--transcript {path}: expected {{\"words\": [...]}}")
+        words = data["words"]
+    else:
+        words = data
     if not isinstance(words, list):
         raise SystemExit(f"--transcript {path}: expected a list of words or {{\"words\": [...]}}")
     out = []
     for w in words:
         try:
-            out.append({"word": str(w["word"]), "start": float(w["start"]), "end": float(w["end"])})
+            start, end = float(w["start"]), float(w["end"])
         except (KeyError, TypeError, ValueError):
             continue
+        if not (math.isfinite(start) and math.isfinite(end)) or start < 0 or end < start:
+            continue
+        out.append({"word": str(w.get("word", "")), "start": start, "end": end})
+    if not out:
+        raise SystemExit(f"--transcript {path}: no usable words in it")
     print(f"  [transcript] using {len(out)} supplied words", flush=True)
     return out
 
