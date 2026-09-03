@@ -96,6 +96,23 @@ def _transcribe(video: str, language: str | None, engine: str | None):
     return res.get("words", [])
 
 
+def _load_transcript(path: str) -> list:
+    import json
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    words = data.get("words", []) if isinstance(data, dict) else data
+    if not isinstance(words, list):
+        raise SystemExit(f"--transcript {path}: expected a list of words or {{\"words\": [...]}}")
+    out = []
+    for w in words:
+        try:
+            out.append({"word": str(w["word"]), "start": float(w["start"]), "end": float(w["end"])})
+        except (KeyError, TypeError, ValueError):
+            continue
+    print(f"  [transcript] using {len(out)} supplied words", flush=True)
+    return out
+
+
 def _find_paragraph(words: list, phrase: str) -> tuple[float, float]:
     """Find the time span of a paragraph by fuzzy-matching its text against
     the transcript word stream. Returns (start, end) seconds."""
@@ -234,6 +251,7 @@ def main():
     ap.add_argument("--paragraph", help="Find fragment by matching this text in the transcript")
     ap.add_argument("--language", default=None, help="Transcription language (e.g. es). Auto-detect if omitted.")
     ap.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], default=None, help="Transcription engine")
+    ap.add_argument("--transcript", default=None, help="Word timings JSON for this video (list of {word,start,end} or {words:[...]}); skips transcription")
     ap.add_argument("--caption-style", default="hormozi", choices=["hormozi", "karaoke", "subtle", "branded"])
     ap.add_argument("--caption-position", default="auto", choices=["auto", "upper", "center", "lower"])
     ap.add_argument("--caption-scale", type=float, default=1.0)
@@ -313,8 +331,7 @@ def main():
     out_dir = os.path.join(data_dir, "output")
     os.makedirs(out_dir, exist_ok=True)
 
-    # Need a transcript if cutting by paragraph or if rendering captions.
-    words = _transcribe(video, args.language, args.engine)
+    words = _load_transcript(args.transcript) if args.transcript else _transcribe(video, args.language, args.engine)
 
     if args.paragraph:
         start, end = _find_paragraph(words, args.paragraph)
