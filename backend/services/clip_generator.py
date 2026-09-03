@@ -473,6 +473,68 @@ def _build_tight_segments(
 _remotion_available = None  # True/False/None — environment availability, not per-clip success
 
 
+def _run_streaming(
+    cmd: list[str],
+    *,
+    timeout: float,
+    cwd: str,
+    env: dict,
+) -> subprocess.CompletedProcess:
+    """Run a render and relay its progress as it happens.
+
+    subprocess.run holds both pipes until the child exits, so for the whole of
+    a Remotion render this process printed nothing. The worker upstream reads
+    silence as a wedged engine and stops it, and a render that had finally
+    started completing was being killed at the ten-minute mark for working.
+
+    Both streams are drained on threads so neither pipe can fill and stall the
+    child, and every line is kept: the caller still gets a CompletedProcess to
+    report from exactly as before. Progress lines go straight to stderr with
+    the same flush the rest of this file uses, which is what the worker watches.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        env=env,
+    )
+    captured: dict[str, list[str]] = {"out": [], "err": []}
+
+    def pump(stream, label: str) -> None:
+        for line in iter(stream.readline, ""):
+            captured[label].append(line)
+            text = line.rstrip()
+            if text:
+                print(f"  Remotion: {text[:200]}", file=sys.stderr, flush=True)
+        stream.close()
+
+    threads = [
+        threading.Thread(target=pump, args=(proc.stdout, "out"), daemon=True),
+        threading.Thread(target=pump, args=(proc.stderr, "err"), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        for t in threads:
+            t.join(timeout=5)
+        raise subprocess.TimeoutExpired(
+            cmd, timeout,
+            output="".join(captured["out"]),
+            stderr="".join(captured["err"]),
+        )
+    for t in threads:
+        t.join(timeout=5)
+    return subprocess.CompletedProcess(
+        cmd, proc.returncode, "".join(captured["out"]), "".join(captured["err"]),
+    )
+
+
 def _report_remotion_failure(
     stage: str,
     stdout: str | bytes | None,
@@ -712,11 +774,8 @@ def _render_with_remotion(
         # is genuinely just slow times out inside Remotion with an actionable
         # message, rather than being hard-killed here first with nothing but
         # "TimeoutExpired" to say why.
-        result = subprocess.run(
+        result = _run_streaming(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
             timeout=2 * 50 * 60 + 300,
             cwd=project_root,
             env=remotion_env,
