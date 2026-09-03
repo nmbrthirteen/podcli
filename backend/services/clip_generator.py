@@ -475,15 +475,6 @@ _remotion_available = None  # True/False/None — environment availability, not 
 
 
 def _stop_process_tree(proc: subprocess.Popen) -> None:
-    """Stop a render and everything it spawned.
-
-    proc.kill() reaches only Node. Chromium and the compositor are its
-    children, and a render that has timed out is exactly the one whose
-    children are still busy, holding the CPU the next job needs. On POSIX the
-    child is started in its own session so the whole group can be signalled:
-    TERM first, which render.mjs handles by closing its server and deleting
-    the half-written overlay, then KILL for whatever ignored it.
-    """
     if hasattr(os, "killpg"):
         try:
             pgid = os.getpgid(proc.pid)
@@ -509,18 +500,6 @@ def _run_streaming(
     cwd: str,
     env: dict,
 ) -> subprocess.CompletedProcess:
-    """Run a render and relay its progress as it happens.
-
-    subprocess.run holds both pipes until the child exits, so for the whole of
-    a Remotion render this process printed nothing. The worker upstream reads
-    silence as a wedged engine and stops it, and a render that had finally
-    started completing was being killed at the ten-minute mark for working.
-
-    Both streams are drained on threads so neither pipe can fill and stall the
-    child, and every line is kept: the caller still gets a CompletedProcess to
-    report from exactly as before. Progress lines go straight to stderr with
-    the same flush the rest of this file uses, which is what the worker watches.
-    """
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -795,14 +774,6 @@ def _render_with_remotion(
         # not happen, and what it threw away was the only description of the
         # failure. Every clip on the Linux worker fell back to burned-in ASS
         # for months and the reason went to /dev/null with the rest of it.
-        #
-        # Above render.mjs's own worst case, not just its per-phase one: it
-        # budgets selectComposition and renderMedia separately, up to 50
-        # minutes each, and a slow first phase does not borrow from the
-        # second. Sized for both back to back plus a buffer, so a render that
-        # is genuinely just slow times out inside Remotion with an actionable
-        # message, rather than being hard-killed here first with nothing but
-        # "TimeoutExpired" to say why.
         result = _run_streaming(
             cmd,
             timeout=2 * 50 * 60 + 300,
