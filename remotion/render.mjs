@@ -75,8 +75,8 @@ function clampLogoScale(raw) {
 // fast and a full-length one gets the minutes it actually needs; overridable
 // for a box whose real throughput has already been measured.
 const timeoutFor = (durationSec) => {
-  const override = process.env.PODCLI_REMOTION_TIMEOUT_MS;
-  if (override) return Math.max(1, parseInt(override, 10));
+  const override = parseInt(process.env.PODCLI_REMOTION_TIMEOUT_MS ?? "", 10);
+  if (Number.isFinite(override)) return Math.max(1, override);
   return Math.min(50 * 60_000, Math.max(120_000, 90_000 + durationSec * 15_000));
 };
 
