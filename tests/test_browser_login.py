@@ -54,6 +54,7 @@ class BrowserLoginTests(unittest.TestCase):
         self.assertEqual(podcli_cloud.read_token(), "sess-abc")
         self.assertEqual(podcli_cloud._auth_data()["workspace_id"], "w1")
 
+    @unittest.skipIf(os.name == "nt", "Unix file modes are not enforced on Windows")
     def test_the_token_file_is_not_readable_by_other_users(self):
         with mock.patch.object(podcli_cloud, "_unauthenticated") as call:
             call.return_value = {"token": "sess-abc", "workspaceId": "w1"}
