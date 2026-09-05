@@ -2665,6 +2665,41 @@ def cmd_thumbnail_options(args):
     print(json.dumps({"texts": [list(t) for t in texts], "frames": frames}))
 
 
+_BROWSER_IMAGE_FORMATS = {"PNG", "JPEG", "WEBP", "GIF", "AVIF", "BMP", "ICO"}
+
+
+def _check_frame(path):
+    """Refuse a frame the renderer would fail to draw, while it is still a message.
+
+    A thumbnail is an HTML page photographed by headless Chrome, so the frame is
+    an <img>. A file the browser cannot decode is not an error there: the page
+    renders anyway, the caption box and the logo land on bg_color, and this
+    command exits 0 with a path to a blank card carrying a 15px broken-image
+    glyph. A missing frame is worse, because it also moves the box to the
+    no-photo height. Callers cannot tell either apart from a picture that
+    worked, so neither is allowed past here.
+    """
+    if not os.path.exists(path):
+        print(f"thumbnail render failed: no frame at {path}", file=sys.stderr)
+        sys.exit(1)
+    if path.lower().endswith(".svg"):
+        return
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            fmt = im.format
+    except Exception as err:
+        print(f"thumbnail render failed: {path} is not an image ({err})", file=sys.stderr)
+        sys.exit(1)
+    if fmt not in _BROWSER_IMAGE_FORMATS:
+        print(
+            f"thumbnail render failed: {path} is {fmt}, which the renderer cannot draw. "
+            "Convert it to PNG, JPEG or WebP first.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def cmd_thumbnail_render(args):
     """Render one final thumbnail from a chosen frame + headline.
 
@@ -2673,6 +2708,7 @@ def cmd_thumbnail_render(args):
     from services.thumbnail_ai import generate_thumbnail_with_template
     from services.asset_store import resolve_logo
 
+    _check_frame(args.frame)
     frame_info = json.loads(args.frame_info) if args.frame_info else None
     out = generate_thumbnail_with_template(
         title=args.title,

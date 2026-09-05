@@ -460,7 +460,10 @@ def _build_html(
     photo_css = ""
     photo_uri = ""
     if has_photo:
-        photo_uri = f"file://{os.path.abspath(photo_path)}"
+        # as_uri() rather than an f-string: a '#' or '?' anywhere in the path is
+        # a fragment or a query to the browser, so the image silently drops and
+        # the card renders as bg_color with a broken-image glyph.
+        photo_uri = Path(photo_path).absolute().as_uri()
         brightness = cfg.get("photo_brightness", 0.85)
         photo_css = f"""
         .photo {{
@@ -471,7 +474,7 @@ def _build_html(
         .photo img {{
             width: 100%; height: 100%;
             object-fit: cover;
-            object-position: center center;
+            object-position: {cfg.get("photo_object_position", "center center")};
             filter: brightness({brightness});
         }}
         .photo-vignette {{
@@ -485,7 +488,7 @@ def _build_html(
     layers_html = _layer_html(cfg.get("layers"))
     logo_pos = cfg.get("logo_position", "none")
     if logo_path and os.path.exists(logo_path) and logo_pos != "none":
-        logo_uri = f"file://{os.path.abspath(logo_path)}"
+        logo_uri = Path(logo_path).absolute().as_uri()
         logo_h = cfg.get("logo_height", "50px")
         logo_margin = cfg.get("logo_margin", "50px")
         logo_opacity = cfg.get("logo_opacity", 0.35)
@@ -555,7 +558,9 @@ def _build_html(
     l1_lh = cfg.get("line1_line_height", 1.15)
     l1_mb = cfg.get("line1_margin_bottom", "10px")
     l1_color = cfg.get("line1_color", "#FFFFFF")
-    l1_nowrap = "nowrap"  # Always nowrap — we shrink to fit instead
+    # Shrinking to fit is the default, so line 1 stays on one line. A template
+    # that turns it off is asking to wrap instead.
+    l1_nowrap = "nowrap" if cfg.get("line1_nowrap", True) else "normal"
 
     l2_weight = cfg.get("line2_font_weight", "500")
     l2_style = cfg.get("line2_font_style", "italic")
