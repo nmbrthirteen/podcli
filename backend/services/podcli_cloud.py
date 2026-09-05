@@ -111,6 +111,16 @@ def entitled() -> bool:
     return plan in PAID_PLANS
 
 
+def revoke_session() -> None:
+    """
+    End this machine's session at the server, not just on disk.
+
+    Deleting the file alone leaves the token live for its full month, so a
+    laptop signed out because it was about to be lost stays signed in.
+    """
+    request("POST", "/v1/auth/logout", {}, timeout=15)
+
+
 def clear_token() -> None:
     try:
         os.unlink(_auth_path())
@@ -376,21 +386,43 @@ def me() -> dict:
     return request("GET", "/v1/auth/me", timeout=30)
 
 
-def login(email: str, password: str) -> dict:
-    """Exchange credentials for a session token. Does not require an existing one."""
-    data = json.dumps({"email": email, "password": password}).encode("utf-8")
+def start_cli_auth(label: str) -> dict:
+    """
+    Open a sign-in that the browser will approve.
+
+    Returns the device code the CLI keeps to itself, the short code the person
+    matches across the two screens, and the link to approve it at. No existing
+    session is needed, and no credential is taken here.
+    """
+    return _unauthenticated("POST", "/v1/auth/cli", {"label": label})
+
+
+def poll_cli_auth(device_code: str) -> Optional[dict]:
+    """
+    Ask whether the browser has approved yet.
+
+    None means keep waiting. A dict is the session, and is written to disk
+    before returning so a crash between here and the caller cannot lose the one
+    token this device code will ever mint.
+    """
+    payload = _unauthenticated("POST", "/v1/auth/cli/poll", {"deviceCode": device_code})
+    if payload.get("status") == "pending":
+        return None
+    write_token(payload["token"], payload.get("workspaceId", ""))
+    return payload
+
+
+def _unauthenticated(method: str, path: str, body: dict) -> dict:
+    """Like `request`, for the endpoints that run before there is a session."""
     req = urllib.request.Request(
-        f"{api_url()}/v1/auth/login", data=data, method="POST",
+        f"{api_url()}{path}", data=json.dumps(body).encode("utf-8"), method=method,
         headers={"content-type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        detail, _ = _describe(exc)
-        raise CloudError(detail, status=exc.code) from None
+        detail, retryable = _describe(exc)
+        raise CloudError(detail, status=exc.code, retryable=retryable) from None
     except urllib.error.URLError as exc:
         raise CloudError(f"could not reach {api_url()}: {exc.reason}") from None
-
-    write_token(payload["token"], payload.get("workspaceId", ""))
-    return payload

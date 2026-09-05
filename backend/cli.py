@@ -810,6 +810,13 @@ def cmd_process(args):
     )
     os.makedirs(output_dir, exist_ok=True)
 
+    # Handed over before any local analysis: the cloud worker runs this same
+    # engine, so transcribing here first would be the whole job done twice.
+    if getattr(args, "cloud", False):
+        from services import cloud_render
+        cloud_render.main(video_path, config, output_dir, args)
+        return
+
     enc_info = get_encoder_info()
     print(f"\n  podcli — processing")
     print(f"  Encoder: {enc_info['best']} ({enc_info['system']})")
@@ -3946,30 +3953,77 @@ def _apply_template(config: dict, name_or_id: str) -> None:
 
 
 def cmd_login(args):
+    """
+    Sign in through the browser, so no password is ever typed at a terminal.
+
+    A password at the prompt lands in scrollback, and one passed as a flag lands
+    in shell history and in `ps`. The browser already holds a session; this asks
+    podcli.com to lend one to this machine.
+    """
     import getpass
+    import socket
+    import time
+    import webbrowser
     from services import podcli_cloud
 
-    email = (args.email or input("Email: ")).strip()
-    # Prefer the prompt: a password in argv is visible in ps output and lands in
-    # the user's shell history.
-    password = args.password or getpass.getpass("Password: ")
-    if not email or not password:
-        print("Email and password are required.")
-        sys.exit(1)
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    bold = "\033[1m"
+    reset = "\033[0m"
 
+    label = f"{getpass.getuser()}@{socket.gethostname()}"
     try:
-        podcli_cloud.login(email, password)
-        account = podcli_cloud.me()
-        podcli_cloud.remember_plan(account.get("plan", ""))
+        start = podcli_cloud.start_cli_auth(label)
     except podcli_cloud.CloudError as exc:
         print(f"Sign-in failed: {exc}")
         sys.exit(1)
 
+    url, code = start["verifyUrl"], start["userCode"]
+    print(f"\n  Approve this machine at {accent}{url}{reset}")
+    print(f"  Your code is {bold}{code}{reset}")
+    print(f"  {gray}Only approve it if your browser shows the same code.{reset}\n")
+
+    # A machine without a browser is the normal case over SSH, and opening one
+    # there prints an error into the middle of the code we just asked them to
+    # read. The link above is the fallback either way.
+    if not args.no_browser:
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+    interval = max(1, int(start.get("interval") or 3))
+    deadline = time.monotonic() + int(start.get("expiresIn") or 600)
+    session = None
+    print(f"  {gray}Waiting for approval…{reset}", end="", flush=True)
+    while session is None and time.monotonic() < deadline:
+        time.sleep(interval)
+        try:
+            session = podcli_cloud.poll_cli_auth(start["deviceCode"])
+        except podcli_cloud.CloudError as exc:
+            # A dropped connection mid-wait is not a refusal; the request is
+            # still open on the server and the next poll picks it back up.
+            if not exc.retryable and exc.status:
+                print(f"\r  {exc}{' ' * 20}")
+                sys.exit(1)
+    print("\r" + " " * 40 + "\r", end="")
+
+    if session is None:
+        print("  That code expired. Run `podcli login` again.")
+        sys.exit(1)
+
+    try:
+        account = podcli_cloud.me()
+        podcli_cloud.remember_plan(account.get("plan", ""))
+    except podcli_cloud.CloudError as exc:
+        print(f"Signed in, but the account could not be read: {exc}")
+        sys.exit(1)
+
     workspace = account.get("workspace") or {}
-    print(f"Signed in to {workspace.get('name', 'your workspace')} "
+    print(f"  Signed in to {workspace.get('name', 'your workspace')} "
           f"({account.get('plan', 'free')} plan, {account.get('role', 'member')}).")
     if account.get("plan") == "free":
-        print("This workspace has no active subscription — podcli will keep using "
+        print("  This workspace has no active subscription — podcli will keep using "
               "your local AI CLI until one starts.")
 
     # Everything already rendered on this machine belongs in the workspace too,
@@ -3979,9 +4033,9 @@ def cmd_login(args):
     except Exception:
         synced, failed = 0, 0
     if synced:
-        print(f"Synced {synced} existing clip{'s' if synced != 1 else ''} to your workspace.")
+        print(f"  Synced {synced} existing clip{'s' if synced != 1 else ''} to your workspace.")
     if failed:
-        print(f"{failed} could not be synced — `podcli whoami` will retry later.")
+        print(f"  {failed} could not be synced — `podcli whoami` will retry later.")
 
 
 def cmd_logout(args):
@@ -3990,6 +4044,12 @@ def cmd_logout(args):
     if not podcli_cloud.signed_in():
         print("Not signed in.")
         return
+    # The local file goes either way: a server that cannot be reached is not a
+    # reason to leave a machine looking signed in.
+    try:
+        podcli_cloud.revoke_session()
+    except podcli_cloud.CloudError as exc:
+        print(f"Signed out here, but the session may still be live: {exc}")
     podcli_cloud.clear_token()
     print("Signed out. podcli will use your local AI CLI from now on.")
 
@@ -4263,9 +4323,9 @@ def main():
     sub = parser.add_subparsers(dest="command")
 
     # ── podcli Pro account ──
-    login_p = sub.add_parser("login", help="Sign in to podcli Pro")
-    login_p.add_argument("--email", help="Account email (prompted if omitted)")
-    login_p.add_argument("--password", help="Password (prompted if omitted; prefer the prompt)")
+    login_p = sub.add_parser("login", help="Sign in to podcli Pro through your browser")
+    login_p.add_argument("--no-browser", action="store_true",
+                         help="Print the link instead of opening it, for SSH sessions")
     sub.add_parser("logout", help="Sign out of podcli Pro on this machine")
     sub.add_parser("whoami", help="Show the signed-in podcli Pro account")
     ws_p = sub.add_parser("workspace", help="Switch between shows in podcli Pro")
@@ -4283,6 +4343,10 @@ def main():
     proc.add_argument("-n", "--top", type=int, help="Number of top clips to export (default: 5)")
     proc.add_argument("-o", "--output", help="Output directory (default: ./clips)")
     proc.add_argument("-p", "--preset", help="Load a saved preset")
+    proc.add_argument("--cloud", action="store_true",
+                      help="Render on podcli.com instead of this machine (needs `podcli login`)")
+    proc.add_argument("--template-id",
+                      help="Cut in a saved cloud template, by id (with --cloud)")
     proc.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], help="Transcription engine (default: whisper-py; whispercpp is local; assemblyai uses ASSEMBLYAI_API_KEY)")
     proc.add_argument("--language", help="Language of the recording (e.g. es, pt-BR, ka). Auto-detect if omitted.")
     proc.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai. Prefer ASSEMBLYAI_API_KEY; command-line secrets can appear in process listings.")
