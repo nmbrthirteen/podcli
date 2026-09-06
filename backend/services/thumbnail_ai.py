@@ -451,7 +451,13 @@ def extract_candidate_frames(
         fh, fw = frame.shape[:2]
         if (fw, fh) != (target_w, target_h):
             frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
-        cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        # imwrite answers a failed write with False rather than raising, and a
+        # full disk is the usual reason. Listing the path regardless hands the
+        # renderer a frame that is not on disk, which it refuses.
+        if not cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, 92]):
+            log_event("thumbnail-ai", "could not write candidate frame",
+                      level="warn", path=path)
+            continue
         results.append({
             "path": path,
             "timestamp": c["timestamp"],
