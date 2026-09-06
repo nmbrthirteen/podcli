@@ -8,6 +8,11 @@ import type { CaptionStyle } from "../types";
 import { MOTION, motionAt } from "../motion";
 import { cardAt } from "../cards";
 import type { Card } from "../cards";
+import { context, DEFAULT_BRAND, muted, track } from "./brand";
+import type { Brand } from "./brand";
+import { fitScene, Scene } from "./Scene";
+import { MIN_FIT } from "../scene";
+import type { Block } from "../scene";
 
 /**
  * A card keeps the person on screen.
@@ -24,25 +29,8 @@ import type { Card } from "../cards";
  * cutaway to a different video.
  */
 
-/**
- * The show's colours, or ours when it has not set any.
- *
- * Three values rather than a palette: the one colour that means "this is the
- * thing", what text is set in, and what it is set on. Everything else on a
- * card is one of those three at a lower opacity, which is what keeps a card
- * looking like the show rather than like a theme.
- */
-export type Brand = { accent: string; ink: string; surface: string };
-
-export const DEFAULT_BRAND: Brand = {
-  accent: "#4C9DF5",
-  ink: "#FFFFFF",
-  surface: "#0A0D14",
-};
-
-/** Text that is not the point, and marks that are not the subject. */
-const muted = (ink: string) => `color-mix(in oklab, ${ink} 62%, transparent)`;
-const context = (ink: string) => `color-mix(in oklab, ${ink} 22%, transparent)`;
+export type { Brand } from "./brand";
+export { DEFAULT_BRAND } from "./brand";
 
 /**
  * A three-step rhythm, so grouping reads from the gaps rather than from rules.
@@ -57,10 +45,6 @@ const GAP = { tight: 14, group: 36, section: 76 };
  * adjacent marks, which is what keeps two bars from reading as one shape.
  */
 const MARK = { bar: 26, cap: 8, gap: 30, rule: 5, dot: 26 };
-
-/** A meter's unfilled remainder: the fill's own hue, several steps lighter. */
-const track = (fill: string) =>
-  `color-mix(in oklab, ${fill} 22%, transparent)`;
 
 /** Authored for the 1920-tall canvas, like every other measurement here. */
 const TYPE = { label: 34, body: 46, item: 58, quote: 68, lead: 84, figure: 168 };
@@ -270,6 +254,20 @@ const CardBody: React.FC<{
   const INK = brand.ink;
   const MUTED = muted(brand.ink);
   const CONTEXT = context(brand.ink);
+
+  if (card.kind === "scene") {
+    return (
+      <Scene
+        blocks={card.blocks}
+        layout={card.layout}
+        gap={card.gap}
+        brand={brand}
+        accent={accent}
+        scale={s}
+        room={room ?? Infinity}
+      />
+    );
+  }
 
   if (card.kind === "stat") {
     return (
@@ -685,8 +683,14 @@ const SpeakerBand: React.FC<{ src: string; startFrom: number; faceY?: number | n
  */
 const KNOWN_KINDS = new Set([
   "stat", "headline", "bullets", "compare", "change", "share", "entity", "quote",
-  "image", "video",
+  "image", "video", "scene",
 ]);
+
+/** A block that would put something on screen, rather than an empty group. */
+const drawsSomething = (block: Block): boolean =>
+  (block.type === "group"
+    ? block.blocks.some(drawsSomething)
+    : block.type !== "media" || Boolean(block.src));
 
 export const Cards: React.FC<{
   cards: Card[];
@@ -712,10 +716,12 @@ export const Cards: React.FC<{
    * quote branch and draw an empty slab over the speaker, which is the one
    * failure that looks deliberate.
    */
-  const usable = cards.filter((c) => (
-    KNOWN_KINDS.has(c.kind)
-    && (c.kind !== "image" && c.kind !== "video" ? true : Boolean(c.src))
-  ));
+  const usable = cards.filter((c) => {
+    if (!KNOWN_KINDS.has(c.kind)) return false;
+    if (c.kind === "image" || c.kind === "video") return Boolean(c.src);
+    if (c.kind === "scene") return c.blocks.some(drawsSomething);
+    return true;
+  });
   const card = cardAt(usable, frame / fps);
   if (!card) return null;
 
@@ -760,9 +766,24 @@ export const Cards: React.FC<{
   // Asked of the union rather than of one kind: only some cards have a caption
   // at all, and the fit arithmetic runs before anything has narrowed to one.
   const hasCaption = "caption" in card && Boolean(card.caption);
+  /*
+   * A scene keeps the speaker while it can still be read beside one.
+   *
+   * The presets know their own height because somebody sized them. An
+   * arrangement nobody has seen before is measured instead, and one that would
+   * have to be squashed to the floor of the fit takes the whole frame rather
+   * than sharing it at a size nobody reads at arm's length.
+   */
+  const sceneShares = card.kind !== "scene"
+    || fitScene(card.blocks, {
+      layout: card.layout,
+      gap: card.gap,
+      room: bodyRoom(room - speakerTakes) / s,
+    }).fit > MIN_FIT;
   const withSpeaker = card.speaker !== null
     && Boolean(videoSrc)
     && room >= headNeeds
+    && sceneShares
     && (!SHOWS_A_FILE.has(card.kind)
       || mediaBand(card.kind, bodyRoom(room - speakerTakes), s, hasCaption)
          >= MEDIA_MIN * s);
