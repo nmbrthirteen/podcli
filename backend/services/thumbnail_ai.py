@@ -343,7 +343,9 @@ def extract_candidate_frames(
         for c in candidates:
             if len(selected) >= count:
                 break
-            if c in selected:
+            # Identity, not equality: these dicts hold a numpy frame, and
+            # comparing two of them raises rather than answering.
+            if any(c is s for s in selected):
                 continue
             if any(_too_similar(c, s) for s in selected):
                 continue
