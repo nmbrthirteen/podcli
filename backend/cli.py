@@ -1026,6 +1026,35 @@ def cmd_process(args):
         face_map = given
         print("         Using the face map passed in (speaker framing preserved)")
 
+    # Still nothing, and the crop about to run needs one. Scanning costs a
+    # minute on a long episode and buys back every clip in it: without a map,
+    # `speaker` and `face` skip every rung that could place a frame and land on
+    # the whole wide source letterboxed into the cut.
+    if not face_map and config.get("crop_strategy") in ("face", "speaker", "speaker-hardcut"):
+        try:
+            from services.face_analysis import analyze_faces
+            print("         No face map yet; scanning the episode for faces")
+            # The last word's end, because the scan only uses this to decide
+            # how many frames to sample; it reads the real frame count off the
+            # file itself and spreads the samples across all of it.
+            spoken = max((float(w.get("end") or 0) for w in words), default=0.0)
+            found = analyze_faces(
+                video_path,
+                [{"speaker": w["speaker"], "start": w["start"], "end": w["end"]}
+                 for w in words if w.get("speaker")],
+                spoken,
+                progress_callback=lambda p, m: None,
+            )
+        except Exception as exc:
+            print(f"         Face scan failed ({type(exc).__name__}: {exc}); "
+                  "the crop will fall back", file=sys.stderr)
+            found = None
+        if found and found.get("clusters"):
+            face_map = found
+            print(f"         Found {len(found['clusters'])} face position(s)")
+        else:
+            print("         No faces found; the crop will fall back")
+
     # Check speaker data availability (needed for smart cropping)
     speakers_in_words = set(w.get("speaker") for w in words if w.get("speaker"))
     diarization_warning = result.get("diarization_warning")

@@ -183,6 +183,55 @@ def _json_file(raw, name):
         return None
 
 
+# The crops that cannot place a frame without knowing where the faces are.
+_WANTS_FACES = ("face", "speaker", "speaker-hardcut")
+
+
+def _face_map_for(video, crop, start, end):
+    """Where the faces are, scanned now, when the crop needs it and nobody said.
+
+    A face map used to arrive only from the diarizing transcriber, so a cut
+    made against a whisper transcript or an imported one had none, and every
+    rung of the crop ladder that needs one was skipped. What the caller got
+    instead was the whole wide frame letterboxed into the cut, reported as a
+    centre crop and looking deliberate.
+
+    Scanning here costs a few seconds on the window actually being cut, which
+    is the trade every one of those clips would have taken.
+    """
+    if crop not in _WANTS_FACES:
+        return None
+    try:
+        from services.face_analysis import analyze_faces
+    except ImportError:
+        return None
+
+    # The whole file's length rather than the fragment's: the scan spreads its
+    # samples across the file it is given, and sizing the count to a 40-second
+    # window would take twenty samples across an hour-long episode.
+    duration = _probe_duration(video) or max(0.0, (end or 0) - (start or 0))
+    if duration <= 0:
+        return None
+
+    print("  [fragment] no face map for this cut; scanning it", flush=True)
+    try:
+        # No speaker segments: those come from diarization, and the whole point
+        # of scanning here is that there was none. Clusters and the split
+        # screen are still found, which is what a crop needs to place a frame.
+        found = analyze_faces(video, [], duration)
+    except Exception as exc:
+        print(f"  Warning: face scan failed ({type(exc).__name__}: {exc}); "
+              "the crop will fall back", file=sys.stderr, flush=True)
+        return None
+
+    if not found or not found.get("clusters"):
+        print("  [fragment] no faces found in this cut", flush=True)
+        return None
+    print(f"  [fragment] found {len(found['clusters'])} face position(s)"
+          f"{' , split screen' if found.get('is_split_screen') else ''}", flush=True)
+    return found
+
+
 def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt="vertical",
                      logo=None, name_card=None, motion=None, caption_position="auto",
                      caption_scale=1.0, logo_position="top-left", logo_scale=1.0,
@@ -419,6 +468,10 @@ def main():
             print("  Warning: --motion is not valid JSON; using each style's own motion",
                   flush=True)
 
+    face_map = _json_file(args.face_map, "--face-map")
+    if face_map is None:
+        face_map = _face_map_for(video, args.crop, start, end)
+
     fragment = _render_fragment(
         video, start, end, words, args.caption_style, args.crop, "fragment", out_dir,
         fmt=args.format,
@@ -438,7 +491,7 @@ def main():
         brand=_json_arg(args.brand, "--brand"),
         font_family=args.font_family,
         captions=not args.no_captions,
-        face_map=_json_file(args.face_map, "--face-map"),
+        face_map=face_map,
         crop_keyframes=_json_file(args.crop_keyframes, "--crop-keyframes"),
     )
 
