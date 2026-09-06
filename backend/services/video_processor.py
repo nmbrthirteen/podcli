@@ -247,11 +247,25 @@ def crop_to_vertical(
     clip_start: The start time of this clip in the original video (for timestamp alignment).
     """
     width, height = get_dimensions(input_path)
+    # What the caller asked for, kept because `strategy` is reassigned on the
+    # way down the ladder. A clip that asked to follow the speaker and ended up
+    # letterboxed should say so in those words, not report a centre crop as
+    # though centre was the plan.
+    wanted = strategy
     face_map = _sane_speaker_mappings(face_map)
     target_w, target_h = target_dims
     target_ratio = target_w / target_h  # 0.5625 for the vertical default
 
     source_ratio = width / height
+
+    # Manual with nothing to place the frame from used to fall past every
+    # branch below and reach the return with no filter built at all, which is
+    # an UnboundLocalError rather than a clip. It became reachable the moment
+    # a caller could pass --crop manual, so it answers for itself: no
+    # keyframes is no hand placement, and the crop it wanted is a face.
+    if strategy == "manual" and not crop_keyframes:
+        log_event("crop", "fallback", reason="manual_without_keyframes", to="face")
+        strategy = "face"
 
     if strategy == "manual" and crop_keyframes:
         log_event("crop", "chose=manual", keyframes=len(crop_keyframes), source=f"{width}x{height}")
@@ -417,7 +431,16 @@ def crop_to_vertical(
 
     if strategy == "center":
         if source_ratio > target_ratio:
-            log_event("crop", "chose=center-blur-bg", source=f"{width}x{height}")
+            log_event("crop", "chose=center-blur-bg", source=f"{width}x{height}", asked=wanted)
+            # The whole wide frame, shrunk into a band with a blur behind it.
+            # It is the honest answer for a source with nothing to crop to and
+            # the wrong one for a clip that asked to follow a face, so it is
+            # reported at warn rather than left to look deliberate.
+            if wanted != "center":
+                log_event(
+                    "crop", "uncropped", level="warn", asked=wanted,
+                    reason="no face map, no speaker labels and no face found in this window",
+                )
             # Wide source with no face detected: blurred background + sharp center.
             # Scales source to fill 9:16 height → blur → overlay sharp fit-to-width.
             vf_complex = (

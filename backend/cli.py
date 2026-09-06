@@ -84,6 +84,23 @@ def _parse_json_transcript(raw_text):
     return data.get("words", []), data.get("segments", []), data
 
 
+def _json_file_arg(path: str | None, name: str):
+    """A JSON file named on the command line, or nothing.
+
+    A path rather than the JSON itself: a face map is a per-second record of
+    every face in the video, which an argument list will not carry. Missing or
+    malformed loses the framing hint, never the run.
+    """
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError) as exc:
+        print(f"  Warning: {name} could not be read ({exc}); ignoring it", file=sys.stderr)
+        return None
+
+
 def _cached_face_map(video_path: str):
     """Face maps are keyed by video content, not by transcript, so an imported
     transcript can still borrow the map from an earlier run on the same file."""
@@ -470,6 +487,16 @@ def cmd_studio(args):
         "--caption-scale", str(getattr(args, "caption_scale", 1.0)),
         "--crop", args.crop,
         "--format", getattr(args, "format", None) or "vertical",
+    ]
+    # Where the faces are, and where somebody put the frame by hand. Both are
+    # what the crop needs and neither could be handed to it before, so a caller
+    # that already knew — the cloud worker scans the window before it renders —
+    # had no way to say so and watched `speaker` fall through to a letterbox.
+    if getattr(args, "face_map", None):
+        cmd += ["--face-map", os.path.abspath(args.face_map)]
+    if getattr(args, "crop_keyframes", None):
+        cmd += ["--crop-keyframes", os.path.abspath(args.crop_keyframes)]
+    cmd += [
         "--logo-position", getattr(args, "logo_position", "top-left"),
         "--logo-scale", str(getattr(args, "logo_scale", 1.0)),
         "--intro-seconds", str(args.intro_seconds),
@@ -978,6 +1005,16 @@ def cmd_process(args):
 
     # Extract face_map before result gets overwritten in clip loop
     face_map = result.get("face_map")
+
+    # A map handed in on the command line wins over one the transcriber found,
+    # because the caller who bothered to pass it scanned this video rather than
+    # inferring the layout from who was speaking. It is also the only map there
+    # is when the transcript came from an engine that does not diarize, which is
+    # the case where `speaker` framing used to fall through to a letterbox.
+    given = _json_file_arg(getattr(args, "face_map", None), "--face-map")
+    if given:
+        face_map = given
+        print("         Using the face map passed in (speaker framing preserved)")
 
     # Check speaker data availability (needed for smart cropping)
     speakers_in_words = set(w.get("speaker") for w in words if w.get("speaker"))
@@ -4399,7 +4436,12 @@ def main():
                       help="Caption placement (default: follows the chosen style)")
     proc.add_argument("--caption-scale", type=float, choices=[0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4, 1.45, 1.5],
                       help="Caption size multiplier (default: 1)")
-    proc.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
+    proc.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut", "manual"])
+    proc.add_argument("--face-map", dest="face_map", default=None,
+                      help="Where the faces sit in this video, as JSON. Skips detection and lets "
+                           "speaker framing work on a transcript that carries no speaker labels.")
+    proc.add_argument("--crop-keyframes", dest="crop_keyframes", default=None,
+                      help="Hand-placed crop positions, as JSON. Used by --crop manual.")
     proc.add_argument("--format", choices=["vertical", "horizontal", "square"], help="Output aspect ratio (default: vertical)")
     proc.add_argument("--profile", choices=["podcast", "party", "action"], help="Detection profile: podcast (transcript-first, default), party/action (laughter/energy highlights)")
     proc.add_argument("--logo", help="Logo image (asset name or path)")
@@ -4485,7 +4527,12 @@ def main():
     studio.add_argument("--caption-style", choices=["hormozi", "karaoke", "subtle", "branded"], default="hormozi")
     studio.add_argument("--caption-position", choices=["auto", "upper", "center", "lower"], default="auto")
     studio.add_argument("--caption-scale", type=float, default=1.0)
-    studio.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"], default="face")
+    studio.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut", "manual"], default="face")
+    studio.add_argument("--face-map", dest="face_map", default=None,
+                        help="Where the faces sit in this video, as JSON. Skips detection and lets "
+                             "speaker framing work on a transcript that carries no speaker labels.")
+    studio.add_argument("--crop-keyframes", dest="crop_keyframes", default=None,
+                        help="Hand-placed crop positions, as JSON. Used by --crop manual.")
     studio.add_argument("--format", choices=["vertical", "horizontal", "square"], default="vertical",
                         help="Output aspect ratio (default: vertical)")
     studio.add_argument("--template", help="Cut in a saved look (podcli Pro). Name or id.")

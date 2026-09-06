@@ -161,11 +161,28 @@ def _json_arg(raw, name):
         return None
 
 
+def _json_file(path, name):
+    """A JSON file, or nothing.
+
+    A path rather than the JSON itself, because a face map is a per-second
+    record of every face in the video and an argument list has a limit.
+    """
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError) as exc:
+        print(f"  Warning: {name} could not be read ({exc}); ignoring it",
+              file=sys.stderr, flush=True)
+        return None
+
+
 def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt="vertical",
                      logo=None, name_card=None, motion=None, caption_position="auto",
                      caption_scale=1.0, logo_position="top-left", logo_scale=1.0,
                      topic=None, progress=None, cards=None, brand=None, font_family=None,
-                     captions=True):
+                     captions=True, face_map=None, crop_keyframes=None):
     """Render the fragment with face-crop + captions via the existing engine."""
     from services.clip_generator import generate_clip
     print(f"  [fragment] rendering {start:.1f}s–{end:.1f}s ({style}, crop={crop}, {fmt})", flush=True)
@@ -175,6 +192,7 @@ def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt=
         caption_font_scale=round(caption_scale * 100),
         logo_position=logo_position, logo_scale=logo_scale,
         crop_strategy=crop, format=fmt,
+        face_map=face_map, crop_keyframes=crop_keyframes,
         transcript_words=words, title=title, output_dir=out_dir,
         logo_path=logo, name_card=name_card, motion=motion,
         topic=topic, progress=progress, cards=cards, brand=brand, font_family=font_family,
@@ -296,6 +314,11 @@ def main():
     ap.add_argument("--progress", action="store_true",
                     help="Draw how much of the clip is left along the bottom edge")
     ap.add_argument("--progress-color", default=None)
+    ap.add_argument("--face-map", dest="face_map", default=None,
+                    help="Path to a JSON face map for this video. Lets speaker framing work "
+                         "on a transcript that carries no speaker labels.")
+    ap.add_argument("--crop-keyframes", dest="crop_keyframes", default=None,
+                    help="Path to hand-placed crop positions as JSON. Used by --crop manual.")
     ap.add_argument("--cards", default=None,
                     help="On-screen cards as JSON, each with kind/start/end")
     ap.add_argument("--brand", default=None,
@@ -410,6 +433,8 @@ def main():
         brand=_json_arg(args.brand, "--brand"),
         font_family=args.font_family,
         captions=not args.no_captions,
+        face_map=_json_file(args.face_map, "--face-map"),
+        crop_keyframes=_json_file(args.crop_keyframes, "--crop-keyframes"),
     )
 
     platforms = [p.strip() for p in platforms_str.split(",") if p.strip()]
