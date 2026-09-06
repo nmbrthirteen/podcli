@@ -84,17 +84,21 @@ def _parse_json_transcript(raw_text):
     return data.get("words", []), data.get("segments", []), data
 
 
-def _json_file_arg(path: str | None, name: str):
-    """A JSON file named on the command line, or nothing.
+def _json_file_arg(raw: str | None, name: str):
+    """JSON given inline or named as a file, or nothing.
 
-    A path rather than the JSON itself: a face map is a per-second record of
-    every face in the video, which an argument list will not carry. Missing or
-    malformed loses the framing hint, never the run.
+    Both, because the two callers differ: keyframes are a handful of numbers
+    and have always been passed inline, while a face map is a per-second record
+    of every face in the video, which an argument list will not carry. Missing
+    or malformed loses the framing hint, never the run.
     """
-    if not path:
+    if not raw:
         return None
+    text = raw.strip()
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        if text.startswith("{") or text.startswith("["):
+            return json.loads(text)
+        with open(text, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except (OSError, ValueError) as exc:
         print(f"  Warning: {name} could not be read ({exc}); ignoring it", file=sys.stderr)
@@ -492,10 +496,16 @@ def cmd_studio(args):
     # what the crop needs and neither could be handed to it before, so a caller
     # that already knew — the cloud worker scans the window before it renders —
     # had no way to say so and watched `speaker` fall through to a letterbox.
+    # A path is made absolute because the script runs from elsewhere; JSON
+    # given inline is handed straight through.
+    def _pass_through(value):
+        text = str(value).strip()
+        return text if text.startswith(("{", "[")) else os.path.abspath(text)
+
     if getattr(args, "face_map", None):
-        cmd += ["--face-map", os.path.abspath(args.face_map)]
+        cmd += ["--face-map", _pass_through(args.face_map)]
     if getattr(args, "crop_keyframes", None):
-        cmd += ["--crop-keyframes", os.path.abspath(args.crop_keyframes)]
+        cmd += ["--crop-keyframes", _pass_through(args.crop_keyframes)]
     cmd += [
         "--logo-position", getattr(args, "logo_position", "top-left"),
         "--logo-scale", str(getattr(args, "logo_scale", 1.0)),

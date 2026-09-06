@@ -161,16 +161,21 @@ def _json_arg(raw, name):
         return None
 
 
-def _json_file(path, name):
-    """A JSON file, or nothing.
+def _json_file(raw, name):
+    """JSON given inline or named as a file, or nothing.
 
-    A path rather than the JSON itself, because a face map is a per-second
-    record of every face in the video and an argument list has a limit.
+    Both, because the two callers differ: keyframes are a handful of numbers
+    and have always been passed inline, while a face map is a per-second record
+    of every face in the video and an argument list will not carry one. Telling
+    them apart by looking is cheaper than a second flag.
     """
-    if not path:
+    if not raw:
         return None
+    text = raw.strip()
+    if text.startswith("{") or text.startswith("["):
+        return _json_arg(text, name)
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(text, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except (OSError, ValueError) as exc:
         print(f"  Warning: {name} could not be read ({exc}); ignoring it",
