@@ -1,3 +1,4 @@
+import type { Block, Gap, Layout } from "./scene";
 import type { Motion } from "./motion";
 
 interface CardBase {
@@ -85,6 +86,20 @@ export type Card =
       src?: string;
     })
   | (CardBase & { kind: "quote"; text: string; attribution?: string })
+  /**
+   * Blocks, arranged. The kind that is not a kind.
+   *
+   * Everything above is a layout somebody drew once and named. This is the
+   * same atoms with the arrangement left open, so a moment that does not
+   * happen to be a figure or a list still gets a card built for it rather
+   * than the nearest preset with the wrong shape.
+   */
+  | (CardBase & {
+      kind: "scene";
+      layout?: Layout;
+      gap?: Gap;
+      blocks: Block[];
+    })
   | (CardBase & {
       kind: "image";
       /** A URL the renderer can reach, or a path inside the bundle. */
