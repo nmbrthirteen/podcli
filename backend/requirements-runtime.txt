@@ -6,7 +6,7 @@ opencv-python-headless>=4.8.1.78
 numpy>=2.5.2
 # Audio-event detection (YAMNet laughter/reaction channel) runs on ONNX Runtime —
 # no torch/TF, so it stays on the hermetic native path.
-onnxruntime>=1.28.0
+onnxruntime>=1.29.0
 Pillow>=12.3.0
 questionary>=2.1.1
 python-dotenv>=1.2.2
