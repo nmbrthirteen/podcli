@@ -11,7 +11,7 @@ import type { Card } from "../cards";
 import { context, DEFAULT_BRAND, muted, track } from "./brand";
 import type { Brand } from "./brand";
 import { fitScene, Scene } from "./Scene";
-import { emphasisRuns, MIN_FIT, SCENE_WIDTH, sceneHeight } from "../scene";
+import { emphasisRuns, MIN_FIT, sceneHeight } from "../scene";
 import type { Block } from "../scene";
 
 /**
@@ -915,7 +915,17 @@ export const Cards: React.FC<{
    * blocks.
    */
   const shape = presetBlocks(card);
-  const wanted = shape ? sceneHeight(shape, "stack", "tight", SCENE_WIDTH) : 0;
+  /*
+   * The measure a preset is actually set to, rather than the scene's.
+   *
+   * A preset fills the padded container, so on a wider frame it wraps later
+   * than SCENE_WIDTH says. Measured at 680 on a landscape clip it came out
+   * far taller than it draws, which shrank the type and could drop the
+   * speaker for a card that had room all along. In portrait the two are the
+   * same number, so nothing moves there.
+   */
+  const contentWidth = width / s - SAFE.left - SAFE.right;
+  const wanted = shape ? sceneHeight(shape, "stack", "tight", contentWidth) : 0;
   const fitFor = (available: number) =>
     wanted > 0 ? Math.max(MIN_FIT, Math.min(1, available / s / wanted)) : 1;
   /** How far this card would have to shrink to sit in a room of this height. */

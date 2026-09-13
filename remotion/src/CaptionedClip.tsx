@@ -146,15 +146,19 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
    * frame is told how much of the top is already spoken for.
    */
   const logoTop = Boolean(logoSrc) && logoPosition.startsWith("top-");
-  const chipCorner = topic?.position ?? "top-left";
+  const chipTop = Boolean(topic?.label)
+    && (topic?.position ?? "top-left").startsWith("top-");
   const chipClashes = logoTop
-    && chipCorner.startsWith("top-")
-    && chipCorner.slice(4) === logoPosition.slice(4);
+    && chipTop
+    && (topic?.position ?? "top-left").slice(4) === logoPosition.slice(4);
   const chipInset = LOGO_INSET
     + (chipClashes ? LOGO_HEIGHT * logoScale + LOGO_CAPTION_GAP : 0);
-  const topTaken = logoTop || chipCorner.startsWith("top-")
-    ? chipInset + (chipClashes ? 48 : LOGO_HEIGHT * logoScale) + LOGO_CAPTION_GAP
-    : SAFE.top;
+  const CHIP_HEIGHT = 48;
+  const topTaken = Math.max(
+    SAFE.top,
+    logoTop ? LOGO_INSET + LOGO_HEIGHT * logoScale + LOGO_CAPTION_GAP : 0,
+    chipTop ? chipInset + CHIP_HEIGHT + LOGO_CAPTION_GAP : 0,
+  );
 
   const captionMotion: Motion = {
     ...(MOTION[style.name] ?? MOTION.subtle), ...(motion?.captions ?? {}),

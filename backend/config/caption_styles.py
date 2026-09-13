@@ -109,6 +109,23 @@ STYLES = {
         "uppercase": False,
         "gradient_overlay": False,
     },
+    "outline": {
+        "description": "A whole line at a time in white with a heavy black outline, no box. Stays readable without covering the shot.",
+        "font_name": DETECTED_FONT,
+        "font_size": 78,
+        "primary_color": "&H00FFFFFF",          # White
+        "active_color": None,                   # The line is the unit, no sweep
+        "outline_color": "&H00000000",          # Black
+        "back_color": "&H00000000",             # Transparent: the outline does the work
+        "bold": True,
+        "outline_width": 6,                     # Heavy enough to carry over any footage
+        "shadow_depth": 0,                      # An outline and a shadow together read as mud
+        "alignment": 2,
+        "margin_v": 460,                        # Clears the app's own title and handle
+        "words_per_chunk": 7,
+        "uppercase": False,
+        "gradient_overlay": False,
+    },
     "branded": {
         "description": "Large bold text, 5-7 words wrapping across 2 lines, dark rounded pill on active word. Clean, no gradient.",
         "font_name": DETECTED_FONT,
