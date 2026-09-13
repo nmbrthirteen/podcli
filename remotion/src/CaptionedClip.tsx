@@ -11,12 +11,15 @@ import { TopicChip } from "./components/TopicChip";
 import type { TopicChipProps } from "./components/TopicChip";
 import { ProgressBar } from "./components/ProgressBar";
 import type { ProgressBarProps } from "./components/ProgressBar";
-import { Cards, CARD_CAPTION_MARGIN } from "./components/Cards";
+import { Cards } from "./components/Cards";
 import { cardAt } from "./cards";
 import type { Card } from "./cards";
 import type { Brand } from "./components/Cards";
-import { MOTION } from "./motion";
+import { MOTION, motionAt } from "./motion";
 import type { Motion } from "./motion";
+import {
+  brandCaptions, captionZone, LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET, safeFor,
+} from "./types";
 import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "./types";
 
 export interface CaptionedClipProps {
@@ -68,36 +71,94 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   brand,
   motion,
 }) => {
-  const { fps, height } = useVideoConfig();
+  const { fps, height, width } = useVideoConfig();
+  const SAFE = safeFor(width, height);
   const frame = useCurrentFrame();
 
-  /*
-   * Captions drop toward the bottom edge while a card holds the frame.
-   *
-   * Their usual margin keeps them clear of a speaker's chin and hands. There
-   * is no chin down there when a card is up, so the margin is only empty
-   * surface, and it was the single biggest thing pushing the speaker's band
-   * short enough to cut a face in half.
-   */
   const nameCardSeconds = nameCard?.title ? (nameCard.seconds ?? 3) : 0;
   const pastNameCard = frame / fps >= nameCardSeconds;
-  const cardUp = pastNameCard && Boolean(cards?.length) && Boolean(cardAt(cards ?? [], frame / fps));
   const cardPlanned = Boolean(cards?.length);
-  const captionShrink = cardUp ? 0.6 : cardPlanned ? 0.75 : 1;
-  const baseCaptionStyle: CaptionStyle = cardUp
-    ? { ...style, marginBottom: Math.min(style.marginBottom, CARD_CAPTION_MARGIN) }
-    : style;
-  // Keep a simple four-stop placement model. It is easier to reason about
-  // than pixels, and stays proportional across every output shape.
-  const placementMargin = captionPosition === "upper" ? 760
-    : captionPosition === "center" ? 480
-      : captionPosition === "lower" ? 220
-        : baseCaptionStyle.marginBottom;
+  const upNow = pastNameCard ? cardAt(cards ?? [], frame / fps) : null;
+  /*
+   * How far in the card is, rather than whether it is.
+   *
+   * The card cross-fades over six frames and the captions used to answer on
+   * the frame it started: shrinking and jumping while the thing they were
+   * getting out of the way of was still arriving. Reading the card's own fade
+   * means the two move together, so a card coming up looks like one move
+   * instead of a card fading under captions that already snapped.
+   */
+  const cardIn = upNow
+    ? motionAt({
+      frame, fps, start: upNow.start, end: upNow.end,
+      motion: upNow.motion ?? MOTION.card,
+    }).opacity
+    : 0;
+  const restingShrink = cardPlanned ? 0.75 : 1;
+  const captionShrink = restingShrink + (0.6 - restingShrink) * cardIn;
+  /*
+   * Captions used to drop toward the bottom edge while a card held the frame,
+   * on the reasoning that there is no chin down there to clear. There is no
+   * chin, but there is a YouTube title, a handle and a link chip, and the
+   * margin that bought the speaker a taller band was spending the one part of
+   * the frame the viewer never sees. They hold above the chrome now, and the
+   * band the speaker lost is taken off its own floor instead.
+   */
+  /*
+   * A four-stop placement model, easier to reason about than pixels.
+   *
+   * The three named stops are fractions of the frame and travel between
+   * shapes on their own. Auto does not. A style's own margin was authored
+   * against a 1920-tall phone, and the same number on a 1080-tall landscape
+   * frame is half the picture. Off a phone, auto means as low as the
+   * furniture allows.
+   */
+  const placementMargin = captionPosition === "upper" ? 1120
+    : captionPosition === "center" ? 820
+      : captionPosition === "lower" ? SAFE.bottom
+        : width < height ? style.marginBottom : SAFE.bottom;
   const captionStyle: CaptionStyle = {
-    ...baseCaptionStyle,
-    marginBottom: placementMargin,
-    fontSize: baseCaptionStyle.fontSize * captionSize * captionShrink,
+    ...brandCaptions(style, brand),
+    marginBottom: Math.max(placementMargin, SAFE.bottom),
+    fontSize: style.fontSize * captionSize * captionShrink,
   };
+
+  /*
+   * What the card lays itself out against.
+   *
+   * Not the caption that is halfway through shrinking. The reserved band is a
+   * function of the caption's size, so handing the card the interpolating one
+   * made its whole body creep and resize through the six frames of its own
+   * fade. It reserves for the settled size instead: the card holds still and
+   * only the captions move.
+   */
+  const settledStyle: CaptionStyle = {
+    ...captionStyle,
+    fontSize: style.fontSize * captionSize * 0.6,
+  };
+
+  /*
+   * Who owns the top corners, so nothing else writes into them.
+   *
+   * The logo and the chip both default to the same corner at the same inset,
+   * which drew one straight through the other on any clip carrying both. The
+   * chip drops below the logo when they collide, and a card given the whole
+   * frame is told how much of the top is already spoken for.
+   */
+  const logoTop = Boolean(logoSrc) && logoPosition.startsWith("top-");
+  const chipTop = Boolean(topic?.label)
+    && (topic?.position ?? "top-left").startsWith("top-");
+  const chipClashes = logoTop
+    && chipTop
+    && (topic?.position ?? "top-left").slice(4) === logoPosition.slice(4);
+  const chipInset = LOGO_INSET
+    + (chipClashes ? LOGO_HEIGHT * logoScale + LOGO_CAPTION_GAP : 0);
+  const CHIP_HEIGHT = 48;
+  const topTaken = Math.max(
+    SAFE.top,
+    logoTop ? LOGO_INSET + LOGO_HEIGHT * logoScale + LOGO_CAPTION_GAP : 0,
+    chipTop ? chipInset + CHIP_HEIGHT + LOGO_CAPTION_GAP : 0,
+  );
 
   const captionMotion: Motion = {
     ...(MOTION[style.name] ?? MOTION.subtle), ...(motion?.captions ?? {}),
@@ -108,6 +169,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
     karaoke: KaraokeCaptions,
     subtle: SubtleCaptions,
     branded: BrandedCaptions,
+    outline: SubtleCaptions,
   }[style.name];
 
   return (
@@ -118,7 +180,8 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
           cards={cards}
           videoSrc={videoSrc}
           startFrom={startFrom}
-          style={captionStyle}
+          style={settledStyle}
+          topInset={topTaken}
           faceY={faceY}
           faceH={faceH}
           brand={brand}
@@ -133,8 +196,14 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
         <CaptionComponent words={words} style={captionStyle} motion={captionMotion}
           singleLine={singleLine} />
       )}
-      {nameCard?.title && <NameCard {...nameCard} motion={cardMotion} />}
-      {topic?.label && <TopicChip {...topic} />}
+      {nameCard?.title && (
+        <NameCard
+          {...nameCard}
+          bottom={nameCard.bottom ?? captionZone(captionStyle) + 24}
+          motion={cardMotion}
+        />
+      )}
+      {topic?.label && <TopicChip {...topic} inset={chipInset} />}
       {progress && <ProgressBar {...progress} />}
     </AbsoluteFill>
   );

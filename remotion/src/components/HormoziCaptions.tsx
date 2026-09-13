@@ -55,7 +55,7 @@ export const HormoziCaptions: React.FC<Props> = ({
     >
       <div
         style={{
-          backgroundColor: "rgba(0, 0, 0, 0.8)",
+          backgroundColor: style.background ?? "rgba(0, 0, 0, 0.8)",
           borderRadius: 16 * s,
           padding: `${14 * s}px ${32 * s}px`,
           maxWidth: `calc(100% - ${120 * s}px)`,

@@ -6,7 +6,8 @@ import { FONT } from "../types";
 import { context, muted, track } from "./brand";
 import type { Brand } from "./brand";
 import {
-  GAP_SIZE, MEDIA_HEIGHT, MIN_FIT, SCENE_WIDTH, TYPE_SIZE, sceneHeight, sizeOf,
+  emphasisRuns, GAP_SIZE, MEDIA_HEIGHT, MIN_FIT, SCENE_WIDTH, TYPE_SIZE, sceneHeight,
+  sizeOf,
 } from "../scene";
 import type { Align, Block, Gap, Layout, Size, Tone } from "../scene";
 
@@ -95,8 +96,9 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
           textAlign: block.align ?? "start",
         }}
       >
-        {block.text}
-        {block.emphasis && <span style={{ color: accent }}> {block.emphasis}</span>}
+        {emphasisRuns(block.text, block.emphasis).map((run, i) => (
+          <span key={i} style={run.mark ? { color: accent } : undefined}>{run.text}</span>
+        ))}
       </div>
     );
   }

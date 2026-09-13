@@ -35,6 +35,8 @@ export const MOTION: Record<string, Motion> = {
   karaoke: { enter: "none", exit: "none", duration: 0, feel: "linear" },
   /** The pill on the active word is the motion; the block holds still. */
   branded: { enter: "none", exit: "none", duration: 0, feel: "linear" },
+  /** A line meant to be read as a line. It cuts, the way a subtitle does. */
+  outline: { enter: "none", exit: "none", duration: 0, feel: "linear" },
   /**
    * Names arrive, hold, and get out of the way.
    *

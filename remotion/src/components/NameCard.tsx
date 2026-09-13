@@ -13,6 +13,8 @@ export interface NameCardProps {
   background?: string;
   color?: string;
   accent?: string;
+  /** How far off the bottom it sits, in unscaled units. */
+  bottom?: number;
   motion?: Motion;
 }
 
@@ -33,6 +35,7 @@ export const NameCard: React.FC<NameCardProps> = ({
   background = "rgba(0,0,0,0.85)",
   color = "#FFFFFF",
   accent = "#2ED9C3",
+  bottom = 620,
   motion,
 }) => {
   const frame = useCurrentFrame();
@@ -53,7 +56,7 @@ export const NameCard: React.FC<NameCardProps> = ({
       style={{
         position: "absolute",
         left: 0,
-        bottom: 620 * s,
+        bottom: bottom * s,
         maxWidth: "78%",
         padding: `${18 * s}px ${28 * s}px ${16 * s}px`,
         background,

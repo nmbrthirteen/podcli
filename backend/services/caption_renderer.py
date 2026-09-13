@@ -118,7 +118,7 @@ def render_captions(
     style = dict(get_style(caption_style))
     scale = max(60, min(160, int(caption_font_scale))) / 100
     style["font_size"] = round(style["font_size"] * scale)
-    position_margins = {"upper": 760, "center": 480, "lower": 220}
+    position_margins = {"upper": 1120, "center": 820, "lower": 460}
     if caption_position in position_margins:
         style["margin_v"] = position_margins[caption_position]
 
@@ -126,7 +126,7 @@ def render_captions(
         content = _render_hormozi(words, style, time_offset)
     elif caption_style == "karaoke":
         content = _render_karaoke(words, style, time_offset)
-    elif caption_style == "subtle":
+    elif caption_style in ("subtle", "outline"):
         content = _render_subtle(words, style, time_offset)
     elif caption_style == "branded":
         content = _render_branded(words, style, time_offset)

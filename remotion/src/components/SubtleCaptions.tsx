@@ -29,12 +29,24 @@ const Line: React.FC<{
     style={{
       fontFamily: style.fontFamily,
       fontSize: style.fontSize * scale,
-      fontWeight: 400,
+      fontWeight: style.stroke ? 600 : 400,
       color: style.color,
-      textShadow:
-        "0 1px 3px rgba(0,0,0,0.95), 0 0 20px rgba(0,0,0,0.6), 0 0 50px rgba(0,0,0,0.3)",
+      /*
+       * One legibility trick or the other, never both. A stroked letter over
+       * three stacked shadows reads as mud at the size this style is set at.
+       */
+      ...(style.stroke
+        ? {
+          WebkitTextStrokeWidth: `${style.fontSize * scale * 0.13}px`,
+          WebkitTextStrokeColor: style.stroke,
+          paintOrder: "stroke fill",
+        }
+        : {
+          textShadow:
+            "0 1px 3px rgba(0,0,0,0.95), 0 0 20px rgba(0,0,0,0.6), 0 0 50px rgba(0,0,0,0.3)",
+        }),
       textAlign: "center",
-      lineHeight: 1.35,
+      lineHeight: style.stroke ? 1.1 : 1.35,
       whiteSpace: nowrap ? "nowrap" : undefined,
     }}
   >

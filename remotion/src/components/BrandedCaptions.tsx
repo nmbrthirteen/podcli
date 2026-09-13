@@ -38,7 +38,8 @@ const WordWithPill: React.FC<{
   frame: number;
   fps: number;
   emphasisColor?: string;
-}> = ({ word, isActive, frame, fps, emphasisColor }) => {
+  background?: string;
+}> = ({ word, isActive, frame, fps, emphasisColor, background }) => {
   const { height } = useVideoConfig();
   const s = captionScale(height);
   const wordEntryFrame = Math.round(word.start * fps);
@@ -61,7 +62,7 @@ const WordWithPill: React.FC<{
           left: -16 * s,
           right: -16 * s,
           bottom: -4 * s,
-          backgroundColor: "rgba(0, 0, 0, 0.85)",
+          backgroundColor: background ?? "rgba(0, 0, 0, 0.85)",
           borderRadius: 18 * s,
           boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
           opacity: pillOpacity,
@@ -120,6 +121,7 @@ const CaptionLine: React.FC<{
               frame={frame}
               fps={fps}
               emphasisColor={style.emphasisColor}
+              background={style.background}
             />
           </React.Fragment>
         );
