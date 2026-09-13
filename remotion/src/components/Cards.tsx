@@ -604,12 +604,27 @@ const CardBody: React.FC<{
         <Img
           src={card.src.startsWith("http") ? card.src : staticFile(card.src)}
           style={{
-            width: "100%",
+            /*
+             * Shown whole, the element is sized by the picture rather than the
+             * other way round.
+             *
+             * A full-width box with objectFit contain letterboxes inside
+             * itself, and the hairline below then traces the box: a tall
+             * screenshot came out as a thin picture adrift in a wide empty
+             * rectangle. Bounded instead of sized, the element is the picture,
+             * so the line lands on its edge.
+             */
+            ...(card.fit === "fill"
+              ? { width: "100%", objectFit: "cover" as const }
+              : {
+                maxWidth: "100%",
+                alignSelf: "center" as const,
+                objectFit: "contain" as const,
+              }),
             // Capped by the room actually left rather than by a number alone:
             // captions placed high reserve their band from the same frame, and
             // a picture pinned to a fixed height drew over them.
             maxHeight: mediaBand("image", room ?? IMAGE_BAND * s, s, Boolean(card.caption)),
-            objectFit: card.fit === "fill" ? "cover" : "contain",
             borderRadius: 16 * s,
             // A screenshot's own edge is often near the surface tone behind it.
             // Pure white at a tenth, never a tone borrowed from the palette.
