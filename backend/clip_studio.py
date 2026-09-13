@@ -338,7 +338,7 @@ def main():
     ap.add_argument("--language", default=None, help="Transcription language (e.g. es). Auto-detect if omitted.")
     ap.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], default=None, help="Transcription engine")
     ap.add_argument("--transcript", default=None, help="Word timings JSON for this video (list of {word,start,end} or {words:[...]}); skips transcription")
-    ap.add_argument("--caption-style", default="hormozi", choices=["hormozi", "karaoke", "subtle", "branded"])
+    ap.add_argument("--caption-style", default="hormozi", choices=["hormozi", "karaoke", "subtle", "branded", "outline"])
     ap.add_argument("--caption-position", default="auto", choices=["auto", "upper", "center", "lower"])
     ap.add_argument("--caption-scale", type=float, default=1.0)
     ap.add_argument("--crop", default="face", choices=["center", "face", "speaker", "speaker-hardcut"])

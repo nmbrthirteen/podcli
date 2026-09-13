@@ -3,7 +3,7 @@ import {
   getRemotionEnvironment, Img, OffthreadVideo, Video, staticFile,
   useCurrentFrame, useVideoConfig,
 } from "remotion";
-import { captionScale, FONT } from "../types";
+import { captionScale, captionZone, FONT, safeFor } from "../types";
 import type { CaptionStyle } from "../types";
 import { MOTION, motionAt } from "../motion";
 import { cardAt } from "../cards";
@@ -11,7 +11,7 @@ import type { Card } from "../cards";
 import { context, DEFAULT_BRAND, muted, track } from "./brand";
 import type { Brand } from "./brand";
 import { fitScene, Scene } from "./Scene";
-import { MIN_FIT } from "../scene";
+import { emphasisRuns, MIN_FIT, SCENE_WIDTH, sceneHeight } from "../scene";
 import type { Block } from "../scene";
 
 /**
@@ -52,11 +52,12 @@ const TYPE = { label: 34, body: 46, item: 58, quote: 68, lead: 84, figure: 168 }
 /**
  * How much of the frame a video card's footage takes.
  *
- * The arithmetic it has to fit: a 1920 canvas, roughly 470 reserved for the
- * captions, 76 of gap, and the speaker's own floor of 820 above it. What is
- * left is this. Asking for the literal half of the frame would push the band
- * under that floor, and the card would answer by dropping the speaker
- * altogether — the opposite of what a split screen is for.
+ * The arithmetic it has to fit: a 1920 canvas, roughly 750 reserved for the
+ * captions and for the app's own furniture under them, 76 of gap, and the
+ * speaker's floor of 680 above it. What is left is this. Asking for the
+ * literal half of the frame would push the band under that floor, and the
+ * card would answer by dropping the speaker altogether, which is the opposite
+ * of what a split screen is for.
  *
  * It shrinks before the speaker does, because a caption style with tall words
  * has to take its room from somewhere and a face cut in half is worse than
@@ -117,8 +118,21 @@ const mediaBand = (
  * two-line quote and a bare figure want different amounts, and pinning both
  * ends meant a tall card overflowed upward across the speaker's chin. This
  * floor stops a very long card from squeezing the face out altogether.
+ *
+ * It was 820 while the captions were free to drop to the bottom edge. They
+ * are not: the bottom 520 belongs to the app the clip plays in. The band the
+ * captions gave back has to come off this floor, because the alternative is a
+ * card written into the part of the frame a viewer never sees.
  */
-const SPEAKER_MIN = 820;
+const SPEAKER_MIN = 680;
+
+/**
+ * How far the footage takes to become the card.
+ *
+ * Long enough to read as a ramp rather than a band, short enough that the
+ * shoulder it eats is a shoulder and not a face.
+ */
+const SEAM = 160;
 
 /**
  * How much room a head needs, given how big the face is.
@@ -134,36 +148,6 @@ const SPEAKER_MIN = 820;
  * not send it, and a clip rendered by one should not look broken.
  */
 const HEAD_TO_FACE = 2.5;
-
-/**
- * Where captions sit while a card is up.
- *
- * Their usual margin exists to clear a speaker's chin and hands, and there is
- * no chin down there behind a card. Dropping them toward the bottom edge is
- * what buys the speaker a band tall enough to hold a whole head.
- */
-export const CARD_CAPTION_MARGIN = 180;
-
-/**
- * The room the captions need, measured rather than assumed.
- *
- * A fixed number worked until a two-line Georgian caption grew taller than it
- * and the card's last line rendered behind the pill. The caption's own style
- * knows where it sits and how big it is, so the reserved band is read off that:
- * its margin, two lines of it, and a gap.
- */
-const captionZone = (style: CaptionStyle) =>
-  style.marginBottom + style.fontSize * CAPTION_LINES * 1.2 + GAP.group;
-
-/**
- * How many lines of caption a card gets out of the way of.
- *
- * Two was the common case and wrong at the worst one: a chunk that wrapped to
- * three lines covered the card's last row, which is the row a comparison keeps
- * its second bar in. Reserving for the tallest caption costs a card some
- * height on every clip and costs it nothing on the clip where it matters.
- */
-const CAPTION_LINES = 3;
 
 /*
  * The panel runs to the bottom edge, and that is not negotiable.
@@ -232,6 +216,68 @@ const Endpoint: React.FC<{
   </div>
 );
 
+/**
+ * A file given the whole frame, the way a cutaway is.
+ *
+ * Cover rather than contain, because a cutaway that letterboxes itself is a
+ * picture of a picture. A screenshot says otherwise by asking to be fitted,
+ * and gets the surface behind it rather than bars of nothing.
+ *
+ * Any caption it carries goes to the top. The bottom of the frame is spoken
+ * for twice over down there, by the clip's own captions and by the app's
+ * furniture under them, and a source line is not worth fighting either for.
+ */
+const BleedMedia: React.FC<{
+  card: Extract<Card, { kind: "image" | "video" }>;
+  scale: number;
+  brand: Brand;
+  fps: number;
+  topInset: number;
+}> = ({ card, scale: s, brand, fps, topInset }) => {
+  const { height, width } = useVideoConfig();
+  const SAFE = safeFor(width, height);
+  const src = card.src.startsWith("http") ? card.src : staticFile(card.src);
+  const fit = card.fit === "fit" ? "contain" : "cover";
+  const box: React.CSSProperties = {
+    position: "absolute", inset: 0, width: "100%", height: "100%",
+    objectFit: fit, backgroundColor: card.fit === "fit" ? brand.surface : "#000",
+  };
+  const Frame = getRemotionEnvironment().isRendering ? OffthreadVideo : Video;
+
+  return (
+    <>
+      {card.kind === "video" ? (
+        <Frame
+          src={src}
+          startFrom={Math.max(0, Math.round((card.startAt ?? 0) * fps))}
+          muted
+          style={box}
+        />
+      ) : (
+        <Img src={src} style={box} />
+      )}
+      {card.caption && (
+        <div
+          style={{
+            position: "absolute", top: 0, left: 0, right: 0,
+            padding: `${topInset * s}px ${SAFE.right * s}px ${GAP.section * s}px `
+              + `${SAFE.left * s}px`,
+            background:
+              `linear-gradient(to bottom, rgba(0,0,0,0.65), transparent)`,
+            fontFamily: FONT,
+            fontSize: TYPE.label * s,
+            fontWeight: 500,
+            lineHeight: 1.3,
+            color: "#FFFFFF",
+          }}
+        >
+          {card.caption}
+        </div>
+      )}
+    </>
+  );
+};
+
 const CardBody: React.FC<{
   card: Card;
   scale: number;
@@ -244,12 +290,25 @@ const CardBody: React.FC<{
    * drawn over the captions rather than a card that came out short.
    */
   room?: number;
+  /**
+   * Whether a file takes the whole frame rather than a band of it.
+   *
+   * Set when the card has already given up the speaker. A photograph nobody
+   * kept a face for was still being drawn at a quarter of the height, which
+   * left it floating in an empty slab: the layout of a split screen with
+   * nothing in the other half. Given the frame, it is a cutaway, which is what
+   * dropping the speaker was for.
+   */
+  bleed?: boolean;
+  /** How much of the top the logo and the chip have already taken. */
+  topInset?: number;
 }> = ({
-  card, scale: s, brand, room,
+  card, scale: s, brand, room, bleed = false, topInset,
 }) => {
   // Read before any of the branches below, so a card kind that never uses it
   // does not change the order the hooks run in.
-  const { fps } = useVideoConfig();
+  const { fps, height, width } = useVideoConfig();
+  const SAFE = safeFor(width, height);
   const accent = card.accent ?? brand.accent;
   const INK = brand.ink;
   const MUTED = muted(brand.ink);
@@ -318,12 +377,11 @@ const CardBody: React.FC<{
             color: INK,
           }}
         >
-          {card.lead}
-          {card.emphasis && (
-            // The payload word carries the card's one accent. Italic as well
-            // would be two ways of saying the same thing.
-            <span style={{ color: accent }}> {card.emphasis}</span>
-          )}
+          {/* The payload words carry the card's one accent. Italic as well
+              would be two ways of saying the same thing. */}
+          {emphasisRuns(card.lead, card.emphasis).map((run, i) => (
+            <span key={i} style={run.mark ? { color: accent } : undefined}>{run.text}</span>
+          ))}
         </div>
         {card.sub && (
           <div
@@ -531,6 +589,15 @@ const CardBody: React.FC<{
     );
   }
 
+  if (bleed && (card.kind === "image" || card.kind === "video")) {
+    return (
+      <BleedMedia
+        card={card} scale={s} brand={brand} fps={fps}
+        topInset={topInset ?? SAFE.top}
+      />
+    );
+  }
+
   if (card.kind === "image") {
     return (
       <>
@@ -598,7 +665,7 @@ const CardBody: React.FC<{
               color: MUTED,
               // Its own inset: the footage above it runs to both edges, and a
               // caption that did the same would sit against the frame.
-              padding: `0 ${96 * s}px`,
+              padding: `0 ${SAFE.right * s}px 0 ${SAFE.left * s}px`,
               marginTop: GAP.tight * s,
             }}
           >
@@ -686,6 +753,58 @@ const KNOWN_KINDS = new Set([
   "image", "video", "scene",
 ]);
 
+/**
+ * A preset written out as the blocks it is made of, for measuring only.
+ *
+ * The presets used to be trusted to fit, on the grounds that somebody sized
+ * them. Somebody sized the layout; nobody sized the words, and five bullets or
+ * a quote that runs to nine lines drew straight through the captions and out
+ * the bottom of the frame. A scene has been measured since the day it existed,
+ * so rather than write a second estimator the preset says which blocks it is
+ * and borrows that one.
+ *
+ * Nothing here draws. The kinds that already answer a height of their own,
+ * which is the two that show a file and the scene itself, return null and keep
+ * the arithmetic they have.
+ */
+const presetBlocks = (card: Card): Block[] | null => {
+  const eyebrow: Block[] = "eyebrow" in card && card.eyebrow
+    ? [{ type: "text", text: card.eyebrow, size: "xs" }]
+    : [];
+  switch (card.kind) {
+    case "stat":
+      return [
+        ...eyebrow,
+        { type: "text", text: card.value, size: "xxl" },
+        ...(card.caption ? [{ type: "text", text: card.caption, size: "sm" } as Block] : []),
+      ];
+    case "headline":
+      return [
+        ...eyebrow,
+        { type: "text", text: card.lead, emphasis: card.emphasis, size: "xl" },
+        ...(card.sub ? [{ type: "text", text: card.sub, size: "sm" } as Block] : []),
+      ];
+    case "bullets":
+      return [...eyebrow, { type: "list", items: card.items, size: "md" }];
+    case "compare":
+      return [...eyebrow, { type: "bars", rows: card.rows.slice(0, 3) }];
+    case "change":
+      return [...eyebrow, { type: "steps", points: [card.from, card.to] }];
+    case "share":
+      return [
+        ...eyebrow,
+        { type: "meter", value: card.value, display: card.display },
+        ...(card.caption ? [{ type: "text", text: card.caption, size: "sm" } as Block] : []),
+      ];
+    case "entity":
+      return [...eyebrow, { type: "chip", name: card.name, note: card.note, src: card.src }];
+    case "quote":
+      return [{ type: "quote", text: card.text, attribution: card.attribution, size: "lg" }];
+    default:
+      return null;
+  }
+};
+
 /** A block that would put something on screen, rather than an empty group. */
 const drawsSomething = (block: Block): boolean =>
   (block.type === "group"
@@ -700,10 +819,15 @@ export const Cards: React.FC<{
   faceY?: number | null;
   faceH?: number | null;
   brand?: Brand | null;
-}> = ({ cards, videoSrc, startFrom = 0, style, faceY, faceH, brand }) => {
+  /** How much of the top the logo and the chip have already taken. */
+  topInset?: number;
+}> = ({
+  cards, videoSrc, startFrom = 0, style, faceY, faceH, brand, topInset,
+}) => {
   const colours = { ...DEFAULT_BRAND, ...(brand ?? {}) };
   const frame = useCurrentFrame();
-  const { fps, height } = useVideoConfig();
+  const { fps, height, width } = useVideoConfig();
+  const SAFE = safeFor(width, height);
   const s = captionScale(height);
 
   /*
@@ -767,52 +891,173 @@ export const Cards: React.FC<{
   // at all, and the fit arithmetic runs before anything has narrowed to one.
   const hasCaption = "caption" in card && Boolean(card.caption);
   /*
-   * A scene keeps the speaker while it can still be read beside one.
+   * A card keeps the speaker while it can still be read beside one.
    *
-   * The presets know their own height because somebody sized them. An
-   * arrangement nobody has seen before is measured instead, and one that would
-   * have to be squashed to the floor of the fit takes the whole frame rather
-   * than sharing it at a size nobody reads at arm's length.
+   * Measured for every kind rather than for the scene alone. A card that would
+   * have to be squashed to the floor of the fit takes the whole frame instead
+   * of sharing it at a size nobody reads at arm's length, and that call is the
+   * same call whether the arrangement was named by somebody or arrived as
+   * blocks.
    */
-  const sceneShares = card.kind !== "scene"
-    || fitScene(card.blocks, {
-      layout: card.layout,
-      gap: card.gap,
-      room: bodyRoom(room - speakerTakes) / s,
-    }).fit > MIN_FIT;
-  const withSpeaker = card.speaker !== null
+  const shape = presetBlocks(card);
+  const wanted = shape ? sceneHeight(shape, "stack", "tight", SCENE_WIDTH) : 0;
+  const fitFor = (available: number) =>
+    wanted > 0 ? Math.max(MIN_FIT, Math.min(1, available / s / wanted)) : 1;
+  /** How far this card would have to shrink to sit in a room of this height. */
+  const fitsIn = (available: number) =>
+    (card.kind === "scene"
+      ? fitScene(card.blocks, {
+        layout: card.layout, gap: card.gap, room: available / s,
+      }).fit
+      : fitFor(available));
+  const bodyShares = fitsIn(bodyRoom(room - speakerTakes)) > MIN_FIT;
+  /*
+   * How far down a card written into the shot has to start.
+   *
+   * Nothing else stops it landing on the face. A banded card has a speaker
+   * band above it and a full-frame one has no face to miss; this one is drawn
+   * over the person and would happily print a sentence across their mouth.
+   * The measured eye line plus a chin's worth below it is the floor. Generous
+   * here costs the card the frame: between a high face and a tall caption
+   * style there is little clear frame to begin with, and the fallback fires
+   * on cards that would have fitted.
+   */
+  const HEAD_BELOW_EYES = 0.13;
+  const faceFloor = ((faceY ?? 0.4) + HEAD_BELOW_EYES) * height;
+  const overRoom = Math.min(
+    bodyRoom(room),
+    Math.max(0, height - faceFloor - (captionZone(style) + GAP.section) * s),
+  );
+  /*
+   * Written into the shot rather than laid over it, when the shot has the room.
+   *
+   * The speaker is never drawn for one of these: the composition is an overlay
+   * composited onto the clip, so leaving the panel transparent is what shows
+   * the person. Drawing the band as well would put the same face on screen
+   * twice, once cropped and once not.
+   *
+   * It falls back to the panel rather than squeezing. Between a close-up's
+   * chin and a tall caption there can be sixty pixels of clear frame, and a
+   * card drawn at the floor of the fit in sixty pixels is not a quieter
+   * treatment, it is an unreadable one. A panel always has room because it
+   * makes its own.
+   */
+  const over = card.place === "over" && fitsIn(overRoom) > MIN_FIT;
+  const withSpeaker = !over
+    && card.speaker !== null
     && Boolean(videoSrc)
     && room >= headNeeds
-    && sceneShares
+    && bodyShares
     && (!SHOWS_A_FILE.has(card.kind)
       || mediaBand(card.kind, bodyRoom(room - speakerTakes), s, hasCaption)
          >= MEDIA_MIN * s);
+  /*
+   * How far the type has to come down to sit inside the band.
+   *
+   * The type shrinks and the width is kept, which is the same move a scene
+   * makes: a card drawn narrower as well as smaller reads as a card that
+   * failed to lay out, where one drawn smaller at the same measure reads as a
+   * card with a lot to say. The estimate it comes from over-states height on
+   * purpose, so the result is a card with a little room to spare rather than
+   * one resting on the caption.
+   */
+  const bodyAvailable = over
+    ? overRoom
+    : bodyRoom(withSpeaker ? room - speakerTakes : room);
+  const bodyFit = fitFor(bodyAvailable);
+  /*
+   * A file takes the whole frame when it was asked to, or when a band would
+   * be too short to be worth one.
+   *
+   * Asked, because a cutaway is an edit rather than a consequence: a card
+   * that keeps its picture in a band on a surface is a legitimate thing to
+   * want, and inferring the cutaway from a dropped speaker took that choice
+   * away. The fallback stays, because the alternative to a band nobody can
+   * read is not a smaller band.
+   *
+   * Never with a speaker still up. A cutaway that leaves the person on screen
+   * is a smaller picture with extra steps.
+   */
+  const bandWouldBe = SHOWS_A_FILE.has(card.kind)
+    ? mediaBand(card.kind, bodyRoom(withSpeaker ? room - speakerTakes : room), s, hasCaption)
+    : 0;
+  const bleeds = SHOWS_A_FILE.has(card.kind)
+    && !withSpeaker
+    && (("bleed" in card && card.bleed === true) || bandWouldBe < MEDIA_MIN * s);
 
   return (
     <div
       style={{
         position: "absolute",
         inset: 0,
-        backgroundColor: card.background ?? colours.surface,
+        backgroundColor: over ? "transparent" : (card.background ?? colours.surface),
         opacity,
         display: "flex",
         flexDirection: "column",
         // The captions are not part of this stack; they are drawn over it.
         // Reserving their band as padding is what keeps a card's last line
         // from ending up behind the pill.
-        paddingBottom: captionZone(style) * s,
+        paddingBottom: bleeds ? 0 : captionZone(style) * s,
       }}
     >
+      {over && (
+        /*
+         * What a panel was doing for free.
+         *
+         * A card written into the shot has to be readable over whatever the
+         * shot happens to be, and a kitchen window behind a guest is white.
+         * A wash rather than a slab: heavy enough at the bottom that ink and
+         * captions hold, gone by the time it reaches the face, so the thing
+         * the overlay was for is still the shot.
+         */
+        <div
+          style={{
+            position: "absolute", left: 0, right: 0, bottom: 0, height: "62%",
+            background: `linear-gradient(to bottom, transparent, `
+              + `color-mix(in oklab, ${colours.surface} 78%, transparent))`,
+          }}
+        />
+      )}
       {withSpeaker && videoSrc && (
-        <div style={{ flex: 1, minHeight: SPEAKER_MIN * s, overflow: "hidden" }}>
+        <div
+          style={{
+            flex: 1, minHeight: SPEAKER_MIN * s, overflow: "hidden",
+            position: "relative",
+          }}
+        >
           <SpeakerBand src={videoSrc} startFrom={startFrom} faceY={faceY} />
+          {/*
+            * Where the footage stops being footage.
+            *
+            * Without this the two halves meet on a hard line, which on a dark
+            * show hides in the dark bottom of the shot and on a light one cuts
+            * a shoulder in half with a white slab. Neither is a decision
+            * anybody made. A short ramp into the surface reads as the card
+            * being laid over the shot on every brand and every room.
+            */}
+          <div
+            style={{
+              position: "absolute", left: 0, right: 0, bottom: 0,
+              height: SEAM * s,
+              background:
+                `linear-gradient(to bottom, transparent, ${colours.surface})`,
+            }}
+          />
         </div>
       )}
       <div
         style={{
-          // Footage runs to both edges. An inset would draw it as a picture
-          // pasted on a card, where the point is a second half of the frame.
-          padding: `${GAP.section * s}px ${(card.kind === "video" ? 0 : 96) * s}px 0`,
+          /*
+           * Wider on the right than on the left, because the app draws its
+           * like, comment and share rail up that side and a bar measured
+           * under it is a bar nobody reads. Footage still runs to both edges:
+           * an inset would draw it as a picture pasted on a card, where the
+           * point is a second half of the frame, and footage losing its outer
+           * ninth to a rail costs nothing a number would not.
+           */
+          padding: bleeds || card.kind === "video"
+            ? `${bleeds ? 0 : GAP.section * s}px 0 0`
+            : `${GAP.section * s}px ${SAFE.right * s}px 0 ${SAFE.left * s}px`,
           display: "flex",
           flexDirection: "column",
           /*
@@ -823,16 +1068,28 @@ export const Cards: React.FC<{
            * reads as a card that failed to load. With a speaker the content
            * belongs low, because the thing above it is a person and the gap
            * between them is what makes the pair read as one shot.
+           *
+           * A file taking the whole frame does neither: it is the frame, so it
+           * stretches rather than sitting anywhere in it.
            */
-          marginTop: "auto",
-          marginBottom: withSpeaker ? undefined : "auto",
+          ...(bleeds
+            ? { position: "absolute", inset: 0 }
+            : {
+              marginTop: "auto",
+              // Written into the shot, a card belongs low for the same reason a
+              // banded one does: the person is above it. Centred, it reads as a
+              // slide someone forgot to take down.
+              marginBottom: withSpeaker || over ? undefined : "auto",
+            }),
         }}
       >
         <CardBody
           card={card}
-          scale={s}
+          scale={s * bodyFit}
           brand={colours}
-          room={bodyRoom(withSpeaker ? room - speakerTakes : room)}
+          room={bodyAvailable}
+          bleed={bleeds}
+          topInset={topInset}
         />
       </div>
     </div>

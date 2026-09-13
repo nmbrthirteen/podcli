@@ -1,3 +1,4 @@
+import { SAFE } from "./types";
 export type Tone = "ink" | "accent" | "muted" | "context";
 
 export type Size = "xs" | "sm" | "md" | "lg" | "xl" | "xxl";
@@ -28,8 +29,15 @@ export type Block =
   | (Common & {
       type: "text";
       text: string;
-      /** Set apart in the card's accent, appended to the text. */
-      emphasis?: string;
+      /**
+       * The words set apart in the card's accent.
+       *
+       * A phrase found inside the text is coloured where it stands, so a
+       * sentence can land on two of them without being rewritten. One that is
+       * not in the text is appended instead, which is what this field used to
+       * mean and what an older plan still sends.
+       */
+      emphasis?: string | string[];
       size?: Size;
       caps?: boolean;
     })
@@ -67,7 +75,7 @@ export const GAP_SIZE: Record<Gap, number> = { tight: 14, group: 36, section: 76
 
 export const MEDIA_HEIGHT = { min: 260, max: 540 };
 
-export const SCENE_WIDTH = 888;
+export const SCENE_WIDTH = 1080 - SAFE.left - SAFE.right;
 
 export const MAX_BLOCKS = 14;
 
@@ -76,6 +84,67 @@ export const MAX_DEPTH = 3;
 const DEFAULT_SIZE: Partial<Record<BlockType, Size>> = {
   text: "sm", quote: "lg", list: "md",
 };
+
+/** A stretch of a line, and whether it is the part being pointed at. */
+export type Run = { text: string; mark: boolean };
+
+/**
+ * A line split into what is set in ink and what is set in the accent.
+ *
+ * Written once because two things ask and they must not disagree: the
+ * renderer, to colour it, and the estimator, to say how tall it is. A phrase
+ * coloured in place costs no extra characters; one appended costs its own
+ * length, and a card measured under one rule and drawn under the other ends
+ * up behind the captions.
+ *
+ * Matching is case-insensitive and first-occurrence. Two phrases that overlap
+ * do not nest: the first one wins and the second is dropped rather than
+ * printed again at the end.
+ */
+export function emphasisRuns(text: string, emphasis?: string | string[]): Run[] {
+  const phrases = (Array.isArray(emphasis) ? emphasis : emphasis ? [emphasis] : [])
+    .map((phrase) => phrase.trim())
+    .filter(Boolean);
+  if (!phrases.length) return [{ text, mark: false }];
+
+  const runs: Run[] = [{ text, mark: false }];
+  const appended: string[] = [];
+
+  for (const phrase of phrases) {
+    let placed = false;
+    for (let i = 0; i < runs.length && !placed; i++) {
+      const run = runs[i]!;
+      if (run.mark) continue;
+      const at = run.text.toLowerCase().indexOf(phrase.toLowerCase());
+      if (at < 0) continue;
+      const before = run.text.slice(0, at);
+      const after = run.text.slice(at + phrase.length);
+      const parts: Run[] = [];
+      if (before) parts.push({ text: before, mark: false });
+      parts.push({ text: run.text.slice(at, at + phrase.length), mark: true });
+      if (after) parts.push({ text: after, mark: false });
+      runs.splice(i, 1, ...parts);
+      placed = true;
+    }
+    /*
+     * Appended only when the line does not contain it at all. A phrase that is
+     * in the line but already sits inside another mark has been said: adding
+     * it to the end as well would print it twice.
+     */
+    if (!placed && !text.toLowerCase().includes(phrase.toLowerCase())) {
+      appended.push(phrase);
+    }
+  }
+
+  for (const phrase of appended) {
+    runs.push({ text: " ", mark: false }, { text: phrase, mark: true });
+  }
+  return runs;
+}
+
+/** What the line comes to once emphasis has been placed or appended. */
+export const emphasised = (text: string, emphasis?: string | string[]): string =>
+  emphasisRuns(text, emphasis).map((run) => run.text).join("");
 
 export const sizeOf = (block: Block): Size =>
   ("size" in block && block.size ? block.size : DEFAULT_SIZE[block.type] ?? "sm");
@@ -124,7 +193,7 @@ export function blockHeight(block: Block, width: number): number {
   switch (block.type) {
     case "text": {
       const size = TYPE_SIZE[sizeOf(block)];
-      const text = block.emphasis ? `${block.text} ${block.emphasis}` : block.text;
+      const text = emphasised(block.text, block.emphasis);
       return lines(text, size, width, block.caps ? CAPS_ADVANCE : ADVANCE) * size * LINE;
     }
     case "quote": {

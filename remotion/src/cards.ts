@@ -20,6 +20,17 @@ interface CardBase {
    * could read at half the height.
    */
   speaker?: null;
+  /**
+   * Whether the card is a surface laid over the shot or ink written on it.
+   *
+   * "panel" is the default and the safe one: an opaque band, legible over any
+   * footage because none of it shows through. "over" keeps the whole shot and
+   * writes into it, which is what an interview channel does when the frame
+   * has room to spare. It costs the guarantee: a card written over a bright
+   * kitchen needs the scrim to do work a panel did for free, so it is a
+   * choice somebody makes about a shot rather than a default.
+   */
+  place?: "panel" | "over";
 }
 
 /**
@@ -42,8 +53,13 @@ export type Card =
       kind: "headline";
       eyebrow?: string;
       lead: string;
-      /** The payload word, set apart from the lead. */
-      emphasis?: string;
+      /**
+       * The payload words, set apart from the lead.
+       *
+       * Coloured where they stand when they are in the lead, appended when
+       * they are not. See the text block for why both.
+       */
+      emphasis?: string | string[];
       sub?: string;
     })
   | (CardBase & { kind: "bullets"; eyebrow?: string; items: string[] })
@@ -110,6 +126,16 @@ export type Card =
        * and is for a photograph, where the edges carry nothing.
        */
       fit?: "fit" | "fill";
+      /**
+       * Whether the file takes the whole frame rather than a band of it.
+       *
+       * Only ever honoured once the card has given up the speaker, because a
+       * cutaway that leaves the person on screen is a smaller picture with
+       * extra steps. A band too short to read falls back to this on its own:
+       * a letterbox slit of a photograph says nothing while still costing the
+       * frame it sits in.
+       */
+      bleed?: boolean;
       caption?: string;
     })
   /**
@@ -139,6 +165,8 @@ export type Card =
       fit?: "fit" | "fill";
       /** Where in the file to start, in seconds. */
       startAt?: number;
+      /** The whole frame rather than the band. See the image card. */
+      bleed?: boolean;
       caption?: string;
     });
 

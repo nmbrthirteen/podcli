@@ -3923,7 +3923,7 @@ def print_help():
     print(f"    {green}-n{reset}, {green}--top{reset} {gray}<N>{reset}            Export top N clips {dim}(default: 5){reset}")
     print(f"    {green}-o{reset}, {green}--output{reset} {gray}<dir>{reset}        Output directory {dim}(default: ./clips){reset}")
     print(f"    {green}-p{reset}, {green}--preset{reset} {gray}<name>{reset}       Load a saved preset")
-    print(f"    {green}--caption-style{reset} {gray}<style>{reset}  branded | hormozi | karaoke | subtle")
+    print(f"    {green}--caption-style{reset} {gray}<style>{reset}  branded | hormozi | karaoke | outline | subtle")
     print(f"    {green}--crop{reset} {gray}<strategy>{reset}       speaker | speaker-hardcut | face | center")
     print(f"    {green}--fast{reset}                 Draft mode: tiny Whisper, heuristic clips, low quality")
     print(f"    {green}--logo{reset} {gray}<asset|path>{reset}     Overlay logo image")
@@ -4470,7 +4470,7 @@ def main():
                       help="Where the thumbnail goes in the video itself. "
                            "off keeps the pictures and leaves the video alone (default: start)")
     proc.add_argument("--template", help="Cut in a saved look (podcli Pro). Name or id.")
-    proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
+    proc.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle", "outline"])
     proc.add_argument("--caption-position", choices=["auto", "upper", "center", "lower"],
                       help="Caption placement (default: follows the chosen style)")
     proc.add_argument("--caption-scale", type=float, choices=[0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4, 1.45, 1.5],
@@ -4563,7 +4563,7 @@ def main():
     studio.add_argument("--language", help="Transcription language (e.g. es). Auto-detect if omitted.")
     studio.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], help="Transcription engine")
     studio.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai. Prefer ASSEMBLYAI_API_KEY; command-line secrets can appear in process listings.")
-    studio.add_argument("--caption-style", choices=["hormozi", "karaoke", "subtle", "branded"], default="hormozi")
+    studio.add_argument("--caption-style", choices=["hormozi", "karaoke", "subtle", "branded", "outline"], default="hormozi")
     studio.add_argument("--caption-position", choices=["auto", "upper", "center", "lower"], default="auto")
     studio.add_argument("--caption-scale", type=float, default=1.0)
     studio.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut", "manual"], default="face")
@@ -4633,7 +4633,7 @@ def main():
     pre_save.add_argument("--video", help="Default video path")
     pre_save.add_argument("--transcript", help="Default transcript path")
     pre_save.add_argument("--output", help="Default output directory")
-    pre_save.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"])
+    pre_save.add_argument("--caption-style", choices=["branded", "hormozi", "karaoke", "subtle", "outline"])
     pre_save.add_argument("--crop", choices=["center", "face", "speaker", "speaker-hardcut"])
     pre_save.add_argument("--logo", help="Logo (asset name or path)")
     pre_save.add_argument("--outro", help="Outro (asset name or path)")
@@ -4787,7 +4787,7 @@ def main():
     clips_edit.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
     clips_edit.add_argument("--title", help="New title")
     clips_edit.add_argument(
-        "--caption-style", choices=["branded", "hormozi", "karaoke", "subtle"], help="New caption style"
+        "--caption-style", choices=["branded", "hormozi", "karaoke", "subtle", "outline"], help="New caption style"
     )
     clips_edit.add_argument("--thumbnail-config", help="Per-clip thumbnail config as a JSON string")
     clips_reopen = clips_sub.add_parser(
@@ -5761,7 +5761,7 @@ def _interactive_presets():
     # Caption style
     caption_style = questionary.select(
         "Caption style:",
-        choices=["branded", "hormozi", "karaoke", "subtle"],
+        choices=["branded", "hormozi", "karaoke", "subtle", "outline"],
         default=config.get("caption_style", "branded"),
         style=qstyle,
     ).ask()

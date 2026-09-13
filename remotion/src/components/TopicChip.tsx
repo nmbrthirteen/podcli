@@ -11,6 +11,14 @@ export interface TopicChipProps {
   color?: string;
   /** Drawn behind the label. Transparent by default, which is the reference look. */
   background?: string;
+  /**
+   * How far off its edge it sits, in unscaled units.
+   *
+   * Passed in rather than fixed, because the logo claims the same corner at
+   * the same inset by default and the two drew through each other. Whoever
+   * knows about both decides; the chip only draws where it is told.
+   */
+  inset?: number;
 }
 
 /**
@@ -29,6 +37,7 @@ export const TopicChip: React.FC<TopicChipProps> = ({
   position = "top-left",
   color = "#FFFFFF",
   background = "transparent",
+  inset = LOGO_INSET,
 }) => {
   const { height } = useVideoConfig();
   const s = captionScale(height);
@@ -42,8 +51,8 @@ export const TopicChip: React.FC<TopicChipProps> = ({
       style={{
         position: "absolute",
         ...(position.startsWith("top-")
-          ? { top: LOGO_INSET * s }
-          : { bottom: LOGO_INSET * s }),
+          ? { top: inset * s }
+          : { bottom: inset * s }),
         ...(position.endsWith("-left")
           ? { left: LOGO_EDGE * s }
           : position.endsWith("-right")
