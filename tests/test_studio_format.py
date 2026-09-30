@@ -85,6 +85,46 @@ class StudioFormatTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--logo-scale") + 1], "1.0")
 
 
+class StudioStyleTests(unittest.TestCase):
+    """`--style` travels to clip_studio.py the same way `--brand` does."""
+
+    def test_style_reaches_the_render_script(self):
+        cmd = _run_studio(_studio_args(style='{"pack": "collage"}'))
+        self.assertIn("--style", cmd)
+        self.assertEqual(cmd[cmd.index("--style") + 1], '{"pack": "collage"}')
+
+    def test_no_style_sends_no_style_flag(self):
+        cmd = _run_studio(_studio_args())
+        self.assertNotIn("--style", cmd)
+
+
+class ClipStudioStyleValidationTests(unittest.TestCase):
+    """clip_studio.py validates --style itself: it is also run standalone."""
+
+    def test_missing_value_is_none(self):
+        import clip_studio
+
+        self.assertIsNone(clip_studio._json_object_arg(None, "--style"))
+
+    def test_a_valid_object_passes_through(self):
+        import clip_studio
+
+        parsed = clip_studio._json_object_arg('{"pack": "collage"}', "--style")
+        self.assertEqual(parsed, {"pack": "collage"})
+
+    def test_malformed_json_exits(self):
+        import clip_studio
+
+        with self.assertRaises(SystemExit):
+            clip_studio._json_object_arg("not json", "--style")
+
+    def test_a_json_array_is_not_an_object(self):
+        import clip_studio
+
+        with self.assertRaises(SystemExit):
+            clip_studio._json_object_arg("[1, 2]", "--style")
+
+
 class StudioCanvasTests(unittest.TestCase):
     """Each stage must be handed the canvas, and it must be the spec's."""
 

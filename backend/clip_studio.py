@@ -161,6 +161,19 @@ def _json_arg(raw, name):
         return None
 
 
+def _json_object_arg(raw, name):
+    """A JSON object argument, or nothing. Malformed or non-object stops the run."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise SystemExit(f"Error: {name} is not valid JSON ({exc})")
+    if not isinstance(parsed, dict):
+        raise SystemExit(f"Error: {name} must be a JSON object")
+    return parsed
+
+
 def _json_file(raw, name):
     """JSON given inline or named as a file, or nothing.
 
@@ -235,7 +248,7 @@ def _face_map_for(video, crop, start, end):
 def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt="vertical",
                      logo=None, name_card=None, motion=None, caption_position="auto",
                      caption_scale=1.0, logo_position="top-left", logo_scale=1.0,
-                     topic=None, progress=None, cards=None, brand=None, font_family=None,
+                     topic=None, progress=None, cards=None, brand=None, theme=None, font_family=None,
                      captions=True, face_map=None, crop_keyframes=None):
     """Render the fragment with face-crop + captions via the existing engine."""
     from services.clip_generator import generate_clip
@@ -249,7 +262,7 @@ def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt=
         face_map=face_map, crop_keyframes=crop_keyframes,
         transcript_words=words, title=title, output_dir=out_dir,
         logo_path=logo, name_card=name_card, motion=motion,
-        topic=topic, progress=progress, cards=cards, brand=brand, font_family=font_family,
+        topic=topic, progress=progress, cards=cards, brand=brand, theme=theme, font_family=font_family,
         captions=captions,
         clean_fillers=True, allow_ass_fallback=True,
         progress_callback=lambda p, m: print(f"    {p}% {m}", flush=True),
@@ -377,6 +390,8 @@ def main():
                     help="On-screen cards as JSON, each with kind/start/end")
     ap.add_argument("--brand", default=None,
                     help='Show colours as JSON: {"accent":"#4C9DF5","ink":"#FFF","surface":"#000"}')
+    ap.add_argument("--style", default=None,
+                    help='Visual theme as JSON: {"pack":"collage","motion":"stop-motion"}')
     ap.add_argument("--font-family", default=None,
                     help="The show's own typeface, ahead of the built-in stack")
     ap.add_argument("--intro", default=None, help="Intro video (asset name or path)")
@@ -396,6 +411,8 @@ def main():
     ap.add_argument("--save-brand", action="store_true",
                     help="Save the given handle/platforms/outro-title/accent/bg as the default brand and exit")
     args = ap.parse_args()
+
+    style_theme = _json_object_arg(args.style, "--style")
 
     # Resolve brand fields: CLI flag > saved brand.json > BRAND_DEFAULTS
     brand = {**BRAND_DEFAULTS, **_load_brand()}
@@ -489,6 +506,7 @@ def main():
         ),
         cards=_json_arg(args.cards, "--cards"),
         brand=_json_arg(args.brand, "--brand"),
+        theme=style_theme,
         font_family=args.font_family,
         captions=not args.no_captions,
         face_map=face_map,

@@ -1,0 +1,9 @@
+These textures are CC0 (public domain), sourced from ambientCG.com and
+reprocessed for use as podcli style-pack overlays.
+
+detail-paper.png                    - ambientCG Paper003, Paper002
+detail-kraft.png                    - ambientCG Paper004, Paper003
+tape-1.png, tape-2.png, tape-3.png  - ambientCG Paper003
+
+Source: https://ambientcg.com
+License: CC0 1.0 Universal (https://creativecommons.org/publicdomain/zero/1.0/)

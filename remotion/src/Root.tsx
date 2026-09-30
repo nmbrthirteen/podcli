@@ -12,13 +12,21 @@ import type { Brand } from "./components/Cards";
 import type { Card } from "./cards";
 import dmSans400 from "@fontsource/dm-sans/files/dm-sans-latin-400-normal.woff2";
 import dmSans700 from "@fontsource/dm-sans/files/dm-sans-latin-700-normal.woff2";
+import playfair700i from "@fontsource/playfair-display/files/playfair-display-latin-700-italic.woff2";
+import playfair900i from "@fontsource/playfair-display/files/playfair-display-latin-900-italic.woff2";
+import barlow600 from "@fontsource/barlow-condensed/files/barlow-condensed-latin-600-normal.woff2";
+import barlow700 from "@fontsource/barlow-condensed/files/barlow-condensed-latin-700-normal.woff2";
+import courier400 from "@fontsource/courier-prime/files/courier-prime-latin-400-normal.woff2";
+import georgian400 from "@fontsource/noto-sans-georgian/files/noto-sans-georgian-georgian-400-normal.woff2";
+import georgian700 from "@fontsource/noto-sans-georgian/files/noto-sans-georgian-georgian-700-normal.woff2";
+import type { ThemeInput } from "./style/theme";
 
 const fontsReady = delayRender("Waiting for DM Sans");
 
-const loadFace = (source: string, weight: string) =>
-  new FontFace("DM Sans", `url(${source})`, {
+const loadFace = (source: string, weight: string, family = "DM Sans", style = "normal") =>
+  new FontFace(family, `url(${source})`, {
     weight,
-    style: "normal",
+    style,
     display: "swap",
   })
     .load()
@@ -26,7 +34,17 @@ const loadFace = (source: string, weight: string) =>
       document.fonts.add(face);
     });
 
-Promise.all([loadFace(dmSans400 as string, "400"), loadFace(dmSans700 as string, "700")])
+Promise.all([
+  loadFace(dmSans400 as string, "400"),
+  loadFace(dmSans700 as string, "700"),
+  loadFace(playfair700i as string, "700", "Playfair Display", "italic"),
+  loadFace(playfair900i as string, "900", "Playfair Display", "italic"),
+  loadFace(barlow600 as string, "600", "Barlow Condensed"),
+  loadFace(barlow700 as string, "700", "Barlow Condensed"),
+  loadFace(courier400 as string, "400", "Courier Prime"),
+  loadFace(georgian400 as string, "400", "Noto Sans Georgian"),
+  loadFace(georgian700 as string, "700", "Noto Sans Georgian"),
+])
   .then(() => continueRender(fontsReady))
   .catch((err) => {
     console.warn("DM Sans failed to load, falling back:", err);
@@ -82,6 +100,7 @@ const inputProps = getInputProps() as {
   brand?: Brand | null;
   /** The show's own face, ahead of the stack that covers what it cannot draw. */
   fontFamily?: string | null;
+  theme?: ThemeInput | null;
 };
 
 export const RemotionRoot: React.FC = () => {
@@ -127,6 +146,7 @@ export const RemotionRoot: React.FC = () => {
           progress: inputProps.progress ?? null,
           cards: inputProps.cards ?? null,
           brand: inputProps.brand ?? null,
+          theme: inputProps.theme ?? null,
         }}
       />
       <Composition

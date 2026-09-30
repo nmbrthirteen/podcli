@@ -213,6 +213,20 @@ class ClipGeneratorTests(unittest.TestCase):
         payload = json.loads(argv[argv.index("--motion") + 1])
         self.assertEqual(payload["captions"]["enter"], "pop")
 
+    def test_theme_reaches_the_renderer_as_one_value(self):
+        argv = self._render_args(
+            caption_style="subtle",
+            theme={"pack": "collage", "motion": "stop-motion"},
+        )
+        self.assertIn("--theme", argv)
+        payload = json.loads(argv[argv.index("--theme") + 1])
+        self.assertEqual(payload["pack"], "collage")
+        self.assertEqual(payload["motion"], "stop-motion")
+
+    def test_no_theme_sends_no_theme_flag(self):
+        argv = self._render_args(caption_style="subtle")
+        self.assertNotIn("--theme", argv)
+
     def test_layout_values_reach_remotion_unchanged(self):
         argv = self._render_args(
             caption_style="branded", caption_position="center", caption_font_scale=125,
@@ -358,6 +372,23 @@ class ClipGeneratorTests(unittest.TestCase):
         self.assertEqual(detect_mock.call_count, 2)
         self.assertEqual(replace_mock.call_count, 2)
 
+
+    def test_auto_fix_transition_jumps_leaves_designed_cuts_sharp(self):
+        with mock.patch.object(cg, "_get_media_duration", return_value=40.0), \
+             mock.patch.object(cg, "_detect_scene_cuts", return_value=[10.0, 10.6, 38.8]), \
+             mock.patch.object(cg, "_apply_local_transition_smoothing", return_value=True) as smooth_mock, \
+             mock.patch.object(cg.os, "replace"):
+            fixed = cg._auto_fix_transition_jumps(
+                "/tmp/fake.mp4", max_passes=1, designed=[10.1, 10.5, 38.9],
+            )
+
+        self.assertFalse(fixed)
+        smooth_mock.assert_not_called()
+
+    def test_designed_cuts_come_from_card_windows(self):
+        cards = [{"kind": "stat", "start": 4, "end": 9.5}, {"kind": "quote", "start": 12.0, "end": True}, "junk"]
+        self.assertEqual(cg._designed_cuts(cards), [4.0, 9.5, 12.0])
+        self.assertEqual(cg._designed_cuts(None), [])
 
 
 class TransitionAutofixGatingTests(unittest.TestCase):

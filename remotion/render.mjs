@@ -16,6 +16,7 @@
  *     [--progress] [--progress-color '#3B9CFF'] \
  *     [--cards '[{"kind":"stat","start":2,"end":6,"value":"70%"}]'] \
  *     [--brand '{"accent":"#4C9DF5","ink":"#FFFFFF","surface":"#0A0D14"}'] \
+ *     [--theme '{"pack":"collage","motion":"stop-motion"}'] \
  *     [--font-family "Inter"] \
  *     [--fps 30]
  *
@@ -255,6 +256,7 @@ async function main() {
 
   const cards = json("cards");
   const brand = json("brand");
+  const theme = json("theme");
   const topic = opts.topic
     ? {
         label: opts.topic,
@@ -285,6 +287,7 @@ async function main() {
     progress,
     cards: Array.isArray(cards) ? cards : null,
     brand: brand && typeof brand === "object" ? brand : null,
+    theme: theme && typeof theme === "object" && !Array.isArray(theme) ? theme : null,
     fontFamily: opts["font-family"] || null,
   };
 

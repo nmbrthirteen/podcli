@@ -3,7 +3,11 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@fontsource/barlow-condensed": "5.3.0",
+    "@fontsource/courier-prime": "5.3.0",
     "@fontsource/dm-sans": "5.2.8",
+    "@fontsource/noto-sans-georgian": "5.3.0",
+    "@fontsource/playfair-display": "5.3.0",
     "@remotion/bundler": "4.0.488",
     "@remotion/renderer": "4.0.488",
     "react": "19.2.7",

@@ -119,3 +119,23 @@ class ExplicitClipBoundsTests(unittest.TestCase):
         config = {**DEFAULT_PRESET, "format": "horizontal"}
         bounds = ClipBounds.of(config["format"], *cli_mod._explicit_clip_bounds(config))
         self.assertEqual((bounds.dur_min, bounds.dur_max), (60, 300))
+
+
+class JsonObjectArgTests(unittest.TestCase):
+    """`--style` is validated up front: malformed input stops the run rather
+    than rendering with a theme nobody asked for."""
+
+    def test_missing_value_is_none(self):
+        self.assertIsNone(cli_mod._json_object_arg(None, "--style"))
+
+    def test_a_valid_object_passes_through(self):
+        parsed = cli_mod._json_object_arg('{"pack": "collage"}', "--style")
+        self.assertEqual(parsed, {"pack": "collage"})
+
+    def test_malformed_json_exits(self):
+        with self.assertRaises(SystemExit):
+            cli_mod._json_object_arg("not json", "--style")
+
+    def test_a_json_array_is_not_an_object(self):
+        with self.assertRaises(SystemExit):
+            cli_mod._json_object_arg("[1, 2]", "--style")

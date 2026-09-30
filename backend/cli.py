@@ -105,6 +105,25 @@ def _json_file_arg(raw: str | None, name: str):
         return None
 
 
+def _json_object_arg(raw: str | None, name: str):
+    """A JSON object argument, or nothing. Malformed or non-object stops the run.
+
+    Unlike `_json_file_arg`, this one refuses rather than warns: a style theme
+    silently ignored would render with the wrong look and nothing to say why.
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        print(f"Error: {name} is not valid JSON ({exc})", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(parsed, dict):
+        print(f"Error: {name} must be a JSON object", file=sys.stderr)
+        sys.exit(1)
+    return parsed
+
+
 def _cached_face_map(video_path: str):
     """Face maps are keyed by video content, not by transcript, so an imported
     transcript can still borrow the map from an earlier run on the same file."""
@@ -538,6 +557,8 @@ def cmd_studio(args):
         cmd += ["--cards", args.cards]
     if getattr(args, "brand", None):
         cmd += ["--brand", args.brand]
+    if getattr(args, "style", None):
+        cmd += ["--style", args.style]
     if getattr(args, "font_family", None):
         cmd += ["--font-family", args.font_family]
     if args.outro_title is not None:
@@ -759,6 +780,8 @@ def cmd_process(args):
         except (ValueError, TypeError):
             print("  Warning: --brand is not valid JSON; using the default colours",
                   file=sys.stderr)
+    if getattr(args, "style", None):
+        config["style"] = _json_object_arg(args.style, "--style")
     if getattr(args, "font_family", None):
         config["font_family"] = args.font_family
     if getattr(args, "no_outro", False):
@@ -1312,6 +1335,7 @@ def cmd_process(args):
                         topic=config.get("topic"),
                         progress=config.get("progress"),
                         brand=config.get("brand"),
+                        theme=config.get("style"),
                         font_family=config.get("font_family"),
                         crop_strategy=config.get("crop_strategy", "face"),
                         format=config.get("format", "vertical"),
@@ -1541,6 +1565,7 @@ def cmd_process(args):
                                 topic=config.get("topic"),
                                 progress=config.get("progress"),
                                 brand=config.get("brand"),
+                                theme=config.get("style"),
                                 font_family=config.get("font_family"),
                                 crop_strategy=config.get("crop_strategy", "face"),
                                 format=config.get("format", "vertical"),
@@ -4499,6 +4524,8 @@ def main():
                       help="Colour of the progress bar, e.g. '#3B9CFF'")
     proc.add_argument("--brand", help="Show colours as JSON: "
                                       '{"accent":"#4C9DF5","ink":"#FFFFFF","surface":"#0A0D14"}')
+    proc.add_argument("--style", help='Visual theme as JSON: '
+                                      '{"pack":"collage","motion":"stop-motion"}')
     proc.add_argument("--font-family", dest="font_family",
                       help="The show's own typeface, ahead of the built-in stack")
     proc.add_argument("--outro", help="Outro video (asset name or path)")
@@ -4590,6 +4617,8 @@ def main():
     studio.add_argument("--cards", help="On-screen cards as JSON, each with kind/start/end")
     studio.add_argument("--brand", help="Show colours as JSON: "
                                         '{"accent":"#4C9DF5","ink":"#FFFFFF","surface":"#0A0D14"}')
+    studio.add_argument("--style", help='Visual theme as JSON: '
+                                        '{"pack":"collage","motion":"stop-motion"}')
     studio.add_argument("--font-family", dest="font_family",
                         help="The show's own typeface, ahead of the built-in stack")
     studio.add_argument("--intro", help="Intro video (asset name or path)")

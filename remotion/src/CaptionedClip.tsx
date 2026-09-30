@@ -21,6 +21,10 @@ import {
   brandCaptions, captionZone, LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET, safeFor,
 } from "./types";
 import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "./types";
+import { resolveTheme } from "./style/theme";
+import { withDefaultTextures } from "./style/textures";
+import type { ThemeInput } from "./style/theme";
+import { StyledCaptions, StyledCards, StyledNameCard } from "./style/styled";
 
 export interface CaptionedClipProps {
   videoSrc: string;
@@ -49,6 +53,7 @@ export interface CaptionedClipProps {
   brand?: Brand | null;
   /** Per-part overrides; each part falls back to its style's own motion. */
   motion?: { captions?: Partial<Motion>; nameCard?: Partial<Motion> } | null;
+  theme?: ThemeInput | null;
 }
 
 export const CaptionedClip: React.FC<CaptionedClipProps> = ({
@@ -70,7 +75,9 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   startFrom = 0,
   brand,
   motion,
+  theme: themeInput,
 }) => {
+  const theme = resolveTheme(withDefaultTextures(themeInput ?? null));
   const { fps, height, width } = useVideoConfig();
   const SAFE = safeFor(width, height);
   const frame = useCurrentFrame();
@@ -175,7 +182,10 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   return (
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
       {/* First, so everything below stays up while a card holds the frame. */}
-      {cards && cards.length > 0 && pastNameCard && (
+      {theme && cards && cards.length > 0 && pastNameCard && (
+        <StyledCards cards={cards} theme={theme} />
+      )}
+      {!theme && cards && cards.length > 0 && pastNameCard && (
         <Cards
           cards={cards}
           videoSrc={videoSrc}
@@ -188,7 +198,9 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
         />
       )}
       <Watermark src={logoSrc} height={height} position={logoPosition} scale={logoScale} />
-      {style.name === "branded" ? (
+      {theme ? (
+        <StyledCaptions theme={theme} words={words} style={captionStyle} />
+      ) : style.name === "branded" ? (
         <BrandedCaptions words={words} style={captionStyle} faceY={faceY}
           captionPosition={captionPosition} hasLogo={Boolean(logoSrc)}
           logoPosition={logoPosition} singleLine={singleLine} />
@@ -196,7 +208,16 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
         <CaptionComponent words={words} style={captionStyle} motion={captionMotion}
           singleLine={singleLine} />
       )}
-      {nameCard?.title && (
+      {theme && nameCard?.title && (
+        <StyledNameCard
+          theme={theme}
+          title={nameCard.title}
+          subtitle={nameCard.subtitle}
+          seconds={nameCardSeconds}
+          bottom={(style.marginBottom + 150) * (height / 1920)}
+        />
+      )}
+      {!theme && nameCard?.title && (
         <NameCard
           {...nameCard}
           bottom={nameCard.bottom ?? captionZone(captionStyle) + 24}

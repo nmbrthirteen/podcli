@@ -316,7 +316,24 @@ def _render_transition_autofix_passes(
     )
 
 
-def _auto_fix_transition_jumps(video_path: str, max_passes: int = 1) -> bool:
+DESIGNED_CUT_TOLERANCE = 0.3
+
+
+def _designed_cuts(cards: Optional[list]) -> list[float]:
+    times: list[float] = []
+    for card in cards or []:
+        if not isinstance(card, dict):
+            continue
+        for key in ("start", "end"):
+            value = card.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                times.append(float(value))
+    return times
+
+
+def _auto_fix_transition_jumps(
+    video_path: str, max_passes: int = 1, designed: Optional[list[float]] = None,
+) -> bool:
     """
     Bounded auto-fix for jumpy transitions. Never loops indefinitely.
     Returns True if at least one fix pass succeeded.
@@ -329,7 +346,10 @@ def _auto_fix_transition_jumps(video_path: str, max_passes: int = 1) -> bool:
     for i in range(max_passes):
         duration = _get_media_duration(current)
         scene_threshold = 0.22 if i == 0 else 0.18
-        cuts = _detect_scene_cuts(current, threshold=scene_threshold)
+        cuts = [
+            t for t in _detect_scene_cuts(current, threshold=scene_threshold)
+            if all(abs(t - d) > DESIGNED_CUT_TOLERANCE for d in designed or [])
+        ]
         problematic = _select_problematic_scene_cuts(cuts, duration)
         if not problematic:
             break
@@ -599,6 +619,7 @@ def _render_with_remotion(
     cards: Optional[list] = None,
     brand: Optional[dict] = None,
     font_family: Optional[str] = None,
+    theme: Optional[dict] = None,
     captions: bool = True,
 ) -> tuple[bool, Optional[str]]:
     """
@@ -766,6 +787,8 @@ def _render_with_remotion(
             cmd.extend(["--brand", json.dumps(brand)])
         if font_family:
             cmd.extend(["--font-family", str(font_family)])
+        if theme:
+            cmd.extend(["--theme", json.dumps(theme)])
         if keep_caption_overlay:
             cmd.append("--keep-overlay")
 
@@ -846,6 +869,7 @@ def generate_clip(
     cards: Optional[list] = None,
     brand: Optional[dict] = None,
     font_family: Optional[str] = None,
+    theme: Optional[dict] = None,
     captions: bool = True,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
@@ -1113,7 +1137,7 @@ def generate_clip(
         # screen at all", and a clip that had cards to draw ran the pass and
         # burned the default caption style over a file that had asked for none.
         wants_overlay = bool(
-            logo_path or topic or progress or cards
+            logo_path or topic or progress or cards or theme
             or (name_card and name_card.get("title"))
         )
         if not captions and wants_overlay:
@@ -1184,6 +1208,7 @@ def generate_clip(
                         cards=cards,
                         brand=brand,
                         font_family=font_family,
+                        theme=theme,
                         captions=captions,
                     )
 
@@ -1318,7 +1343,9 @@ def generate_clip(
         if max_autofix_passes > 0:
             if progress_callback:
                 progress_callback(97, "Quality gate: checking transitions...")
-            _auto_fix_transition_jumps(final_path, max_passes=max_autofix_passes)
+            _auto_fix_transition_jumps(
+                final_path, max_passes=max_autofix_passes, designed=_designed_cuts(cards),
+            )
 
         # Get file size
         file_size = os.path.getsize(final_path)

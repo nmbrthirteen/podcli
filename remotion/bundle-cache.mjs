@@ -20,6 +20,7 @@ const LOCK_DIR = `${CACHE_DIR}.lock`;
 const LOCK_STALE_MS = 5 * 60 * 1000;
 const LOCK_HEARTBEAT_MS = Math.floor(LOCK_STALE_MS / 3);
 const ENTRY_POINT = path.join(__dirname, "src", "index.ts");
+const PUBLIC_DIR = path.join(__dirname, "public");
 
 /**
  * A bundle is a product of the compositions, the webpack config, and the
@@ -39,7 +40,9 @@ function currentHash() {
   }
 
   walk(path.join(__dirname, "src"));
+  if (fs.existsSync(PUBLIC_DIR)) walk(PUBLIC_DIR);
   hash.update(fs.readFileSync(path.join(__dirname, "webpack-override.mjs")));
+  hash.update(fs.readFileSync(fileURLToPath(import.meta.url)));
   hash.update(`remotion@${require("remotion/package.json").version}`);
   hash.update(`@remotion/bundler@${require("@remotion/bundler/package.json").version}`);
   return hash.digest("hex");
@@ -148,6 +151,7 @@ export async function getCachedBundle({ onBundle } = {}) {
       await bundle({
         entryPoint: ENTRY_POINT,
         outDir: staging,
+        publicDir: PUBLIC_DIR,
         webpackOverride,
       });
       if (!ownsLock(lock)) {
