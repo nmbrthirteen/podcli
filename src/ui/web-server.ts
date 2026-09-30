@@ -98,7 +98,7 @@ function safePath(base: string, filename: string): string | null {
 // Track active jobs so the UI can poll progress
 interface JobState {
   id: string;
-  type: "transcribe" | "create_clip" | "batch_clips" | "download_video" | "full_episode" | "silence_analysis" | "silence_render";
+  type: "transcribe" | "create_clip" | "batch_clips" | "download_video" | "full_episode" | "silence_analysis" | "silence_render" | "multicam";
   status: "pending" | "running" | "done" | "error";
   progress: number;
   message: string;
@@ -838,11 +838,47 @@ app.post("/api/select-file", (req, res) => {
   });
 });
 
+/** Native folder dialog; returns the chosen directory, or null when cancelled. */
+function pickFolder(): string | null {
+  const prompt = "Choose the folder with this episode's recordings";
+  try {
+    let raw: string;
+    if (process.platform === "darwin") {
+      raw = execFileSync("osascript", ["-e", `POSIX path of (choose folder with prompt "${prompt}")`], {
+        encoding: "utf-8",
+        timeout: 120_000,
+      });
+    } else if (process.platform === "win32") {
+      const ps = [
+        "Add-Type -AssemblyName System.Windows.Forms;",
+        "$f = New-Object System.Windows.Forms.FolderBrowserDialog;",
+        `$f.Description = '${prompt.replace(/'/g, "''")}';`,
+        "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $f.SelectedPath }",
+      ].join(" ");
+      raw = execSync(`powershell -NoProfile -STA -EncodedCommand ${Buffer.from(ps, "utf16le").toString("base64")}`, {
+        encoding: "utf-8",
+        timeout: 120_000,
+      });
+    } else {
+      raw = execFileSync("zenity", ["--file-selection", "--directory"], { encoding: "utf-8", timeout: 120_000 });
+    }
+    const folder = raw.trim();
+    return folder && existsSync(folder) && statSync(folder).isDirectory() ? folder : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * GET /api/browse-file — Open native OS file dialog and return the selected path
  */
 app.get("/api/browse-file", (req, res) => {
   const multiple = req.query.multiple === "1" || req.query.multiple === "true";
+  if (req.query.folder === "1") {
+    const folder = pickFolder();
+    res.json(folder ? { folder } : { error: "cancelled" });
+    return;
+  }
   try {
     let raw: string;
     if (process.platform === "darwin") {
@@ -1980,6 +2016,11 @@ app.get("/api/stream-source", (req, res) => {
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
     ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".aif": "audio/aiff",
+    ".aiff": "audio/aiff",
+    ".mts": "video/mp2t",
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -2195,6 +2236,122 @@ app.get("/api/reel-download", (req, res) => {
     return;
   }
   if (extname(resolved).toLowerCase() !== ".mp4" || !allowedSourcePaths.has(resolved)) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+  res.download(resolved);
+});
+
+// --- Multicam: map sources, sync, cut, render one recording ---
+const MULTICAM_JOB_ACTIONS = new Set(["sync", "plan", "render"]);
+const MULTICAM_WRITE_ACTIONS = new Set(["map", "cut", "export", "delete", ...MULTICAM_JOB_ACTIONS]);
+const multicamPreviewDir = join(paths.working, "multicam");
+// A multi-hour, multi-camera render outlasts the default one-hour task limit.
+const multicamExecutor = new PythonExecutor(8 * 3600_000);
+// A job holds its session for minutes to hours and saves it when done; any
+// other write in between would be overwritten, so writes wait their turn.
+const multicamRunning = new Map<string, { id: string; action: string }>();
+
+type MulticamPayload = {
+  session_id?: string;
+  sources?: Array<{ path?: string }>;
+  outputs?: { video?: string };
+  active_job?: { id: string; action: string };
+};
+
+// Camera and mic files become streamable for the review player, but only the
+// finished episode joins the recent-sources list the other pages offer.
+function allowMulticamPaths(data: MulticamPayload | undefined): void {
+  for (const s of data?.sources || []) {
+    try {
+      if (s.path) allowedSourcePaths.add(realpathSync(path.resolve(s.path)));
+    } catch {}
+  }
+  if (data?.outputs?.video) registerSourcePath(data.outputs.video);
+}
+
+function withActiveJob(data: MulticamPayload | undefined): MulticamPayload {
+  const running = data?.session_id ? multicamRunning.get(data.session_id) : undefined;
+  return running ? { ...data, active_job: running } : data || {};
+}
+
+app.post("/api/multicam", async (req, res) => {
+  const body = req.body || {};
+  const action = String(body.action || "show");
+  const sessionId = typeof body.session_id === "string" ? body.session_id : "";
+  const running = multicamRunning.get(sessionId);
+  if (running && MULTICAM_WRITE_ACTIONS.has(action)) {
+    res.status(409).json({ error: `This edit is busy (${running.action}). Wait for it to finish, then try again.` });
+    return;
+  }
+
+  if (!MULTICAM_JOB_ACTIONS.has(action)) {
+    try {
+      const result = await executor.execute<MulticamPayload>("manage_multicam", body);
+      allowMulticamPaths(result.data);
+      res.json(withActiveJob(result.data));
+    } catch (err) {
+      res.status(400).json({ error: errMsg(err) });
+    }
+    return;
+  }
+
+  const jobId = uuidv4();
+  const job: JobState = {
+    id: jobId,
+    type: "multicam",
+    status: "running",
+    progress: 0,
+    message: "Starting...",
+    createdAt: Date.now(),
+  };
+  jobs.set(jobId, job);
+  multicamRunning.set(sessionId, { id: jobId, action });
+  res.json({ job_id: jobId, status: "running" });
+
+  multicamExecutor.execute<MulticamPayload>("manage_multicam", body, (event) => {
+    job.progress = event.percent;
+    job.message = event.message;
+  }).then((result) => {
+    allowMulticamPaths(result.data);
+    job.status = "done";
+    job.progress = 100;
+    job.message = "Done";
+    job.result = result.data;
+  }).catch((err) => {
+    job.status = "error";
+    job.error = err.message;
+    job.message = `Error: ${err.message}`;
+  }).finally(() => {
+    multicamRunning.delete(sessionId);
+  });
+});
+
+app.get("/api/multicam/image", (req, res) => {
+  // Python reports resolved paths (/private/tmp on macOS), so compare real paths on both sides.
+  let resolved: string | null = null;
+  try {
+    const root = realpathSync(multicamPreviewDir);
+    resolved = safePath(root, path.relative(root, realpathSync(String(req.query.path || ""))));
+  } catch {}
+  if (!resolved || extname(resolved).toLowerCase() !== ".jpg") {
+    res.status(404).json({ error: "Preview not found" });
+    return;
+  }
+  res.sendFile(resolved);
+});
+
+// Downloads are limited to what a multicam render or export wrote, so this
+// route can't turn a path registered elsewhere into a readable file.
+app.get("/api/multicam/file", (req, res) => {
+  let resolved: string | null = null;
+  try {
+    const root = realpathSync(paths.output);
+    const real = realpathSync(String(req.query.path || ""));
+    const inside = safePath(root, path.relative(root, real));
+    if (inside && path.basename(path.dirname(inside)).endsWith("_multicam_podcli")) resolved = inside;
+  } catch {}
+  if (!resolved || ![".mp4", ".xml", ".fcpxml", ".wav"].includes(extname(resolved).toLowerCase())) {
     res.status(403).json({ error: "Access denied" });
     return;
   }

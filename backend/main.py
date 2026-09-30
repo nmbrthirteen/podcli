@@ -963,6 +963,74 @@ def handle_render_silence_removed(task_id: str, params: dict):
         emit_result(task_id, "error", error=str(e))
 
 
+MULTICAM_MAP_KEYS = ("people", "sources", "range_start", "range_end", "cut_settings", "speaker_map", "look")
+
+
+def handle_manage_multicam(task_id: str, params: dict):
+    """Multicam podcast editing: map sources, sync, plan cuts, render, export.
+
+    Actions: new (folder or files, people), list, show, map, sync, plan, cut
+    (swap one shot's camera), previews, render, export (premiere|fcpxml), delete.
+    sync, plan and render apply any mapping fields sent with them first.
+    """
+    from services import multicam as mc
+
+    action = params.get("action", "show")
+
+    def progress(stage):
+        return lambda p, m: emit_progress(task_id, stage, p, m)
+
+    try:
+        if action == "list":
+            emit_result(task_id, "success", data={"sessions": mc.list_sessions()})
+            return
+        if action == "new":
+            session = mc.new_session(
+                folder=str(params.get("folder") or ""),
+                files=params.get("files"),
+                people=params.get("people"),
+                name=str(params.get("name") or ""),
+                progress_callback=progress("scanning"),
+            )
+            emit_result(task_id, "success", data=mc.payload(session))
+            return
+
+        session_id = params.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("session_id is required. Get one from action 'new' or 'list'.")
+        if action == "delete":
+            mc.delete_session(session_id)
+            emit_result(task_id, "success", data={"deleted": True, "session_id": session_id})
+            return
+
+        session = mc.MulticamSession.load(session_id)
+        if action in ("map", "sync", "plan", "render") and any(k in params for k in MULTICAM_MAP_KEYS):
+            session = mc.update_mapping(session, params)
+        data: dict = {}
+        if action in ("show", "map"):
+            pass
+        elif action == "sync":
+            session = mc.sync_session(session, force=bool(params.get("force")), progress_callback=progress("syncing"))
+        elif action == "plan":
+            session = mc.plan_session(session, progress_callback=progress("planning"))
+        elif action == "cut":
+            index, source_id = params.get("index"), params.get("source_id")
+            if not isinstance(index, int) or not isinstance(source_id, str):
+                raise ValueError("cut needs index (0-based shot number) and source_id (a camera's id)")
+            session = mc.set_cut(session, index, source_id)
+        elif action == "previews":
+            data["previews"] = mc.previews(session, looks=bool(params.get("looks")), at=params.get("at"))
+        elif action == "render":
+            mc.render_session(session, stems=params.get("stems", True), progress_callback=progress("rendering"))
+        elif action == "export":
+            data["export_path"] = mc.export_xml(session, params.get("format", "premiere"))
+        else:
+            raise ValueError(f"Unknown multicam action {action!r}")
+        emit_result(task_id, "success", data={**mc.payload(session), **data})
+    except (IndexError, ValueError, OSError, RuntimeError, ImportError, TypeError, AttributeError) as e:
+        emit_result(task_id, "error", error=str(e))
+
+
 def handle_run_integration_tool(task_id: str, params: dict):
     from services.integrations import IntegrationRegistry, IntegrationsManager
 
@@ -1022,6 +1090,7 @@ TASK_HANDLERS = {
     "manage_config": handle_manage_config,
     "analyze_silence": handle_analyze_silence,
     "render_silence_removed": handle_render_silence_removed,
+    "manage_multicam": handle_manage_multicam,
 }
 
 

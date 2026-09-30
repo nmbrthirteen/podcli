@@ -2221,6 +2221,95 @@ export function createServer(): McpServer {
   );
 
   // =============================================
+  // Tool: manage_multicam
+  // =============================================
+  server.tool(
+    "manage_multicam",
+    "Edit a full multicam podcast episode: map every camera and mic file to a person, sync them by audio (with clock-drift correction), " +
+      "auto-cut cameras to whoever is speaking, then render an MP4 or export a Premiere XML / FCPXML timeline that points at the original files. " +
+      "Flow: 'new' (folder or files, people) → check the guessed mapping with 'show' and fix it with 'map' → 'sync' → 'plan' → 'render' or 'export'. " +
+      "'new' returns the session with guessed roles; calling it again on the same files reopens that edit. " +
+      "'sync', 'plan' and 'render' start a background job and return job_id: poll job_status, then call 'show'. " +
+      "Mapping fields (people, sources, range_start, range_end, cut_settings, speaker_map, look) apply on 'map', 'sync', 'plan' and 'render'. " +
+      "Changing who is in a file or where it sits clears the cut, so run 'plan' again. 'render' skips work when nothing changed. " +
+      "Other actions: 'list', 'cut' (index, source_id: swap one shot's camera), 'previews' (still frames per camera, looks: true adds color-look stills), 'delete'.",
+    {
+      action: z
+        .enum(["new", "list", "show", "map", "sync", "plan", "cut", "previews", "render", "export", "delete"])
+        .describe("What to do"),
+      session_id: z.string().optional().describe("Session id returned by 'new' (every action except new/list)"),
+      folder: z.string().optional().describe("For 'new': folder holding one episode's recordings, scanned recursively"),
+      files: z.array(z.string()).optional().describe("For 'new': explicit media file paths, alone or with folder"),
+      people: z
+        .array(z.union([z.string(), z.object({ id: z.string().optional(), name: z.string() })]))
+        .optional()
+        .describe("For 'new': speaker names (default Host, Guest). For 'map': the full people list, with ids to keep"),
+      name: z.string().optional().describe("For 'new': episode name"),
+      sources: z
+        .array(
+          z.object({
+            id: z.string(),
+            role: z.enum(["camera", "mic", "ignore"]).optional(),
+            person: z.string().optional().describe("Camera: a person id or 'wide'. Mic: a person id, or '' for a shared room mic"),
+            channel_people: z.array(z.string()).optional().describe("Mic: one person id per channel when a recorder puts two people on L/R"),
+            offset: z.number().optional().describe("Timeline seconds where this file starts, to override sync"),
+            nudge: z.number().optional().describe("Seconds to shift the synced offset by"),
+          }),
+        )
+        .optional()
+        .describe("Per-source corrections. An offset set here survives later syncs unless force is true"),
+      range_start: z.number().nullable().optional().describe("For 'map'/'plan': episode start on the timeline, null for automatic"),
+      range_end: z.number().nullable().optional().describe("For 'map'/'plan': episode end on the timeline, null for automatic"),
+      cut_settings: z
+        .object({
+          min_shot: z.number().optional().describe("Shortest shot in seconds (default 2)"),
+          max_shot: z.number().optional().describe("Break a longer single-speaker shot with a wide shot; 0 disables (default 30)"),
+          wide_insert: z.number().optional().describe("Length of that wide shot in seconds (default 4)"),
+        })
+        .optional(),
+      speaker_map: z.record(z.string(), z.string()).optional().describe("For shared-audio shows: diarization label → person id"),
+      look: z.enum(["none", "natural", "warm", "contrast"]).optional().describe("Color look used by 'render'"),
+      force: z.boolean().optional().describe("For 'sync': also re-measure offsets that were set by hand"),
+      stems: z.boolean().optional().describe("For 'render': also write one WAV per person (default true)"),
+      format: z.enum(["premiere", "fcpxml"]).optional().describe("For 'export': premiere (FCP7 XML, also opens in Resolve) or fcpxml (Final Cut Pro, Resolve)"),
+      index: z.number().int().min(0).optional().describe("For 'cut': 0-based shot index"),
+      source_id: z.string().optional().describe("For 'cut': camera source id to use for that shot"),
+      looks: z.boolean().optional().describe("For 'previews': include one still per color look"),
+    },
+    async (params) => {
+      try {
+        const res = await fetch(`${webServerUrl}/api/multicam`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+        });
+        const data = (await res.json()) as ApiError & Record<string, unknown>;
+        if (data.error) {
+          return {
+            content: [{ type: "text" as const, text: `Error: ${data.error}` }],
+            isError: true,
+          };
+        }
+        const text = typeof data.job_id === "string"
+          ? withNextStep(
+              JSON.stringify(data, null, 2),
+              `Poll job_status("${data.job_id}", wait_seconds: 30) until done, then manage_multicam(action: "show", session_id) to read the result.`,
+            )
+          : JSON.stringify(data, null, 2);
+        return { content: [{ type: "text" as const, text }] };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
+          return {
+            content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }],
+          };
+        }
+        return mcpError(err);
+      }
+    },
+  );
+
+  // =============================================
   // Tool: set_video
   // =============================================
   server.tool(

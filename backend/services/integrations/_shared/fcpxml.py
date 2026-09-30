@@ -1,7 +1,6 @@
 """FCPXML 1.10 primitives shared by FCPXML-consuming editors (Resolve, FCP, Premiere)."""
 from __future__ import annotations
 
-import urllib.parse
 import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
@@ -45,7 +44,8 @@ def rational_time(frames: int, fps: float) -> str:
 
 
 def file_uri(p: Path) -> str:
-    return "file://" + urllib.parse.quote(str(p.resolve()))
+    # as_uri handles Windows drive letters and backslashes (file:///C:/...).
+    return p.resolve().as_uri()
 
 
 def make_format(format_id: str, fps: float, width: int, height: int) -> ET.Element:
@@ -71,11 +71,12 @@ def make_asset(
     has_video: bool = True,
     has_audio: bool = False,
     audio_channels: int = 0,
+    start: str = "0s",
 ) -> ET.Element:
     attrs = {
         "id": asset_id,
         "name": name,
-        "start": "0s",
+        "start": start,
         "duration": rational_time(frames, fps),
         "hasVideo": "1" if has_video else "0",
         "format": format_id,

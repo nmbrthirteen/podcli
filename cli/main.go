@@ -83,7 +83,7 @@ func wantsRuntime(args []string) bool {
 		return true
 	}
 	switch args[0] {
-	case "process", "transcribe", "studio", "auto", "ui", "webui":
+	case "process", "transcribe", "studio", "multicam", "auto", "ui", "webui":
 		return true
 	}
 	return false
@@ -768,6 +768,7 @@ Engine commands (routed to the processing backend):
   process <video>      Transcribe a video and export short-form clips
   ui                   Open the Studio web dashboard (http://localhost:3847)
   studio <video>       Cut a fragment + intro/outro bookends
+  multicam <folder>    Sync every camera and mic, auto-cut to the speaker, render the episode
   clips                Browse and edit saved clips
   thumbnails           Generate thumbnails
   knowledge | presets | assets | youtube | config | cache | info
