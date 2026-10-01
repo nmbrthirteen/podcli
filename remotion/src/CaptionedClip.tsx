@@ -12,10 +12,9 @@ import type { TopicChipProps } from "./components/TopicChip";
 import { ProgressBar } from "./components/ProgressBar";
 import type { ProgressBarProps } from "./components/ProgressBar";
 import { Cards } from "./components/Cards";
-import { cardAt } from "./cards";
 import type { Card } from "./cards";
 import type { Brand } from "./components/Cards";
-import { MOTION, motionAt } from "./motion";
+import { MOTION } from "./motion";
 import type { Motion } from "./motion";
 import {
   brandCaptions, captionZone, STYLES, LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET, safeFor,
@@ -56,7 +55,7 @@ export interface CaptionedClipProps {
   theme?: ThemeInput | null;
 }
 
-const ON_PAGE = 0.8;
+const CARDED = 0.75;
 
 export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   videoSrc,
@@ -94,23 +93,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
 
   const nameCardSeconds = nameCard?.title ? (nameCard.seconds ?? 3) : 0;
   const pastNameCard = frame / fps >= nameCardSeconds;
-  const upNow = pastNameCard ? cardAt(cards ?? [], frame / fps) : null;
-  /*
-   * How far in the card is, rather than whether it is.
-   *
-   * The card cross-fades over six frames and the captions used to answer on
-   * the frame it started: shrinking and jumping while the thing they were
-   * getting out of the way of was still arriving. Reading the card's own fade
-   * means the two move together, so a card coming up looks like one move
-   * instead of a card fading under captions that already snapped.
-   */
-  const cardIn = upNow
-    ? motionAt({
-      frame, fps, start: upNow.start, end: upNow.end,
-      motion: upNow.motion ?? MOTION.card,
-    }).opacity
-    : 0;
-  const captionShrink = 1 + (ON_PAGE - 1) * cardIn;
+  const captionShrink = cards?.length ? CARDED : 1;
   /*
    * Captions used to drop toward the bottom edge while a card held the frame,
    * on the reasoning that there is no chin down there to clear. There is no
@@ -149,7 +132,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
    */
   const settledStyle: CaptionStyle = {
     ...captionStyle,
-    fontSize: voice.fontSize * captionSize * ON_PAGE,
+    fontSize: voice.fontSize * captionSize * captionShrink,
   };
 
   /*
@@ -222,7 +205,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
           title={nameCard.title}
           subtitle={nameCard.subtitle}
           seconds={nameCardSeconds}
-          bottom={captionZone(captionStyle) + 24}
+          top={topTaken + 12}
         />
       )}
       {!theme && nameCard?.title && (

@@ -28,8 +28,8 @@ export const StyledNameCard: React.FC<{
   title: string;
   subtitle?: string;
   seconds: number;
-  bottom: number;
-}> = ({ theme, title, subtitle, seconds, bottom }) => {
+  top: number;
+}> = ({ theme, title, subtitle, seconds, top }) => {
   const frame = useCurrentFrame();
   const { fps, height } = useVideoConfig();
   const s = captionScale(height);
@@ -38,7 +38,7 @@ export const StyledNameCard: React.FC<{
   if (frame < 8 || out >= 1) return null;
   return (
     <Reveal theme={theme} role="name" f={frame} at={8} fps={fps} style={{
-      left: 60 * s, bottom, display: "flex", flexDirection: "column",
+      left: 60 * s, top, display: "flex", flexDirection: "column",
       alignItems: "flex-start", gap: 6 * s, opacity: 1 - out,
       textShadow: theme.surface === "none" ? `0 ${2 * s}px ${14 * s}px rgba(0,0,0,0.8)` : undefined,
     }}>
@@ -49,7 +49,7 @@ export const StyledNameCard: React.FC<{
       {subtitle && (
         <Paper theme={theme} seed={72} color={theme.color.stripAlt} scale={s}
           style={{ marginLeft: theme.surface === "none" ? 0 : 30 * s, transform: `rotate(${theme.tilt * 0.6}deg)` }}>
-          <div style={{ ...fontOf(theme.type.label, 42 * s), color: theme.surface === "none" ? theme.color.accent : theme.color.ink,
+          <div style={{ ...fontOf(theme.type.label, 42 * s), color: theme.color.ink,
             padding: theme.surface === "none" ? 0 : `${12 * s}px ${26 * s}px` }}>
             {subtitle}
           </div>
