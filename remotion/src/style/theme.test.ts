@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MOTIONS, PACKS, resolveTheme } from "./theme";
+import { ENTRANCES, MOTIONS, PACKS, ROLES, resolveTheme } from "./theme";
 
 describe("resolveTheme", () => {
   it("returns null without a style", () => {
@@ -51,5 +51,23 @@ describe("caption choice", () => {
 
   it("closes every motion preset with a fade rather than a cut", () => {
     for (const motion of Object.values(MOTIONS)) expect(motion.exit).toBe("fade");
+  });
+});
+
+describe("motion presets", () => {
+  it("name an entrance for every role and leave by fading", () => {
+    for (const [id, motion] of Object.entries(MOTIONS)) {
+      expect(Object.keys(motion.roles).sort(), id).toEqual([...ROLES].sort());
+      for (const entrance of Object.values(motion.roles)) expect(ENTRANCES, id).toContain(entrance);
+      expect(motion.exit, id).toBe("fade");
+    }
+  });
+
+  it("resolve on every pack", () => {
+    for (const pack of Object.keys(PACKS) as (keyof typeof PACKS)[]) {
+      for (const motion of Object.keys(MOTIONS) as (keyof typeof MOTIONS)[]) {
+        expect(resolveTheme({ pack, motion })?.motion).toEqual(MOTIONS[motion]);
+      }
+    }
   });
 });

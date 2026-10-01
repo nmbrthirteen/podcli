@@ -111,6 +111,51 @@ export const MOTIONS = {
     frames: 10, stagger: 6, holdEvery: 2, charsPerPose: 2, ease: "linear", overshoot: 0, bounces: 0,
     from: "left", textUnit: "char", camera: "none", exit: "fade",
   },
+  snappy: {
+    roles: every("pop"),
+    frames: 4, stagger: 3, holdEvery: 1, charsPerPose: 4, ease: "out", overshoot: 0, bounces: 0,
+    from: "left", textUnit: "word", camera: "punch", exit: "fade",
+  },
+  elastic: {
+    roles: every("spring", { media: "scale", label: "scale" }),
+    frames: 9, stagger: 5, holdEvery: 1, charsPerPose: 3, ease: "out", overshoot: 0.6, bounces: 2,
+    from: "bottom", textUnit: "word", camera: "push", exit: "fade",
+  },
+  cinematic: {
+    roles: every("blur", { media: "fade", label: "fade" }),
+    frames: 18, stagger: 9, holdEvery: 1, charsPerPose: 2, ease: "in-out", overshoot: 0, bounces: 0,
+    from: "bottom", textUnit: "word", camera: "push", exit: "fade",
+  },
+  slide: {
+    roles: every("slide", { media: "wipe" }),
+    frames: 10, stagger: 5, holdEvery: 1, charsPerPose: 3, ease: "out", overshoot: 0, bounces: 0,
+    from: "left", textUnit: "word", camera: "track", exit: "fade",
+  },
+  reveal: {
+    roles: every("mask-circle", { title: "wipe", item: "mask-diagonal", label: "fade", strip: "wipe" }),
+    frames: 14, stagger: 6, holdEvery: 1, charsPerPose: 2, ease: "in-out", overshoot: 0, bounces: 0,
+    from: "left", textUnit: "word", camera: "none", exit: "fade",
+  },
+  split: {
+    roles: every("mask-split", { label: "fade", strip: "wipe", name: "wipe" }),
+    frames: 12, stagger: 6, holdEvery: 1, charsPerPose: 2, ease: "out", overshoot: 0, bounces: 0,
+    from: "left", textUnit: "word", camera: "push", exit: "fade",
+  },
+  typewriter: {
+    roles: every("type", { media: "pop", figure: "pop" }),
+    frames: 6, stagger: 4, holdEvery: 1, charsPerPose: 1, ease: "linear", overshoot: 0, bounces: 0,
+    from: "left", textUnit: "char", camera: "none", exit: "fade",
+  },
+  zoom: {
+    roles: every("scale", { label: "pop", strip: "wipe" }),
+    frames: 8, stagger: 4, holdEvery: 1, charsPerPose: 3, ease: "out", overshoot: 0.2, bounces: 1,
+    from: "bottom", textUnit: "word", camera: "punch", exit: "fade",
+  },
+  newsroom: {
+    roles: every("wipe", { figure: "wipe-up", media: "wipe-up", label: "pop" }),
+    frames: 9, stagger: 5, holdEvery: 1, charsPerPose: 3, ease: "out", overshoot: 0, bounces: 0,
+    from: "left", textUnit: "word", camera: "track", exit: "fade",
+  },
 } satisfies Record<string, Motion>;
 
 export type MotionId = keyof typeof MOTIONS;
