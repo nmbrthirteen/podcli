@@ -92,14 +92,19 @@ def test_update_mapping_validates_roles_and_people(sandbox):
     assert session.sources[0].person == ""
 
 
-def test_shot_frames_fills_gaps_on_one_grid():
+def test_render_plan_fills_gaps_and_skips_removals_on_one_grid():
     session = mc.MulticamSession(session_id="abc123abc126", name="ep", cuts=[
         {"start": 10.0, "end": 12.51, "source_id": "a"},
         {"start": 12.51, "end": 14.0, "source_id": "b"},
         {"start": 15.0, "end": 16.0, "source_id": "a"},
     ])
-    frames = mc.shot_frames(session, 30.0)
-    assert frames == [("a", 0, 75), ("b", 75, 45), (None, 120, 30), ("a", 150, 30)]
+    plan = [(p.source_id, p.out_frame, p.frames) for p in mc.render_plan(session, 30.0)]
+    assert plan == [("a", 0, 75), ("b", 75, 45), (None, 120, 30), ("a", 150, 30)]
+
+    session.removals = [{"start": 11.0, "end": 13.0}]
+    plan = mc.render_plan(session, 30.0)
+    assert [(p.source_id, p.out_frame, p.frames) for p in plan] == [("a", 0, 30), ("b", 30, 30), (None, 60, 30), ("a", 90, 30)]
+    assert plan[1].tl_start == pytest.approx(13.0)
 
 
 # --- End to end with generated media -----------------------------------------
@@ -212,7 +217,7 @@ def test_sync_plan_render_and_export_a_three_camera_episode(sandbox):
     tracks = premiere.findall("./sequence/media/audio/track")
     assert len(tracks) == 2
     vclips = premiere.findall("./sequence/media/video/track/clipitem")
-    assert len(vclips) == len([f for f in mc.shot_frames(session, 30.0) if f[0]])
+    assert len(vclips) == len([p for p in mc.render_plan(session, 30.0) if p.source_id])
 
     fcp = ET.parse(mc.export_xml(session, "fcpxml")).getroot()
     lanes = {c.get("lane") for c in fcp.iter("asset-clip")}
@@ -222,6 +227,23 @@ def test_sync_plan_render_and_export_a_three_camera_episode(sandbox):
     before = os.path.getmtime(video)
     assert mc.render_session(session)["video"] == video
     assert os.path.getmtime(video) == before
+
+    # Removing 2.5 s takes it out of picture, mix, stems and both timelines alike.
+    full = float(probe.stdout)
+    mc.set_removals(session, [{"start": 20.0, "end": 22.5, "reason": "retake"}])
+    trimmed = mc.render_session(session)
+
+    def length(path, stream):
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", stream, "-show_entries",
+                              "stream=duration", "-of", "csv=p=0", path], check=True, capture_output=True, text=True)
+        return float(out.stdout.strip().splitlines()[0])
+
+    assert abs(length(trimmed["video"], "v:0") - (full - 2.5)) < 0.1
+    assert abs(length(trimmed["video"], "a:0") - (full - 2.5)) < 0.1
+    assert all(abs(length(stem, "a:0") - (full - 2.5)) < 0.1 for stem in trimmed["stems"])
+    xml = ET.parse(mc.export_xml(session, "premiere")).getroot()
+    assert abs(int(xml.findtext("./sequence/duration")) / 30 - (full - 2.5)) < 0.1
+    mc.set_removals(session, [])
 
     # A hand-set offset survives a normal re-sync; force measures it again.
     wide = next(s for s in session.sources if s.path.endswith("cam_wide.mp4"))
@@ -511,3 +533,61 @@ def test_cli_guests_flag_sets_roles(episode, monkeypatch, capsys):
     assert {p["name"]: p["role"] for p in data["people"]} == {"Nika": "guest", "Ana": "host"}
     assert run_cli(monkeypatch, data["session_id"], "--guests", "Bob", "--no-render") == 1
     assert "No person named 'bob'" in capsys.readouterr().err
+
+
+def test_a_saved_edit_renders_on_another_machine_without_syncing(episode, monkeypatch, capsys, tmp_path):
+    assert run_cli(monkeypatch, str(episode), "--people", "Nika, Ana", "--set", "cam_one=camera:nika",
+                   "--set", "cam_two=camera:ana", "--no-render", "--json") == 0
+    prepared = json.loads(capsys.readouterr().out)
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps(prepared))
+
+    # A fresh worker: the same recordings in another folder, and nothing saved.
+    elsewhere = tmp_path / "worker" / "ep"
+    shutil.copytree(episode, elsewhere)
+    monkeypatch.setitem(paths, "packed", str(tmp_path / "worker" / "home" / "packed"))
+    monkeypatch.setattr(mc, "sync_session", lambda *a, **k: pytest.fail("synced again"))
+    monkeypatch.setattr(mc, "plan_session", lambda *a, **k: pytest.fail("cut again"))
+    assert run_cli(monkeypatch, str(elsewhere), "--state", str(state), "--no-render", "--json") == 0
+    restored = json.loads(capsys.readouterr().out)
+
+    assert restored["session_id"] != prepared["session_id"]
+    assert {s["id"]: s["offset"] for s in restored["sources"]} == {s["id"]: s["offset"] for s in prepared["sources"]}
+    assert restored["cuts"] == prepared["cuts"]
+
+
+def test_transcript_credits_each_word_to_the_mic_that_spoke(episode, monkeypatch):
+    from services import transcription
+
+    calls = []
+
+    def fake(path, **kw):
+        calls.append(path)
+        return {"words": [{"word": "hello", "start": 2.0, "end": 2.4}, {"word": "there", "start": 25.0, "end": 25.5}],
+                "language": "en"}
+
+    monkeypatch.setattr(transcription, "transcribe_file", fake)
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    mc.update_mapping(session, {"sources": [
+        {"id": s.id, "role": "camera", "person": "nika" if "one" in s.path else "ana"}
+        for s in session.sources if s.kind == "video"
+    ]})
+    session = mc.sync_session(session)
+    data = mc.transcript(session)
+    assert [(w["text"], w["person"]) for w in data["words"]] == [("hello", "nika"), ("there", "ana")]
+    assert mc.transcript(session) == data and len(calls) == 1
+
+
+def test_turn_edges_follow_sentences_not_loose_timestamps():
+    def words(spec):
+        return [{"text": t, "person": p, "start": i, "end": i + 0.5} for i, (t, p) in enumerate(spec)]
+
+    # "Right," opens the host's sentence but was timed before the guest stopped.
+    w = words([("get", "g"), ("home.", "g"), ("Right,", "g"), ("because", "h"), ("every", "h")])
+    mc._settle_turn_edges(w)
+    assert [x["person"] for x in w] == ["g", "g", "h", "h", "h"]
+
+    # A lone word mid-sentence credited to the other mic goes back to the speaker.
+    w = words([("the", "g"), ("pain", "h"), ("starts", "g"), ("here.", "g")])
+    mc._settle_turn_edges(w)
+    assert [x["person"] for x in w] == ["g", "g", "g", "g"]

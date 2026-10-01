@@ -830,6 +830,8 @@ def cmd_multicam(args):
             data = mc.payload(session)
             if args.activity:
                 data["activity"] = mc.activity(session)
+            if args.transcript:
+                data["transcript"] = mc.transcript(session, model_size=args.model, engine=args.engine)
             print(json.dumps(data), file=out)
     except (ValueError, OSError, RuntimeError, ImportError, TypeError) as e:
         sys.stdout.flush()
@@ -839,12 +841,16 @@ def cmd_multicam(args):
         sys.exit(1)
 
 
-def _load_cuts(path: str) -> list:
+def _load_json(path: str, what: str):
     try:
         with open(_clean_path(path), encoding="utf-8") as f:
-            data = json.load(f)
+            return json.load(f)
     except (OSError, json.JSONDecodeError) as e:
-        raise ValueError(f"Can't read the cut from {path}: {e}")
+        raise ValueError(f"Can't read the {what} from {path}: {e}")
+
+
+def _load_cuts(path: str) -> list:
+    data = _load_json(path, "cut")
     return data.get("cuts", data) if isinstance(data, dict) else data
 
 
@@ -859,7 +865,10 @@ def _run_multicam(args, mc, target: str):
         return None
 
     people = [n.strip() for n in (args.people or "").split(",") if n.strip()] or None
-    session = _apply_multicam_fixes(_open_multicam_session(target, people), args.set or [])
+    session = _open_multicam_session(target, people)
+    if args.state:
+        session = mc.apply_state(session, _load_json(args.state, "saved edit"))
+    session = _apply_multicam_fixes(session, args.set or [])
     if args.guests is not None:
         guests = {n.strip().lower() for n in args.guests.split(",") if n.strip()}
         unknown = guests - {p.name.lower() for p in session.people}
@@ -899,6 +908,9 @@ def _run_multicam(args, mc, target: str):
     }
     if cut_edits:
         session = mc.update_mapping(session, cut_edits)
+    if args.removals:
+        data = _load_json(args.removals, "removals")
+        session = mc.set_removals(session, data.get("removals", []) if isinstance(data, dict) else data)
     if args.cuts:
         session = mc.set_cuts(session, _load_cuts(args.cuts))
     elif not session.cuts:
@@ -909,6 +921,9 @@ def _run_multicam(args, mc, target: str):
     names = {s.id: os.path.basename(s.path) for s in session.sources}
     share = ", ".join(f"{names[k]} {v:.0%}" for k, v in sorted(stats["share"].items(), key=lambda kv: -kv[1]))
     print(f"\n  {stats['shots']} shots over {_fmt_time(stats['duration'])}, average {stats['average_shot']:.1f}s  ({share})")
+    if session.removals:
+        removed = sum(r["end"] - r["start"] for r in session.removals)
+        print(f"  {len(session.removals)} stretches removed, {_fmt_time(removed)} in all")
     if args.activity and not args.json:
         spoken = mc.activity(session)["people"]
         print("  Talk time: " + ", ".join(
@@ -916,6 +931,11 @@ def _run_multicam(args, mc, target: str):
 
     for fmt in (["premiere", "fcpxml"] if args.export == "all" else [args.export] if args.export else []):
         print(f"  ✓ {mc.export_xml(session, fmt)}")
+    if args.transcript:
+        report, done = _multicam_progress("Transcribing")
+        words = mc.transcript(session, model_size=args.model, engine=args.engine, progress_callback=report)["words"]
+        done()
+        print(f"  ✓ Transcribed {len(words)} words")
     if args.preview:
         report, done = _multicam_progress("Preview")
         session = mc.build_preview(session, progress_callback=report)
@@ -4903,10 +4923,19 @@ def main():
                       help="Sync every file again, including offsets you set by hand")
     mc_p.add_argument("-y", "--yes", action="store_true", help="Don't stop to review guessed roles")
     mc_p.add_argument("--delete", action="store_true", help="Delete this multicam edit (source files are untouched)")
+    mc_p.add_argument("--state", metavar="FILE",
+                      help="Restore a prepared edit (a saved --json result) so these files render without syncing again")
     mc_p.add_argument("--cuts", metavar="FILE",
                       help="Use this cut instead of the automatic one: a JSON list of {start, end, source_id}, back to back")
+    mc_p.add_argument("--removals", metavar="FILE",
+                      help="Cut these stretches out of the episode: a JSON list of {start, end} on the timeline; [] restores everything")
     mc_p.add_argument("--preview", action="store_true",
                       help="Also build small playback proxies of each camera and a mic mix on the timeline")
+    mc_p.add_argument("--transcript", action="store_true",
+                      help="Transcribe the episode with each word credited to whoever's mic was speaking")
+    mc_p.add_argument("--model", default="base", help="Whisper model for --transcript (default base)")
+    mc_p.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"],
+                      help="Transcription engine for --transcript (default: the one podcli is set up with)")
     mc_p.add_argument("--activity", action="store_true", help="Report who speaks when (talk time, or spans with --json)")
     mc_p.add_argument("--json", action="store_true",
                       help="Print the edit as one JSON object on stdout; progress and messages go to stderr")

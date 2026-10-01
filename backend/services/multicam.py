@@ -127,6 +127,7 @@ class MulticamSession:
     outputs: dict = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
     preview: dict = field(default_factory=dict)
+    removals: list[dict] = field(default_factory=list)
 
     def path(self) -> Path:
         return _sessions_dir() / f"{self.session_id}.json"
@@ -253,7 +254,9 @@ def probe_source(path: str) -> Source:
             fps = 30.0
     sample_rate = int(audio.get("sample_rate") or 0) if audio else 0
     return Source(
-        id=hashlib.sha1(os.path.abspath(path).encode()).hexdigest()[:10],
+        # Name and size, not the full path, so the same recording gets the same id
+        # on another machine and a saved edit or cut list still points at it.
+        id=hashlib.sha1(f"{os.path.basename(path)}:{os.path.getsize(path)}".encode()).hexdigest()[:10],
         path=os.path.abspath(path),
         kind="video" if video else "audio",
         duration=round(duration, 3),
@@ -408,6 +411,13 @@ def new_session(
             _emit(progress_callback, 5 + 90 * i / len(found), f"Skipped {os.path.basename(p)}: {e}")
     if not sources:
         raise ValueError("None of the files could be read as audio or video.")
+    seen: dict[str, int] = {}
+    for src in sources:
+        # Two cameras can write the same file name at the same size (C0001.MP4).
+        n = seen.get(src.id, 0)
+        seen[src.id] = n + 1
+        if n:
+            src.id = hashlib.sha1(f"{src.id}:{n}".encode()).hexdigest()[:10]
 
     person_names = person_names or ["Host", "Guest"]
     session = MulticamSession(
@@ -425,6 +435,42 @@ def new_session(
     guess_roles(session)
     session.save()
     _emit(progress_callback, 100, f"Found {len(sources)} sources")
+    return session
+
+
+def apply_state(session: MulticamSession, state: dict) -> MulticamSession:
+    """Restore a prepared edit (a saved --json payload) onto freshly opened files.
+
+    A cloud worker is stateless: it downloads the recordings, opens them, and
+    applies the state another worker prepared, so it can render without
+    syncing again. Files are matched by id, which is stable across machines.
+    """
+    if not isinstance(state, dict) or not isinstance(state.get("sources"), list):
+        raise ValueError("A saved edit needs its people and sources")
+    if state.get("people"):
+        session.people = [Person(id=p["id"], name=p["name"], role=p.get("role", "host")) for p in state["people"]]
+    by_id = {s.get("id"): s for s in state["sources"]}
+    for src in session.sources:
+        saved = by_id.get(src.id)
+        if not saved:
+            continue
+        src.role = saved.get("role", src.role)
+        src.person = saved.get("person", src.person)
+        src.channel_people = list(saved.get("channel_people") or [])
+        src.offset = saved.get("offset")
+        src.speed = float(saved.get("speed") or 1.0)
+        src.sync = dict(saved.get("sync") or {})
+        src.guessed = False
+    ids = {s.id for s in session.sources}
+    for key in ("reference_id", "range_start", "range_end", "look", "speaker_map", "removals"):
+        if key in state:
+            setattr(session, key, state[key])
+    if isinstance(state.get("cut_settings"), dict):
+        session.cut_settings = {**DEFAULT_CUT, **state["cut_settings"]}
+    cuts = state.get("cuts") or []
+    session.cuts = [dict(c) for c in cuts] if all(c.get("source_id") in ids for c in cuts) else []
+    session.activity_key = ""
+    session.save()
     return session
 
 
@@ -520,6 +566,8 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
             "backchannel": max(0.0, min(5.0, float(merged.get("backchannel", DEFAULT_CUT["backchannel"])))),
             "hold_guest": bool(merged.get("hold_guest", True)),
         }
+    if "removals" in params:
+        set_removals(session, params["removals"] or [])
     if "speaker_map" in params:
         session.speaker_map = {str(k): v for k, v in (params["speaker_map"] or {}).items() if v in valid}
     if _cut_inputs(session) != before:
@@ -753,6 +801,17 @@ def _diarized_labels(session: MulticamSession, length: int, progress_callback: P
     return sig.segments_to_frames(segments, people, length)
 
 
+def _person_levels(session: MulticamSession, length: int, progress_callback: ProgressCallback = None) -> dict[str, np.ndarray]:
+    """One timeline-aligned level track (dB per 10 ms) per person with a mic of their own."""
+    feeds = [(s, ch, pid) for s, ch, pid in session.person_mics() if s.synced]
+    per_person: dict[str, np.ndarray] = {}
+    for i, (s, ch, pid) in enumerate(feeds):
+        _emit(progress_callback, 10 + 70 * i / len(feeds), f"Listening to {os.path.basename(s.path)}")
+        level = _timeline_levels(session, s, ch, length)
+        per_person[pid] = np.maximum(per_person[pid], level) if pid in per_person else level
+    return per_person
+
+
 def speaker_labels(session: MulticamSession, progress_callback: ProgressCallback = None) -> np.ndarray:
     """Per-10ms timeline labels (person index, SILENT, BOTH), cached per mapping."""
     length = int(np.ceil(session.timeline_duration() / sig.FRAME_SECONDS))
@@ -763,14 +822,9 @@ def speaker_labels(session: MulticamSession, progress_callback: ProgressCallback
         if len(labels) == length:
             return labels
 
-    feeds = [(s, ch, pid) for s, ch, pid in session.person_mics() if s.synced]
-    if feeds:
+    per_person = _person_levels(session, length, progress_callback)
+    if per_person:
         people = session.person_ids()
-        per_person: dict[str, np.ndarray] = {}
-        for i, (s, ch, pid) in enumerate(feeds):
-            _emit(progress_callback, 10 + 70 * i / len(feeds), f"Listening to {os.path.basename(s.path)}")
-            level = _timeline_levels(session, s, ch, length)
-            per_person[pid] = np.maximum(per_person[pid], level) if pid in per_person else level
         speaking = [p for p in people if p in per_person]
         raw = sig.speaker_frames([per_person[p] for p in speaking])
         index = np.array([people.index(p) for p in speaking], dtype=np.int32)
@@ -970,26 +1024,12 @@ def build_preview(session: MulticamSession, progress_callback: ProgressCallback 
             os.replace(tmp, out)
         proxies[cam.id] = str(out)
 
-    feeds = _audio_inputs(session)
-    key = hashlib.sha1(json.dumps(
-        [(s.id, ch, s.offset, s.speed, os.path.getmtime(s.path)) for s, ch in feeds], default=str,
-    ).encode()).hexdigest()[:12]
-    audio = work / f"preview-{key}.m4a"
+    audio = work / f"preview-{_mix_key(session)}.m4a"
     if not audio.exists():
         _emit(progress_callback, 88, "Mixing preview audio")
-        duration = session.timeline_duration()
-        args, chains = [], []
-        for i, (s, ch) in enumerate(feeds):
-            inp, steps = _aligned_input(s, ch, 0.0, duration)
-            args += inp
-            chains.append(f"[{i}:a:0]{','.join(steps)}[a{i}]")
-        mix = "".join(f"[a{i}]" for i in range(len(feeds)))
-        graph = ";".join(chains) + (f";{mix}amix=inputs={len(feeds)}:normalize=0[out]" if len(feeds) > 1 else ";[a0]anull[out]")
         tmp = audio.with_suffix(".tmp.m4a")
-        proc_run([
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args, "-filter_complex", graph,
-            "-map", "[out]", "-ac", "1", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(tmp),
-        ], timeout=7200, check=True)
+        _write_mix(session, tmp, 0.0, session.timeline_duration(),
+                   encode=("-ac", "1", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart"))
         os.replace(tmp, audio)
         for old in work.glob("preview-*.m4a"):
             if old != audio:
@@ -1000,6 +1040,101 @@ def build_preview(session: MulticamSession, progress_callback: ProgressCallback 
     latest.save()
     _emit(progress_callback, 100, "Preview ready")
     return latest
+
+
+def transcript(session: MulticamSession, *, model_size: str = "base", engine: Optional[str] = None,
+               language: Optional[str] = None, progress_callback: ProgressCallback = None) -> dict:
+    """Words on the timeline, each credited to the person who said it.
+
+    The mics are mixed and transcribed once: transcribing each mic alone with
+    the other voice silenced throws word timestamps seconds off. Each word goes
+    to the mic that was loudest during it, relative to that mic's own speech
+    level, then sentence edges settle what loose timestamps leave unclear at a
+    turn change. Cached until the mix changes.
+    """
+    from services.transcription import transcribe_file
+
+    work = _work_dir(session.session_id)
+    out = work / f"transcript-{_mix_key(session)}.json"
+    if out.exists():
+        return json.loads(out.read_text(encoding="utf-8"))
+    wav = work / "transcript-mix.wav"
+    _emit(progress_callback, 2, "Mixing the mics for transcription")
+    _write_mix(session, wav, 0.0, session.timeline_duration(), encode=("-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le"))
+    try:
+        result = transcribe_file(
+            str(wav), model_size=model_size, engine=engine, language=language, enable_diarization=False,
+            wav_path=str(wav), progress_callback=lambda p, m: _emit(progress_callback, 5 + p * 0.85, m),
+        )
+    finally:
+        wav.unlink(missing_ok=True)
+    labels = speaker_labels(session)
+    people = session.person_ids()
+    levels = {
+        pid: level - np.percentile(level[level > -90], 95) if (level > -90).any() else level
+        for pid, level in _person_levels(session, len(labels)).items()
+    }
+
+    def loudest(start: float, end: float) -> str:
+        a, b = max(0, int(start / sig.FRAME_SECONDS)), int(np.ceil(end / sig.FRAME_SECONDS))
+        means = {pid: float(np.mean(lv[a:b])) for pid, lv in levels.items() if len(lv[a:b])}
+        if means and max(means.values()) > -30:
+            return max(means, key=means.get)
+        return _speaker_at(labels, people, start, end)
+
+    words, last = [], ""
+    for w in result.get("words") or []:
+        start, end = float(w["start"]), float(w["end"])
+        last = loudest(start, end) or last
+        words.append({"start": round(start, 3), "end": round(end, 3), "text": str(w.get("word", "")).strip(), "person": last})
+    _settle_turn_edges(words)
+    data = {"words": words, "language": result.get("language")}
+    out.write_text(json.dumps(data), encoding="utf-8")
+    _emit(progress_callback, 100, f"Transcribed {len(words)} words")
+    return data
+
+
+_SENTENCE_END = (".", "?", "!")
+
+
+def _settle_turn_edges(words: list[dict]) -> None:
+    """Fix credits that loose word timestamps get wrong around a turn change.
+
+    A lone word credited to someone else in the middle of an unfinished
+    sentence goes back to the person saying that sentence. Then a new sentence
+    opened after the previous speaker's last full stop belongs to whoever
+    speaks next: "...get home. Right," is the next speaker's "Right,".
+    """
+    for i in range(1, len(words) - 1):
+        prev, word, nxt = words[i - 1], words[i], words[i + 1]
+        if (word["person"] != prev["person"] and prev["person"] == nxt["person"]
+                and not prev["text"].endswith(_SENTENCE_END) and not word["text"].endswith(_SENTENCE_END)):
+            word["person"] = prev["person"]
+    i = 0
+    while i < len(words):
+        j = i
+        while j < len(words) and words[j]["person"] == words[i]["person"]:
+            j += 1
+        if j < len(words):
+            k = j
+            while k > i + 1 and j - k < 3 and not words[k - 1]["text"].endswith(_SENTENCE_END):
+                k -= 1
+            if k < j and words[k - 1]["text"].endswith(_SENTENCE_END) and words[k]["text"][:1].isupper():
+                for m in range(k, j):
+                    words[m]["person"] = words[j]["person"]
+        i = j
+
+
+def _speaker_at(labels: np.ndarray, people: list[str], start: float, end: float) -> str:
+    """Whoever speaks most during a word, else around it within a second, else nobody."""
+    for pad in (0.0, 1.0):
+        a = max(0, int((start - pad) / sig.FRAME_SECONDS))
+        b = min(len(labels), int(np.ceil((end + pad) / sig.FRAME_SECONDS)))
+        span = labels[a:b]
+        span = span[span >= 0]
+        if len(span):
+            return people[int(np.bincount(span).argmax())]
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -1094,24 +1229,43 @@ def _aligned_input(s: Source, channel: int, start: float, duration: float) -> tu
     return ["-ss", f"{max(0.0, src_start):.4f}", "-i", s.path], steps
 
 
-def _render_audio(session: MulticamSession, out: Path, start: float, duration: float) -> None:
+def _write_mix(session: MulticamSession, out: Path, start: float, duration: float, *,
+               per_feed: tuple[str, ...] = (), after: str = "anull", encode: tuple[str, ...],
+               feeds: Optional[list[tuple[Source, int]]] = None) -> None:
+    """Mix every mic (or the room, or just `feeds`) onto [start, start + duration] of the timeline."""
     args: list[str] = []
     chains: list[str] = []
-    for i, (s, ch) in enumerate(_audio_inputs(session)):
+    for i, (s, ch) in enumerate(feeds if feeds is not None else _audio_inputs(session)):
         inp, steps = _aligned_input(s, ch, start, duration)
         args += inp
-        chains.append(f"[{i}:a:0]{','.join(steps + ['dynaudnorm=f=250:g=15:p=0.9'])}[a{i}]")
+        chains.append(f"[{i}:a:0]{','.join([*steps, *per_feed])}[a{i}]")
     n = len(chains)
     mix = "".join(f"[a{i}]" for i in range(n)) + f"amix=inputs={n}:normalize=0," if n > 1 else "[a0]"
-    graph = ";".join(chains) + f";{mix}loudnorm=I=-16:TP=-1.5:LRA=11,aformat=channel_layouts=stereo[out]"
     proc_run([
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args,
-        "-filter_complex", graph, "-map", "[out]", "-ar", "48000",
-        "-c:a", "aac", "-b:a", "192k", str(out),
+        "-filter_complex", ";".join(chains) + f";{mix}{after}[out]", "-map", "[out]", *encode, str(out),
     ], timeout=7200, check=True)
 
 
-def _render_stems(session: MulticamSession, out_dir: Path, start: float, duration: float) -> list[str]:
+def _mix_key(session: MulticamSession) -> str:
+    """Changes whenever which mics are mixed, or where they sit, changes."""
+    feeds = [(s.id, ch, s.offset, s.speed, os.path.getmtime(s.path)) for s, ch in _audio_inputs(session)]
+    return hashlib.sha1(json.dumps(feeds, default=str).encode()).hexdigest()[:12]
+
+
+def _render_audio(session: MulticamSession, out: Path, start: float, duration: float) -> None:
+    _write_mix(
+        session, out, start, duration,
+        per_feed=("dynaudnorm=f=250:g=15:p=0.9",),
+        after="loudnorm=I=-16:TP=-1.5:LRA=11,aformat=channel_layouts=stereo",
+        encode=("-ar", "48000", "-c:a", "pcm_s16le"),
+    )
+
+
+def _render_stems(
+    session: MulticamSession, out_dir: Path, start: float, duration: float,
+    splice: Optional[list[tuple[float, float]]] = None,
+) -> list[str]:
     """One WAV per person; a person recorded across several files (recorder splits) gets them mixed in."""
     stems = []
     for pid in session.person_ids():
@@ -1127,32 +1281,133 @@ def _render_stems(session: MulticamSession, out_dir: Path, start: float, duratio
         graph = ";".join(chains) + (f";{mix}amix=inputs={len(feeds)}:normalize=0[out]" if len(feeds) > 1 else ";[a0]anull[out]")
         # Person ids are unique slugs, so two people never share a file name.
         out = out_dir / f"{pid}.wav"
+        full = out.with_name(f"{pid}.full.wav") if splice else out
         proc_run([
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args,
-            "-filter_complex", graph, "-map", "[out]", "-ar", "48000", "-c:a", "pcm_s24le", str(out),
+            "-filter_complex", graph, "-map", "[out]", "-ar", "48000", "-c:a", "pcm_s24le", str(full),
         ], timeout=3600, check=True)
+        if splice:
+            _splice_audio(full, out, splice, ["-c:a", "pcm_s24le"])
+            full.unlink(missing_ok=True)
         stems.append(str(out))
     return stems
 
 
-def shot_frames(session: MulticamSession, fps: float) -> list[tuple[Optional[str], int, int]]:
-    """(source_id or None for a gap, first frame, frame count) on one grid from the first cut.
+@dataclass
+class Piece:
+    source_id: Optional[str]  # None renders black: no camera covered this stretch
+    out_frame: int  # first frame in the finished episode
+    frames: int
+    tl_start: float  # timeline second shown on that first frame
 
-    One grid over the whole episode keeps shot lengths from accumulating
-    rounding drift against the audio.
+
+def kept_segments(session: MulticamSession) -> list[tuple[float, float]]:
+    """The episode range minus the removed stretches, in timeline seconds."""
+    start, end = session.cuts[0]["start"], session.cuts[-1]["end"]
+    kept, cursor = [], start
+    for r in session.removals:
+        a, b = max(start, r["start"]), min(end, r["end"])
+        if b <= cursor or a >= end:
+            continue
+        if a > cursor:
+            kept.append((cursor, a))
+        cursor = max(cursor, b)
+    if cursor < end:
+        kept.append((cursor, end))
+    return kept
+
+
+def render_plan(session: MulticamSession, fps: float) -> list[Piece]:
+    """Every shot, split at removals, laid end to end on one output frame grid.
+
+    One grid over the whole episode keeps piece lengths from accumulating
+    rounding drift against the audio; the MP4, the stems, and both editor
+    timelines are all built from this list so they agree frame for frame.
     """
-    start = session.cuts[0]["start"]
-    out: list[tuple[Optional[str], int, int]] = []
-    cursor = 0
-    for shot in session.cuts:
-        f0 = round((shot["start"] - start) * fps)
-        f1 = round((shot["end"] - start) * fps)
-        if f0 > cursor:
-            out.append((None, cursor, f0 - cursor))
-        if f1 > max(f0, cursor):
-            out.append((shot["source_id"], max(f0, cursor), f1 - max(f0, cursor)))
-            cursor = f1
-    return out
+    pieces: list[Piece] = []
+    out_t, out_f = 0.0, 0
+
+    def emit(source_id: Optional[str], a: float, b: float) -> None:
+        nonlocal out_t, out_f
+        out_end = out_t + (b - a)
+        f_end = round(out_end * fps)
+        if f_end > out_f:
+            pieces.append(Piece(source_id, out_f, f_end - out_f, a + (out_f / fps - out_t)))
+            out_f = f_end
+        out_t = out_end
+
+    for a, b in kept_segments(session):
+        t = a
+        for c in session.cuts:
+            if c["end"] <= t:
+                continue
+            if c["start"] >= b:
+                break
+            if c["start"] > t:
+                emit(None, t, c["start"])
+                t = c["start"]
+            e = min(c["end"], b)
+            emit(c["source_id"], t, e)
+            t = e
+        if t < b:
+            emit(None, t, b)
+    return pieces
+
+
+SPLICE_BATCH = 60
+FADE = 0.008
+
+
+def _splice_audio(src: Path, dst: Path, segments: list[tuple[float, float]], codec: list[str]) -> None:
+    """Keep only `segments` (seconds into src), with 8 ms fades so a cut never clicks."""
+    work = dst.parent
+    chunks = []
+    for k in range(0, len(segments), SPLICE_BATCH):
+        batch = segments[k:k + SPLICE_BATCH]
+        parts = []
+        for i, (a, b) in enumerate(batch):
+            fade = min(FADE, (b - a) / 2)
+            parts.append(
+                f"[0:a]atrim=start={a:.5f}:end={b:.5f},asetpts=PTS-STARTPTS,"
+                f"afade=t=in:d={fade:.4f},afade=t=out:st={b - a - fade:.5f}:d={fade:.4f}[s{i}]"
+            )
+        joined = "".join(f"[s{i}]" for i in range(len(batch)))
+        chunk = work / f"{dst.stem}.part{k // SPLICE_BATCH:04d}.wav"
+        proc_run([
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src),
+            "-filter_complex", ";".join(parts) + f";{joined}concat=n={len(batch)}:v=0:a=1[out]",
+            "-map", "[out]", *codec, str(chunk),
+        ], timeout=7200, check=True)
+        chunks.append(chunk)
+    listing = work / f"{dst.stem}.parts.txt"
+    listing.write_text("".join(f"file '{c.as_posix()}'\n" for c in chunks), encoding="utf-8")
+    proc_run([
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
+        "-i", str(listing), "-c", "copy", str(dst),
+    ], timeout=3600, check=True)
+    for c in chunks:
+        c.unlink(missing_ok=True)
+    listing.unlink(missing_ok=True)
+
+
+def set_removals(session: MulticamSession, removals: list) -> MulticamSession:
+    """Stretches cut out of the episode on every camera and mic, as [{start, end, reason?}]."""
+    if not isinstance(removals, list):
+        raise ValueError("removals must be a list of {start, end}")
+    clean: list[dict] = []
+    for r in sorted(removals, key=lambda r: float(r["start"])):
+        a, b = float(r["start"]), float(r["end"])
+        if b - a < 0.02:
+            continue
+        if clean and a <= clean[-1]["end"]:
+            clean[-1]["end"] = round(max(clean[-1]["end"], b), 3)
+        else:
+            clean.append({"start": round(a, 3), "end": round(b, 3), **({"reason": str(r["reason"])} if r.get("reason") else {})})
+    session.removals = clean
+    if session.cuts and not kept_segments(session):
+        raise ValueError("That would remove the whole episode")
+    session.save()
+    return session
 
 
 def _render_key(session: MulticamSession, stems: bool) -> str:
@@ -1160,7 +1415,7 @@ def _render_key(session: MulticamSession, stems: bool) -> str:
     used = {c["source_id"] for c in session.cuts} | {s.id for s, _ in _audio_inputs(session)}
     files = [(s.id, s.offset, s.speed, s.channel_people, s.person, os.path.getmtime(s.path))
              for s in session.sources if s.id in used and os.path.exists(s.path)]
-    blob = json.dumps([session.cuts, session.look, stems, files], sort_keys=True, default=str)
+    blob = json.dumps([session.cuts, session.removals, session.look, stems, files], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
 
@@ -1182,19 +1437,22 @@ def render_session(
     out_dir = _output_dir(session)
     work = Path(tempfile.mkdtemp(prefix="podcli_multicam_", dir=paths["working"] if os.path.isdir(paths["working"]) else None))
     try:
-        jobs = shot_frames(session, fps)
-        total_frames = sum(n for _, _, n in jobs)
+        jobs = render_plan(session, fps)
+        total_frames = sum(p.frames for p in jobs)
         duration = total_frames / fps
+        end = session.cuts[-1]["end"]
+        # Audio renders over the whole range, then the removed stretches come out.
+        splice = [(a - start, b - start) for a, b in kept_segments(session)] if session.removals else None
         done = [0, 0]
         lock = threading.Lock()
 
         def run(item):
-            i, (source_id, f0, n) = item
+            i, piece = item
             chunk = work / f"shot-{i:05d}.mp4"
-            cam = session.source(source_id) if source_id else None
-            _render_shot(cam, chunk, start + f0 / fps, n, width, height, fps, session.look)
+            cam = session.source(piece.source_id) if piece.source_id else None
+            _render_shot(cam, chunk, piece.tl_start, piece.frames, width, height, fps, session.look)
             with lock:
-                done[0] += n
+                done[0] += piece.frames
                 done[1] += 1
                 _emit(progress_callback, 3 + 80 * done[0] / total_frames, f"Cut {done[1]} of {len(jobs)} shots")
             return chunk
@@ -1204,8 +1462,11 @@ def render_session(
             chunks = list(pool.map(run, enumerate(jobs)))
 
         _emit(progress_callback, 84, "Mixing microphones")
-        audio = work / "audio.m4a"
-        _render_audio(session, audio, start, duration)
+        audio = work / "audio.wav"
+        _render_audio(session, audio, start, end - start)
+        if splice:
+            _splice_audio(audio, work / "kept.wav", splice, ["-c:a", "pcm_s16le"])
+            audio = work / "kept.wav"
 
         _emit(progress_callback, 92, "Joining shots")
         listing = work / "shots.txt"
@@ -1214,7 +1475,7 @@ def render_session(
         proc_run([
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-f", "concat", "-safe", "0", "-i", str(listing), "-i", str(audio),
-            "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-shortest",
+            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
             "-movflags", "+faststart", str(partial),
         ], timeout=3600, check=True)
         video = out_dir / "episode.mp4"
@@ -1224,7 +1485,7 @@ def render_session(
         stem_paths = []
         if stems:
             _emit(progress_callback, 96, "Writing separate mic tracks")
-            stem_paths = _render_stems(session, out_dir, start, duration)
+            stem_paths = _render_stems(session, out_dir, start, end - start, splice)
 
         session.outputs = {
             **session.outputs,

@@ -6,9 +6,10 @@ Resolve. Both reference the original camera and mic files, so nothing is
 re-encoded: V1 carries the camera cuts, and each person's mic sits on its own
 audio track.
 
-Clock drift can't be expressed as a clip property in either format. When a mic
-drifts, its track is split at every camera cut and each piece gets its own
-in-point, which keeps it within a millisecond or two of picture.
+Both follow the same render plan as the MP4, so removed stretches drop out of
+picture and mics at the same frames. Clock drift can't be expressed as a clip
+property in either format, so a drifting mic is split at every shot and each
+piece gets its own in-point, which keeps it within a millisecond of picture.
 """
 from __future__ import annotations
 
@@ -36,22 +37,33 @@ def _text(parent: ET.Element, tag: str, value) -> ET.Element:
     return el
 
 
-def _audio_pieces(session, source, start: float, end: float, fps: float) -> list[tuple[int, int, float]]:
-    """(timeline_frame_in, timeline_frame_out, source_seconds_at_in) for one mic across the episode."""
-    lo = max(start, source.timeline_start())
-    hi = min(end, source.timeline_end())
-    if hi <= lo:
-        return []
-    bounds = [lo, hi]
-    if abs(source.speed - 1.0) > 1e-6:
-        bounds = [lo] + [c["start"] for c in session.cuts if lo < c["start"] < hi] + [hi]
-    pieces = []
-    for a, b in zip(bounds, bounds[1:]):
-        f0 = round((a - start) * fps)
-        f1 = round((b - start) * fps)
-        if f1 > f0:
-            pieces.append((f0, f1, source.source_time(start + f0 / fps)))
-    return pieces
+def _audio_pieces(source, plan, fps: float) -> list[tuple[int, int, float]]:
+    """(output_frame_in, output_frame_out, source_seconds_at_in) for one mic across the episode.
+
+    Follows the render plan, so removed stretches drop out of the mics exactly
+    where they drop out of the picture. Pieces that continue each other on the
+    timeline are joined; a drifting mic is left split at every shot, so each
+    piece gets its own in-point and stays within a millisecond of picture.
+    """
+    pieces: list[list] = []
+    joinable = abs(source.speed - 1.0) <= 1e-6
+    last_end = None
+    for p in plan:
+        a = p.tl_start
+        b = a + p.frames / fps
+        lo, hi = max(a, source.timeline_start()), min(b, source.timeline_end())
+        if hi <= lo:
+            continue
+        f0 = p.out_frame + round((lo - a) * fps)
+        f1 = p.out_frame + round((hi - a) * fps)
+        if f1 <= f0:
+            continue
+        if joinable and pieces and pieces[-1][1] == f0 and last_end is not None and abs(last_end - lo) < 1e-3:
+            pieces[-1][1] = f1
+        else:
+            pieces.append([f0, f1, source.source_time(p.tl_start + (f0 - p.out_frame) / fps)])
+        last_end = hi
+    return [tuple(x) for x in pieces]
 
 
 def _label(session, source, channel: int, person: str) -> str:
@@ -80,13 +92,10 @@ def _mic_tracks(session, *, split_stereo: bool = False) -> list[tuple[object, in
 
 
 def write_xmeml(session, out_path: Path, *, width: int, height: int, fps: float) -> None:
-    from services.multicam import shot_frames
+    from services.multicam import render_plan
 
-    start = session.cuts[0]["start"]
-    end = session.cuts[-1]["end"]
-    frames = shot_frames(session, fps)
-    shots = [s for s in frames if s[0]]
-    total = max(f0 + n for _, f0, n in frames)
+    plan = render_plan(session, fps)
+    total = sum(p.frames for p in plan)
 
     root = ET.Element("xmeml", {"version": "4"})
     seq = ET.SubElement(root, "sequence", {"id": "sequence-1"})
@@ -147,16 +156,18 @@ def write_xmeml(session, out_path: Path, *, width: int, height: int, fps: float)
             _text(st, "mediatype", "audio")
             _text(st, "trackindex", max(1, audio_channel + 1))
 
-    for source_id, f0, n in shots:
-        cam = session.source(source_id)
-        clipitem(vtrack, cam, f0, f0 + n, cam.source_time(start + f0 / fps), name=os.path.basename(cam.path))
+    for p in plan:
+        if not p.source_id:
+            continue
+        cam = session.source(p.source_id)
+        clipitem(vtrack, cam, p.out_frame, p.out_frame + p.frames, cam.source_time(p.tl_start), name=os.path.basename(cam.path))
 
     audio = ET.SubElement(media, "audio")
     _text(audio, "numOutputChannels", 2)
     for source, channel, person in _mic_tracks(session, split_stereo=True):
         track = ET.SubElement(audio, "track")
         label = _label(session, source, channel, person)
-        for f0, f1, src_seconds in _audio_pieces(session, source, start, end, fps):
+        for f0, f1, src_seconds in _audio_pieces(source, plan, fps):
             clipitem(track, source, f0, f1, src_seconds, name=label, audio_channel=channel)
         _text(track, "enabled", "TRUE")
 
@@ -170,12 +181,10 @@ def write_xmeml(session, out_path: Path, *, width: int, height: int, fps: float)
 
 
 def write_fcpxml(session, out_path: Path, *, width: int, height: int, fps: float) -> None:
-    from services.multicam import shot_frames
+    from services.multicam import render_plan
 
-    start = session.cuts[0]["start"]
-    end = session.cuts[-1]["end"]
-    frames = shot_frames(session, fps)
-    total = max(f0 + n for _, f0, n in frames)
+    plan = render_plan(session, fps)
+    total = sum(p.frames for p in plan)
 
     def t(frame_count: int) -> str:
         return fx.rational_time(frame_count, fps)
@@ -193,7 +202,7 @@ def write_fcpxml(session, out_path: Path, *, width: int, height: int, fps: float
     resources = [fx.make_format(fmt_id, fps, width, height)]
     asset_ids: dict[str, str] = {}
     formats: dict[str, str] = {}
-    used = {s for s, _, _ in frames if s} | {s.id for s, _, _ in _mic_tracks(session)}
+    used = {p.source_id for p in plan if p.source_id} | {s.id for s, _, _ in _mic_tracks(session)}
     for i, source in enumerate(s for s in session.sources if s.id in used):
         aid = f"a{i + 1}"
         asset_ids[source.id] = aid
@@ -240,22 +249,22 @@ def write_fcpxml(session, out_path: Path, *, width: int, height: int, fps: float
     # lanes, so every clip is positioned against the same zero.
     gap = ET.SubElement(spine, "gap", {"name": "Episode", "offset": "0s", "start": "0s", "duration": t(total)})
 
-    for source_id, f0, n in frames:
-        if not source_id:
+    for p in plan:
+        if not p.source_id:
             continue
-        cam = session.source(source_id)
+        cam = session.source(p.source_id)
         ET.SubElement(gap, "asset-clip", {
-            "ref": asset_ids[source_id],
+            "ref": asset_ids[p.source_id],
             "lane": "1",
-            "offset": t(f0),
-            "start": src_t(cam, cam.source_time(start + f0 / fps)),
-            "duration": t(n),
+            "offset": t(p.out_frame),
+            "start": src_t(cam, cam.source_time(p.tl_start)),
+            "duration": t(p.frames),
             "name": os.path.basename(cam.path),
             "srcEnable": "video",
         })
 
     for lane, (source, channel, person) in enumerate(_mic_tracks(session), start=1):
-        for f0, f1, src_seconds in _audio_pieces(session, source, start, end, fps):
+        for f0, f1, src_seconds in _audio_pieces(source, plan, fps):
             clip = ET.SubElement(gap, "asset-clip", {
                 "ref": asset_ids[source.id],
                 "lane": str(-lane),

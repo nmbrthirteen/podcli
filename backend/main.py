@@ -963,7 +963,7 @@ def handle_render_silence_removed(task_id: str, params: dict):
         emit_result(task_id, "error", error=str(e))
 
 
-MULTICAM_MAP_KEYS = ("people", "sources", "range_start", "range_end", "cut_settings", "speaker_map", "look")
+MULTICAM_MAP_KEYS = ("people", "sources", "range_start", "range_end", "cut_settings", "speaker_map", "look", "removals")
 
 
 def handle_manage_multicam(task_id: str, params: dict):

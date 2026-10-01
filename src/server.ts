@@ -2230,7 +2230,7 @@ export function createServer(): McpServer {
       "Flow: 'new' (folder or files, people) → check the guessed mapping with 'show' and fix it with 'map' → 'sync' → 'plan' → 'render' or 'export'. " +
       "'new' returns the session with guessed roles; calling it again on the same files reopens that edit. " +
       "'sync', 'plan' and 'render' start a background job and return job_id: poll job_status, then call 'show'. " +
-      "Mapping fields (people, sources, range_start, range_end, cut_settings, speaker_map, look) apply on 'map', 'sync', 'plan' and 'render'. " +
+      "Mapping fields (people, sources, range_start, range_end, cut_settings, speaker_map, look, removals) apply on 'map', 'sync', 'plan' and 'render'. " +
       "Changing who is in a file or where it sits clears the cut, so run 'plan' again. 'render' skips work when nothing changed. " +
       "Other actions: 'list', 'cut' (index, source_id: swap one shot's camera), 'set_cuts' (cuts: replace the whole cut with back-to-back shots), " +
       "'activity' (who speaks when, as spans per person), 'previews' (still frames per camera, looks: true adds color-look stills), " +
@@ -2278,6 +2278,10 @@ export function createServer(): McpServer {
       format: z.enum(["premiere", "fcpxml"]).optional().describe("For 'export': premiere (FCP7 XML, also opens in Resolve) or fcpxml (Final Cut Pro, Resolve)"),
       index: z.number().int().min(0).optional().describe("For 'cut': 0-based shot index"),
       source_id: z.string().optional().describe("For 'cut': camera source id to use for that shot"),
+      removals: z
+        .array(z.object({ start: z.number(), end: z.number(), reason: z.string().optional() }))
+        .optional()
+        .describe("Stretches cut out of the episode on every camera and mic, in timeline seconds; [] restores everything"),
       cuts: z
         .array(z.object({ start: z.number(), end: z.number(), source_id: z.string() }))
         .optional()
