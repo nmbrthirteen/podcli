@@ -705,7 +705,10 @@ class VideoProcessorTests(unittest.TestCase):
                 strategy="face",
                 transcript_words=[{"word": "hi", "start": 0.0, "end": 0.4, "speaker": None}],
                 clip_start=0.0,
-                face_map={"clusters": [{"center_x": 100, "crop_x": 0}], "video_width": 1920},
+                face_map={
+                    "clusters": [{"center_x": 100, "crop_x": 0}], "video_width": 1920,
+                    "speaker_mappings": {"SPEAKER_00": 0},
+                },
             )
 
         self.assertEqual(result, "ok.mp4")
@@ -713,6 +716,45 @@ class VideoProcessorTests(unittest.TestCase):
         face_map_crop.assert_called_once()
         track_crop.assert_not_called()
         runner.assert_called_once()
+
+    def test_crop_to_vertical_tracks_a_cut_whose_face_map_it_scanned_itself(self):
+        with mock.patch.object(vp, "get_dimensions", return_value=(1920, 1080)), \
+             mock.patch.object(vp, "_use_face_map", return_value="456") as face_map_crop, \
+             mock.patch.object(vp, "_track_and_crop", return_value="tracked.mp4") as track_crop, \
+             mock.patch.object(vp, "_run_ffmpeg_with_fallback", return_value="ok.mp4") as runner:
+            result = vp.crop_to_vertical(
+                input_path="in.mp4",
+                output_path="out.mp4",
+                strategy="speaker",
+                transcript_words=[{"word": "hi", "start": 0.0, "end": 0.4}],
+                clip_start=0.0,
+                face_map={
+                    "clusters": [{"center_x": 100, "crop_x": 0}], "video_width": 1920,
+                    "speaker_mappings": {},
+                },
+            )
+
+        self.assertEqual(result, "tracked.mp4")
+        track_crop.assert_called_once()
+        face_map_crop.assert_not_called()
+        runner.assert_not_called()
+
+    def test_crop_to_vertical_falls_back_to_a_scanned_face_map_when_tracking_fails(self):
+        with mock.patch.object(vp, "get_dimensions", return_value=(1920, 1080)), \
+             mock.patch.object(vp, "_use_face_map", return_value="456") as face_map_crop, \
+             mock.patch.object(vp, "_track_and_crop", return_value=None), \
+             mock.patch.object(vp, "_run_ffmpeg_with_fallback", return_value="ok.mp4"):
+            result = vp.crop_to_vertical(
+                input_path="in.mp4",
+                output_path="out.mp4",
+                strategy="speaker",
+                transcript_words=[{"word": "hi", "start": 0.0, "end": 0.4}],
+                clip_start=0.0,
+                face_map={"clusters": [{"center_x": 100, "crop_x": 0}], "video_width": 1920},
+            )
+
+        self.assertEqual(result, "ok.mp4")
+        face_map_crop.assert_called_once()
 
 
 if __name__ == "__main__":

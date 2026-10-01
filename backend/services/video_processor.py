@@ -372,7 +372,8 @@ def crop_to_vertical(
         # episode-wide face_map. Global speaker→side mappings are too coarse for
         # monologues and mixed-layout edits; they can pin a single-speaker clip
         # to the wrong person for the whole render.
-        if speakers_in_clip:
+        scanned_here = bool(face_map) and not face_map.get("speaker_mappings")
+        if speakers_in_clip or scanned_here:
             result = _track_and_crop(
                 input_path, output_path,
                 width, height, target_w, target_h,
@@ -1645,8 +1646,9 @@ def _track_and_crop_inner(
             # Merge very short runs (<0.8s) into their neighbors
             if len(runs) > 1:
                 merged_runs = [runs[0]]
-                for r in runs[1:]:
-                    if (r[1] - r[0]) < 0.8:
+                for i, r in enumerate(runs[1:], start=1):
+                    shortest = 0.4 if i == len(runs) - 1 else 0.8
+                    if (r[1] - r[0]) < shortest:
                         # Absorb into previous run
                         merged_runs[-1] = (merged_runs[-1][0], r[1], merged_runs[-1][2])
                     else:
