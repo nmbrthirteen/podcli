@@ -398,6 +398,8 @@ def run_cli(monkeypatch, *argv):
 
 @pytest.fixture
 def episode(sandbox):
+    if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+        pytest.skip("ffmpeg not installed")
     folder = sandbox / "ep"
     folder.mkdir()
     a = _speech(40, 5)
