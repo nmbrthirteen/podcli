@@ -1906,6 +1906,7 @@ def _post_render_loop(
                     face_map=face_map,
                     allow_ass_fallback=config.get("allow_ass_fallback", False),
                     use_ass_captions=config.get("use_ass_captions", False),
+                    theme=config.get("style"),
                 )
                 r["result"] = new_result
                 ok = True
@@ -2092,6 +2093,7 @@ def _post_render_loop(
                                         face_map=face_map,
                                         allow_ass_fallback=config.get("allow_ass_fallback", False),
                                         use_ass_captions=config.get("use_ass_captions", False),
+                                        theme=config.get("style"),
                                     )
                                     rendered.append({"clip": f_clip, "result": new_result, "index": len(clips)})
                                     clips.append(f_clip)
@@ -2148,6 +2150,7 @@ def _post_render_loop(
                                         face_map=face_map,
                                         allow_ass_fallback=config.get("allow_ass_fallback", False),
                                         use_ass_captions=config.get("use_ass_captions", False),
+                                        theme=config.get("style"),
                                     )
                                     rendered.append({"clip": nc, "result": new_result, "index": len(clips)})
                                     clips.append(nc)

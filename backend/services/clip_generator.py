@@ -319,7 +319,7 @@ def _render_transition_autofix_passes(
 DESIGNED_CUT_TOLERANCE = 0.3
 
 
-def _designed_cuts(cards: Optional[list]) -> list[float]:
+def _designed_cuts(cards: Optional[list], offset: float = 0.0) -> list[float]:
     times: list[float] = []
     for card in cards or []:
         if not isinstance(card, dict):
@@ -327,7 +327,7 @@ def _designed_cuts(cards: Optional[list]) -> list[float]:
         for key in ("start", "end"):
             value = card.get(key)
             if isinstance(value, (int, float)) and not isinstance(value, bool):
-                times.append(float(value))
+                times.append(float(value) + offset)
     return times
 
 
@@ -1293,6 +1293,7 @@ def generate_clip(
         # concat_outro joins two clips head-to-tail, so passing the intro first
         # puts it in front of the clip.
         final_video_path = normalized_path
+        intro_offset = 0.0
         if intro_path and os.path.exists(intro_path):
             if progress_callback:
                 progress_callback(83, "Adding intro")
@@ -1303,9 +1304,11 @@ def generate_clip(
             intro_scaled = os.path.join(work_dir, "intro_scaled.mp4")
             scale_to_frame(intro_path, intro_scaled, cw, ch)
             with_intro_path = os.path.join(work_dir, "with_intro.mp4")
+            clip_duration = _get_media_duration(final_video_path)
             concat_outro(intro_scaled, final_video_path, with_intro_path,
                          crossfade_duration=bookend_fade)
             final_video_path = with_intro_path
+            intro_offset = max(0.0, _get_media_duration(with_intro_path) - clip_duration)
 
         if outro_path and os.path.exists(outro_path):
             if progress_callback:
@@ -1344,7 +1347,9 @@ def generate_clip(
             if progress_callback:
                 progress_callback(97, "Quality gate: checking transitions...")
             _auto_fix_transition_jumps(
-                final_path, max_passes=max_autofix_passes, designed=_designed_cuts(cards),
+                final_path,
+                max_passes=max_autofix_passes,
+                designed=_designed_cuts(cards, offset=intro_offset),
             )
 
         # Get file size

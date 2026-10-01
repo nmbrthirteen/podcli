@@ -390,6 +390,10 @@ class ClipGeneratorTests(unittest.TestCase):
         self.assertEqual(cg._designed_cuts(cards), [4.0, 9.5, 12.0])
         self.assertEqual(cg._designed_cuts(None), [])
 
+    def test_designed_cuts_shift_by_the_intro(self):
+        cards = [{"kind": "stat", "start": 4, "end": 9.5}]
+        self.assertEqual(cg._designed_cuts(cards, offset=2.5), [6.5, 12.0])
+
 
 class TransitionAutofixGatingTests(unittest.TestCase):
     def test_multi_segment_cut_can_jump(self):
