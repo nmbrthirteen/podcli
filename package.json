@@ -1,6 +1,6 @@
 {
   "name": "podcli",
-  "version": "2.7.36",
+  "version": "2.7.37",
   "private": true,
   "description": "AI-powered podcast clip generator for TikTok/YouTube Shorts. Transcribe, find viral moments, export vertical clips with burned captions.",
   "type": "module",
