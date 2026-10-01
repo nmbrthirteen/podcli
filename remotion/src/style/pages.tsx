@@ -120,7 +120,7 @@ const Strip: React.FC<{ theme: Theme; seed: number; s: number; color?: string; s
   theme, seed, s, color, size = 48, children,
 }) => (
   <Paper theme={theme} seed={seed} color={color ?? theme.color.stripAlt} scale={s}>
-    <div style={{ ...fontOf(theme.type.label, size * s), color: theme.color.ink, padding: `${16 * s}px ${34 * s}px` }}>
+    <div style={{ ...fontOf(theme.type.label, size * s * (theme.surface === "none" ? 1.35 : 1)), color: theme.color.ink, padding: `${16 * s}px ${34 * s}px` }}>
       {children}
     </div>
   </Paper>

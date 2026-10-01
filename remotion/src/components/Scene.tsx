@@ -6,7 +6,7 @@ import { FONT } from "../types";
 import { context, muted, track } from "./brand";
 import type { Brand } from "./brand";
 import {
-  emphasisRuns, GAP_SIZE, MEDIA_HEIGHT, MIN_FIT, SCENE_WIDTH, TYPE_SIZE, sceneHeight,
+  emphasisRuns, GAP_SIZE, MEDIA_HEIGHT, MIN_FIT, SCENE_WIDTH, TYPE_SIZE, sceneHeight, stepType,
   sizeOf,
 } from "../scene";
 import type { Align, Block, Gap, Layout, Size, Tone } from "../scene";
@@ -278,6 +278,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
 
   if (block.type === "steps") {
     const last = block.points.length - 1;
+    const type = stepType(block.points);
     return (
       <div style={{ display: "flex", alignItems: "center" }}>
         {block.points.map((point, i) => (
@@ -287,9 +288,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
                 style={{
                   flex: 1,
                   height: MARK.rule * unit,
-                  background: i === last
-                    ? `linear-gradient(90deg, ${context(brand.ink)}, ${accent})`
-                    : context(brand.ink),
+                  background: i === last ? accent : context(brand.ink),
                   margin: `0 ${18 * unit}px`,
                   transform: `translateY(${-14 * unit}px)`,
                 }}
@@ -308,7 +307,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
               <div
                 style={{
                   fontFamily: paint.font,
-                  fontSize: TYPE_SIZE.md * unit,
+                  fontSize: type.value * unit,
                   fontWeight: 700,
                   color: brand.ink,
                   marginTop: 12 * unit,
@@ -321,7 +320,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
                 <div
                   style={{
                     fontFamily: paint.font,
-                    fontSize: TYPE_SIZE.xs * unit,
+                    fontSize: type.note * unit,
                     color: muted(brand.ink),
                     marginTop: 6 * unit,
                   }}
