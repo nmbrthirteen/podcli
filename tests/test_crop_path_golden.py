@@ -396,6 +396,25 @@ class MixedLayoutDetectionTests(unittest.TestCase):
         # through the mixed path.
         self.assertFalse(self._decide(self._frames(76, 4)))
 
+    def test_a_short_switch_at_the_end_of_a_clip_is_still_a_layout_change(self):
+        self.assertTrue(self._decide(self._frames(0, 326) + [
+            ((326 + i) * 0.1, [{"cx": 1181}, {"cx": 2909}]) for i in range(15)
+        ]))
+
+    def test_scattered_misses_never_add_up_to_a_run(self):
+        det = []
+        for i in range(300):
+            faces = [{"cx": 2050}] if i % 10 == 0 else [{"cx": 1181}, {"cx": 2909}]
+            det.append((i * 0.1, faces))
+        self.assertFalse(self._decide(det))
+
+    def test_frames_with_no_face_do_not_break_a_run(self):
+        det = self._frames(0, 300) + [
+            ((300 + i) * 0.1, [] if i % 3 == 0 else [{"cx": 1181}, {"cx": 2909}])
+            for i in range(15)
+        ]
+        self.assertTrue(self._decide(det))
+
     def test_face_map_flag_still_wins_when_the_clip_looks_uniform(self):
         # A clip that sits entirely inside one layout still belongs to a mixed
         # episode; the episode-wide flag remains a valid hint.

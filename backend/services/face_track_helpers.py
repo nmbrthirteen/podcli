@@ -255,11 +255,27 @@ def seats_from_frames(
     return left, right
 
 
+def longest_layout_run(detections: list, split: bool) -> float:
+    best = 0.0
+    start = None
+    for t, faces in detections:
+        if not faces:
+            continue
+        if (len(faces) >= 2) == split:
+            if start is None:
+                start = t
+            best = max(best, t - start)
+        else:
+            start = None
+    return best
+
+
 def clip_layout_is_mixed(
     detections: list,
     face_map: dict | None = None,
     min_share: float = 0.15,
     min_frames: int = 3,
+    min_run: float = 1.0,
 ) -> bool:
     """Does this clip switch between a split screen and a fullscreen shot?
 
@@ -281,6 +297,12 @@ def clip_layout_is_mixed(
     if layout_frames and (
         split_frames >= max(min_frames, layout_frames * min_share)
         and single_frames >= max(min_frames, layout_frames * min_share)
+    ):
+        return True
+
+    if (
+        longest_layout_run(detections, split=True) >= min_run
+        and longest_layout_run(detections, split=False) >= min_run
     ):
         return True
 
