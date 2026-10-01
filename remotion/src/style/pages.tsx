@@ -10,7 +10,7 @@ import { Label, Paper, Tape } from "./materials";
 import { camera, progress, Reveal, RevealText, roleFrames } from "./reveal";
 import type { Shot } from "./reveal";
 import { Scene } from "../components/Scene";
-import { SCENE_WIDTH } from "../scene";
+import { hasMedia, SCENE_WIDTH, sceneHeight } from "../scene";
 
 type PageProps<K extends Card["kind"]> = {
   card: Extract<Card, { kind: K }>;
@@ -235,16 +235,18 @@ const EntityPage: React.FC<PageProps<"entity"> & { length: number }> = ({ card, 
         <Tape theme={theme} seed={3} scale={s} width={250} style={{ left: -60 * s, top: 0, transform: "rotate(-28deg)" }} />
         <Tape theme={theme} seed={1} scale={s} width={250} style={{ left: 680 * s, top: 20 * s, transform: "rotate(24deg)" }} />
       </Reveal>}
-      <Reveal theme={theme} role="figure" f={f} at={nameAt} fps={fps} style={{ left: 50 * s, top: (src ? 1030 : 560) * s, ...tilt(theme, -2) }}>
-        <Label theme={theme} seed={32} scale={s} size={(src ? 150 : 190) * s} ink={theme.color.figure} pad={0.18}>
-          <RevealText theme={theme} role="figure" f={f} at={nameAt} text={card.name} s={s} />
-        </Label>
-      </Reveal>
-      {card.note && (
-        <Reveal theme={theme} role="strip" f={f} at={noteAt} fps={fps} style={{ left: 110 * s, top: (src ? 1225 : 860) * s, maxWidth: 860 * s, ...tilt(theme, 0.8) }}>
-          <Strip theme={theme} seed={33} s={s}>{card.note}</Strip>
+      <div style={{ position: "absolute", left: 50 * s, right: 50 * s, top: (src ? 1030 : 560) * s, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 36 * s }}>
+        <Reveal theme={theme} role="figure" f={f} at={nameAt} fps={fps} style={{ position: "relative", ...tilt(theme, -2) }}>
+          <Label theme={theme} seed={32} scale={s} size={(src ? 150 : 190) * s} ink={theme.color.figure} pad={0.18}>
+            <RevealText theme={theme} role="figure" f={f} at={nameAt} text={card.name} s={s} />
+          </Label>
         </Reveal>
-      )}
+        {card.note && (
+          <Reveal theme={theme} role="strip" f={f} at={noteAt} fps={fps} style={{ position: "relative", marginLeft: 60 * s, maxWidth: 860 * s, ...tilt(theme, 0.8) }}>
+            <Strip theme={theme} seed={33} s={s}>{card.note}</Strip>
+          </Reveal>
+        )}
+      </div>
     </Page>
   );
 };
@@ -470,16 +472,20 @@ const ScenePage: React.FC<PageProps<"scene"> & { length: number }> = ({ card, th
   const sheetAt = next("media");
   const bodyAt = next("item");
   const surface = theme.surface === "none" ? theme.color.ground : theme.color.sheet;
+  const room = hasMedia(card.blocks)
+    ? 940
+    : Math.min(940, Math.max(360, sceneHeight(card.blocks, card.layout ?? "stack", card.gap ?? "group") * 920 / SCENE_WIDTH + 80));
+  const top = 250 + (940 - room) / 2;
   return (
     <Page theme={theme} s={s} f={f} length={length} inset={inset} k={k} punch={null}
       shots={[{ at: 0, zoom: 1.12, x: 540, y: 700 }, { at: bodyAt + 14, zoom: 1, x: 540, y: 960 }]}>
       <Reveal theme={theme} role="media" f={f} at={sheetAt} fps={fps}
-        style={{ left: 40 * s, top: 190 * s, width: 1000 * s, height: 1060 * s, ...tilt(theme, -0.8) }}>
+        style={{ left: 40 * s, top: (top - 60) * s, width: 1000 * s, height: (room + 120) * s, ...tilt(theme, -0.8) }}>
         <Paper theme={theme} seed={121} color={surface} scale={s} style={{ width: "100%", height: "100%" }} />
       </Reveal>
       <Reveal theme={theme} role="item" f={f} at={bodyAt} fps={fps}
-        style={{ left: 80 * s, top: 250 * s, width: 920 * s, height: 940 * s, display: "flex", flexDirection: "column", justifyContent: "center", ...tilt(theme, -0.8) }}>
-        <Scene blocks={card.blocks} layout={card.layout} gap={card.gap} scale={(s * 920) / SCENE_WIDTH} room={940 * s}
+        style={{ left: 80 * s, top: top * s, width: 920 * s, height: room * s, display: "flex", flexDirection: "column", justifyContent: "center", ...tilt(theme, -0.8) }}>
+        <Scene blocks={card.blocks} layout={card.layout} gap={card.gap} scale={(s * 920) / SCENE_WIDTH} room={room * s}
           font={theme.type.label.family}
           brand={{ accent: theme.color.accent, ink: theme.color.ink, surface }} accent={theme.color.accent} />
       </Reveal>
