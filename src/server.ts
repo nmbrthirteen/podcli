@@ -2232,18 +2232,20 @@ export function createServer(): McpServer {
       "'sync', 'plan' and 'render' start a background job and return job_id: poll job_status, then call 'show'. " +
       "Mapping fields (people, sources, range_start, range_end, cut_settings, speaker_map, look) apply on 'map', 'sync', 'plan' and 'render'. " +
       "Changing who is in a file or where it sits clears the cut, so run 'plan' again. 'render' skips work when nothing changed. " +
-      "Other actions: 'list', 'cut' (index, source_id: swap one shot's camera), 'previews' (still frames per camera, looks: true adds color-look stills), 'delete'.",
+      "Other actions: 'list', 'cut' (index, source_id: swap one shot's camera), 'set_cuts' (cuts: replace the whole cut with back-to-back shots), " +
+      "'activity' (who speaks when, as spans per person), 'previews' (still frames per camera, looks: true adds color-look stills), " +
+      "'preview' (background job: playback proxies for the studio), 'delete'.",
     {
       action: z
-        .enum(["new", "list", "show", "map", "sync", "plan", "cut", "previews", "render", "export", "delete"])
+        .enum(["new", "list", "show", "map", "sync", "plan", "cut", "set_cuts", "activity", "previews", "preview", "render", "export", "delete"])
         .describe("What to do"),
       session_id: z.string().optional().describe("Session id returned by 'new' (every action except new/list)"),
       folder: z.string().optional().describe("For 'new': folder holding one episode's recordings, scanned recursively"),
       files: z.array(z.string()).optional().describe("For 'new': explicit media file paths, alone or with folder"),
       people: z
-        .array(z.union([z.string(), z.object({ id: z.string().optional(), name: z.string() })]))
+        .array(z.union([z.string(), z.object({ id: z.string().optional(), name: z.string(), role: z.enum(["host", "guest"]).optional() })]))
         .optional()
-        .describe("For 'new': speaker names (default Host, Guest). For 'map': the full people list, with ids to keep"),
+        .describe("For 'new': speaker names (default Host, Guest; the last one is the guest). For 'map': the full people list, with ids to keep and role host or guest; a guest's answers stay on their camera"),
       name: z.string().optional().describe("For 'new': episode name"),
       sources: z
         .array(
@@ -2265,6 +2267,8 @@ export function createServer(): McpServer {
           min_shot: z.number().optional().describe("Shortest shot in seconds (default 2)"),
           max_shot: z.number().optional().describe("Break a longer single-speaker shot with a wide shot; 0 disables (default 30)"),
           wide_insert: z.number().optional().describe("Length of that wide shot in seconds (default 4)"),
+          backchannel: z.number().optional().describe("Interjections shorter than this many seconds inside someone's turn never cut away (default 1.2)"),
+          hold_guest: z.boolean().optional().describe("Never cut away from a guest mid-answer (default true)"),
         })
         .optional(),
       speaker_map: z.record(z.string(), z.string()).optional().describe("For shared-audio shows: diarization label → person id"),
@@ -2274,6 +2278,10 @@ export function createServer(): McpServer {
       format: z.enum(["premiere", "fcpxml"]).optional().describe("For 'export': premiere (FCP7 XML, also opens in Resolve) or fcpxml (Final Cut Pro, Resolve)"),
       index: z.number().int().min(0).optional().describe("For 'cut': 0-based shot index"),
       source_id: z.string().optional().describe("For 'cut': camera source id to use for that shot"),
+      cuts: z
+        .array(z.object({ start: z.number(), end: z.number(), source_id: z.string() }))
+        .optional()
+        .describe("For 'set_cuts': the full cut, shots back to back on the timeline"),
       looks: z.boolean().optional().describe("For 'previews': include one still per color look"),
     },
     async (params) => {

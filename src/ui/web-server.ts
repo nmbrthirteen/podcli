@@ -2243,8 +2243,8 @@ app.get("/api/reel-download", (req, res) => {
 });
 
 // --- Multicam: map sources, sync, cut, render one recording ---
-const MULTICAM_JOB_ACTIONS = new Set(["sync", "plan", "render"]);
-const MULTICAM_WRITE_ACTIONS = new Set(["map", "cut", "export", "delete", ...MULTICAM_JOB_ACTIONS]);
+const MULTICAM_JOB_ACTIONS = new Set(["sync", "plan", "render", "preview"]);
+const MULTICAM_WRITE_ACTIONS = new Set(["map", "cut", "set_cuts", "export", "delete", ...MULTICAM_JOB_ACTIONS]);
 const multicamPreviewDir = join(paths.working, "multicam");
 // A multi-hour, multi-camera render outlasts the default one-hour task limit.
 const multicamExecutor = new PythonExecutor(8 * 3600_000);
@@ -2327,10 +2327,11 @@ app.post("/api/multicam", async (req, res) => {
   });
 });
 
+// Camera stills podcli made for an edit; nothing outside its working folder.
 app.get("/api/multicam/image", (req, res) => {
-  // Python reports resolved paths (/private/tmp on macOS), so compare real paths on both sides.
   let resolved: string | null = null;
   try {
+    // Python reports resolved paths (/private/tmp on macOS), so compare real paths on both sides.
     const root = realpathSync(multicamPreviewDir);
     resolved = safePath(root, path.relative(root, realpathSync(String(req.query.path || ""))));
   } catch {}

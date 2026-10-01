@@ -5,6 +5,7 @@
 export interface McPerson {
   id: string;
   name: string;
+  role?: "host" | "guest";
 }
 
 export type McRole = "camera" | "mic" | "ignore";
@@ -51,6 +52,8 @@ export interface McCutSettings {
   min_shot: number;
   max_shot: number;
   wide_insert: number;
+  backchannel: number;
+  hold_guest: boolean;
 }
 
 export interface McStats {

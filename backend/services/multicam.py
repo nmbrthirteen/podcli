@@ -46,7 +46,7 @@ LOOKS = {
     "contrast": "curves=preset=medium_contrast,eq=saturation=1.1",
 }
 
-DEFAULT_CUT = {"min_shot": 2.0, "max_shot": 30.0, "wide_insert": 4.0}
+DEFAULT_CUT = {"min_shot": 2.0, "max_shot": 30.0, "wide_insert": 4.0, "backchannel": 1.2, "hold_guest": True}
 
 
 def _emit(callback: ProgressCallback, percent: float, message: str) -> None:
@@ -70,6 +70,7 @@ def _work_dir(session_id: str) -> Path:
 class Person:
     id: str
     name: str
+    role: str = "host"  # "host" | "guest": a guest's answers are held on their camera
 
 
 @dataclass
@@ -125,6 +126,7 @@ class MulticamSession:
     activity_key: str = ""
     outputs: dict = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
+    preview: dict = field(default_factory=dict)
 
     def path(self) -> Path:
         return _sessions_dir() / f"{self.session_id}.json"
@@ -412,7 +414,11 @@ def new_session(
         session_id=uuid.uuid4().hex[:12],
         name=name or (Path(folder).name if folder else Path(found[0]).stem),
         folder=os.path.abspath(folder) if folder else "",
-        people=[Person(id=_person_id(n, i), name=n) for i, n in enumerate(person_names)],
+        # Most shows list the hosts first, so the last person is guessed to be the guest.
+        people=[
+            Person(id=_person_id(n, i), name=n, role="guest" if i == len(person_names) - 1 and i > 0 else "host")
+            for i, n in enumerate(person_names)
+        ],
         sources=sources,
         skipped=skipped,
     )
@@ -440,6 +446,7 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
     before = _cut_inputs(session)
     if "people" in params:
         people = []
+        roles = {p.id: p.role for p in session.people}
         for i, entry in enumerate(params["people"] or []):
             name = str(entry.get("name") if isinstance(entry, dict) else entry).strip()
             if not name:
@@ -447,7 +454,10 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
             pid = (entry.get("id") if isinstance(entry, dict) else None) or _person_id(name, i)
             if pid == "wide" or pid in {p.id for p in people}:
                 pid = f"{pid}-{i + 1}"
-            people.append(Person(id=pid, name=name))
+            role = (entry.get("role") if isinstance(entry, dict) else None) or roles.get(pid, "host")
+            if role not in {"host", "guest"}:
+                raise ValueError(f"A person is a host or a guest, not {role!r}")
+            people.append(Person(id=pid, name=name, role=role))
         if not people:
             raise ValueError("Add at least one person")
         session.people = people
@@ -507,6 +517,8 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
             "min_shot": max(0.5, min(10.0, float(merged["min_shot"]))),
             "max_shot": max(0.0, min(600.0, float(merged["max_shot"]))),
             "wide_insert": max(1.0, min(15.0, float(merged["wide_insert"]))),
+            "backchannel": max(0.0, min(5.0, float(merged.get("backchannel", DEFAULT_CUT["backchannel"])))),
+            "hold_guest": bool(merged.get("hold_guest", True)),
         }
     if "speaker_map" in params:
         session.speaker_map = {str(k): v for k, v in (params["speaker_map"] or {}).items() if v in valid}
@@ -519,7 +531,8 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
 def _cut_inputs(session: MulticamSession) -> str:
     return json.dumps([
         [(s.id, s.role, s.person, s.channel_people, s.offset) for s in session.sources],
-        session.person_ids(), session.range_start, session.range_end, session.cut_settings, session.speaker_map,
+        [(p.id, p.role) for p in session.people], session.range_start, session.range_end,
+        session.cut_settings, session.speaker_map,
     ], default=str)
 
 
@@ -804,7 +817,9 @@ def plan_session(session: MulticamSession, progress_callback: ProgressCallback =
 
     session.cuts = sig.plan_cuts(
         labels, session.person_ids(), cams,
-        range_start=start, range_end=end, **session.cut_settings,
+        range_start=start, range_end=end,
+        guests=frozenset(p.id for p in session.people if p.role == "guest"),
+        **{**DEFAULT_CUT, **session.cut_settings},
     )
     if not session.cuts:
         raise ValueError("No camera covers the episode range. Check the camera mapping and the start and end.")
@@ -828,26 +843,67 @@ def cut_stats(session: MulticamSession) -> dict:
     }
 
 
-def set_cut(session: MulticamSession, index: int, source_id: str) -> MulticamSession:
-    """Swap one shot to another camera; neighbours on the same camera merge."""
-    if not 0 <= index < len(session.cuts):
-        raise IndexError(f"No shot {index + 1}")
-    cam = session.source(source_id)
-    shot = session.cuts[index]
-    if cam.role != "camera" or not cam.synced:
-        raise ValueError("Pick a synced camera")
-    if cam.timeline_start() > shot["start"] + 1e-3 or cam.timeline_end() < shot["end"] - 1e-3:
-        raise ValueError(f"{os.path.basename(cam.path)} wasn't recording for this whole shot")
-    shot["source_id"] = source_id
-    merged: list[dict] = []
-    for c in session.cuts:
-        if merged and merged[-1]["source_id"] == c["source_id"]:
-            merged[-1]["end"] = c["end"]
+def set_cuts(session: MulticamSession, cuts: list) -> MulticamSession:
+    """Replace the cut with a hand-edited one; neighbouring shots on the same camera merge.
+
+    Shots must run back to back, and every camera must have been recording for
+    its whole shot, so a render never reaches past the end of a file.
+    """
+    if not isinstance(cuts, list) or not cuts:
+        raise ValueError("cuts must be a non-empty list of {start, end, source_id}")
+    clean: list[dict] = []
+    for c in cuts:
+        if not isinstance(c, dict):
+            raise ValueError("cuts must be a non-empty list of {start, end, source_id}")
+        start, end = float(c["start"]), float(c["end"])
+        cam = session.source(str(c["source_id"]))
+        if end - start < 0.04:
+            raise ValueError("A shot must be at least one frame long")
+        if clean and abs(clean[-1]["end"] - start) > 1e-3:
+            raise ValueError("Shots must run back to back with no gaps or overlaps")
+        if cam.role != "camera" or not cam.synced:
+            raise ValueError(f"{os.path.basename(cam.path)} isn't a synced camera")
+        if cam.timeline_start() > start + 1e-3 or cam.timeline_end() < end - 1e-3:
+            raise ValueError(f"{os.path.basename(cam.path)} wasn't recording for the whole shot at {start:.1f}s")
+        if clean and clean[-1]["source_id"] == cam.id:
+            clean[-1]["end"] = round(end, 3)
         else:
-            merged.append(dict(c))
-    session.cuts = merged
+            clean.append({"start": round(start, 3), "end": round(end, 3), "source_id": cam.id})
+    session.cuts = clean
     session.save()
     return session
+
+
+def set_cut(session: MulticamSession, index: int, source_id: str) -> MulticamSession:
+    """Swap one shot to another camera."""
+    if not 0 <= index < len(session.cuts):
+        raise IndexError(f"No shot {index + 1}")
+    cuts = [dict(c) for c in session.cuts]
+    cuts[index]["source_id"] = source_id
+    return set_cuts(session, cuts)
+
+
+def activity(session: MulticamSession) -> dict:
+    """Who speaks when, as spans per person, for drawing the timeline's speaking lanes."""
+    labels = speaker_labels(session)
+    people = session.person_ids()
+
+    def spans(mask: np.ndarray) -> list[list[float]]:
+        edges = np.flatnonzero(np.diff(np.concatenate([[0], mask.astype(np.int8), [0]])))
+        out: list[list[float]] = []
+        for a, b in zip(edges[::2], edges[1::2]):
+            start, end = a * sig.FRAME_SECONDS, b * sig.FRAME_SECONDS
+            # Breaths and short pauses would draw as noise; join them into one phrase.
+            if out and start - out[-1][1] < 0.25:
+                out[-1][1] = round(end, 2)
+            elif end - start >= 0.15:
+                out.append([round(start, 2), round(end, 2)])
+        return out
+
+    return {
+        "people": {pid: spans((labels == i) | (labels == sig.BOTH)) for i, pid in enumerate(people)},
+        "both": spans(labels == sig.BOTH),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -888,6 +944,62 @@ def previews(session: MulticamSession, *, looks: bool = False, at: Optional[floa
                     _frame(cam, t, out, look=name, width=640)
                 frames["looks"][name] = str(out)
     return frames
+
+
+def build_preview(session: MulticamSession, progress_callback: ProgressCallback = None) -> MulticamSession:
+    """Small proxies of every camera and one mic mix on the timeline, for live playback in the studio.
+
+    Browsers can't play 4K, MXF, or MTS smoothly or at all; 540p H.264 with a
+    keyframe every second seeks instantly. Both are cached until a source or
+    the sync changes.
+    """
+    work = _work_dir(session.session_id)
+    cams = [s for s in session.cameras() if s.synced]
+    proxies: dict[str, str] = {}
+    for i, cam in enumerate(cams):
+        out = work / f"{cam.id}.proxy.mp4"
+        if not (out.exists() and out.stat().st_mtime >= os.path.getmtime(cam.path)):
+            _emit(progress_callback, 5 + 80 * i / max(1, len(cams)), f"Preparing preview of {os.path.basename(cam.path)}")
+            tmp = out.with_suffix(".tmp.mp4")
+            gop = str(max(1, round(cam.fps or 25)))
+            proc_run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", cam.path, "-map", "0:v:0", "-an",
+                "-vf", "scale=-2:540", "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+                "-g", gop, "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(tmp),
+            ], timeout=7200, check=True)
+            os.replace(tmp, out)
+        proxies[cam.id] = str(out)
+
+    feeds = _audio_inputs(session)
+    key = hashlib.sha1(json.dumps(
+        [(s.id, ch, s.offset, s.speed, os.path.getmtime(s.path)) for s, ch in feeds], default=str,
+    ).encode()).hexdigest()[:12]
+    audio = work / f"preview-{key}.m4a"
+    if not audio.exists():
+        _emit(progress_callback, 88, "Mixing preview audio")
+        duration = session.timeline_duration()
+        args, chains = [], []
+        for i, (s, ch) in enumerate(feeds):
+            inp, steps = _aligned_input(s, ch, 0.0, duration)
+            args += inp
+            chains.append(f"[{i}:a:0]{','.join(steps)}[a{i}]")
+        mix = "".join(f"[a{i}]" for i in range(len(feeds)))
+        graph = ";".join(chains) + (f";{mix}amix=inputs={len(feeds)}:normalize=0[out]" if len(feeds) > 1 else ";[a0]anull[out]")
+        tmp = audio.with_suffix(".tmp.m4a")
+        proc_run([
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args, "-filter_complex", graph,
+            "-map", "[out]", "-ac", "1", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(tmp),
+        ], timeout=7200, check=True)
+        os.replace(tmp, audio)
+        for old in work.glob("preview-*.m4a"):
+            if old != audio:
+                old.unlink(missing_ok=True)
+    # Edits keep landing while proxies encode, so write onto the latest saved copy.
+    latest = MulticamSession.load(session.session_id)
+    latest.preview = {"proxies": proxies, "audio": str(audio)}
+    latest.save()
+    _emit(progress_callback, 100, "Preview ready")
+    return latest
 
 
 # ---------------------------------------------------------------------------
@@ -1182,12 +1294,17 @@ def payload(session: MulticamSession) -> dict:
     data = asdict(session)
     data["timeline_duration"] = round(session.timeline_duration(), 3)
     data["stats"] = cut_stats(session)
+    data["cut_settings"] = {**DEFAULT_CUT, **session.cut_settings}
     data["looks"] = list(LOOKS)
     data["has_person_mics"] = bool(session.person_mics())
     data["outputs"] = {
         k: v for k, v in session.outputs.items()
         if not isinstance(v, str) or not os.path.isabs(v) or os.path.exists(v)
     }
+    proxies = {k: v for k, v in (session.preview.get("proxies") or {}).items() if os.path.exists(v)}
+    audio = session.preview.get("audio")
+    ready = audio and os.path.exists(audio) and all(c.id in proxies for c in session.cameras() if c.synced)
+    data["preview"] = {"proxies": proxies, "audio": audio} if ready else None
     for s in data["sources"]:
         s["name"] = os.path.basename(s["path"])
         s["timeline_start"] = s["offset"]

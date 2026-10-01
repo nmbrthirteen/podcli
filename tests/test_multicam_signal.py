@@ -198,13 +198,32 @@ def test_plan_cuts_never_overlaps_wide_inserts():
     assert abs(sum(c["end"] - c["start"] for c in cuts) - 20) < 1e-6
 
 
-def test_flickering_crosstalk_becomes_one_wide_shot():
-    rng = np.random.default_rng(1)
-    flicker = rng.choice([BOTH, BOTH, 0, 1], size=500).astype(np.int32)
-    labels = np.concatenate([_labels([(0, 15)]), flicker, _labels([(1, 10)])])
-    cuts = plan_cuts(labels, ["host", "guest"], CAMS, range_start=0, range_end=30, max_shot=0)
+def test_sustained_crosstalk_with_blips_becomes_one_wide_shot():
+    blips = [(BOTH, 0.7), (0, 0.05), (BOTH, 0.9), (1, 0.08), (BOTH, 1.2), (0, 0.05), (BOTH, 1.0)]
+    labels = _labels([(0, 15), *blips, (1, 10)])
+    cuts = plan_cuts(labels, ["host", "guest"], CAMS, range_start=0, range_end=29, max_shot=0)
     assert [c["source_id"] for c in cuts] == ["cam_host", "cam_wide", "cam_guest"]
-    assert cuts[1]["end"] - cuts[1]["start"] > 3.0
+    assert cuts[1]["end"] - cuts[1]["start"] > 3.5
+
+
+def test_backchannels_inside_an_answer_never_cut_away():
+    # Host says "mm-hm" and laughs with the guest briefly while the guest answers.
+    labels = _labels([(0, 5), (1, 12), (0, 0.6), (1, 9), (BOTH, 0.8), (1, 14), (0, 6)])
+    cuts = plan_cuts(labels, ["host", "guest"], CAMS, range_start=0, range_end=48.4, max_shot=0)
+    assert [c["source_id"] for c in cuts] == ["cam_host", "cam_guest", "cam_host"]
+
+
+def test_guest_answers_hold_but_host_monologues_get_a_cutaway():
+    labels = _labels([(1, 70), (0, 70)])
+    cams = [Camera(c.source_id, c.person, 0, 200) for c in CAMS]
+    cuts = plan_cuts(labels, ["host", "guest"], cams, range_start=0, range_end=140, max_shot=30,
+                     guests=frozenset({"guest"}))
+    ids = [c["source_id"] for c in cuts]
+    assert ids[0] == "cam_guest" and cuts[0]["end"] == 70
+    assert "cam_wide" in ids[1:]
+    held_off = plan_cuts(labels, ["host", "guest"], cams, range_start=0, range_end=140, max_shot=30,
+                         guests=frozenset({"guest"}), hold_guest=False)
+    assert held_off[1]["source_id"] == "cam_wide" and held_off[1]["start"] < 70
 
 
 def test_plan_cuts_scales_to_a_three_hour_episode():

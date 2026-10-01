@@ -659,7 +659,8 @@ def _fmt_time(seconds: float) -> str:
 def _multicam_table(session) -> None:
     names = {p.id: p.name for p in session.people}
     names.update({"wide": "Everyone (wide)", "": "Shared room mic"})
-    print(f"\n  {session.name}  ·  people: {', '.join(p.name for p in session.people)}  ·  session {session.session_id}")
+    people = ", ".join(f"{p.name} ({p.role})" for p in session.people)
+    print(f"\n  {session.name}  ·  people: {people}  ·  session {session.session_id}")
     print(f"  {'#':>2}  {'File':<28} {'Role':<7} {'Who':<22} {'Length':>8}  {'Format':<10} Sync")
     for i, s in enumerate(session.sources, 1):
         if s.role == "ignore":
@@ -796,12 +797,20 @@ def _open_multicam_session(target: str, people):
 
 
 def cmd_multicam(args):
-    """Edit a full multicam episode: map every file, sync, auto-cut, then render or export."""
+    """Edit a full multicam episode: map every file, sync, auto-cut, then render or export.
+
+    With --json, the human output moves to stderr and stdout carries one JSON
+    object (the edit, plus activity when asked), for scripts and the cloud worker.
+    """
+    import contextlib
     from services import multicam as mc
 
     target = _clean_path(args.target) if args.target else ""
     if target == "list":
         sessions = mc.list_sessions()
+        if args.json:
+            print(json.dumps({"sessions": sessions}))
+            return
         if not sessions:
             print("  No multicam edits yet. Start one with: podcli multicam <folder>")
         for s in sessions:
@@ -813,75 +822,116 @@ def cmd_multicam(args):
               "  Example: podcli multicam ~/Podcasts/ep12 --people \"Nika, Ana\"")
         sys.exit(2)
 
+    out = sys.stdout
     try:
-        if args.delete:
-            session = (mc.find_session(mc.collect_files(target)) if os.path.isdir(target)
-                       else mc.MulticamSession.load(target))
-            if not session:
-                raise ValueError(f"No multicam edit for {target}")
-            mc.delete_session(session.session_id)
-            print(f"  ✓ Deleted multicam edit {session.session_id}. Your recordings are untouched.")
-            return
-
-        people = [n.strip() for n in (args.people or "").split(",") if n.strip()] or None
-        session = _apply_multicam_fixes(_open_multicam_session(target, people), args.set or [])
-
-        guessed = any(s.guessed and s.role != "ignore" for s in session.sources)
-        if guessed and sys.stdin.isatty() and sys.stdout.isatty() and not args.yes:
-            session = _review_multicam_interactively(session)
-            if session is None:
-                return
-        else:
-            _multicam_table(session)
-            if guessed:
-                print("  Using the guessed roles above. Fix any with --set FILE=ROLE:NAME.")
-
-        if args.resync or mc.needs_sync(session):
-            report, done = _multicam_progress("Syncing")
-            session = mc.sync_session(session, force=args.resync, progress_callback=report)
-            done()
-            _multicam_table(session)
-            failed = [s for s in session.sources if s.role != "ignore" and not s.synced]
-            if failed:
-                names = ", ".join(os.path.basename(s.path) for s in failed)
-                print(f"\n  ✗ Couldn't sync {names}. Ignore it with --set {os.path.basename(failed[0].path)}=ignore, "
-                      "or set its offset in the studio (podcli ui).")
-                sys.exit(1)
-
-        cut_edits = {
-            **({"range_start": args.start} if args.start is not None else {}),
-            **({"range_end": args.end} if args.end is not None else {}),
-            **({"cut_settings": {k: v for k, v in (("min_shot", args.min_shot), ("max_shot", args.max_shot)) if v is not None}}
-               if args.min_shot is not None or args.max_shot is not None else {}),
-            **({"look": args.look} if args.look else {}),
-        }
-        if cut_edits:
-            session = mc.update_mapping(session, cut_edits)
-        if not session.cuts:
-            report, done = _multicam_progress("Cutting")
-            session = mc.plan_session(session, progress_callback=report)
-            done()
-        stats = mc.cut_stats(session)
-        names = {s.id: os.path.basename(s.path) for s in session.sources}
-        share = ", ".join(f"{names[k]} {v:.0%}" for k, v in sorted(stats["share"].items(), key=lambda kv: -kv[1]))
-        print(f"\n  {stats['shots']} shots over {_fmt_time(stats['duration'])}, average {stats['average_shot']:.1f}s  ({share})")
-
-        for fmt in (["premiere", "fcpxml"] if args.export == "all" else [args.export] if args.export else []):
-            print(f"  ✓ {mc.export_xml(session, fmt)}")
-        if not args.no_render:
-            report, done = _multicam_progress("Rendering")
-            outputs = mc.render_session(session, stems=not args.no_stems, progress_callback=report)
-            done()
-            for path in [outputs["video"], *(outputs.get("stems") or [])]:
-                print(f"  ✓ {path}")
-        print(f"\n  Change anything and re-run: podcli multicam {session.session_id} [options]")
-        video = session.outputs.get("video")
-        if video and os.path.exists(video):
-            print(f"  Make clips from it:         podcli process \"{video}\"")
+        with contextlib.redirect_stdout(sys.stderr) if args.json else contextlib.nullcontext():
+            session = _run_multicam(args, mc, target)
+        if args.json and session:
+            data = mc.payload(session)
+            if args.activity:
+                data["activity"] = mc.activity(session)
+            print(json.dumps(data), file=out)
     except (ValueError, OSError, RuntimeError, ImportError, TypeError) as e:
         sys.stdout.flush()
+        if args.json:
+            print(json.dumps({"error": str(e)}), file=out)
         print(f"  ✗ {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def _load_cuts(path: str) -> list:
+    try:
+        with open(_clean_path(path), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        raise ValueError(f"Can't read the cut from {path}: {e}")
+    return data.get("cuts", data) if isinstance(data, dict) else data
+
+
+def _run_multicam(args, mc, target: str):
+    if args.delete:
+        session = (mc.find_session(mc.collect_files(target)) if os.path.isdir(target)
+                   else mc.MulticamSession.load(target))
+        if not session:
+            raise ValueError(f"No multicam edit for {target}")
+        mc.delete_session(session.session_id)
+        print(f"  ✓ Deleted multicam edit {session.session_id}. Your recordings are untouched.")
+        return None
+
+    people = [n.strip() for n in (args.people or "").split(",") if n.strip()] or None
+    session = _apply_multicam_fixes(_open_multicam_session(target, people), args.set or [])
+    if args.guests is not None:
+        guests = {n.strip().lower() for n in args.guests.split(",") if n.strip()}
+        unknown = guests - {p.name.lower() for p in session.people}
+        if unknown:
+            raise ValueError(f"No person named {sorted(unknown)[0]!r}. People: {', '.join(p.name for p in session.people)}")
+        session = mc.update_mapping(session, {"people": [
+            {"id": p.id, "name": p.name, "role": "guest" if p.name.lower() in guests else "host"} for p in session.people
+        ]})
+
+    guessed = any(s.guessed and s.role != "ignore" for s in session.sources)
+    if guessed and sys.stdin.isatty() and sys.stdout.isatty() and not (args.yes or args.json):
+        session = _review_multicam_interactively(session)
+        if session is None:
+            return None
+    else:
+        _multicam_table(session)
+        if guessed:
+            print("  Using the guessed roles above. Fix any with --set FILE=ROLE:NAME.")
+
+    if args.resync or mc.needs_sync(session):
+        report, done = _multicam_progress("Syncing")
+        session = mc.sync_session(session, force=args.resync, progress_callback=report)
+        done()
+        _multicam_table(session)
+        failed = [s for s in session.sources if s.role != "ignore" and not s.synced]
+        if failed:
+            names = ", ".join(os.path.basename(s.path) for s in failed)
+            raise ValueError(f"Couldn't sync {names}. Ignore it with --set {os.path.basename(failed[0].path)}=ignore, "
+                             "or set its offset in the studio (podcli ui).")
+
+    cut_edits = {
+        **({"range_start": args.start} if args.start is not None else {}),
+        **({"range_end": args.end} if args.end is not None else {}),
+        **({"cut_settings": {k: v for k, v in (("min_shot", args.min_shot), ("max_shot", args.max_shot)) if v is not None}}
+           if args.min_shot is not None or args.max_shot is not None else {}),
+        **({"look": args.look} if args.look else {}),
+    }
+    if cut_edits:
+        session = mc.update_mapping(session, cut_edits)
+    if args.cuts:
+        session = mc.set_cuts(session, _load_cuts(args.cuts))
+    elif not session.cuts:
+        report, done = _multicam_progress("Cutting")
+        session = mc.plan_session(session, progress_callback=report)
+        done()
+    stats = mc.cut_stats(session)
+    names = {s.id: os.path.basename(s.path) for s in session.sources}
+    share = ", ".join(f"{names[k]} {v:.0%}" for k, v in sorted(stats["share"].items(), key=lambda kv: -kv[1]))
+    print(f"\n  {stats['shots']} shots over {_fmt_time(stats['duration'])}, average {stats['average_shot']:.1f}s  ({share})")
+    if args.activity and not args.json:
+        spoken = mc.activity(session)["people"]
+        print("  Talk time: " + ", ".join(
+            f"{p.name} {_fmt_time(sum(b - a for a, b in spoken.get(p.id, [])))}" for p in session.people))
+
+    for fmt in (["premiere", "fcpxml"] if args.export == "all" else [args.export] if args.export else []):
+        print(f"  ✓ {mc.export_xml(session, fmt)}")
+    if args.preview:
+        report, done = _multicam_progress("Preview")
+        session = mc.build_preview(session, progress_callback=report)
+        done()
+        print(f"  ✓ Preview proxies and mix in {os.path.dirname(session.preview['audio'])}")
+    if not args.no_render:
+        report, done = _multicam_progress("Rendering")
+        outputs = mc.render_session(session, stems=not args.no_stems, progress_callback=report)
+        done()
+        for path in [outputs["video"], *(outputs.get("stems") or [])]:
+            print(f"  ✓ {path}")
+    print(f"\n  Change anything and re-run: podcli multicam {session.session_id} [options]")
+    video = session.outputs.get("video")
+    if video and os.path.exists(video):
+        print(f"  Make clips from it:         podcli process \"{video}\"")
+    return session
 
 
 def cmd_process(args):
@@ -4834,6 +4884,8 @@ def main():
     )
     mc_p.add_argument("target", nargs="?", help="Episode folder, a session id to resume, or 'list'")
     mc_p.add_argument("--people", help="Comma-separated speaker names (default: Host, Guest)")
+    mc_p.add_argument("--guests", help="Comma-separated names of the guests; their answers stay on their camera "
+                                         "(default: the last person)")
     mc_p.add_argument("--set", action="append", metavar="FILE=ROLE[:NAME]",
                       help="Fix a file's role: camera:NAME, camera:wide, mic:NAME, mic:NAME,NAME (stereo L/R), mic:room, or ignore. "
                            "FILE is its number in the table or the start of its name. Repeatable.")
@@ -4851,6 +4903,13 @@ def main():
                       help="Sync every file again, including offsets you set by hand")
     mc_p.add_argument("-y", "--yes", action="store_true", help="Don't stop to review guessed roles")
     mc_p.add_argument("--delete", action="store_true", help="Delete this multicam edit (source files are untouched)")
+    mc_p.add_argument("--cuts", metavar="FILE",
+                      help="Use this cut instead of the automatic one: a JSON list of {start, end, source_id}, back to back")
+    mc_p.add_argument("--preview", action="store_true",
+                      help="Also build small playback proxies of each camera and a mic mix on the timeline")
+    mc_p.add_argument("--activity", action="store_true", help="Report who speaks when (talk time, or spans with --json)")
+    mc_p.add_argument("--json", action="store_true",
+                      help="Print the edit as one JSON object on stdout; progress and messages go to stderr")
 
     # ── studio ──
     studio = sub.add_parser("studio", help="Cut a fragment + add Remotion intro/outro (follow-us) bookends")

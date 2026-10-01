@@ -7,12 +7,9 @@ import { BackIcon } from "./icons";
 import MulticamStart from "./multicam-start";
 import MulticamSources from "./multicam-sources";
 import MulticamSync from "./multicam-sync";
-import MulticamCut from "./multicam-cut";
-import MulticamLook from "./multicam-look";
-import MulticamDeliver from "./multicam-deliver";
-import type { McJobKind, McPreviews, McPreviewsResp, McSession, McSessionSummary } from "./multicam-types";
-
-const emptyPreviews: McPreviews = { cameras: {}, looks: {} };
+import MulticamSummary from "./multicam-summary";
+import MulticamResults, { DeliverActions } from "./multicam-deliver";
+import type { McJobKind, McPreviewsResp, McSession, McSessionSummary } from "./multicam-types";
 
 const JOB_LABEL: Record<McJobKind, string> = {
   sync: "Syncing",
@@ -21,6 +18,7 @@ const JOB_LABEL: Record<McJobKind, string> = {
 };
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const post = <T,>(body: Record<string, unknown>) => api<T>("/multicam", { method: "POST", body: JSON.stringify(body) });
 
 export default function MulticamPage() {
   const navigate = useNavigate();
@@ -29,22 +27,22 @@ export default function MulticamPage() {
 
   const [sessions, setSessions] = useState<McSessionSummary[]>([]);
   const [session, setSession] = useState<McSession | null>(null);
-  const [previews, setPreviews] = useState<McPreviews>(emptyPreviews);
+  const [stills, setStills] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<{ id: string; kind: McJobKind } | null>(null);
   const jobState = useJob(job?.id ?? null);
   const [peopleDraft, setPeopleDraft] = useState<string[]>(["Host", "Guest"]);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
 
-  // One lock for the whole page: a running job owns the session until it
-  // finishes, so edits can't race it and get overwritten.
+  // A running job owns the session until it finishes, so edits can't race it and get overwritten.
   const locked = busy || job !== null;
 
   async function call<T = McSession>(body: Record<string, unknown>): Promise<T | null> {
     setBusy(true);
     setError(null);
     try {
-      return await api<T>("/multicam", { method: "POST", body: JSON.stringify(body) });
+      return await post<T>(body);
     } catch (e) {
       setError(errorText(e));
       return null;
@@ -63,40 +61,37 @@ export default function MulticamPage() {
     session && call({ ...body, session_id: session.session_id }).then(adopt);
 
   function refreshList() {
-    api<{ sessions: McSessionSummary[] }>("/multicam", { method: "POST", body: JSON.stringify({ action: "list" }) })
-      .then((r) => setSessions(r.sessions))
-      .catch(() => {});
+    post<{ sessions: McSessionSummary[] }>({ action: "list" }).then((r) => setSessions(r.sessions)).catch(() => {});
   }
 
-  useEffect(() => {
-    refreshList();
-  }, []);
+  function startJob(kind: McJobKind, extra: Record<string, unknown> = {}, sessionId = session?.session_id) {
+    if (!sessionId) return;
+    call<{ job_id: string }>({ action: kind, session_id: sessionId, ...extra }).then((r) => {
+      if (r) setJob({ id: r.job_id, kind });
+    });
+  }
+
+  useEffect(refreshList, []);
 
   useEffect(() => {
+    setStills({});
+    setSourcesOpen(false);
     if (!openId) {
       setSession(null);
       setJob(null);
-      setPreviews(emptyPreviews);
       return;
     }
-    if (session?.session_id !== openId) {
-      setPreviews(emptyPreviews);
-      call({ action: "show", session_id: openId }).then(adopt);
-    }
+    if (session?.session_id !== openId) call({ action: "show", session_id: openId }).then(adopt);
   }, [openId]);
 
   const cutReady = !!session && session.cuts.length > 0;
+
   useEffect(() => {
     if (!session) return;
-    const wantLooks = cutReady && Object.keys(previews.looks).length === 0;
-    if (Object.keys(previews.cameras).length > 0 && !wantLooks) return;
-    api<McPreviewsResp>("/multicam", {
-      method: "POST",
-      body: JSON.stringify({ action: "previews", session_id: session.session_id, looks: cutReady }),
-    })
-      .then((r) => setPreviews(r.previews))
+    post<McPreviewsResp>({ action: "previews", session_id: session.session_id })
+      .then((r) => setStills(r.previews.cameras))
       .catch(() => {});
-  }, [session?.session_id, cutReady]);
+  }, [session?.session_id]);
 
   useEffect(() => {
     if (!job || !jobState) return;
@@ -115,13 +110,6 @@ export default function MulticamPage() {
     if (job.kind === "sync" && allSynced) startJob("plan", {}, result.session_id);
   }, [jobState?.status]);
 
-  function startJob(kind: McJobKind, extra: Record<string, unknown> = {}, sessionId = session?.session_id) {
-    if (!sessionId) return;
-    call<{ job_id: string }>({ action: kind, session_id: sessionId, ...extra }).then((r) => {
-      if (r) setJob({ id: r.job_id, kind });
-    });
-  }
-
   async function startSession(seed: Record<string, unknown>): Promise<boolean> {
     const r = await call({ action: "new", ...seed, people: peopleDraft.filter((n) => n.trim()) });
     if (!r) return false;
@@ -131,15 +119,10 @@ export default function MulticamPage() {
     return true;
   }
 
-  function closeSession() {
-    setError(null);
-    setSearchParams({});
-  }
-
   async function deleteSession(id: string) {
     if (!window.confirm("Delete this multicam edit? Your recordings stay where they are.")) return;
     if (await call({ action: "delete", session_id: id })) {
-      if (session?.session_id === id) closeSession();
+      if (session?.session_id === id) setSearchParams({});
       refreshList();
     }
   }
@@ -181,13 +164,34 @@ export default function MulticamPage() {
         jobState?.progress ? ` (${Math.round(jobState.progress)}%)` : ""
       }`
     : null;
-  const syncStarted = !!session?.sources.some((s) => s.sync?.status);
+  const synced = !!session?.sources.some((s) => s.sync?.status);
+  const unsynced = session?.sources.filter((s) => s.role !== "ignore" && s.offset === null) || [];
+  const showSources = !session || !cutReady || sourcesOpen || unsynced.length > 0;
 
   return (
     <div className="app">
-      <PageHeader title="Multicam edit" />
+      <PageHeader
+        title={session ? session.name : "Multicam edit"}
+        back={session && (
+          <button className="btn btn-ghost btn-sm" onClick={() => setSearchParams({})} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <BackIcon /> All multicam edits
+          </button>
+        )}
+        actions={session && cutReady && (
+          <DeliverActions
+            locked={locked}
+            onRender={() => startJob("render", { stems: true })}
+            onExport={(format) => mutate({ action: "export", format })}
+          />
+        )}
+      />
 
       {error && <div className="set-note err" style={{ marginBottom: 16 }}>{error}</div>}
+      {progress && (
+        <div className="set-note" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <div className="spinner sm" /> {progress}
+        </div>
+      )}
 
       {!session ? (
         <MulticamStart
@@ -201,42 +205,30 @@ export default function MulticamPage() {
         />
       ) : (
         <div className="stream-in">
-          <button className="btn btn-ghost btn-sm" onClick={closeSession} style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
-            <BackIcon /> All multicam edits
-          </button>
-
-          {progress && (
-            <div className="set-note" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <div className="spinner sm" /> {progress}
+          {!showSources && (
+            <div className="section card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px" }}>
+              <span className="pill pill-green">Synced</span>
+              <span className="hint">
+                {session.sources.filter((s) => s.role !== "ignore").length} files · {session.people.map((p) => p.name).join(", ")}
+              </span>
+              <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => setSourcesOpen(true)}>
+                Edit sources
+              </button>
             </div>
           )}
-
-          <MulticamSources
-            session={session}
-            previewCameras={previews.cameras}
-            locked={locked}
-            onEdit={mutate}
-            onSync={onSync}
-          />
-          {syncStarted && (
-            <MulticamSync session={session} locked={locked} onEdit={mutate} onCut={() => startJob("plan")} />
+          {showSources && (
+            <>
+              <MulticamSources session={session} previewCameras={stills} locked={locked} onEdit={mutate} onSync={onSync} />
+              {synced && <MulticamSync session={session} locked={locked} onEdit={mutate} onCut={() => startJob("plan")} />}
+              {cutReady && sourcesOpen && (
+                <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={() => setSourcesOpen(false)}>Hide sources</button>
+              )}
+            </>
           )}
           {cutReady && (
             <>
-              <MulticamCut
-                session={session}
-                locked={locked}
-                onEdit={mutate}
-                onRecut={(extra) => startJob("plan", extra)}
-              />
-              <MulticamLook session={session} lookPreviews={previews.looks} locked={locked} onEdit={mutate} />
-              <MulticamDeliver
-                session={session}
-                locked={locked}
-                onRender={() => startJob("render", { stems: true })}
-                onExport={(format) => mutate({ action: "export", format })}
-                onMakeClips={onMakeClips}
-              />
+              <MulticamSummary session={session} locked={locked} onEdit={mutate} onRecut={(extra) => startJob("plan", extra)} />
+              <MulticamResults session={session} locked={locked} onMakeClips={onMakeClips} />
             </>
           )}
         </div>

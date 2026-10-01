@@ -45,6 +45,8 @@ export default function MulticamSources({
             onChange={(v) => setNameDraft((d) => ({ ...d, [person.id]: v }))}
             onBlur={() => commitName(person)}
             onRemove={() => savePeople(session.people.filter((p) => p.id !== person.id))}
+            role={person.role || "host"}
+            onRole={(role) => savePeople(session.people.map((p) => (p.id === person.id ? { ...p, role } : p)))}
           />
         ))}
         <button

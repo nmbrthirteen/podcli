@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -447,3 +448,66 @@ def test_bad_fix_exits_with_a_readable_error(episode, monkeypatch, capsys):
 def test_no_target_prints_usage(monkeypatch, capsys):
     assert run_cli(monkeypatch) == 2
     assert "podcli multicam <folder" in capsys.readouterr().out
+
+
+def test_set_cuts_checks_coverage_and_merges(sandbox):
+    session = mc.MulticamSession(
+        session_id="abc123abc150", name="ep",
+        people=[mc.Person("host", "Host"), mc.Person("guest", "Guest")],
+        sources=[
+            _source("/x/a.mp4", role="camera", person="host", offset=0.0),
+            _source("/x/w.mp4", role="camera", person="wide", offset=10.0, duration=20.0),
+        ],
+    )
+    mc.set_cuts(session, [
+        {"start": 0, "end": 5, "source_id": "a"},
+        {"start": 5, "end": 12, "source_id": "a"},
+        {"start": 12, "end": 20, "source_id": "w"},
+    ])
+    assert session.cuts == [{"start": 0, "end": 12, "source_id": "a"}, {"start": 12, "end": 20, "source_id": "w"}]
+    with pytest.raises(ValueError, match="wasn't recording"):
+        mc.set_cuts(session, [{"start": 0, "end": 12, "source_id": "w"}])
+    with pytest.raises(ValueError, match="back to back"):
+        mc.set_cuts(session, [{"start": 0, "end": 4, "source_id": "a"}, {"start": 5, "end": 9, "source_id": "a"}])
+
+
+def test_cli_json_mode_applies_a_cut_and_builds_the_preview(episode, monkeypatch, capsys, tmp_path):
+    code = run_cli(monkeypatch, str(episode), "--people", "Nika, Ana", "--set", "cam_one=camera:nika",
+                   "--set", "cam_two=camera:ana", "--no-render", "--json", "--activity")
+    out = capsys.readouterr().out
+    assert code == 0, out
+    data = json.loads(out)
+    assert data["cuts"] and set(data["activity"]["people"]) == {"nika", "ana"}
+    assert data["activity"]["people"]["nika"][0][0] < 20 <= data["activity"]["people"]["ana"][0][0] + 1
+
+    one = next(s["id"] for s in data["sources"] if s["name"] == "cam_one.mp4")
+    start, end = data["cuts"][0]["start"], data["cuts"][-1]["end"]
+    cuts = tmp_path / "cuts.json"
+    cuts.write_text(json.dumps([{"start": start, "end": end, "source_id": one}]))
+    code = run_cli(monkeypatch, data["session_id"], "--cuts", str(cuts), "--preview", "--no-render", "--json")
+    data = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert data["cuts"] == [{"start": start, "end": end, "source_id": one}]
+    assert set(data["preview"]["proxies"]) == {s["id"] for s in data["sources"] if s["role"] == "camera"}
+    assert os.path.exists(data["preview"]["audio"])
+
+    cuts.write_text("not json")
+    assert run_cli(monkeypatch, data["session_id"], "--cuts", str(cuts), "--json") == 1
+    assert "error" in json.loads(capsys.readouterr().out)
+
+
+def test_last_person_is_the_guest_and_roles_survive_renames(episode):
+    session = mc.new_session(folder=str(episode), people=["Nihal", "Cameron", "Ana"])
+    assert [(p.name, p.role) for p in session.people] == [("Nihal", "host"), ("Cameron", "host"), ("Ana", "guest")]
+    session = mc.rename_people(session, ["Nihal", "Cam", "Ana Smith"])
+    assert [p.role for p in session.people] == ["host", "host", "guest"]
+
+
+def test_cli_guests_flag_sets_roles(episode, monkeypatch, capsys):
+    code = run_cli(monkeypatch, str(episode), "--people", "Nika, Ana", "--guests", "Nika",
+                   "--set", "cam_one=camera:nika", "--set", "cam_two=camera:ana", "--no-render", "--json")
+    data = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert {p["name"]: p["role"] for p in data["people"]} == {"Nika": "guest", "Ana": "host"}
+    assert run_cli(monkeypatch, data["session_id"], "--guests", "Bob", "--no-render") == 1
+    assert "No person named 'bob'" in capsys.readouterr().err

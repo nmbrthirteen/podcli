@@ -970,7 +970,9 @@ def handle_manage_multicam(task_id: str, params: dict):
     """Multicam podcast editing: map sources, sync, plan cuts, render, export.
 
     Actions: new (folder or files, people), list, show, map, sync, plan, cut
-    (swap one shot's camera), previews, render, export (premiere|fcpxml), delete.
+    (swap one shot's camera), set_cuts (replace the whole cut), activity (who
+    speaks when), previews (stills), preview (playback proxies), render,
+    export (premiere|fcpxml), delete.
     sync, plan and render apply any mapping fields sent with them first.
     """
     from services import multicam as mc
@@ -1013,6 +1015,12 @@ def handle_manage_multicam(task_id: str, params: dict):
             session = mc.sync_session(session, force=bool(params.get("force")), progress_callback=progress("syncing"))
         elif action == "plan":
             session = mc.plan_session(session, progress_callback=progress("planning"))
+        elif action == "preview":
+            session = mc.build_preview(session, progress_callback=progress("preview"))
+        elif action == "activity":
+            data["activity"] = mc.activity(session)
+        elif action == "set_cuts":
+            session = mc.set_cuts(session, params.get("cuts"))
         elif action == "cut":
             index, source_id = params.get("index"), params.get("source_id")
             if not isinstance(index, int) or not isinstance(source_id, str):
@@ -1029,6 +1037,8 @@ def handle_manage_multicam(task_id: str, params: dict):
         emit_result(task_id, "success", data={**mc.payload(session), **data})
     except (IndexError, ValueError, OSError, RuntimeError, ImportError, TypeError, AttributeError) as e:
         emit_result(task_id, "error", error=str(e))
+    except KeyError as e:
+        emit_result(task_id, "error", error=f"Missing field {e.args[0]!r}")
 
 
 def handle_run_integration_tool(task_id: str, params: dict):
