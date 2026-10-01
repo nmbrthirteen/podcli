@@ -53,6 +53,7 @@ const source = (src: string) => (src.startsWith("http") ? src : staticFile(src))
 type Paint = {
   brand: Brand;
   accent: string;
+  font: string;
   /** Reference pixels to device pixels, with the fit shrink already folded in. */
   unit: number;
   /** Device pixels, for anything measured against the width it was given. */
@@ -86,7 +87,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
     return (
       <div
         style={{
-          fontFamily: FONT,
+          fontFamily: paint.font,
           fontSize: TYPE_SIZE[size] * unit,
           fontWeight: WEIGHT[size],
           lineHeight: LINE_HEIGHT[size],
@@ -109,7 +110,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
       <>
         <div
           style={{
-            fontFamily: FONT,
+            fontFamily: paint.font,
             fontSize: TYPE_SIZE[size] * unit,
             fontWeight: 500,
             lineHeight: LINE_HEIGHT[size],
@@ -131,7 +132,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
         {block.attribution && (
           <div
             style={{
-              fontFamily: FONT,
+              fontFamily: paint.font,
               fontSize: TYPE_SIZE.xs * unit,
               fontWeight: 600,
               letterSpacing: 1.5 * unit,
@@ -163,7 +164,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
             {block.numbered ? (
               <span
                 style={{
-                  fontFamily: FONT,
+                  fontFamily: paint.font,
                   fontSize: TYPE_SIZE.xs * unit,
                   fontWeight: 700,
                   color: i === 0 ? accent : muted(brand.ink),
@@ -184,7 +185,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
             )}
             <div
               style={{
-                fontFamily: FONT,
+                fontFamily: paint.font,
                 fontSize: TYPE_SIZE[size] * unit,
                 fontWeight: 500,
                 lineHeight: LINE_HEIGHT[size],
@@ -214,13 +215,13 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
               }}
             >
               <span
-                style={{ fontFamily: FONT, fontSize: TYPE_SIZE.xs * unit, color: muted(brand.ink) }}
+                style={{ fontFamily: paint.font, fontSize: TYPE_SIZE.xs * unit, color: muted(brand.ink) }}
               >
                 {row.label}
               </span>
               <span
                 style={{
-                  fontFamily: FONT,
+                  fontFamily: paint.font,
                   fontSize: TYPE_SIZE.sm * unit,
                   fontWeight: 700,
                   color: row.subject ? brand.ink : muted(brand.ink),
@@ -249,7 +250,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
       <>
         <div
           style={{
-            fontFamily: FONT,
+            fontFamily: paint.font,
             fontSize: TYPE_SIZE.xxl * 0.72 * unit,
             fontWeight: 700,
             lineHeight: 1,
@@ -306,7 +307,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
               />
               <div
                 style={{
-                  fontFamily: FONT,
+                  fontFamily: paint.font,
                   fontSize: TYPE_SIZE.md * unit,
                   fontWeight: 700,
                   color: brand.ink,
@@ -319,7 +320,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
               {point.note && (
                 <div
                   style={{
-                    fontFamily: FONT,
+                    fontFamily: paint.font,
                     fontSize: TYPE_SIZE.xs * unit,
                     color: muted(brand.ink),
                     marginTop: 6 * unit,
@@ -355,7 +356,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
         <div>
           <div
             style={{
-              fontFamily: FONT,
+              fontFamily: paint.font,
               fontSize: TYPE_SIZE.md * unit,
               fontWeight: 700,
               lineHeight: 1.15,
@@ -367,7 +368,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
           {block.note && (
             <div
               style={{
-                fontFamily: FONT,
+                fontFamily: paint.font,
                 fontSize: TYPE_SIZE.sm * unit,
                 color: muted(brand.ink),
                 lineHeight: 1.3,
@@ -415,7 +416,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
       {block.caption && (
         <div
           style={{
-            fontFamily: FONT,
+            fontFamily: paint.font,
             fontSize: TYPE_SIZE.xs * unit,
             lineHeight: 1.3,
             color: muted(brand.ink),
@@ -528,7 +529,8 @@ export const Scene: React.FC<{
   scale: number;
   /** Device pixels the scene has to sit inside. */
   room: number;
-}> = ({ blocks, layout = "stack", gap = "group", brand, accent, scale, room }) => {
+  font?: string;
+}> = ({ blocks, layout = "stack", gap = "group", brand, accent, scale, room, font = FONT }) => {
   const { fit, mediaHeight } = fitScene(blocks, { layout, gap, room: room / scale });
   const unit = scale * fit;
 
@@ -550,6 +552,7 @@ export const Scene: React.FC<{
         paint={{
           brand,
           accent,
+          font,
           unit,
           width: SCENE_WIDTH * scale,
           mediaHeight: mediaHeight * scale,

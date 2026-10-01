@@ -39,3 +39,17 @@ describe("resolveTheme", () => {
     expect(text).not.toMatch(/gradient/i);
   });
 });
+
+describe("caption choice", () => {
+  it("keeps the pack's caption skin by default", () => {
+    expect(resolveTheme({ pack: "collage" })?.captions).toBe("pack");
+  });
+
+  it("takes any caption preset on its own", () => {
+    expect(resolveTheme({ pack: "collage", motion: "kinetic", overrides: { captions: "hormozi" } })?.captions).toBe("hormozi");
+  });
+
+  it("closes every motion preset with a fade rather than a cut", () => {
+    for (const motion of Object.values(MOTIONS)) expect(motion.exit).toBe("fade");
+  });
+});

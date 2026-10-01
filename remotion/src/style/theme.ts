@@ -11,6 +11,9 @@ export type TextUnit = "char" | "word";
 export type Ease = "out" | "in-out" | "linear";
 export type CameraMove = "none" | "track" | "push" | "punch";
 export type Exit = "cut" | "fade";
+export type CaptionChoice = "pack" | "template" | "hormozi" | "karaoke" | "subtle" | "branded" | "outline";
+
+export const CAPTION_CHOICES: CaptionChoice[] = ["pack", "template", "hormozi", "karaoke", "subtle", "branded", "outline"];
 
 export const ROLES: Role[] = ["title", "figure", "item", "media", "label", "strip", "caption", "name"];
 export const ENTRANCES: Entrance[] = [
@@ -61,6 +64,7 @@ export interface Theme {
   type: { display: Face; label: Face; mono: Face; caption: number };
   edge: { kind: EdgeKind; wave: number; fiber: number; rim: number };
   surface: "paper" | "none";
+  captions: CaptionChoice;
   mark: "fill" | "color";
   shadow: number;
   texture: { strength: number; ground: number };
@@ -85,7 +89,7 @@ export const MOTIONS = {
   "stop-motion": {
     roles: every("pop", { title: "type", item: "wipe", media: "wipe-up", strip: "wipe", name: "wipe" }),
     frames: 8, stagger: 8, holdEvery: 2, charsPerPose: 1, ease: "out", overshoot: 0, bounces: 0,
-    from: "left", textUnit: "char", camera: "track", exit: "cut",
+    from: "left", textUnit: "char", camera: "track", exit: "fade",
   },
   smooth: {
     roles: every("rise", { media: "fade" }),
@@ -95,7 +99,7 @@ export const MOTIONS = {
   kinetic: {
     roles: every("spring", { label: "pop", strip: "wipe", name: "wipe" }),
     frames: 7, stagger: 4, holdEvery: 1, charsPerPose: 3, ease: "out", overshoot: 0.35, bounces: 1,
-    from: "right", textUnit: "word", camera: "punch", exit: "cut",
+    from: "right", textUnit: "word", camera: "punch", exit: "fade",
   },
   calm: {
     roles: every("fade"),
@@ -105,7 +109,7 @@ export const MOTIONS = {
   digital: {
     roles: every("scramble", { media: "pop", label: "pop", strip: "wipe", name: "pop" }),
     frames: 10, stagger: 6, holdEvery: 2, charsPerPose: 2, ease: "linear", overshoot: 0, bounces: 0,
-    from: "left", textUnit: "char", camera: "none", exit: "cut",
+    from: "left", textUnit: "char", camera: "none", exit: "fade",
   },
 } satisfies Record<string, Motion>;
 
@@ -154,6 +158,7 @@ const collage: Theme = {
   },
   edge: { kind: "torn", wave: 5, fiber: 1.6, rim: 9 },
   surface: "paper",
+  captions: "pack",
   mark: "fill",
   shadow: 0.07,
   texture: { strength: 0.55, ground: 0.95 },
