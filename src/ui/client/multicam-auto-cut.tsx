@@ -26,10 +26,10 @@ export default function MulticamAutoCut({
   const [settings, setSettings] = useState(session.cut_settings);
 
   const field = (label: string, value: number, onChange: (v: number) => void, limits = { min: 0, max: session.timeline_duration, step: 0.1 }) => (
-    <div>
-      <label className="field-label">{label}</label>
+    <label style={{ display: "block" }}>
+      <span className="field-label">{label}</span>
       <input type="number" {...limits} value={value} onChange={(e) => onChange(Number(e.target.value))} style={{ width: "100%" }} />
-    </div>
+    </label>
   );
 
   return (

@@ -515,6 +515,12 @@ def test_cli_json_mode_applies_a_cut_and_builds_the_preview(episode, monkeypatch
     assert set(data["preview"]["proxies"]) == {s["id"] for s in data["sources"] if s["role"] == "camera"}
     assert os.path.exists(data["preview"]["audio"])
 
+    # Moving a mic changes the mix, so the old preview audio no longer matches.
+    session = mc.MulticamSession.load(data["session_id"])
+    mic = next(s for s in session.sources if s.role in ("mic", "camera") and s.offset)
+    mc.update_mapping(session, {"sources": [{"id": mic.id, "nudge": 0.04}]})
+    assert mc.payload(mc.MulticamSession.load(data["session_id"]))["preview"] is None
+
     cuts.write_text("not json")
     assert run_cli(monkeypatch, data["session_id"], "--cuts", str(cuts), "--json") == 1
     assert "error" in json.loads(capsys.readouterr().out)

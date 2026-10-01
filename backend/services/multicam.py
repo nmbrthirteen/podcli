@@ -1975,7 +1975,12 @@ def payload(session: MulticamSession) -> dict:
     }
     proxies = {k: v for k, v in (session.preview.get("proxies") or {}).items() if os.path.exists(v)}
     audio = session.preview.get("audio")
-    ready = audio and os.path.exists(audio) and all(c.id in proxies for c in session.cameras() if c.synced and not c.virtual)
+    try:
+        current = os.path.basename(audio or "") == f"preview-{_mix_key(session)}.m4a"
+    except OSError:
+        current = False
+    # The mix file is named by the mic alignment, so a re-sync or remap leaves it stale.
+    ready = current and os.path.exists(audio) and all(c.id in proxies for c in session.cameras() if c.synced and not c.virtual)
     stills = {k: v for k, v in (session.preview.get("stills") or {}).items() if os.path.exists(v)}
     data["preview"] = {"proxies": proxies, "audio": audio, "stills": stills} if ready else None
     for s in data["sources"]:

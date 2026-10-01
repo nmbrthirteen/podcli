@@ -174,7 +174,7 @@ export default function MulticamPage() {
       <PageHeader
         title={session ? session.name : "Multicam edit"}
         back={session && (
-          <button className="btn btn-ghost btn-sm" onClick={() => setSearchParams({})} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setSearchParams({})} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <BackIcon /> All multicam edits
           </button>
         )}
