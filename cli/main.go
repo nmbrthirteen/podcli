@@ -115,7 +115,13 @@ func refreshStudioBundles() {
 func ensureRuntime() error {
 	if _, ok := engine.BackendRoot(); !ok {
 		fmt.Fprintln(os.Stderr, "First run - setting up podcli (one-time download)...")
-		if setup(nil) != 0 {
+		// setup reports on stdout, which belongs to the command being run here:
+		// `--json` callers parse it as exactly one JSON object.
+		stdout := os.Stdout
+		os.Stdout = os.Stderr
+		ok := setup(nil) == 0
+		os.Stdout = stdout
+		if !ok {
 			return fmt.Errorf("first-run setup failed (see errors above) - run `podcli setup` to retry")
 		}
 	} else if err := refreshBackend(); err != nil {

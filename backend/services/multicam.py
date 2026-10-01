@@ -443,7 +443,7 @@ def detect_panes(source: Source, samples: int = 8) -> list[list[float]]:
         other = 1 if axis == 2 else 2
         # App chrome (gutters, margins) is one solid colour; even a plain wall in a
         # downscaled, compressed camera picture varies more than this.
-        flat = block.std(axis=other).max(axis=0) < 2
+        flat = block.std(axis=other).max(axis=0) < 3
         diff = np.abs(np.diff(block, axis=axis)).mean(axis=other).min(axis=0)  # a hard edge in every frame
         edge = np.concatenate([diff > 40, [False]])
         runs, k = [], 0
