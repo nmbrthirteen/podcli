@@ -18,7 +18,7 @@ import type { Brand } from "./components/Cards";
 import { MOTION, motionAt } from "./motion";
 import type { Motion } from "./motion";
 import {
-  brandCaptions, captionZone, LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET, safeFor,
+  brandCaptions, captionZone, STYLES, LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET, safeFor,
 } from "./types";
 import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "./types";
 import { resolveTheme } from "./style/theme";
@@ -78,6 +78,14 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   theme: themeInput,
 }) => {
   const theme = resolveTheme(withDefaultTextures(themeInput ?? null));
+  const preset = theme ? STYLES[theme.captions] : undefined;
+  const voice: CaptionStyle = preset && preset.name !== style.name
+    ? {
+      ...preset,
+      fontFamily: style.fontFamily,
+      fontSize: preset.fontSize * (style.fontSize / (STYLES[style.name]?.fontSize ?? style.fontSize)),
+    }
+    : style;
   const { fps, height, width } = useVideoConfig();
   const SAFE = safeFor(width, height);
   const frame = useCurrentFrame();
@@ -123,11 +131,11 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   const placementMargin = captionPosition === "upper" ? 1120
     : captionPosition === "center" ? 820
       : captionPosition === "lower" ? SAFE.bottom
-        : width < height ? style.marginBottom : SAFE.bottom;
+        : width < height ? voice.marginBottom : SAFE.bottom;
   const captionStyle: CaptionStyle = {
-    ...brandCaptions(style, brand),
+    ...brandCaptions(voice, brand),
     marginBottom: Math.max(placementMargin, SAFE.bottom),
-    fontSize: style.fontSize * captionSize * captionShrink,
+    fontSize: voice.fontSize * captionSize * captionShrink,
   };
 
   /*
@@ -168,7 +176,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   );
 
   const captionMotion: Motion = {
-    ...(MOTION[style.name] ?? MOTION.subtle), ...(motion?.captions ?? {}),
+    ...(MOTION[voice.name] ?? MOTION.subtle), ...(motion?.captions ?? {}),
   };
   const cardMotion: Motion = { ...MOTION.nameCard, ...(motion?.nameCard ?? {}) };
   const CaptionComponent = {
@@ -177,7 +185,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
     subtle: SubtleCaptions,
     branded: BrandedCaptions,
     outline: SubtleCaptions,
-  }[style.name];
+  }[voice.name];
 
   return (
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
@@ -198,9 +206,9 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
         />
       )}
       <Watermark src={logoSrc} height={height} position={logoPosition} scale={logoScale} />
-      {theme ? (
+      {theme && theme.captions === "pack" ? (
         <StyledCaptions theme={theme} words={words} style={captionStyle} />
-      ) : style.name === "branded" ? (
+      ) : voice.name === "branded" ? (
         <BrandedCaptions words={words} style={captionStyle} faceY={faceY}
           captionPosition={captionPosition} hasLogo={Boolean(logoSrc)}
           logoPosition={logoPosition} singleLine={singleLine} />
