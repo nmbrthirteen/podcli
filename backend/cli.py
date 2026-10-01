@@ -501,6 +501,8 @@ def cmd_studio(args):
         cmd += ["--language", args.language]
     if getattr(args, "engine", None):
         cmd += ["--engine", args.engine]
+    if getattr(args, "transcript", None):
+        cmd += ["--transcript", args.transcript]
     env = os.environ.copy()
     if getattr(args, "assemblyai_api_key", None):
         env["ASSEMBLYAI_API_KEY"] = args.assemblyai_api_key
@@ -5012,6 +5014,7 @@ def main():
     studio.add_argument("--paragraph", help="Find the fragment by matching this text in the transcript")
     studio.add_argument("--language", help="Transcription language (e.g. es). Auto-detect if omitted.")
     studio.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], help="Transcription engine")
+    studio.add_argument("--transcript", help="Word timings JSON for this video ({words:[...]} or a list); skips transcription")
     studio.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai. Prefer ASSEMBLYAI_API_KEY; command-line secrets can appear in process listings.")
     studio.add_argument("--caption-style", choices=["hormozi", "karaoke", "subtle", "branded", "outline"], default="hormozi")
     studio.add_argument("--caption-position", choices=["auto", "upper", "center", "lower"], default="auto")

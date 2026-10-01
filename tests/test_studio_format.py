@@ -85,6 +85,21 @@ class StudioFormatTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--logo-scale") + 1], "1.0")
 
 
+class StudioTranscriptTests(unittest.TestCase):
+    def test_supplied_words_reach_the_render_script(self):
+        cmd = _run_studio(_studio_args(transcript="/tmp/window-words.json"))
+        self.assertEqual(cmd[cmd.index("--transcript") + 1], "/tmp/window-words.json")
+
+    def test_no_transcript_sends_no_transcript_flag(self):
+        self.assertNotIn("--transcript", _run_studio(_studio_args()))
+
+    def test_the_flag_is_in_the_help_the_cloud_worker_reads(self):
+        import subprocess
+        script = os.path.join(os.path.dirname(cli_mod.__file__), "cli.py")
+        shown = subprocess.run([sys.executable, script, "studio", "--help"], capture_output=True, text=True)
+        self.assertIn("--transcript", shown.stdout)
+
+
 class StudioStyleTests(unittest.TestCase):
     """`--style` travels to clip_studio.py the same way `--brand` does."""
 
