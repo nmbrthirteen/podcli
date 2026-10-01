@@ -56,7 +56,14 @@ const mask = (entrance: Entrance, p: number) => {
 export const roleFrames = (theme: Theme, role: Role, text?: string) =>
   entranceFrames(theme.motion, theme.motion.roles[role], text);
 
-const GLYPHS = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789#%&";
+const UPPER = "ABCDEFGHJKLMNPRSTUVXYZ";
+const LOWER = "abcdeghknoprsuvxz";
+const DIGITS = "0123456789";
+
+const scrambled = (char: string, n: number) => {
+  const pool = /[A-Z]/.test(char) ? UPPER : /[a-z]/.test(char) ? LOWER : /[0-9]/.test(char) ? DIGITS : "";
+  return pool ? pool[n % pool.length] : char;
+};
 
 export const Reveal: React.FC<{
   theme: Theme;
@@ -150,26 +157,39 @@ export const RevealText: React.FC<{
 
   let seen = 0;
   let cursor = 0;
-  const spans: { text: string; from: number; visible: boolean; fresh: boolean }[] = pieces.map((piece) => {
+  const spans: { text: string; from: number; visible: boolean; fresh: boolean; cover?: string }[] = pieces.map((piece) => {
     const word = piece.trim().length > 0;
     const index = word ? seen++ : seen - 1;
     const from = cursor;
     cursor += piece.length;
     const settled = index < count;
     const shown = entrance === "scramble" ? f >= at : settled || (!word && index < count);
-    const body = entrance === "scramble" && !settled && word
-      ? Array.from(piece).map((_, i) => GLYPHS[((from + i) * 7 + seed * 13) % GLYPHS.length]).join("")
-      : piece;
-    return { text: body, from, visible: shown, fresh: entrance === "type" && word && index === count - 1 && count < total };
+    const cover = entrance === "scramble" && !settled && word
+      ? Array.from(piece).map((char, i) => scrambled(char, (from + i) * 7 + seed * 13)).join("")
+      : undefined;
+    return { text: piece, from, visible: shown, cover, fresh: entrance === "type" && word && index === count - 1 && count < total };
   });
 
   const render = (lo: number, hi: number) => spans
     .filter((span) => span.from >= lo && span.from < hi)
     .map((span) => (
-      <span key={span.from} style={{
-        opacity: span.visible ? 1 : 0,
-        filter: span.fresh ? `blur(${3 * s}px)` : undefined,
-      }}>{span.text}</span>
+      span.cover ? (
+        <span key={span.from} style={{ opacity: span.visible ? 1 : 0 }}>
+          {Array.from(span.text).map((char, i) => (
+            <span key={i} style={{ position: "relative" }}>
+              <span style={{ visibility: "hidden" }}>{char}</span>
+              <span style={{ position: "absolute", left: "50%", top: 0, transform: "translateX(-50%)" }}>
+                {Array.from(span.cover ?? "")[i]}
+              </span>
+            </span>
+          ))}
+        </span>
+      ) : (
+        <span key={span.from} style={{
+          opacity: span.visible ? 1 : 0,
+          filter: span.fresh ? `blur(${3 * s}px)` : undefined,
+        }}>{span.text}</span>
+      )
     ));
 
   if (markStart < 0 || motion.textUnit === "word" && !spans.some((span) => span.from === markStart)) {
