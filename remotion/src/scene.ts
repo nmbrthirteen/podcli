@@ -170,8 +170,8 @@ const BAR_ROW = 26 + 8 + 34 * 1.3;
 
 const CHAR_WIDTH = 0.58;
 
-export const stepType = (points: StepPoint[]) => {
-  const slot = (SCENE_WIDTH - Math.max(0, points.length - 1) * 120) / Math.max(1, points.length);
+export const stepType = (points: StepPoint[], width = SCENE_WIDTH) => {
+  const slot = (width - Math.max(0, points.length - 1) * 120) / Math.max(1, points.length);
   const fits = (text: string | undefined, size: number) => !text || text.length * size * CHAR_WIDTH <= slot;
   const value = [TYPE_SIZE.xl, TYPE_SIZE.lg, TYPE_SIZE.md]
     .find((size) => points.every((point) => fits(point.value, size))) ?? TYPE_SIZE.md;
@@ -180,8 +180,8 @@ export const stepType = (points: StepPoint[]) => {
   return { value, note };
 };
 
-const stepRow = (points: StepPoint[]) => {
-  const type = stepType(points);
+const stepRow = (points: StepPoint[], width: number) => {
+  const type = stepType(points, width);
   return 26 + type.value + type.note * 2.6 + 24;
 };
 
@@ -230,7 +230,7 @@ export function blockHeight(block: Block, width: number): number {
     case "meter":
       return TYPE_SIZE.xxl * 0.72 + GAP_SIZE.tight + METER_ROW;
     case "steps":
-      return stepRow(block.points);
+      return stepRow(block.points, width);
     case "chip":
       return Math.max(
         CHIP_ROW,

@@ -278,7 +278,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
 
   if (block.type === "steps") {
     const last = block.points.length - 1;
-    const type = stepType(block.points);
+    const type = stepType(block.points, paint.width / unit);
     return (
       <div style={{ display: "flex", alignItems: "center" }}>
         {block.points.map((point, i) => (
