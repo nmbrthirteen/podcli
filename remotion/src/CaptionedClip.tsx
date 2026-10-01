@@ -183,7 +183,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
     <AbsoluteFill style={{ backgroundColor: "transparent" }}>
       {/* First, so everything below stays up while a card holds the frame. */}
       {theme && cards && cards.length > 0 && pastNameCard && (
-        <StyledCards cards={cards} theme={theme} />
+        <StyledCards cards={cards} theme={theme} topInset={topTaken} />
       )}
       {!theme && cards && cards.length > 0 && pastNameCard && (
         <Cards

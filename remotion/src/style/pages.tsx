@@ -10,6 +10,7 @@ import { Label, Paper, Tape } from "./materials";
 import { camera, progress, Reveal, RevealText, roleFrames } from "./reveal";
 import type { Shot } from "./reveal";
 import { Scene } from "../components/Scene";
+import { SCENE_WIDTH } from "../scene";
 
 type PageProps<K extends Card["kind"]> = {
   card: Extract<Card, { kind: K }>;
@@ -17,6 +18,7 @@ type PageProps<K extends Card["kind"]> = {
   s: number;
   f: number;
   fps: number;
+  inset: number;
 };
 
 const planner = (theme: Theme, start = 2) => {
@@ -29,6 +31,9 @@ const planner = (theme: Theme, start = 2) => {
   };
 };
 
+const CONTENT_TOP = 190;
+const CONTENT_BOTTOM = 1250;
+
 const Page: React.FC<{
   theme: Theme;
   s: number;
@@ -36,9 +41,12 @@ const Page: React.FC<{
   length: number;
   shots: Shot[];
   punch: Shot | null;
+  inset: number;
   children: React.ReactNode;
-}> = ({ theme, s, f, length, shots, punch, children }) => {
+}> = ({ theme, s, f, length, shots, punch, inset, children }) => {
   const { width, height } = useVideoConfig();
+  const shift = Math.max(0, inset - CONTENT_TOP + 20);
+  const squeeze = (CONTENT_BOTTOM - CONTENT_TOP - shift) / (CONTENT_BOTTOM - CONTENT_TOP);
   const lens = (shot: Shot) => ({ ...shot, x: shot.x * s, y: shot.y * s });
   const fade = theme.motion.exit === "fade"
     ? interpolate(f, [length - 6, length], [1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
@@ -55,7 +63,12 @@ const Page: React.FC<{
             backgroundSize: `${1100 * s}px`, opacity: theme.texture.ground,
           }} />
         )}
-        {children}
+        <div style={{
+          position: "absolute", inset: 0, transformOrigin: `50% ${CONTENT_TOP * s}px`,
+          transform: shift > 0 ? `translateY(${shift * s}px) scale(${squeeze})` : undefined,
+        }}>
+          {children}
+        </div>
       </div>
     </AbsoluteFill>
   );
@@ -110,7 +123,7 @@ const Strip: React.FC<{ theme: Theme; seed: number; s: number; color?: string; s
   </Paper>
 );
 
-const StatPage: React.FC<PageProps<"stat"> & { length: number }> = ({ card, theme, s, f, fps, length }) => {
+const StatPage: React.FC<PageProps<"stat"> & { length: number }> = ({ card, theme, s, f, fps, length, inset }) => {
   const title = card.eyebrow ?? "By the numbers";
   const next = planner(theme);
   const titleAt = next("title", title);
@@ -119,7 +132,7 @@ const StatPage: React.FC<PageProps<"stat"> & { length: number }> = ({ card, them
   const figureAt = next("figure", card.value) + 4;
   const circleAt = figureAt + 8;
   return (
-    <Page theme={theme} s={s} f={f} length={length}
+    <Page theme={theme} s={s} f={f} length={length} inset={inset}
       punch={{ at: figureAt, zoom: 1.12, x: 540, y: 820 }}
       shots={[
         { at: 0, zoom: 1.35, x: 360, y: 300 }, { at: stripAt, zoom: 1.35, x: 360, y: 300 },
@@ -160,7 +173,7 @@ const StatPage: React.FC<PageProps<"stat"> & { length: number }> = ({ card, them
   );
 };
 
-const HeadlinePage: React.FC<PageProps<"headline"> & { length: number }> = ({ card, theme, s, f, fps, length }) => {
+const HeadlinePage: React.FC<PageProps<"headline"> & { length: number }> = ({ card, theme, s, f, fps, length, inset }) => {
   const next = planner(theme);
   const eyebrowAt = next("label");
   const leadAt = next("title", card.lead);
@@ -168,7 +181,7 @@ const HeadlinePage: React.FC<PageProps<"headline"> & { length: number }> = ({ ca
   const subAt = next("strip") + 6;
   const mark = Array.isArray(card.emphasis) ? card.emphasis[0] : card.emphasis;
   return (
-    <Page theme={theme} s={s} f={f} length={length}
+    <Page theme={theme} s={s} f={f} length={length} inset={inset}
       punch={{ at: markAt, zoom: 1.1, x: 540, y: 640 }}
       shots={[
         { at: 0, zoom: 1.18, x: 540, y: 560 }, { at: markAt, zoom: 1.18, x: 540, y: 560 }, { at: markAt + 16, zoom: 1, x: 540, y: 960 },
@@ -196,17 +209,17 @@ const HeadlinePage: React.FC<PageProps<"headline"> & { length: number }> = ({ ca
   );
 };
 
-const EntityPage: React.FC<PageProps<"entity"> & { length: number }> = ({ card, theme, s, f, fps, length }) => {
+const EntityPage: React.FC<PageProps<"entity"> & { length: number }> = ({ card, theme, s, f, fps, length, inset }) => {
   const next = planner(theme, 0);
   const mediaAt = next("media");
   const nameAt = next("figure", card.name) + 10;
   const noteAt = next("strip") + 10;
   const src = card.src && (theme.media === "halftone" ? theme.textures.halftone?.[card.src] ?? card.src : card.src);
   return (
-    <Page theme={theme} s={s} f={f} length={length}
+    <Page theme={theme} s={s} f={f} length={length} inset={inset}
       punch={{ at: nameAt, zoom: 1.1, x: 300, y: 1090 }}
       shots={[{ at: 0, zoom: 1.4, x: 560, y: 420 }, { at: 12, zoom: 1.4, x: 560, y: 420 }, { at: 34, zoom: 1, x: 540, y: 960 }]}>
-      <Reveal theme={theme} role="media" f={f} at={mediaAt} fps={fps} style={{ left: 120 * s, top: 170 * s, width: 840 * s, ...tilt(theme, 1.3) }}>
+      {src && <Reveal theme={theme} role="media" f={f} at={mediaAt} fps={fps} style={{ left: 120 * s, top: 170 * s, width: 840 * s, ...tilt(theme, 1.3) }}>
         <Paper theme={theme} seed={31} color="#E8E4D8" scale={s} strength={0.3}>
           <div style={{ padding: theme.surface === "paper" ? 22 * s : 0 }}>
             {src && <Img src={src} style={{ width: 796 * s, height: 1035 * s, display: "block", objectFit: "cover" }} />}
@@ -214,14 +227,14 @@ const EntityPage: React.FC<PageProps<"entity"> & { length: number }> = ({ card, 
         </Paper>
         <Tape theme={theme} seed={3} scale={s} width={250} style={{ left: -60 * s, top: 0, transform: "rotate(-28deg)" }} />
         <Tape theme={theme} seed={1} scale={s} width={250} style={{ left: 680 * s, top: 20 * s, transform: "rotate(24deg)" }} />
-      </Reveal>
-      <Reveal theme={theme} role="figure" f={f} at={nameAt} fps={fps} style={{ left: 50 * s, top: 1030 * s, ...tilt(theme, -2) }}>
-        <Label theme={theme} seed={32} scale={s} size={150 * s} ink={theme.color.figure} pad={0.18}>
+      </Reveal>}
+      <Reveal theme={theme} role="figure" f={f} at={nameAt} fps={fps} style={{ left: 50 * s, top: (src ? 1030 : 560) * s, ...tilt(theme, -2) }}>
+        <Label theme={theme} seed={32} scale={s} size={(src ? 150 : 190) * s} ink={theme.color.figure} pad={0.18}>
           <RevealText theme={theme} role="figure" f={f} at={nameAt} text={card.name} s={s} />
         </Label>
       </Reveal>
       {card.note && (
-        <Reveal theme={theme} role="strip" f={f} at={noteAt} fps={fps} style={{ left: 110 * s, top: 1225 * s, ...tilt(theme, 0.8) }}>
+        <Reveal theme={theme} role="strip" f={f} at={noteAt} fps={fps} style={{ left: 110 * s, top: (src ? 1225 : 860) * s, maxWidth: 860 * s, ...tilt(theme, 0.8) }}>
           <Strip theme={theme} seed={33} s={s}>{card.note}</Strip>
         </Reveal>
       )}
@@ -229,7 +242,7 @@ const EntityPage: React.FC<PageProps<"entity"> & { length: number }> = ({ card, 
   );
 };
 
-const BulletsPage: React.FC<PageProps<"bullets"> & { length: number }> = ({ card, theme, s, f, fps, length }) => {
+const BulletsPage: React.FC<PageProps<"bullets"> & { length: number }> = ({ card, theme, s, f, fps, length, inset }) => {
   const title = card.eyebrow ?? "In short";
   const next = planner(theme);
   const titleAt = next("title", title);
@@ -237,7 +250,7 @@ const BulletsPage: React.FC<PageProps<"bullets"> & { length: number }> = ({ card
   const stocks = [theme.color.sheet, theme.color.stripAlt, theme.color.strip];
   const lefts = [50, 110, 70];
   return (
-    <Page theme={theme} s={s} f={f} length={length}
+    <Page theme={theme} s={s} f={f} length={length} inset={inset}
       punch={{ at: items[0] ?? 0, zoom: 1.08, x: 480, y: 600 }}
       shots={[{ at: 0, zoom: 1.3, x: 380, y: 290 }, { at: items[0] ?? 0, zoom: 1.3, x: 380, y: 290 }, { at: (items[0] ?? 0) + 12, zoom: 1, x: 540, y: 960 }]}>
       {theme.surface === "paper" && (
@@ -268,12 +281,12 @@ const BulletsPage: React.FC<PageProps<"bullets"> & { length: number }> = ({ card
   );
 };
 
-const QuotePage: React.FC<PageProps<"quote"> & { length: number }> = ({ card, theme, s, f, fps, length }) => {
+const QuotePage: React.FC<PageProps<"quote"> & { length: number }> = ({ card, theme, s, f, fps, length, inset }) => {
   const next = planner(theme);
   const textAt = next("title", card.text);
   const byAt = next("label") + 4;
   return (
-    <Page theme={theme} s={s} f={f} length={length}
+    <Page theme={theme} s={s} f={f} length={length} inset={inset}
       punch={{ at: byAt, zoom: 1.06, x: 540, y: 700 }}
       shots={[{ at: 0, zoom: 1.15, x: 520, y: 620 }, { at: byAt - 4, zoom: 1.15, x: 520, y: 620 }, { at: byAt + 10, zoom: 1, x: 540, y: 960 }]}>
       {theme.surface === "paper" && (
@@ -312,7 +325,7 @@ const Title: React.FC<{ theme: Theme; s: number; f: number; fps: number; at: num
   </Reveal>
 );
 
-const CompareRows: React.FC<PageProps<"compare"> & { length: number }> = ({ card, theme, s, f, fps, length }) => {
+const CompareRows: React.FC<PageProps<"compare"> & { length: number }> = ({ card, theme, s, f, fps, length, inset }) => {
   const title = card.eyebrow ?? "Side by side";
   const next = planner(theme);
   const titleAt = next("title", title);
@@ -320,7 +333,7 @@ const CompareRows: React.FC<PageProps<"compare"> & { length: number }> = ({ card
   const ats = rows.map(() => next("item"));
   const top = Math.max(...rows.map((r) => r.value), 1);
   return (
-    <Page theme={theme} s={s} f={f} length={length} punch={{ at: ats[0] ?? 0, zoom: 1.06, x: 540, y: 700 }}
+    <Page theme={theme} s={s} f={f} length={length} inset={inset} punch={{ at: ats[0] ?? 0, zoom: 1.06, x: 540, y: 700 }}
       shots={[{ at: 0, zoom: 1.3, x: 380, y: 290 }, { at: ats[0] ?? 0, zoom: 1.3, x: 380, y: 290 }, { at: (ats[0] ?? 0) + 12, zoom: 1, x: 540, y: 960 }]}>
       <Title theme={theme} s={s} f={f} fps={fps} at={titleAt} text={title} seed={81} />
       {rows.map((row, i) => (
@@ -343,7 +356,7 @@ const CompareRows: React.FC<PageProps<"compare"> & { length: number }> = ({ card
   );
 };
 
-const ChangePage: React.FC<PageProps<"change"> & { length: number }> = ({ card, theme, s, f, fps, length }) => {
+const ChangePage: React.FC<PageProps<"change"> & { length: number }> = ({ card, theme, s, f, fps, length, inset }) => {
   const title = card.eyebrow ?? card.label ?? "What moved";
   const next = planner(theme);
   const titleAt = next("title", title);
@@ -361,7 +374,7 @@ const ChangePage: React.FC<PageProps<"change"> & { length: number }> = ({ card, 
     </Reveal>
   );
   return (
-    <Page theme={theme} s={s} f={f} length={length} punch={{ at: toAt, zoom: 1.1, x: 540, y: 1000 }}
+    <Page theme={theme} s={s} f={f} length={length} inset={inset} punch={{ at: toAt, zoom: 1.1, x: 540, y: 1000 }}
       shots={[{ at: 0, zoom: 1.25, x: 540, y: 560 }, { at: arrowAt, zoom: 1.25, x: 540, y: 560 }, { at: toAt + 8, zoom: 1, x: 540, y: 960 }]}>
       <Title theme={theme} s={s} f={f} fps={fps} at={titleAt} text={title} seed={91} />
       {end(card.from.value, card.from.note, fromAt, "item", 440, 92, false)}
@@ -377,7 +390,7 @@ const ChangePage: React.FC<PageProps<"change"> & { length: number }> = ({ card, 
   );
 };
 
-const SharePage: React.FC<PageProps<"share"> & { length: number }> = ({ card, theme, s, f, fps, length }) => {
+const SharePage: React.FC<PageProps<"share"> & { length: number }> = ({ card, theme, s, f, fps, length, inset }) => {
   const share = Math.max(0, Math.min(1, card.value));
   const display = card.display ?? `${Math.round(share * 100)}%`;
   const title = card.eyebrow ?? "How much";
@@ -387,7 +400,7 @@ const SharePage: React.FC<PageProps<"share"> & { length: number }> = ({ card, th
   const barAt = next("item");
   const fill = progress(theme.motion, f, barAt, Math.max(12, theme.motion.frames * 2));
   return (
-    <Page theme={theme} s={s} f={f} length={length} punch={{ at: figureAt, zoom: 1.1, x: 540, y: 700 }}
+    <Page theme={theme} s={s} f={f} length={length} inset={inset} punch={{ at: figureAt, zoom: 1.1, x: 540, y: 700 }}
       shots={[{ at: 0, zoom: 1.3, x: 380, y: 290 }, { at: figureAt, zoom: 1.3, x: 380, y: 290 }, { at: figureAt + 12, zoom: 1, x: 540, y: 960 }]}>
       <Title theme={theme} s={s} f={f} fps={fps} at={titleAt} text={title} seed={101} />
       <Reveal theme={theme} role="figure" f={f} at={figureAt} fps={fps}
@@ -409,7 +422,7 @@ const SharePage: React.FC<PageProps<"share"> & { length: number }> = ({ card, th
   );
 };
 
-const MediaPage: React.FC<PageProps<"image" | "video"> & { length: number }> = ({ card, theme, s, f, fps, length }) => {
+const MediaPage: React.FC<PageProps<"image" | "video"> & { length: number }> = ({ card, theme, s, f, fps, length, inset }) => {
   const src = card.src.startsWith("http") || card.src.startsWith("/") ? card.src : staticFile(card.src);
   const shown = card.kind === "image" && theme.media === "halftone" ? theme.textures.halftone?.[card.src] ?? src : src;
   const Frame = getRemotionEnvironment().isRendering ? OffthreadVideo : Video;
@@ -422,7 +435,7 @@ const MediaPage: React.FC<PageProps<"image" | "video"> & { length: number }> = (
     ? <Frame src={src} muted startFrom={Math.max(0, Math.round((card.startAt ?? 0) * fps))} style={fit} />
     : <Img src={shown} style={fit} />;
   return (
-    <Page theme={theme} s={s} f={f} length={length} punch={null}
+    <Page theme={theme} s={s} f={f} length={length} inset={inset} punch={null}
       shots={[{ at: 0, zoom: 1.12, x: 540, y: 800 }, { at: 30, zoom: 1, x: 540, y: 960 }]}>
       <Reveal theme={theme} role="media" f={f} at={mediaAt} fps={fps}
         style={bleed ? { inset: 0 } : { left: 70 * s, top: 170 * s, width: 940 * s, height: 1180 * s, ...tilt(theme, 1.1) }}>
@@ -442,33 +455,54 @@ const MediaPage: React.FC<PageProps<"image" | "video"> & { length: number }> = (
   );
 };
 
-const ScenePage: React.FC<PageProps<"scene"> & { length: number }> = ({ card, theme, s, f, fps, length }) => {
+const ScenePage: React.FC<PageProps<"scene"> & { length: number }> = ({ card, theme, s, f, fps, length, inset }) => {
   const next = planner(theme, 0);
   const sheetAt = next("media");
   const bodyAt = next("item");
   const surface = theme.surface === "none" ? theme.color.ground : theme.color.sheet;
   return (
-    <Page theme={theme} s={s} f={f} length={length} punch={null}
+    <Page theme={theme} s={s} f={f} length={length} inset={inset} punch={null}
       shots={[{ at: 0, zoom: 1.12, x: 540, y: 700 }, { at: bodyAt + 14, zoom: 1, x: 540, y: 960 }]}>
       <Reveal theme={theme} role="media" f={f} at={sheetAt} fps={fps}
-        style={{ left: 40 * s, top: 170 * s, width: 1000 * s, height: 1180 * s, ...tilt(theme, -0.8) }}>
+        style={{ left: 40 * s, top: 190 * s, width: 1000 * s, height: 1060 * s, ...tilt(theme, -0.8) }}>
         <Paper theme={theme} seed={121} color={surface} scale={s} style={{ width: "100%", height: "100%" }} />
       </Reveal>
       <Reveal theme={theme} role="item" f={f} at={bodyAt} fps={fps}
-        style={{ left: 110 * s, top: 250 * s, width: 860 * s, ...tilt(theme, -0.8) }}>
-        <Scene blocks={card.blocks} layout={card.layout} gap={card.gap} scale={s} room={1020 * s}
+        style={{ left: 80 * s, top: 250 * s, width: 920 * s, height: 940 * s, display: "flex", flexDirection: "column", justifyContent: "center", ...tilt(theme, -0.8) }}>
+        <Scene blocks={card.blocks} layout={card.layout} gap={card.gap} scale={(s * 920) / SCENE_WIDTH} room={940 * s}
+          font={theme.type.label.family}
           brand={{ accent: theme.color.accent, ink: theme.color.ink, surface }} accent={theme.color.accent} />
       </Reveal>
     </Page>
   );
 };
 
-export const TakeoverPage: React.FC<{ card: Card; theme: Theme; s: number; start: number; length: number }> = ({
-  card, theme, s, start, length,
-}) => {
+const cardTexts = (card: Card): string[] => Object.values(card).flatMap((value) => {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  return [];
+});
+
+export const paced = (theme: Theme, card: Card, length: number): Theme => {
+  const budget = Math.max(6, length * 0.45);
+  const hold = Math.max(1, theme.motion.holdEvery);
+  const longest = Math.max(0, ...cardTexts(card).map((text) => Array.from(text).length));
+  const words = Math.max(0, ...cardTexts(card).map((text) => text.split(/\s+/).filter(Boolean).length));
+  if (theme.motion.textUnit === "word") {
+    if (words * hold <= budget) return theme;
+    return { ...theme, motion: { ...theme.motion, textUnit: "char", charsPerPose: Math.ceil((longest * hold) / budget) } };
+  }
+  const poses = Math.ceil(longest / theme.motion.charsPerPose);
+  if (poses * hold <= budget) return theme;
+  return { ...theme, motion: { ...theme.motion, charsPerPose: Math.ceil((longest * hold) / budget) } };
+};
+
+export const TakeoverPage: React.FC<{
+  card: Card; theme: Theme; s: number; start: number; length: number; inset: number;
+}> = ({ card, theme, s, start, length, inset }) => {
   const f = useCurrentFrame() - start;
   const { fps } = useVideoConfig();
-  const props = { theme, s, f, fps, length };
+  const props = { theme: paced(theme, card, length), s, f, fps, length, inset };
   if (card.kind === "stat") return <StatPage card={card} {...props} />;
   if (card.kind === "headline") return <HeadlinePage card={card} {...props} />;
   if (card.kind === "entity") return <EntityPage card={card} {...props} />;

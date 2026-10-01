@@ -11,7 +11,7 @@ import { Label, Paper } from "./materials";
 import { progress, Reveal } from "./reveal";
 import { TakeoverPage } from "./pages";
 
-export const StyledCards: React.FC<{ cards: Card[]; theme: Theme }> = ({ cards, theme }) => {
+export const StyledCards: React.FC<{ cards: Card[]; theme: Theme; topInset?: number }> = ({ cards, theme, topInset = 0 }) => {
   const frame = useCurrentFrame();
   const { fps, height } = useVideoConfig();
   const card = cardAt(cards.filter((c) => theme.layout[c.kind] === "takeover"), frame / fps);
@@ -19,7 +19,7 @@ export const StyledCards: React.FC<{ cards: Card[]; theme: Theme }> = ({ cards, 
   const start = Math.round(card.start * fps);
   return (
     <TakeoverPage card={card} theme={theme} s={captionScale(height)} start={start}
-      length={Math.round(card.end * fps) - start} />
+      length={Math.round(card.end * fps) - start} inset={topInset} />
   );
 };
 
