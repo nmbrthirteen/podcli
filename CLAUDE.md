@@ -61,7 +61,7 @@ All 27 tools registered by the MCP server.
 
 | Tool | What it does |
 |------|-------------|
-| `manage_multicam` | Map camera, mic and call-recording files to people, sync them by audio, auto-cut to the speaker, render, or export a studio shoot to Premiere / FCPXML |
+| `manage_multicam` | Map camera, mic and call-recording files to people, sync them by audio, auto-cut to the speaker, render, export a studio shoot to Premiere / FCPXML, or hand the edit to the podcli cloud editor |
 
 **Content and configuration**
 

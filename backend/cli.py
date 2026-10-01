@@ -880,6 +880,9 @@ def _run_multicam(args, mc, target: str):
         print(f"  ✓ Deleted multicam edit {session.session_id}. Your recordings are untouched.")
         return {"deleted": True, "session_id": session.session_id}
 
+    if args.pull:
+        return _pull_multicam(args, mc, target)
+
     people = [n.strip() for n in (args.people or "").split(",") if n.strip()] or None
     session = _open_multicam_session(target, people)
     if args.state:
@@ -963,16 +966,47 @@ def _run_multicam(args, mc, target: str):
         session = mc.build_preview(session, progress_callback=report)
         done()
         print(f"  ✓ Preview proxies and mix in {os.path.dirname(session.preview['audio'])}")
-    if not args.no_render:
-        report, done = _multicam_progress("Rendering")
-        outputs = mc.render_session(session, stems=not args.no_stems, progress_callback=report)
+    if args.cloud:
+        from services import multicam_cloud
+        report, done = _multicam_progress("Sending")
+        session = multicam_cloud.push(session, model_size=args.model, engine=args.engine, progress_callback=report)
         done()
-        for path in [outputs["video"], *(outputs.get("stems") or [])]:
-            print(f"  ✓ {path}")
+        print(f"  ✓ Open the edit: {session.cloud['url']}")
+        print(f"  Render it here when you're done: podcli multicam {session.session_id} --pull")
+        return session
+    if not args.no_render:
+        _render_multicam(args, mc, session)
     print(f"\n  Change anything and re-run: podcli multicam {session.session_id} [options]")
     video = session.outputs.get("video")
     if video and os.path.exists(video):
         print(f"  Make clips from it:         podcli process \"{video}\"")
+    return session
+
+
+def _render_multicam(args, mc, session):
+    report, done = _multicam_progress("Rendering")
+    outputs = mc.render_session(session, stems=not args.no_stems, progress_callback=report)
+    done()
+    for path in [outputs["video"], *(outputs.get("stems") or [])]:
+        print(f"  ✓ {path}")
+
+
+def _pull_multicam(args, mc, target: str):
+    """Renders the cut made in the podcli cloud editor from the camera files on this computer."""
+    from services import multicam_cloud
+
+    session = multicam_cloud.pull(multicam_cloud.resolve(target))
+    stats = mc.cut_stats(session)
+    removed = sum(r["end"] - r["start"] for r in session.removals)
+    print(f"  Pulled the cloud edit: {stats['shots']} shots over {_fmt_time(stats['duration'])}"
+          + (f", {_fmt_time(removed)} cut out" if removed else ""))
+    for fmt in (["premiere", "fcpxml"] if args.export == "all" else [args.export] if args.export else []):
+        try:
+            print(f"  ✓ {mc.export_xml(session, fmt)}")
+        except ValueError as e:
+            print(f"  ! Skipped the {fmt} export: {e}", file=sys.stderr)
+    if not args.no_render:
+        _render_multicam(args, mc, session)
     return session
 
 
@@ -4963,6 +4997,10 @@ def main():
     mc_p.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"],
                       help="Transcription engine for --transcript (default: the one podcli is set up with)")
     mc_p.add_argument("--activity", action="store_true", help="Report who speaks when (talk time, or spans with --json)")
+    mc_p.add_argument("--cloud", action="store_true",
+                      help="Send the edit to the podcli cloud editor (Pro). Only previews go up; camera files stay here")
+    mc_p.add_argument("--pull", action="store_true",
+                      help="Render the cut made in the podcli cloud editor. Target is this edit's session id or cloud id")
     mc_p.add_argument("--json", action="store_true",
                       help="Print the edit as one JSON object on stdout; progress and messages go to stderr")
 

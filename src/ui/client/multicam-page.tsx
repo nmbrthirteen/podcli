@@ -9,6 +9,7 @@ import MulticamSources from "./multicam-sources";
 import MulticamSync from "./multicam-sync";
 import MulticamSummary from "./multicam-summary";
 import MulticamResults, { DeliverActions } from "./multicam-deliver";
+import MulticamCloud from "./multicam-cloud";
 import type { McJobKind, McPreviewsResp, McSession, McSessionSummary } from "./multicam-types";
 
 const JOB_LABEL: Record<McJobKind, string> = {
@@ -16,6 +17,8 @@ const JOB_LABEL: Record<McJobKind, string> = {
   plan: "Cutting",
   render: "Rendering",
   preview: "Preparing previews",
+  cloud: "Sending to podcli cloud",
+  pull: "Rendering the cloud edit",
 };
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -233,6 +236,7 @@ export default function MulticamPage() {
           {cutReady && (
             <>
               <MulticamSummary session={session} locked={locked} onEdit={mutate} onRecut={(extra) => startJob("plan", extra)} />
+              <MulticamCloud session={session} locked={locked} onSend={() => startJob("cloud")} onPull={() => startJob("pull")} />
               <MulticamResults session={session} locked={locked} onMakeClips={onMakeClips} />
             </>
           )}

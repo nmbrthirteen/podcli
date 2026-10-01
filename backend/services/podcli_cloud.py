@@ -186,7 +186,8 @@ def _describe(exc: urllib.error.HTTPError) -> tuple[str, bool]:
     if exc.code == 401:
         return ("podcli Pro session expired — run `podcli login` again", False)
     if exc.code == 402:
-        return ("this workspace has no active podcli Pro subscription", False)
+        # A plan's own limits (footage, cameras) say which one; a bare 402 means no plan at all.
+        return (detail or "this workspace has no active podcli Pro subscription", False)
     if exc.code == 403:
         return (detail or "your role does not allow this", False)
     if exc.code == 429:

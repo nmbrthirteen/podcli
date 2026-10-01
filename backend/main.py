@@ -1038,6 +1038,13 @@ def handle_manage_multicam(task_id: str, params: dict):
             mc.render_session(session, stems=stems, progress_callback=progress("rendering"))
         elif action == "export":
             data["export_path"] = mc.export_xml(session, params.get("format", "premiere"))
+        elif action == "cloud":
+            from services import multicam_cloud
+            session = multicam_cloud.push(session, progress_callback=progress("sending"))
+        elif action == "pull":
+            from services import multicam_cloud
+            session = multicam_cloud.pull(session)
+            mc.render_session(session, stems=True, progress_callback=progress("rendering"))
         else:
             raise ValueError(f"Unknown multicam action {action!r}")
         emit_result(task_id, "success", data={**mc.payload(session), **data})

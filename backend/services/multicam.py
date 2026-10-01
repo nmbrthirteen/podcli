@@ -164,6 +164,7 @@ class MulticamSession:
     skipped: list[str] = field(default_factory=list)
     preview: dict = field(default_factory=dict)
     removals: list[dict] = field(default_factory=list)
+    cloud: dict = field(default_factory=dict)  # {"id", "url"} once sent to the podcli cloud editor
 
     def path(self) -> Path:
         return _sessions_dir() / f"{self.session_id}.json"

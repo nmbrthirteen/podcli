@@ -2235,10 +2235,12 @@ export function createServer(): McpServer {
       "Other actions: 'list', 'cut' (index, source_id: swap one shot's camera), 'set_cuts' (cuts: replace the whole cut with back-to-back shots), " +
       "'activity' (who speaks when, as spans per person), 'previews' (still frames per camera, looks: true adds color-look stills), " +
       "'preview' (background job: playback proxies, a mic mix and stills, for a browser editor such as podcli cloud), 'delete'. " +
+      "'cloud' (background job, needs podcli login and Pro: sends previews and the edit to the podcli cloud editor; camera files stay here) and " +
+      "'pull' (background job: renders the cut made in that editor from the files here). " +
       "Call recordings work too: one file per person becomes a split screen, one gallery recording is split into a camera per tile; Premiere and FCPXML export refuse those layouts for now.",
     {
       action: z
-        .enum(["new", "list", "show", "map", "sync", "plan", "cut", "set_cuts", "activity", "previews", "preview", "render", "export", "delete"])
+        .enum(["new", "list", "show", "map", "sync", "plan", "cut", "set_cuts", "activity", "previews", "preview", "render", "export", "cloud", "pull", "delete"])
         .describe("What to do"),
       session_id: z.string().optional().describe("Session id returned by 'new' (every action except new/list)"),
       folder: z.string().optional().describe("For 'new': folder holding one episode's recordings, scanned recursively"),

@@ -2243,7 +2243,7 @@ app.get("/api/reel-download", (req, res) => {
 });
 
 // --- Multicam: map sources, sync, cut, render one recording ---
-const MULTICAM_JOB_ACTIONS = new Set(["sync", "plan", "render", "preview"]);
+const MULTICAM_JOB_ACTIONS = new Set(["sync", "plan", "render", "preview", "cloud", "pull"]);
 // activity saves the session when it refreshes its cache, so it waits for jobs like any write.
 const MULTICAM_WRITE_ACTIONS = new Set(["map", "cut", "set_cuts", "export", "delete", "activity", ...MULTICAM_JOB_ACTIONS]);
 const multicamPreviewDir = join(paths.working, "multicam");

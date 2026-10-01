@@ -78,6 +78,7 @@ Clips land in `podcli-clips/` in the directory you ran it from, so each show kee
 - Remote shows too: one file per person becomes a split screen, and a single gallery recording is split into a camera per tile. Questions stay on the split and the guest goes full frame on long answers
 - Render the episode as an MP4 with one WAV per person. Studio shoots can also go to Premiere or Final Cut as a timeline that points at your original files
 - Same edit from the studio (Multicam edit), the CLI (`podcli multicam <folder>`), or an agent (`manage_multicam`). Re-running reuses the sync and the cut, so only the step you changed runs again
+- With podcli Pro, steer the cut in the cloud editor: `podcli multicam <folder> --cloud` sends small previews and the transcript (your camera files stay on your computer), and `--pull` renders the cut you made there
 
 **Finding the moments**
 

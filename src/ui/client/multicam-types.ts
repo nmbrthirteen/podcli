@@ -95,6 +95,7 @@ export interface McSession {
   resolved_style: "studio" | "remote";
   auto_style: "studio" | "remote";
   removals: { start: number; end: number; reason?: string }[];
+  cloud?: { id?: string; url?: string };
   cuts: McCut[];
   stats: McStats;
   speaker_map: Record<string, string>;
@@ -123,7 +124,7 @@ export interface McPreviewsResp extends McSession {
   previews: McPreviews;
 }
 
-export type McJobKind = "sync" | "plan" | "render" | "preview";
+export type McJobKind = "sync" | "plan" | "render" | "preview" | "cloud" | "pull";
 
 export const mcImageUrl = (path: string) => `/api/multicam/image?path=${encodeURIComponent(path)}`;
 export const mcFileUrl = (path: string) => `/api/multicam/file?path=${encodeURIComponent(path)}`;
