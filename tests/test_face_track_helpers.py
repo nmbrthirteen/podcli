@@ -367,6 +367,41 @@ class SeatsFromFramesTests(unittest.TestCase):
         self.assertIsNone(fth.seats_from_frames([[960]] * 50, self.WIDTH))
 
 
+class FollowWithinRunsTests(unittest.TestCase):
+    CROP = 1215
+    WIDTH = 3840
+
+    def _follow(self, runs, points):
+        return fth.follow_within_runs(runs, points, self.CROP, self.WIDTH)
+
+    def _at(self, keys, t):
+        return [x for kt, x in keys if kt <= t][-1]
+
+    def test_a_still_face_keeps_a_still_camera(self):
+        points = [(i * 0.1, 1900.0 + (i % 3) * 20, 640.0) for i in range(100)]
+        keys = self._follow([(0.0, 10.0, 1900.0)], points)
+        self.assertEqual({x for _, x in keys}, {1900.0})
+
+    def test_a_close_face_that_leans_is_followed_before_it_leaves_frame(self):
+        points = [(i * 0.1, 1930.0, 650.0) for i in range(140)]
+        points += [(14.0 + i * 0.1, 2300.0, 850.0) for i in range(50)]
+        keys = self._follow([(0.0, 19.0, 1930.0)], points)
+        half = self.CROP / 2
+        self.assertLessEqual(abs(self._at(keys, 15.0) - 2300.0) + 425, half)
+
+    def test_a_layout_change_is_a_cut_not_a_pan(self):
+        points = [(i * 0.1, 1950.0, 640.0) for i in range(330)]
+        points += [(33.0 + i * 0.1, 1000.0, 680.0) for i in range(15)]
+        keys = self._follow([(0.0, 33.0, 1950.0), (33.0, 34.5, 1000.0)], points)
+        self.assertEqual(self._at(keys, 32.999), 1950.0)
+        self.assertEqual(self._at(keys, 33.0), 1000.0)
+
+    def test_the_camera_never_leaves_the_source(self):
+        points = [(i * 0.1, 50.0, 400.0) for i in range(30)]
+        keys = self._follow([(0.0, 3.0, 50.0)], points)
+        self.assertTrue(all(x >= self.CROP / 2 for _, x in keys))
+
+
 class ReExportTests(unittest.TestCase):
     def test_video_processor_reexports_all_helpers(self):
         from services import video_processor as vp

@@ -44,6 +44,7 @@ from services.face_track_helpers import (
     clamp_away_from_dead_zone as _clamp_away_from_dead_zone,
     clip_layout_is_mixed as _clip_layout_is_mixed,
     crop_center_keeping_faces_visible as _crop_center_keeping_faces_visible,
+    follow_within_runs as _follow_within_runs,
     followed_face_cx_at as _followed_face_cx_at,
     safe_default_center as _safe_default_center,
     update_tripod_camera as _update_tripod_camera,
@@ -1590,6 +1591,7 @@ def _track_and_crop_inner(
         # ── Collect per-frame face positions (speaker-aware) ──────
         from statistics import median
         face_points = []  # [(t, center_x), ...]
+        face_widths = []
         for t, faces in detections:
             if not faces:
                 continue
@@ -1603,6 +1605,7 @@ def _track_and_crop_inner(
             else:
                 best = max(faces, key=lambda f: f["fw"])
             face_points.append((t, float(best["cx"])))
+            face_widths.append(float(best.get("fw", 0)))
 
         # ── Split into stable position runs ─────────────────────
         # Each run = one locked camera position.  Runs split on
@@ -1687,7 +1690,14 @@ def _track_and_crop_inner(
                 cuts = _source_cut_times(input_path)
                 snapped = _snap_runs_to_source_cuts(runs, cuts)
                 moved = sum(1 for a, b in zip(runs, snapped) if abs(a[1] - b[1]) > 0.001)
-                x_expr = _run_step_crop_x_expr(snapped, _crop_for)
+                followed = _follow_within_runs(
+                    snapped,
+                    [(t, cx, fw) for (t, cx), fw in zip(face_points, face_widths)],
+                    crop_w, width,
+                )
+                keys = _simplify_keyframes([(t, _crop_for(cx)) for t, cx in followed], tolerance=8)
+                x_expr = (_build_cam_expr(keys, duration, False)
+                          or _run_step_crop_x_expr(snapped, _crop_for))
                 vf = (f"crop={crop_w}:{crop_h}:x='{x_expr}':y={crop_y},"
                       f"scale={target_w}:{target_h}")
                 log_event("crop", "chose=mixed-step-cuts", runs=len(runs),

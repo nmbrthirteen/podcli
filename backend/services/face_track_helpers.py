@@ -270,6 +270,38 @@ def longest_layout_run(detections: list, split: bool) -> float:
     return best
 
 
+def follow_within_runs(
+    runs: list,
+    face_points: list,
+    crop_w: int,
+    video_width: int,
+    fast: float = 480.0,
+    slow: float = 140.0,
+) -> list:
+    half = crop_w / 2.0
+    lowest, highest = half, max(half, video_width - half)
+    keys = []
+    for start, end, center in runs:
+        cam = min(max(center, lowest), highest)
+        if keys:
+            keys.append((max(keys[-1][0], start - 0.001), keys[-1][1]))
+        keys.append((start, cam))
+        last = start
+        for t, cx, fw in face_points:
+            if not start <= t < end:
+                continue
+            room = max(24.0, (crop_w - fw) / 2.0 - crop_w * 0.04)
+            calm = min(crop_w * 0.22, room)
+            diff = cx - cam
+            if abs(diff) > calm:
+                speed = fast if abs(diff) > room else slow
+                cam += min(abs(diff), speed * max(t - last, 0.01)) * (1 if diff > 0 else -1)
+                cam = min(max(cam, lowest), highest)
+            last = t
+            keys.append((t, cam))
+    return keys
+
+
 def clip_layout_is_mixed(
     detections: list,
     face_map: dict | None = None,
