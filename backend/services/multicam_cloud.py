@@ -147,5 +147,6 @@ def pull(session: mc.MulticamSession) -> mc.MulticamSession:
     cuts = edit.get("cuts") or state.get("cuts")
     if cuts:
         session = mc.set_cuts(session, cuts)
-    session = mc.set_removals(session, [{"start": r["start"], "end": r["end"]} for r in edit.get("removals") or []])
+    if isinstance(edit.get("removals"), list):
+        session = mc.set_removals(session, [{"start": r["start"], "end": r["end"]} for r in edit["removals"]])
     return session
