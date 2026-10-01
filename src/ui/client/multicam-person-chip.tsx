@@ -8,6 +8,7 @@ export default function PersonChip({
   onBlur,
   role,
   onRole,
+  disabled = false,
 }: {
   value: string;
   onChange: (name: string) => void;
@@ -15,11 +16,13 @@ export default function PersonChip({
   onBlur?: () => void;
   role?: "host" | "guest";
   onRole?: (role: "host" | "guest") => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="file-badge" style={{ padding: "6px 10px", background: "var(--surface2)", border: "1px solid var(--border)" }}>
       <input
         value={value}
+        disabled={disabled}
         aria-label="Person name"
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
@@ -31,13 +34,14 @@ export default function PersonChip({
         <button
           className={`pill ${role === "guest" ? "pill-sky" : "pill-blue"}`}
           title={role === "guest" ? "Guest: answers stay on their camera. Click to make a host." : "Host. Click to make a guest."}
+          disabled={disabled}
           onClick={() => onRole(role === "guest" ? "host" : "guest")}
           style={{ border: "none", cursor: "pointer" }}
         >
           {role === "guest" ? "Guest" : "Host"}
         </button>
       )}
-      <button className="btn btn-ghost btn-sm" aria-label={`Remove ${value || "person"}`} onClick={onRemove} style={{ padding: "2px 6px" }}>
+      <button className="btn btn-ghost btn-sm" aria-label={`Remove ${value || "person"}`} disabled={disabled} onClick={onRemove} style={{ padding: "2px 6px" }}>
         <TrashIcon size={12} />
       </button>
     </div>

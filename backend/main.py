@@ -1006,6 +1006,9 @@ def handle_manage_multicam(task_id: str, params: dict):
             return
 
         session = mc.MulticamSession.load(session_id)
+        if action == "render" and any(k in params for k in MULTICAM_MAP_KEYS if k != "look"):
+            # A mapping change can drop the cut, and a render needs one: map, then plan, then render.
+            raise ValueError("render takes only look and stems. Change the mapping with 'map', then 'plan' again.")
         if action in ("map", "sync", "plan", "render") and any(k in params for k in MULTICAM_MAP_KEYS):
             session = mc.update_mapping(session, params)
         data: dict = {}
@@ -1029,16 +1032,21 @@ def handle_manage_multicam(task_id: str, params: dict):
         elif action == "previews":
             data["previews"] = mc.previews(session, looks=bool(params.get("looks")), at=params.get("at"))
         elif action == "render":
-            mc.render_session(session, stems=params.get("stems", True), progress_callback=progress("rendering"))
+            stems = params.get("stems", True)
+            if not isinstance(stems, bool):
+                raise ValueError("stems is true or false")
+            mc.render_session(session, stems=stems, progress_callback=progress("rendering"))
         elif action == "export":
             data["export_path"] = mc.export_xml(session, params.get("format", "premiere"))
         else:
             raise ValueError(f"Unknown multicam action {action!r}")
         emit_result(task_id, "success", data={**mc.payload(session), **data})
-    except (IndexError, ValueError, OSError, RuntimeError, ImportError, TypeError, AttributeError) as e:
-        emit_result(task_id, "error", error=str(e))
     except KeyError as e:
         emit_result(task_id, "error", error=f"Missing field {e.args[0]!r}")
+    except Exception as e:
+        # Callers get one sentence; the full trace goes to the log, never to a client.
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
+        emit_result(task_id, "error", error=str(e) or type(e).__name__)
 
 
 def handle_run_integration_tool(task_id: str, params: dict):

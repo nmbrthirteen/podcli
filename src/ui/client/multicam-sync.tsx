@@ -8,6 +8,7 @@ const STATUS: Record<string, { label: string; color: string; pill: string }> = {
   ok: { label: "Synced", color: "var(--green)", pill: "pill-green" },
   rough: { label: "Rough sync", color: "var(--amber)", pill: "pill-amber" },
   manual: { label: "Set by hand", color: "var(--blue)", pill: "pill-sky" },
+  assumed: { label: "Starts with the others", color: "var(--amber)", pill: "pill-amber" },
 };
 const NOT_SYNCED = { label: "Not synced", color: "var(--red)", pill: "pill-red" };
 
@@ -23,7 +24,7 @@ export default function MulticamSync({
   onCut: () => void;
 }) {
   const duration = session.timeline_duration || 1;
-  const active = session.sources.filter((s) => s.role !== "ignore");
+  const active = session.sources.filter((s) => s.role !== "ignore" && !s.parent && !s.members.length);
   const ready = active.every((s) => s.offset !== null);
 
   return (
@@ -98,6 +99,7 @@ function SyncRow({ source, people, onEdit, disabled }: { source: McSource; peopl
       {source.offset === null && (
         <span className="hint" style={{ color: "var(--red)" }}>{source.sync.message || "Sync this file, or type where it starts."}</span>
       )}
+      {source.sync.status === "assumed" && <span className="hint">{source.sync.message}</span>}
 
       <div style={{ display: "inline-flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
         {source.offset === null ? (

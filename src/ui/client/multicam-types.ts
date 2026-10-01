@@ -9,7 +9,7 @@ export interface McPerson {
 }
 
 export type McRole = "camera" | "mic" | "ignore";
-export type McSyncStatus = "reference" | "ok" | "rough" | "failed" | "manual";
+export type McSyncStatus = "reference" | "ok" | "rough" | "failed" | "manual" | "assumed";
 
 export interface McSourceSync {
   status?: McSyncStatus;
@@ -40,6 +40,9 @@ export interface McSource {
   timeline_start: number | null;
   timeline_end: number | null;
   sync: McSourceSync;
+  parent: string;
+  crop: number[];
+  members: string[];
 }
 
 export interface McCut {
@@ -48,12 +51,18 @@ export interface McCut {
   source_id: string;
 }
 
+export type McStyle = "auto" | "studio" | "remote";
+
 export interface McCutSettings {
+  style: McStyle;
   min_shot: number;
   max_shot: number;
   wide_insert: number;
   backchannel: number;
   hold_guest: boolean;
+  host_solo: boolean;
+  guest_min: number;
+  guest_delay: number;
 }
 
 export interface McStats {
@@ -83,6 +92,9 @@ export interface McSession {
   look: string;
   looks: string[];
   cut_settings: McCutSettings;
+  resolved_style: "studio" | "remote";
+  auto_style: "studio" | "remote";
+  removals: { start: number; end: number; reason?: string }[];
   cuts: McCut[];
   stats: McStats;
   speaker_map: Record<string, string>;
@@ -111,7 +123,7 @@ export interface McPreviewsResp extends McSession {
   previews: McPreviews;
 }
 
-export type McJobKind = "sync" | "plan" | "render";
+export type McJobKind = "sync" | "plan" | "render" | "preview";
 
 export const mcImageUrl = (path: string) => `/api/multicam/image?path=${encodeURIComponent(path)}`;
 export const mcFileUrl = (path: string) => `/api/multicam/file?path=${encodeURIComponent(path)}`;
@@ -129,8 +141,8 @@ export function whoLabel(people: McPerson[], source: McSource): string {
 
 export type McEdit = (body: Record<string, unknown>) => void;
 
-// Stable color per camera, assigned in first-appearance order across the cuts
-// so the shot strip and legend always agree on which color means which camera.
+// One color per camera in the order the cameras are listed, so the shot strip
+// and the legend agree on which color means which camera.
 const CAMERA_COLORS = ["var(--accent)", "var(--green)", "var(--blue)", "var(--amber)", "var(--red)", "var(--text2)"];
 
 export function cameraColorMap(cameraIds: string[]): Record<string, string> {

@@ -15,6 +15,7 @@ const JOB_LABEL: Record<McJobKind, string> = {
   sync: "Syncing",
   plan: "Cutting",
   render: "Rendering",
+  preview: "Preparing previews",
 };
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -91,7 +92,7 @@ export default function MulticamPage() {
     post<McPreviewsResp>({ action: "previews", session_id: session.session_id })
       .then((r) => setStills(r.previews.cameras))
       .catch(() => {});
-  }, [session?.session_id]);
+  }, [session?.session_id, session?.sources.map((s) => s.id).join()]);
 
   useEffect(() => {
     if (!job || !jobState) return;
@@ -113,7 +114,7 @@ export default function MulticamPage() {
   async function startSession(seed: Record<string, unknown>): Promise<boolean> {
     const r = await call({ action: "new", ...seed, people: peopleDraft.filter((n) => n.trim()) });
     if (!r) return false;
-    setSession(r);
+    adopt(r);
     setSearchParams({ session: r.session_id });
     refreshList();
     return true;
@@ -180,6 +181,10 @@ export default function MulticamPage() {
         actions={session && cutReady && (
           <DeliverActions
             locked={locked}
+            exportable={!session.cuts.some((c) => {
+              const cam = session.sources.find((s) => s.id === c.source_id);
+              return !!cam && (!!cam.parent || cam.members.length > 0);
+            })}
             onRender={() => startJob("render", { stems: true })}
             onExport={(format) => mutate({ action: "export", format })}
           />
@@ -209,7 +214,7 @@ export default function MulticamPage() {
             <div className="section card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px" }}>
               <span className="pill pill-green">Synced</span>
               <span className="hint">
-                {session.sources.filter((s) => s.role !== "ignore").length} files · {session.people.map((p) => p.name).join(", ")}
+                {session.sources.filter((s) => s.role !== "ignore" && !s.parent && !s.members.length).length} files · {session.people.map((p) => p.name).join(", ")}
               </span>
               <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => setSourcesOpen(true)}>
                 Edit sources

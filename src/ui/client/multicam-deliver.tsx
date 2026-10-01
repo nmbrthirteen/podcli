@@ -8,17 +8,20 @@ const linkStyle = { textDecoration: "none", display: "inline-flex", alignItems: 
 
 export function DeliverActions({
   locked,
+  exportable,
   onRender,
   onExport,
 }: {
   locked: boolean;
+  exportable: boolean;
   onRender: () => void;
   onExport: (format: "premiere" | "fcpxml") => void;
 }) {
+  const why = exportable ? undefined : "Editor timelines can't carry call layouts yet. Render the MP4 instead.";
   return (
     <>
-      <button className="btn btn-ghost btn-sm" disabled={locked} onClick={() => onExport("premiere")}>Export for Premiere</button>
-      <button className="btn btn-ghost btn-sm" disabled={locked} onClick={() => onExport("fcpxml")}>Export for Final Cut</button>
+      <button className="btn btn-ghost btn-sm" disabled={locked || !exportable} title={why} onClick={() => onExport("premiere")}>Export for Premiere</button>
+      <button className="btn btn-ghost btn-sm" disabled={locked || !exportable} title={why} onClick={() => onExport("fcpxml")}>Export for Final Cut</button>
       <button className="btn btn-primary btn-sm" disabled={locked} onClick={onRender}>Render episode</button>
     </>
   );

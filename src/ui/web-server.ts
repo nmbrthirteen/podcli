@@ -2244,7 +2244,8 @@ app.get("/api/reel-download", (req, res) => {
 
 // --- Multicam: map sources, sync, cut, render one recording ---
 const MULTICAM_JOB_ACTIONS = new Set(["sync", "plan", "render", "preview"]);
-const MULTICAM_WRITE_ACTIONS = new Set(["map", "cut", "set_cuts", "export", "delete", ...MULTICAM_JOB_ACTIONS]);
+// activity saves the session when it refreshes its cache, so it waits for jobs like any write.
+const MULTICAM_WRITE_ACTIONS = new Set(["map", "cut", "set_cuts", "export", "delete", "activity", ...MULTICAM_JOB_ACTIONS]);
 const multicamPreviewDir = join(paths.working, "multicam");
 // A multi-hour, multi-camera render outlasts the default one-hour task limit.
 const multicamExecutor = new PythonExecutor(8 * 3600_000);
@@ -2254,19 +2255,13 @@ const multicamRunning = new Map<string, { id: string; action: string }>();
 
 type MulticamPayload = {
   session_id?: string;
-  sources?: Array<{ path?: string }>;
   outputs?: { video?: string };
   active_job?: { id: string; action: string };
 };
 
-// Camera and mic files become streamable for the review player, but only the
-// finished episode joins the recent-sources list the other pages offer.
+// Only the finished episode becomes streamable: paths in a request body are the
+// caller's say-so, and registering them would let a request read any media file.
 function allowMulticamPaths(data: MulticamPayload | undefined): void {
-  for (const s of data?.sources || []) {
-    try {
-      if (s.path) allowedSourcePaths.add(realpathSync(path.resolve(s.path)));
-    } catch {}
-  }
   if (data?.outputs?.video) registerSourcePath(data.outputs.video);
 }
 

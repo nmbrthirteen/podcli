@@ -279,6 +279,9 @@ def plan_cuts(
     backchannel: float = 1.2,
     guests: frozenset[str] = frozenset(),
     hold_guest: bool = True,
+    host_solo: bool = True,
+    guest_min: float = 0.0,
+    guest_delay: float = 0.0,
 ) -> list[dict]:
     """Turn per-frame speaker labels into [{start, end, source_id}] on the timeline.
 
@@ -288,9 +291,12 @@ def plan_cuts(
     fold into a neighbour whose camera also covers them. A single shot longer
     than max_shot gets a wide_insert-second wide shot in the middle when a wide
     camera exists, except on a guest when hold_guest is set: a guest's answer
-    stays on the guest from start to finish. Split camera files (part 1,
-    part 2) are handled because every decision checks which camera actually
-    covers the moment.
+    stays on the guest from start to finish. With host_solo off a host speaks
+    on the wide shot. A guest turn shorter than guest_min stays wide, and a
+    longer one opens wide for guest_delay seconds before going to the guest,
+    as a call recording cuts between the split screen and the guest. Split
+    camera files (part 1, part 2) are handled because every decision checks
+    which camera actually covers the moment.
     """
     if not cameras or range_end <= range_start:
         return []
@@ -319,14 +325,19 @@ def plan_cuts(
     window = suppress_backchannels(window, backchannel)
 
     targets: list[str] = []
+    speech: list[str] = []
     previous = "wide" if wide else (people[0] if people else "wide")
     for value in window:
         if value == SILENT:
             targets.append(previous)
+            speech.append("")
             continue
         current = "wide" if value == BOTH else people[value]
         targets.append(current)
+        speech.append(current)
         previous = current
+    if wide and (not host_solo or guest_min > 0 or guest_delay > 0):
+        targets = _call_layout(targets, speech, guests, host_solo, guest_min, guest_delay)
     codes = {name: i for i, name in enumerate(dict.fromkeys(targets))}
     names = list(codes)
     shot_runs = _runs(np.array([codes[t] for t in targets], dtype=np.int32))
@@ -383,6 +394,42 @@ def plan_cuts(
         for s in shots
         if s["end"] - s["start"] > 1e-3
     ]
+
+
+# A guest's full-frame shot runs this far past their last word, then the
+# split returns before the next speaker, as the measured remote edits do.
+SOLO_TAIL = 1.0
+
+
+def _call_layout(targets: list[str], speech: list[str], guests: frozenset[str], host_solo: bool,
+                 guest_min: float, guest_delay: float) -> list[str]:
+    """Send host turns and short guest turns to the wide shot; open long guest turns on it.
+
+    `targets` has pauses filled with the last speaker; `speech` keeps them
+    empty, so a guest turn is measured from their first word to their last,
+    and silence after an answer never counts toward it.
+    """
+    out = list(targets)
+    delay = int(guest_delay / FRAME_SECONDS)
+    tail = int(SOLO_TAIL / FRAME_SECONDS)
+    start = 0
+    for i in range(1, len(targets) + 1):
+        if i < len(targets) and targets[i] == targets[start]:
+            continue
+        who = targets[start]
+        if who in guests:
+            spoken = [k for k in range(start, i) if speech[k] == who]
+            first, last = (spoken[0], spoken[-1] + 1) if spoken else (start, start)
+            if (last - first) * FRAME_SECONDS < guest_min:
+                out[start:i] = ["wide"] * (i - start)
+            else:
+                solo_from, solo_to = min(i, first + delay), min(i, last + tail)
+                out[start:i] = ["wide"] * (i - start)
+                out[solo_from:solo_to] = [who] * max(0, solo_to - solo_from)
+        elif who != "wide" and not host_solo:
+            out[start:i] = ["wide"] * (i - start)
+        start = i
+    return out
 
 
 def suppress_backchannels(labels: np.ndarray, backchannel: float) -> np.ndarray:

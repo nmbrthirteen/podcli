@@ -22,7 +22,11 @@ export default function MulticamSummary({
   return (
     <div className="section card">
       <div className="card-title" style={{ marginBottom: 4 }}>Cut</div>
-      <p className="card-desc">Cameras follow whoever is speaking, picked from each person's mic.</p>
+      <p className="card-desc">
+        {session.resolved_style === "remote"
+          ? "Questions play on the split screen; the guest goes full frame on long answers."
+          : "Cameras follow whoever is speaking, picked from each person's mic."}
+      </p>
 
       <div aria-hidden style={{ display: "flex", height: 28, borderRadius: "var(--radius-sm)", overflow: "hidden", border: "1px solid var(--border)" }}>
         {session.cuts.map((c) => (
@@ -41,7 +45,11 @@ export default function MulticamSummary({
             {whoLabel(session.people, cam)} {Math.round((share[cam.id] || 0) * 100)}%
           </span>
         ))}
-        <span className="hint">{shots} shots · average {average_shot.toFixed(1)}s · {fmt(duration)}</span>
+        <span className="hint">
+          {shots} shots · average {average_shot.toFixed(1)}s · {fmt(duration)}
+          {session.removals.length > 0 &&
+            ` · ${session.removals.length} cut out (${fmt(session.removals.reduce((t, r) => t + r.end - r.start, 0))})`}
+        </span>
         <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
           Look
           <select value={session.look} disabled={locked} onChange={(e) => onEdit({ action: "map", look: e.target.value })} style={{ width: "auto", padding: "4px 28px 4px 10px", fontSize: 12 }}>

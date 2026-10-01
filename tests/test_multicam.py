@@ -569,7 +569,7 @@ def test_transcript_credits_each_word_to_the_mic_that_spoke(episode, monkeypatch
     monkeypatch.setattr(transcription, "transcribe_file", fake)
     session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
     mc.update_mapping(session, {"sources": [
-        {"id": s.id, "role": "camera", "person": "nika" if "one" in s.path else "ana"}
+        {"id": s.id, "role": "camera", "person": "nika" if "one" in os.path.basename(s.path) else "ana"}
         for s in session.sources if s.kind == "video"
     ]})
     session = mc.sync_session(session)
@@ -584,10 +584,221 @@ def test_turn_edges_follow_sentences_not_loose_timestamps():
 
     # "Right," opens the host's sentence but was timed before the guest stopped.
     w = words([("get", "g"), ("home.", "g"), ("Right,", "g"), ("because", "h"), ("every", "h")])
-    mc._settle_turn_edges(w)
+    mc._settle_turn_edges(w, [0.0] * len(w))
     assert [x["person"] for x in w] == ["g", "g", "h", "h", "h"]
 
     # A lone word mid-sentence credited to the other mic goes back to the speaker.
     w = words([("the", "g"), ("pain", "h"), ("starts", "g"), ("here.", "g")])
-    mc._settle_turn_edges(w)
+    mc._settle_turn_edges(w, [0.0] * len(w))
     assert [x["person"] for x in w] == ["g", "g", "g", "g"]
+
+    # A word the mics credit clearly never moves, even at a turn edge.
+    w = words([("home.", "a"), ("Then", "a"), ("Exactly.", "b")])
+    mc._settle_turn_edges(w, [0.0, 15.0, 15.0])
+    assert [x["person"] for x in w] == ["a", "a", "b"]
+
+
+# --- Remote recordings ------------------------------------------------------------
+
+def _voices(seconds=40):
+    host, guest = _speech(seconds, 21), _speech(seconds, 22)
+    t = np.arange(len(host)) / RATE
+    host[t >= 8] = 0           # a short question...
+    guest[t < 8] = 0           # ...then one long answer
+    return host, guest
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_one_file_per_person_cuts_like_a_call(sandbox):
+    folder = sandbox / "remote"
+    folder.mkdir()
+    host, guest = _voices()
+    # Each person's local recording hears only them (headphones), so the files share no sound.
+    for name, voice, color in (("nika", host, "red"), ("ana", guest, "blue")):
+        _write_wav(sandbox / f"{name}.wav", voice)
+        _ffmpeg("-f", "lavfi", "-i", f"color=c={color}:s=320x180:r=30:d=40", "-i", str(sandbox / f"{name}.wav"),
+                "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(folder / f"{name}.mp4"))
+    session = mc.sync_session(mc.new_session(folder=str(folder), people=["Nika", "Ana"]))
+    assert {s.sync["status"] for s in session.sources if not s.virtual} == {"reference", "assumed"}
+    split = next(s for s in session.sources if s.members)
+    assert split.person == "wide" and mc.resolved_style(session) == "remote"
+    assert sorted(p for _, _, p in session.person_mics()) == ["ana", "nika"]
+
+    session = mc.plan_session(session)
+    ids = {s.id: s for s in session.sources}
+    # The question plays on the split; the answer goes to Ana once she's 4 s in.
+    assert ids[session.cuts[0]["source_id"]].members
+    guest_shot = next(c for c in session.cuts if ids[c["source_id"]].person == "ana")
+    assert 11.0 < guest_shot["start"] < 13.5
+
+    video = mc.render_session(session, stems=False)["video"]
+    left, right = _mean_rgb_at(video, 3, crop="crop=iw/2:ih:0:0"), _mean_rgb_at(video, 3, crop="crop=iw/2:ih:iw/2:0")
+    assert left[0] > 150 and right[2] > 150  # split screen: Nika red on the left, Ana blue on the right
+    full = _mean_rgb_at(video, session.cuts[-1]["end"] - session.cuts[0]["start"] - 2)
+    assert full[2] > 150 and full[0] < 80  # Ana alone, full frame
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_one_gallery_recording_becomes_a_camera_per_tile(sandbox, monkeypatch):
+    from services import speaker_detection
+
+    folder = sandbox / "gallery"
+    folder.mkdir()
+    host, guest = _voices()
+    _write_wav(sandbox / "call.wav", host + guest)
+    # A two-tile call recording: moving pictures in each tile, a flat gutter between them.
+    _ffmpeg("-f", "lavfi", "-i", "testsrc2=s=310x360:r=30:d=40", "-f", "lavfi", "-i", "mandelbrot=s=310x360:r=30",
+            "-i", str(sandbox / "call.wav"),
+            "-filter_complex", "[0:v]pad=320:360:0:0:color=0x202020[l];[1:v]pad=320:360:10:0:color=0x202020[r];[l][r]hstack[v]",
+            "-map", "[v]", "-map", "2:a", "-t", "40", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+            str(folder / "zoom_call.mp4"))
+    monkeypatch.setattr(speaker_detection, "run_diarization", lambda *a, **k: [
+        {"speaker": "SPEAKER_00", "start": 0.5, "end": 7.8}, {"speaker": "SPEAKER_01", "start": 8.2, "end": 39.5}])
+
+    session = mc.new_session(folder=str(folder), people=["Nika", "Ana"])
+    panes = [s for s in session.sources if s.parent]
+    assert [p.person for p in panes] == ["nika", "ana"]
+    assert panes[0].crop[0] < 0.05 and 0.45 < panes[0].crop[2] < 0.52 and panes[1].crop[0] > 0.48
+    session = mc.plan_session(mc.sync_session(session))
+    assert mc.resolved_style(session) == "remote"
+    ids = {s.id: s for s in session.sources}
+    assert ids[session.cuts[0]["source_id"]].person == "wide"
+    assert ids[session.cuts[-1]["source_id"]].person == "ana"
+    mc.render_session(session, stems=False)
+
+
+def _mean_rgb_at(video, at, crop="null"):
+    raw = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", f"{at}", "-i", str(video),
+         "-frames:v", "1", "-vf", f"{crop},scale=8:8", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        check=True, capture_output=True,
+    ).stdout
+    return np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3).mean(axis=0)
+
+
+# --- Audit regressions ------------------------------------------------------------
+
+def _bare(sandbox, n=2):
+    return mc.MulticamSession(
+        session_id="abc123abc199", name="ep",
+        people=[mc.Person("host", "Host"), mc.Person("guest", "Guest", role="guest")],
+        sources=[_source(f"/x/{c}.mp4", role="camera", person=p, offset=0.0, id=c)
+                 for c, p in (("a", "host"), ("b", "guest"), ("w", "wide"))[:n + 1]],
+    )
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), "x"])
+def test_non_finite_numbers_are_refused_everywhere(sandbox, bad):
+    session = _bare(sandbox)
+    session.cuts = [{"start": 0, "end": 30, "source_id": "a"}]
+    with pytest.raises(ValueError):
+        mc.set_removals(session, [{"start": 1, "end": bad}])
+    with pytest.raises(ValueError):
+        mc.set_cuts(session, [{"start": 0, "end": bad, "source_id": "a"}])
+    with pytest.raises(ValueError):
+        mc.update_mapping(session, {"sources": [{"id": "a", "offset": bad}]})
+    with pytest.raises(ValueError):
+        mc.update_mapping(session, {"range_end": bad})
+
+
+def test_choosing_a_style_keeps_only_real_tweaks(sandbox):
+    session = _bare(sandbox)
+    mc.update_mapping(session, {"cut_settings": {**mc.STYLES["studio"], "style": "remote"}})
+    # Everything sent equals studio defaults, which differ from remote's: those are tweaks.
+    assert session.cut_settings["style"] == "remote" and session.cut_settings["host_solo"] is True
+    mc.update_mapping(session, {"cut_settings": {"style": "studio"}})
+    assert session.cut_settings == {"style": "studio"}
+    mc.update_mapping(session, {"cut_settings": {"min_shot": 2.0, "max_shot": 12}})
+    assert session.cut_settings == {"style": "studio", "max_shot": 12.0}
+
+
+def test_removals_and_cuts_are_checked_against_each_other(sandbox):
+    session = _bare(sandbox)
+    session.cuts = [{"start": 0, "end": 30, "source_id": "a"}]
+    mc.set_removals(session, [{"start": 9, "end": 21}])
+    with pytest.raises(ValueError, match="cover this whole cut"):
+        mc.set_cuts(session, [{"start": 10, "end": 20, "source_id": "a"}])
+    assert session.cuts == [{"start": 0, "end": 30, "source_id": "a"}]
+
+
+def test_frame_size_comes_from_one_landscape_camera(sandbox):
+    session = _bare(sandbox, n=1)
+    session.sources[1].width, session.sources[1].height = 1080, 1920
+    assert mc._output_format(session)[:2] == (1920, 1080)
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_studio_cameras_that_start_at_different_times_stay_studio(sandbox):
+    folder = sandbox / "studio"
+    folder.mkdir()
+    host, guest = _voices()
+    room = (host + guest) * 0.6
+    _write_wav(folder / "rec_Tr1.wav", host + 0.08 * guest)
+    _write_wav(folder / "rec_Tr2.wav", guest + 0.08 * host)
+    for name, start in (("nika", 0), ("ana", 12)):
+        _write_wav(sandbox / f"{name}.wav", room[int(start * RATE):])
+        _ffmpeg("-f", "lavfi", "-i", f"color=c=gray:s=160x90:r=30:d={40 - start}", "-i", str(sandbox / f"{name}.wav"),
+                "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(folder / f"cam_{name}.mp4"))
+    session = mc.sync_session(mc.new_session(folder=str(folder), people=["Nika", "Ana"]))
+    assert not any(s.members for s in session.sources) and mc.resolved_style(session) == "studio"
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_each_persons_video_and_audio_sync_together_and_start_with_the_rest(sandbox):
+    folder = sandbox / "tracks"
+    folder.mkdir()
+    host, guest = _voices()
+    for name, voice, color in (("nika", host, "red"), ("ana", guest, "blue")):
+        _write_wav(folder / f"{name}_audio.wav", voice)
+        _write_wav(sandbox / f"{name}.wav", voice * 0.5)
+        _ffmpeg("-f", "lavfi", "-i", f"color=c={color}:s=160x90:r=30:d=40", "-i", str(sandbox / f"{name}.wav"),
+                "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(folder / f"{name}_video.mp4"))
+    session = mc.new_session(folder=str(folder), people=["Nika", "Ana"])
+    mc.update_mapping(session, {"sources": [
+        {"id": s.id, "role": "camera" if s.kind == "video" else "mic", "person": "nika" if "nika" in os.path.basename(s.path) else "ana"}
+        for s in session.sources
+    ]})
+    session = mc.sync_session(session)
+    assert not mc.needs_sync(session), [(os.path.basename(s.path), s.role, s.offset, s.sync) for s in session.sources]
+    assert "assumed" in {s.sync.get("status") for s in session.sources}
+    assert any(s.members for s in session.sources)
+    # Reopening the folder finds this edit, split screen and all.
+    assert mc.new_session(folder=str(folder)).session_id == session.session_id
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_gallery_with_two_tiles_on_top_and_one_below(sandbox, tmp_path):
+    video = tmp_path / "three.mp4"
+    _ffmpeg("-f", "lavfi", "-i", "testsrc2=s=300x168:r=30:d=6", "-f", "lavfi", "-i", "mandelbrot=s=300x168:r=30",
+            "-f", "lavfi", "-i", "life=s=300x168:r=30:mold=10:ratio=0.2",
+            "-filter_complex",
+            "color=c=0x101010:s=640x360:d=6[bg];[bg][0:v]overlay=10:8[a];[a][1:v]overlay=330:8[b];[b][2:v]overlay=170:184[v]",
+            "-map", "[v]", "-t", "6", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video))
+    panes = mc.detect_panes(mc.probe_source(str(video)))
+    assert len(panes) == 3
+    top, bottom = sorted(panes, key=lambda p: (p[1], p[0]))[:2], sorted(panes, key=lambda p: (p[1], p[0]))[2]
+    assert all(p[1] < 0.1 for p in top) and bottom[1] > 0.45 and 0.2 < bottom[0] < 0.3
+
+
+def test_render_refuses_mapping_changes_that_would_drop_the_cut(sandbox, monkeypatch):
+    import main as backend
+
+    session = _bare(sandbox)
+    session.cuts = [{"start": 0, "end": 30, "source_id": "a"}]
+    session.save()
+    sent = []
+    monkeypatch.setattr(backend, "emit_result", lambda task, status, data=None, error=None: sent.append((status, error)))
+    backend.handle_manage_multicam("t", {"action": "render", "session_id": session.session_id, "range_start": 5})
+    assert sent[0][0] == "error" and "only look" in sent[0][1]
+    assert mc.MulticamSession.load(session.session_id).cuts
+
+
+def test_cli_json_always_prints_one_object(episode, monkeypatch, capsys, tmp_path):
+    assert run_cli(monkeypatch, "--json") == 2
+    assert "error" in json.loads(capsys.readouterr().out)
+    cuts = tmp_path / "cuts.json"
+    cuts.write_text(json.dumps([{"end": 3, "source_id": "x"}]))
+    assert run_cli(monkeypatch, str(episode), "--cuts", str(cuts), "--no-render", "--json", "-y") == 1
+    assert "error" in json.loads(capsys.readouterr().out)
+    assert run_cli(monkeypatch, str(episode), "--delete", "--json") == 0
+    assert json.loads(capsys.readouterr().out)["deleted"] is True

@@ -237,3 +237,27 @@ def test_plan_cuts_scales_to_a_three_hour_episode():
     cuts = plan_cuts(labels, ["host", "guest"], cams, range_start=0, range_end=len(labels) / 100)
     assert time.perf_counter() - t0 < 5
     assert all(c["end"] - c["start"] >= 2.0 - 1e-6 for c in cuts[1:-1])
+
+
+def test_remote_style_keeps_questions_on_the_split_and_opens_answers_wide():
+    labels = _labels([(0, 6), (1, 5), (0, 4), (1, 30)])
+    cuts = plan_cuts(labels, ["host", "guest"], CAMS, range_start=0, range_end=45, min_shot=4, max_shot=0,
+                     guests=frozenset({"guest"}), host_solo=False, guest_min=8, guest_delay=4)
+    # Question, short answer and follow-up all sit on the split; the long answer goes to the guest after 4 s.
+    assert [c["source_id"] for c in cuts] == ["cam_wide", "cam_guest"]
+    assert abs(cuts[1]["start"] - 19.0) < 0.05 and cuts[1]["end"] == 45
+
+
+def test_remote_style_measures_a_guest_turn_by_its_words_not_the_silence_after():
+    labels = _labels([(0, 6), (1, 3), (SILENT, 6), (0, 6)])
+    cuts = plan_cuts(labels, ["host", "guest"], CAMS, range_start=0, range_end=21, min_shot=1, max_shot=0,
+                     guests=frozenset({"guest"}), host_solo=False, guest_min=8, guest_delay=4)
+    assert [c["source_id"] for c in cuts] == ["cam_wide"]
+
+
+def test_remote_style_returns_to_the_split_soon_after_the_answer_ends():
+    labels = _labels([(0, 4), (1, 20), (SILENT, 5), (0, 4)])
+    cuts = plan_cuts(labels, ["host", "guest"], CAMS, range_start=0, range_end=33, min_shot=1, max_shot=0,
+                     guests=frozenset({"guest"}), host_solo=False, guest_min=8, guest_delay=4)
+    solo = next(c for c in cuts if c["source_id"] == "cam_guest")
+    assert abs(solo["start"] - 8) < 0.05 and abs(solo["end"] - 25) < 0.05

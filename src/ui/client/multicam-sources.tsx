@@ -45,6 +45,7 @@ export default function MulticamSources({
             onChange={(v) => setNameDraft((d) => ({ ...d, [person.id]: v }))}
             onBlur={() => commitName(person)}
             onRemove={() => savePeople(session.people.filter((p) => p.id !== person.id))}
+            disabled={locked}
             role={person.role || "host"}
             onRole={(role) => savePeople(session.people.map((p) => (p.id === person.id ? { ...p, role } : p)))}
           />
@@ -116,9 +117,11 @@ function SourceRow({
 
       <div style={{ minWidth: 0, width: 200 }}>
         <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={source.path}>
-          {basename(source.path)}
+          {source.name || basename(source.path)}
         </div>
-        <div className="hint">{details.join(" · ")}</div>
+        <div className="hint">
+          {source.parent ? "Cut from the call recording" : source.members.length ? "Side by side from everyone's own files" : details.join(" · ")}
+        </div>
       </div>
 
       {source.guessed && source.role !== "ignore" && <span className="pill pill-amber">Guessed</span>}
@@ -130,7 +133,7 @@ function SourceRow({
           <option value="ignore">Ignore</option>
         </select>
 
-        {source.role === "camera" && (
+        {source.role === "camera" && !source.members.length && (
           <select value={source.person || "wide"} disabled={disabled} style={selectStyle} onChange={(e) => onEdit({ person: e.target.value })}>
             {personOptions}
             <option value="wide">Everyone (wide)</option>
