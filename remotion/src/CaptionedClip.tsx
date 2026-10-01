@@ -56,6 +56,8 @@ export interface CaptionedClipProps {
   theme?: ThemeInput | null;
 }
 
+const ON_PAGE = 0.8;
+
 export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   videoSrc,
   words,
@@ -92,7 +94,6 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
 
   const nameCardSeconds = nameCard?.title ? (nameCard.seconds ?? 3) : 0;
   const pastNameCard = frame / fps >= nameCardSeconds;
-  const cardPlanned = Boolean(cards?.length);
   const upNow = pastNameCard ? cardAt(cards ?? [], frame / fps) : null;
   /*
    * How far in the card is, rather than whether it is.
@@ -109,8 +110,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
       motion: upNow.motion ?? MOTION.card,
     }).opacity
     : 0;
-  const restingShrink = cardPlanned ? 0.75 : 1;
-  const captionShrink = restingShrink + (0.6 - restingShrink) * cardIn;
+  const captionShrink = 1 + (ON_PAGE - 1) * cardIn;
   /*
    * Captions used to drop toward the bottom edge while a card held the frame,
    * on the reasoning that there is no chin down there to clear. There is no
@@ -149,7 +149,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
    */
   const settledStyle: CaptionStyle = {
     ...captionStyle,
-    fontSize: style.fontSize * captionSize * 0.6,
+    fontSize: voice.fontSize * captionSize * ON_PAGE,
   };
 
   /*
@@ -222,7 +222,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
           title={nameCard.title}
           subtitle={nameCard.subtitle}
           seconds={nameCardSeconds}
-          bottom={(style.marginBottom + 150) * (height / 1920)}
+          bottom={captionZone(captionStyle) + 24}
         />
       )}
       {!theme && nameCard?.title && (
