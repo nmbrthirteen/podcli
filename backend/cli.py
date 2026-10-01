@@ -687,8 +687,8 @@ def _multicam_progress(label: str):
     tty = sys.stdout.isatty()
     last = [""]
 
-    def report(percent: int, message: str) -> None:
-        line = f"  {label} {percent:>3}%  {message}"[:110]
+    def report(percent: float, message: str) -> None:
+        line = f"  {label} {round(percent):>3}%  {message}"[:110]
         if tty:
             print("\r" + line.ljust(len(last[0])), end="", flush=True)
             last[0] = line
