@@ -17,7 +17,7 @@ import type { Brand } from "./components/Cards";
 import { MOTION } from "./motion";
 import type { Motion } from "./motion";
 import {
-  brandCaptions, captionZone, STYLES, LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET, safeFor,
+  brandCaptions, captionScale, captionZone, STYLES, LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET, safeFor,
 } from "./types";
 import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "./types";
 import { resolveTheme } from "./style/theme";
@@ -205,7 +205,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
           title={nameCard.title}
           subtitle={nameCard.subtitle}
           seconds={nameCardSeconds}
-          top={topTaken + 12}
+          top={(topTaken + 12) * captionScale(height)}
         />
       )}
       {!theme && nameCard?.title && (
