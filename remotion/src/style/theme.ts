@@ -263,7 +263,7 @@ const clean: Theme = {
   },
   type: {
     display: face("DM Sans", 700, { tracking: -2.5, lineHeight: 1.02 }),
-    label: face("DM Sans", 700, { tracking: 0, lineHeight: 1.1, size: 0.8 }),
+    label: face("DM Sans", 700, { tracking: 0, lineHeight: 1.1, size: 0.95 }),
     mono: face("DM Sans", 400, { lineHeight: 1.5 }),
     caption: 58,
   },
@@ -278,7 +278,112 @@ const clean: Theme = {
   motion: MOTIONS.smooth,
 };
 
-export const PACKS = { clean, collage, editorial } satisfies Record<string, Theme>;
+const swiss: Theme = {
+  ...clean,
+  pack: "swiss",
+  color: {
+    ground: "#F3F1EC",
+    sheet: "#F3F1EC",
+    strip: "#F3F1EC",
+    stripAlt: "#F3F1EC",
+    ink: "#111111",
+    muted: "#5E5C58",
+    accent: "#E3301F",
+    highlight: "#E3301F",
+    label: "#E3301F",
+    onLabel: "#F3F1EC",
+    figure: "#E3301F",
+  },
+  type: {
+    display: face("DM Sans", 700, { tracking: -3, lineHeight: 1 }),
+    label: face("DM Sans", 700, { tracking: -0.5, lineHeight: 1.1 }),
+    mono: face("DM Sans", 400, { lineHeight: 1.5 }),
+    caption: 60,
+  },
+  motion: MOTIONS.slide,
+};
+
+const poster: Theme = {
+  ...clean,
+  pack: "poster",
+  color: {
+    ground: "#1D3FD8",
+    sheet: "#1D3FD8",
+    strip: "#1D3FD8",
+    stripAlt: "#1D3FD8",
+    ink: "#FFFFFF",
+    muted: "#C4CEF7",
+    accent: "#FFD23F",
+    highlight: "#FFD23F",
+    label: "#FFD23F",
+    onLabel: "#1D3FD8",
+    figure: "#FFD23F",
+  },
+  type: {
+    display: face("Barlow Condensed", 700, { tracking: -0.5, lineHeight: 0.95 }),
+    label: face("Barlow Condensed", 600, { tracking: 0.5, lineHeight: 1.05, size: 1.15 }),
+    mono: face("Barlow Condensed", 600, { lineHeight: 1.3 }),
+    caption: 68,
+  },
+  motion: MOTIONS.zoom,
+};
+
+const terminal: Theme = {
+  ...clean,
+  pack: "terminal",
+  color: {
+    ground: "#0A0D0B",
+    sheet: "#0A0D0B",
+    strip: "#0A0D0B",
+    stripAlt: "#0A0D0B",
+    ink: "#D9E4DC",
+    muted: "#6E8676",
+    accent: "#3DDC84",
+    highlight: "#3DDC84",
+    label: "#3DDC84",
+    onLabel: "#0A0D0B",
+    figure: "#3DDC84",
+  },
+  type: {
+    display: face("Courier Prime", 400, { tracking: -1, lineHeight: 1.08 }),
+    label: face("Courier Prime", 400, { tracking: 0, lineHeight: 1.2 }),
+    mono: face("Courier Prime", 400, { lineHeight: 1.45 }),
+    caption: 56,
+  },
+  motion: MOTIONS.digital,
+};
+
+const riso: Theme = {
+  ...collage,
+  pack: "riso",
+  color: {
+    ground: "#EFE9DD",
+    sheet: "#F8F4EC",
+    strip: "#FFC6D5",
+    stripAlt: "#F8F4EC",
+    ink: "#23308F",
+    muted: "#5C67A8",
+    accent: "#FF4F81",
+    highlight: "#FFB3C8",
+    label: "#23308F",
+    onLabel: "#F8F4EC",
+    figure: "#FF7DA1",
+  },
+  type: {
+    display: face("DM Sans", 700, { tracking: -2.5, lineHeight: 1 }),
+    label: face("Barlow Condensed", 600, { tracking: 0.5, lineHeight: 1.05 }),
+    mono: face("Courier Prime", 400, { lineHeight: 1.45 }),
+    caption: 66,
+  },
+  edge: { kind: "straight", wave: 0, fiber: 0, rim: 0 },
+  shadow: 0,
+  texture: { strength: 0.45, ground: 0.7 },
+  tape: false,
+  tilt: 0.8,
+  motion: MOTIONS.snappy,
+};
+
+export const PACKS = { clean, collage, editorial, swiss, poster, terminal, riso } satisfies Record<string, Theme>;
 
 export type PackId = keyof typeof PACKS;
 

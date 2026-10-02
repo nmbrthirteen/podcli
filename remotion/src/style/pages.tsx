@@ -83,7 +83,7 @@ const Circle: React.FC<{ theme: Theme; f: number; at: number; s: number; inset: 
   const p = progress(theme.motion, f, at, 10);
   if (p <= 0) return null;
   const ring = (dx: string, dy: string, rot: number) => (
-    <ellipse cx={dx} cy={dy} rx="48%" ry="45%" transform={`rotate(${rot})`} pathLength={1}
+    <ellipse cx={dx} cy={dy} rx="55%" ry="70%" transform={`rotate(${rot})`} pathLength={1}
       style={{ transformOrigin: "center", transformBox: "fill-box" }}
       fill="none" stroke={theme.color.accent} strokeWidth={6 * s} strokeLinecap="round"
       strokeDasharray="1" strokeDashoffset={1 - p} />
@@ -150,30 +150,32 @@ const StatPage: React.FC<PageProps<"stat"> & { length: number }> = ({ card, them
         </Reveal>
       )}
       <div style={{ position: "absolute", left: 50 * s, top: 190 * s, width: 980 * s, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 14 * s }}>
-        {title && (
-          <Reveal theme={theme} role="title" f={f} at={titleAt} fps={fps} style={{ position: "relative", ...tilt(theme, -1) }}>
-            <Paper theme={theme} seed={12} color={theme.color.strip} scale={s}>
-              <div style={{ ...fontOf(theme.type.display, titleSize(title, 124) * s), color: theme.color.ink, padding: `${22 * s}px ${48 * s}px ${34 * s}px` }}>
-                <RevealText theme={theme} role="title" f={f} at={titleAt} text={title} s={s} />
-              </div>
-            </Paper>
-          </Reveal>
-        )}
-        {card.caption && (
-          <Reveal theme={theme} role="strip" f={f} at={stripAt} fps={fps} style={{ position: "relative", marginLeft: 60 * s, ...tilt(theme, 0.6) }}>
-            <Strip theme={theme} seed={13} s={s}>{card.caption}</Strip>
-          </Reveal>
-        )}
-      </div>
-      <Reveal theme={theme} role="figure" f={f} at={figureAt} fps={fps}
-        style={{ left: 0, right: 0, top: 640 * s, display: "flex", justifyContent: "center", ...tilt(theme, 1.8) }}>
-        <div style={{ position: "relative" }}>
-          <Label theme={theme} seed={14} scale={s} size={280 * s} ink={theme.color.figure} pad={0.16}>
-            <RevealText theme={theme} role="figure" f={f} at={figureAt} text={card.value} s={s} />
-          </Label>
-          <Circle theme={theme} f={f} at={circleAt} s={s} inset={46} />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 14 * s, minHeight: 360 * s }}>
+          {title && (
+            <Reveal theme={theme} role="title" f={f} at={titleAt} fps={fps} style={{ position: "relative", ...tilt(theme, -1) }}>
+              <Paper theme={theme} seed={12} color={theme.color.strip} scale={s}>
+                <div style={{ ...fontOf(theme.type.display, titleSize(title, 124) * s), color: theme.color.ink, padding: `${22 * s}px ${48 * s}px ${34 * s}px` }}>
+                  <RevealText theme={theme} role="title" f={f} at={titleAt} text={title} s={s} />
+                </div>
+              </Paper>
+            </Reveal>
+          )}
+          {card.caption && (
+            <Reveal theme={theme} role="strip" f={f} at={stripAt} fps={fps} style={{ position: "relative", marginLeft: 60 * s, ...tilt(theme, 0.6) }}>
+              <Strip theme={theme} seed={13} s={s}>{card.caption}</Strip>
+            </Reveal>
+          )}
         </div>
-      </Reveal>
+        <Reveal theme={theme} role="figure" f={f} at={figureAt} fps={fps}
+          style={{ position: "relative", alignSelf: "center", marginTop: 60 * s, ...tilt(theme, 1.8) }}>
+          <div style={{ position: "relative" }}>
+            <Label theme={theme} seed={14} scale={s} size={280 * s} ink={theme.color.figure} pad={0.16}>
+              <RevealText theme={theme} role="figure" f={f} at={figureAt} text={card.value} s={s} />
+            </Label>
+            <Circle theme={theme} f={f} at={circleAt} s={s} inset={22} />
+          </div>
+        </Reveal>
+      </div>
     </Page>
   );
 };
@@ -197,7 +199,7 @@ const HeadlinePage: React.FC<PageProps<"headline"> & { length: number }> = ({ ca
       )}
       {card.eyebrow && (
         <Reveal theme={theme} role="label" f={f} at={eyebrowAt} fps={fps} style={{ left: 80 * s, top: 250 * s, ...tilt(theme, -2) }}>
-          <Label theme={theme} seed={22} scale={s} size={50 * s}>{card.eyebrow}</Label>
+          <Label theme={theme} seed={22} scale={s} size={(theme.surface === "none" ? 64 : 50) * s}>{card.eyebrow}</Label>
         </Reveal>
       )}
       <Reveal theme={theme} role="title" f={f} at={leadAt} fps={fps} style={{ left: 40 * s, top: 340 * s, width: 990 * s, ...tilt(theme, -0.8) }}>
@@ -235,7 +237,7 @@ const EntityPage: React.FC<PageProps<"entity"> & { length: number }> = ({ card, 
         <Tape theme={theme} seed={3} scale={s} width={250} style={{ left: -60 * s, top: 0, transform: "rotate(-28deg)" }} />
         <Tape theme={theme} seed={1} scale={s} width={250} style={{ left: 680 * s, top: 20 * s, transform: "rotate(24deg)" }} />
       </Reveal>}
-      <div style={{ position: "absolute", left: 50 * s, right: 50 * s, top: (src ? 1030 : 560) * s, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 36 * s }}>
+      <div style={{ position: "absolute", left: 50 * s, right: 50 * s, top: (src ? (theme.surface === "none" ? 1250 : 1030) : 560) * s, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 36 * s }}>
         <Reveal theme={theme} role="figure" f={f} at={nameAt} fps={fps} style={{ position: "relative", ...tilt(theme, -2) }}>
           <Label theme={theme} seed={32} scale={s} size={(src ? 150 : 190) * s} ink={theme.color.figure} pad={0.18}>
             <RevealText theme={theme} role="figure" f={f} at={nameAt} text={card.name} s={s} />
@@ -350,14 +352,14 @@ const CompareRows: React.FC<PageProps<"compare"> & { length: number }> = ({ card
       {title && <Title theme={theme} s={s} f={f} fps={fps} at={titleAt} text={title} seed={81} />}
       {rows.map((row, i) => (
         <Reveal key={`${row.label}-${i}`} theme={theme} role="item" f={f} at={ats[i]} fps={fps}
-          style={{ left: 70 * s, top: (480 + i * 170) * s, width: 940 * s }}>
-          <div style={{ ...fontOf(theme.type.label, 46 * s), color: theme.color.ink, marginBottom: 10 * s }}>{row.label}</div>
+          style={{ left: 70 * s, top: (500 + i * 210) * s, width: 940 * s }}>
+          <div style={{ ...fontOf(theme.type.label, 60 * s), color: theme.color.ink, marginBottom: 14 * s }}>{row.label}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 18 * s }}>
-            <div style={{ width: `${Math.max(6, (row.value / top) * 72)}%` }}>
-              <Bar theme={theme} seed={82 + i} s={s} height={56}
+            <div style={{ width: `${Math.max(10, (row.value / top) * 70)}%` }}>
+              <Bar theme={theme} seed={82 + i} s={s} height={76}
                 color={row.subject ? theme.color.accent : theme.surface === "none" ? theme.color.muted : theme.color.stripAlt} />
             </div>
-            <div style={{ ...fontOf(theme.type.label, 52 * s), fontWeight: 700,
+            <div style={{ ...fontOf(theme.type.label, 76 * s), fontWeight: 700,
               color: row.subject && theme.surface === "none" ? theme.color.accent : theme.color.ink }}>
               {row.display ?? String(row.value)}
             </div>
@@ -382,7 +384,7 @@ const ChangePage: React.FC<PageProps<"change"> & { length: number }> = ({ card, 
         ink={strong ? theme.color.figure : undefined}>
         <RevealText theme={theme} role={role} f={f} at={at} text={value} s={s} />
       </Label>
-      {note && <div style={{ ...fontOf(theme.type.label, 42 * s), color: theme.color.muted }}>{note}</div>}
+      {note && <div style={{ ...fontOf(theme.type.label, 54 * s), color: theme.color.muted }}>{note}</div>}
     </Reveal>
   );
   return (
@@ -427,7 +429,7 @@ const SharePage: React.FC<PageProps<"share"> & { length: number }> = ({ card, th
           <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${share * fill * 100}%`, backgroundColor: theme.color.accent }} />
         </Bar>
         {card.caption && (
-          <div style={{ ...fontOf(theme.type.label, 46 * s), color: theme.color.ink, marginTop: 24 * s }}>{card.caption}</div>
+          <div style={{ ...fontOf(theme.type.label, 56 * s), color: theme.color.ink, marginTop: 24 * s }}>{card.caption}</div>
         )}
       </Reveal>
     </Page>
