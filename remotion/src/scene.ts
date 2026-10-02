@@ -190,8 +190,11 @@ export const stepType = (points: StepPoint[], width = SCENE_WIDTH) => {
 const stepRow = (points: StepPoint[], width: number) => {
   const type = stepType(points, width);
   if (!stepsStacked(points)) return 26 + type.value + type.note * 2.6 + 24;
+  const text = width - 56;
   return points.reduce((sum, point, i) =>
-    sum + (i ? STEP_RISE : 0) + type.value * 1.05 + (point.note ? type.note * 1.3 + 6 : 0), 0);
+    sum + (i ? STEP_RISE : 0)
+      + lines(point.value, type.value, text, CHAR_WIDTH) * type.value * 1.05
+      + (point.note ? lines(point.note, type.note, text, CHAR_WIDTH) * type.note * 1.3 + 6 : 0), 0);
 };
 
 const CHIP_ROW = 132;

@@ -83,3 +83,13 @@ describe("the card in front at a moment", () => {
   });
 });
 
+
+describe("a stacked timeline of steps", () => {
+  const steps = (note: string) => [{ type: "steps", points: [{ value: "Product", note }, { value: "Distribution", note }] }] as Block[];
+
+  it("grows when a note wraps", () => {
+    const short = sceneHeight(steps("First-time founders"), "stack", "group");
+    const long = sceneHeight(steps("Founders who already shipped one company and now worry about distribution first"), "stack", "group");
+    expect(long).toBeGreaterThan(short);
+  });
+});
