@@ -7,7 +7,7 @@ import type { Card } from "../cards";
 import { fontOf } from "./theme";
 import type { Role, Theme } from "./theme";
 import { Label, Paper, Tape } from "./materials";
-import { camera, progress, Reveal, RevealText, roleFrames } from "./reveal";
+import { camera, progress, Reveal, RevealText, roleFrames, TEXT_ENTRANCES } from "./reveal";
 import type { Shot } from "./reveal";
 import { Scene } from "../components/Scene";
 import { hasMedia, SCENE_WIDTH, sceneHeight } from "../scene";
@@ -26,7 +26,7 @@ const planner = (theme: Theme, start = 2) => {
   let cursor = start;
   return (role: Role, text?: string) => {
     const at = cursor;
-    const spoken = theme.motion.roles[role] === "type" || theme.motion.roles[role] === "scramble";
+    const spoken = TEXT_ENTRANCES.has(theme.motion.roles[role]);
     cursor = at + (spoken ? roleFrames(theme, role, text) : 0) + Math.max(2, theme.motion.stagger);
     return at;
   };

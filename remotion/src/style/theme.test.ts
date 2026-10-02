@@ -9,7 +9,7 @@ describe("resolveTheme", () => {
   it("starts from the pack and its own motion", () => {
     const theme = resolveTheme({ pack: "editorial" });
     expect(theme?.color.accent).toBe(PACKS.editorial.color.accent);
-    expect(theme?.motion).toEqual(MOTIONS.smooth);
+    expect(theme?.motion).toEqual(MOTIONS.highlighter);
   });
 
   it("swaps the motion without touching the look", () => {

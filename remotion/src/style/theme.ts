@@ -5,7 +5,8 @@ export type Layout = "takeover";
 export type Role = "title" | "figure" | "item" | "media" | "label" | "strip" | "caption" | "name";
 export type Entrance =
   | "type" | "scramble" | "wipe" | "wipe-up" | "pop" | "rise" | "fade" | "spring"
-  | "slide" | "scale" | "blur" | "mask-circle" | "mask-diagonal" | "mask-split";
+  | "slide" | "scale" | "blur" | "mask-circle" | "mask-diagonal" | "mask-split"
+  | "count" | "slam" | "drop" | "register" | "typed";
 export type Side = "left" | "right" | "top" | "bottom";
 export type TextUnit = "char" | "word";
 export type Ease = "out" | "in-out" | "linear";
@@ -19,6 +20,7 @@ export const ROLES: Role[] = ["title", "figure", "item", "media", "label", "stri
 export const ENTRANCES: Entrance[] = [
   "type", "scramble", "wipe", "wipe-up", "pop", "rise", "fade", "spring",
   "slide", "scale", "blur", "mask-circle", "mask-diagonal", "mask-split",
+  "count", "slam", "drop", "register", "typed",
 ];
 export const SIDES: Side[] = ["left", "right", "top", "bottom"];
 
@@ -156,6 +158,41 @@ export const MOTIONS = {
     frames: 9, stagger: 5, holdEvery: 1, charsPerPose: 3, ease: "out", overshoot: 0, bounces: 0,
     from: "left", textUnit: "word", camera: "track", exit: "fade",
   },
+  settle: {
+    roles: every("rise", { figure: "count", media: "fade" }),
+    frames: 14, stagger: 4, holdEvery: 1, charsPerPose: 2, ease: "out", overshoot: 0, bounces: 0,
+    from: "bottom", textUnit: "word", camera: "none", exit: "fade",
+  },
+  pinned: {
+    roles: every("drop", { figure: "count", caption: "pop" }),
+    frames: 6, stagger: 5, holdEvery: 2, charsPerPose: 2, ease: "out", overshoot: 0, bounces: 0,
+    from: "left", textUnit: "word", camera: "push", exit: "fade",
+  },
+  highlighter: {
+    roles: every("rise", { title: "wipe", label: "wipe", strip: "wipe", figure: "count", media: "mask-diagonal" }),
+    frames: 12, stagger: 6, holdEvery: 1, charsPerPose: 2, ease: "in-out", overshoot: 0, bounces: 0,
+    from: "left", textUnit: "word", camera: "push", exit: "fade",
+  },
+  grid: {
+    roles: every("slide", { figure: "wipe-up", media: "mask-split" }),
+    frames: 10, stagger: 3, holdEvery: 1, charsPerPose: 2, ease: "in-out", overshoot: 0, bounces: 0,
+    from: "left", textUnit: "word", camera: "none", exit: "fade",
+  },
+  slam: {
+    roles: every("slam", { figure: "count", label: "pop", strip: "pop" }),
+    frames: 9, stagger: 6, holdEvery: 1, charsPerPose: 3, ease: "out", overshoot: 0.4, bounces: 0,
+    from: "bottom", textUnit: "word", camera: "punch", exit: "fade",
+  },
+  typed: {
+    roles: every("typed", { figure: "scramble", media: "wipe-up" }),
+    frames: 8, stagger: 2, holdEvery: 2, charsPerPose: 1, ease: "linear", overshoot: 0, bounces: 0,
+    from: "left", textUnit: "char", camera: "none", exit: "fade",
+  },
+  misprint: {
+    roles: every("register"),
+    frames: 12, stagger: 5, holdEvery: 2, charsPerPose: 2, ease: "out", overshoot: 0, bounces: 0,
+    from: "bottom", textUnit: "word", camera: "none", exit: "fade",
+  },
 } satisfies Record<string, Motion>;
 
 export type MotionId = keyof typeof MOTIONS;
@@ -210,7 +247,7 @@ const collage: Theme = {
   tape: true,
   media: "halftone",
   tilt: 1.6,
-  motion: MOTIONS["stop-motion"],
+  motion: MOTIONS.pinned,
   layout: TAKEOVER,
   textures: {},
 };
@@ -242,7 +279,7 @@ const editorial: Theme = {
   texture: { strength: 0.25, ground: 0.4 },
   tape: false,
   tilt: 0,
-  motion: MOTIONS.smooth,
+  motion: MOTIONS.highlighter,
 };
 
 const clean: Theme = {
@@ -275,7 +312,7 @@ const clean: Theme = {
   tape: false,
   media: "photo",
   tilt: 0,
-  motion: MOTIONS.smooth,
+  motion: MOTIONS.settle,
 };
 
 const swiss: Theme = {
@@ -300,7 +337,7 @@ const swiss: Theme = {
     mono: face("DM Sans", 400, { lineHeight: 1.5 }),
     caption: 60,
   },
-  motion: MOTIONS.slide,
+  motion: MOTIONS.grid,
 };
 
 const poster: Theme = {
@@ -325,7 +362,7 @@ const poster: Theme = {
     mono: face("Barlow Condensed", 600, { lineHeight: 1.3 }),
     caption: 68,
   },
-  motion: MOTIONS.zoom,
+  motion: MOTIONS.slam,
 };
 
 const terminal: Theme = {
@@ -350,7 +387,7 @@ const terminal: Theme = {
     mono: face("Courier Prime", 400, { lineHeight: 1.45 }),
     caption: 56,
   },
-  motion: MOTIONS.digital,
+  motion: MOTIONS.typed,
 };
 
 const riso: Theme = {
@@ -380,7 +417,7 @@ const riso: Theme = {
   texture: { strength: 0.45, ground: 0.7 },
   tape: false,
   tilt: 0.8,
-  motion: MOTIONS.snappy,
+  motion: MOTIONS.misprint,
 };
 
 export const PACKS = { clean, collage, editorial, swiss, poster, terminal, riso } satisfies Record<string, Theme>;

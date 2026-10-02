@@ -17,7 +17,7 @@ export const wipe = (p: number, from: "left" | "bottom" = "left") => {
   return from === "bottom" ? `inset(${hidden} 0 0 0)` : `inset(-20% ${hidden} -20% -5%)`;
 };
 
-const TEXT_ENTRANCES = new Set<Entrance>(["type", "scramble"]);
+export const TEXT_ENTRANCES = new Set<Entrance>(["type", "typed", "scramble", "count"]);
 
 export const settle = (t: number, bounces: number) => {
   const k = Math.min(1, Math.max(0, t));
@@ -32,6 +32,7 @@ const unitCount = (text: string, unit: Motion["textUnit"]) =>
 
 export const entranceFrames = (motion: Motion, entrance: Entrance, text?: string) => {
   if (entrance === "pop") return 1;
+  if (entrance === "count") return Math.round(motion.frames * 1.8);
   if (TEXT_ENTRANCES.has(entrance) && text) {
     const perPose = motion.textUnit === "word" ? 1 : motion.charsPerPose;
     return Math.ceil(unitCount(text, motion.textUnit) / perPose) * Math.max(1, motion.holdEvery);
@@ -65,6 +66,20 @@ const scrambled = (char: string, n: number) => {
   return pool ? pool[n % pool.length] : char;
 };
 
+const NUMBER = /^(.*?)([-−]?)(\d[\d,]*)(?:\.(\d+))?(.*)$/s;
+
+export const countedTo = (text: string, p: number) => {
+  const found = NUMBER.exec(text);
+  if (!found) return text;
+  const [, before, sign, whole, decimals = "", after] = found;
+  const target = Number(`${whole.replace(/,/g, "")}.${decimals || "0"}`);
+  const now = target * Math.min(1, Math.max(0, p));
+  const fixed = now.toFixed(decimals.length);
+  const [int, frac] = fixed.split(".");
+  const grouped = whole.includes(",") ? int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : int;
+  return `${before}${sign}${grouped}${frac ? `.${frac}` : ""}${after}`;
+};
+
 export const Reveal: React.FC<{
   theme: Theme;
   role: Role;
@@ -94,6 +109,37 @@ export const Reveal: React.FC<{
     const opacity = interpolate(held(motion, f) - at, [0, 2], [0, 1], { extrapolateRight: "clamp" });
     return (
       <div style={{ ...base, opacity, transform: `${base.transform ?? ""} scale(${0.82 + 0.18 * k})` }}>{children}</div>
+    );
+  }
+
+  if (entrance === "slam") {
+    const k = spring({
+      frame: held(motion, f) - at, fps,
+      config: { stiffness: 220, damping: 14, mass: 0.6 },
+      durationInFrames: motion.frames * 2,
+    });
+    const opacity = interpolate(held(motion, f) - at, [0, 1], [0, 1], { extrapolateRight: "clamp" });
+    return (
+      <div style={{ ...base, opacity, transform: `${base.transform ?? ""} scale(${1.35 - 0.35 * k})` }}>{children}</div>
+    );
+  }
+
+  if (entrance === "drop") {
+    const p = progress(motion, f, at);
+    const turn = (at % 2 ? 4 : -4) * (1 - p);
+    return (
+      <div style={{ ...base, opacity: Math.min(1, p * 3), transform: `${base.transform ?? ""} rotate(${turn}deg) scale(${1 + 0.08 * (1 - p)})` }}>
+        {children}
+      </div>
+    );
+  }
+
+  if (entrance === "register") {
+    const p = progress(motion, f, at);
+    const dx = 4 + 10 * (1 - p);
+    const dy = -(3 + 6 * (1 - p));
+    return (
+      <div style={{ ...base, opacity: p, filter: `drop-shadow(${dx}px ${dy}px 0 ${theme.color.accent})` }}>{children}</div>
     );
   }
 
@@ -144,6 +190,10 @@ export const RevealText: React.FC<{
 }> = ({ theme, role, f, at, text, mark, markAt, s }) => {
   const { motion } = theme;
   const entrance = motion.roles[role];
+  if (entrance === "count") {
+    const p = progress(motion, f, at, entranceFrames(motion, "count"));
+    return <span style={{ fontVariantNumeric: "tabular-nums" }}>{countedTo(text, p)}</span>;
+  }
   const typing = TEXT_ENTRANCES.has(entrance);
   const pieces = units(text, motion.textUnit);
   const perPose = motion.textUnit === "word" ? 1 : motion.charsPerPose;
@@ -157,7 +207,11 @@ export const RevealText: React.FC<{
 
   let seen = 0;
   let cursor = 0;
-  const spans: { text: string; from: number; visible: boolean; fresh: boolean; cover?: string }[] = pieces.map((piece) => {
+  const finished = at + entranceFrames(motion, entrance, text);
+  const since = held(motion, f) - finished;
+  const caretOn = entrance === "typed"
+    && (count < total || (since < 30 && Math.floor(since / 15) % 2 === 0));
+  const spans: { text: string; from: number; visible: boolean; fresh: boolean; cover?: string; caret?: boolean }[] = pieces.map((piece) => {
     const word = piece.trim().length > 0;
     const index = word ? seen++ : seen - 1;
     const from = cursor;
@@ -167,7 +221,11 @@ export const RevealText: React.FC<{
     const cover = entrance === "scramble" && !settled && word
       ? Array.from(piece).map((char, i) => scrambled(char, (from + i) * 7 + seed * 13)).join("")
       : undefined;
-    return { text: piece, from, visible: shown, cover, fresh: entrance === "type" && word && index === count - 1 && count < total };
+    return {
+      text: piece, from, visible: shown, cover,
+      fresh: entrance === "type" && word && index === count - 1 && count < total,
+      caret: caretOn && word && index === count - 1,
+    };
   });
 
   const render = (lo: number, hi: number) => spans
@@ -185,10 +243,18 @@ export const RevealText: React.FC<{
           ))}
         </span>
       ) : (
-        <span key={span.from} style={{
-          opacity: span.visible ? 1 : 0,
-          filter: span.fresh ? `blur(${3 * s}px)` : undefined,
-        }}>{span.text}</span>
+        <React.Fragment key={span.from}>
+          <span style={{
+            opacity: span.visible ? 1 : 0,
+            filter: span.fresh ? `blur(${3 * s}px)` : undefined,
+          }}>{span.text}</span>
+          {span.caret && (
+            <span style={{
+              display: "inline-block", width: "0.55em", height: "0.92em", marginLeft: "0.06em",
+              verticalAlign: "-0.12em", backgroundColor: "currentColor",
+            }} />
+          )}
+        </React.Fragment>
       )
     ));
 
