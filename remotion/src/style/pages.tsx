@@ -149,7 +149,7 @@ const StatPage: React.FC<PageProps<"stat"> & { length: number }> = ({ card, them
       ]}>
       {theme.surface === "paper" && (
         <Reveal theme={theme} role="media" f={f} at={sheetAt} fps={fps}
-          style={{ left: -40 * s, top: 500 * s, width: 1000 * s, height: 1500 * s, ...tilt(theme, -1.2) }}>
+          style={{ left: -40 * s, top: 500 * s, width: 1000 * s, height: 800 * s, ...tilt(theme, -1.2) }}>
           <Paper theme={theme} seed={11} color={theme.color.sheet} scale={s} style={{ width: "100%", height: "100%" }} />
           <Tape theme={theme} seed={1} scale={s} width={260} style={{ left: 760 * s, top: -24 * s, transform: "rotate(32deg)" }} />
         </Reveal>
@@ -200,25 +200,27 @@ const HeadlinePage: React.FC<PageProps<"headline"> & { length: number }> = ({ ca
       ]}>
       {theme.surface === "paper" && (
         <Paper theme={theme} seed={21} color={theme.color.sheet} scale={s} strength={0.4}
-          style={{ position: "absolute", left: 160 * s, top: 760 * s, width: 1000 * s, height: 1300 * s, ...tilt(theme, 2) }} />
+          style={{ position: "absolute", left: 160 * s, top: 640 * s, width: 1000 * s, height: 640 * s, ...tilt(theme, 2) }} />
       )}
       {card.eyebrow && (
         <Reveal theme={theme} role="label" f={f} at={eyebrowAt} fps={fps} style={{ left: 80 * s, top: 250 * s, ...tilt(theme, -2) }}>
           <Label theme={theme} seed={22} scale={s} size={(theme.surface === "none" ? 64 : 50) * s}>{card.eyebrow}</Label>
         </Reveal>
       )}
-      <Reveal theme={theme} role="title" f={f} at={leadAt} fps={fps} style={{ left: 40 * s, top: 340 * s, width: 990 * s, ...tilt(theme, -0.8) }}>
-        <Paper theme={theme} seed={23} color={theme.color.sheet} scale={s}>
-          <div style={{ ...fontOf(theme.type.display, 128 * s), color: theme.color.ink, padding: `${50 * s}px ${60 * s}px ${64 * s}px` }}>
-            <RevealText theme={theme} role="title" f={f} at={leadAt} text={card.lead} mark={mark} markAt={markAt} s={s} />
-          </div>
-        </Paper>
-      </Reveal>
-      {card.sub && (
-        <Reveal theme={theme} role="strip" f={f} at={subAt} fps={fps} style={{ left: 120 * s, top: 1150 * s, ...tilt(theme, 1) }}>
-          <Strip theme={theme} seed={24} s={s} size={50}>{card.sub}</Strip>
+      <div style={{ position: "absolute", left: 40 * s, top: 340 * s, width: 990 * s, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 48 * s }}>
+        <Reveal theme={theme} role="title" f={f} at={leadAt} fps={fps} style={{ position: "relative", width: "100%", ...tilt(theme, -0.8) }}>
+          <Paper theme={theme} seed={23} color={theme.color.sheet} scale={s}>
+            <div style={{ ...fontOf(theme.type.display, 128 * s), color: theme.color.ink, padding: `${50 * s}px ${60 * s}px ${64 * s}px` }}>
+              <RevealText theme={theme} role="title" f={f} at={leadAt} text={card.lead} mark={mark} markAt={markAt} s={s} />
+            </div>
+          </Paper>
         </Reveal>
-      )}
+        {card.sub && (
+          <Reveal theme={theme} role="strip" f={f} at={subAt} fps={fps} style={{ position: "relative", marginLeft: 80 * s, maxWidth: 860 * s, ...tilt(theme, 1) }}>
+            <Strip theme={theme} seed={24} s={s} size={50}>{card.sub}</Strip>
+          </Reveal>
+        )}
+      </div>
     </Page>
   );
 };
@@ -236,13 +238,13 @@ const EntityPage: React.FC<PageProps<"entity"> & { length: number }> = ({ card, 
       {src && <Reveal theme={theme} role="media" f={f} at={mediaAt} fps={fps} style={{ left: 120 * s, top: 170 * s, width: 840 * s, ...tilt(theme, 1.3) }}>
         <Paper theme={theme} seed={31} color="#E8E4D8" scale={s} strength={0.3}>
           <div style={{ padding: theme.surface === "paper" ? 22 * s : 0 }}>
-            {src && <Img src={src} style={{ width: 796 * s, height: 1035 * s, display: "block", objectFit: "cover" }} />}
+            {src && <Img src={src} style={{ width: 796 * s, height: (theme.surface === "none" ? 780 : 1035) * s, display: "block", objectFit: "cover" }} />}
           </div>
         </Paper>
         <Tape theme={theme} seed={3} scale={s} width={250} style={{ left: -60 * s, top: 0, transform: "rotate(-28deg)" }} />
         <Tape theme={theme} seed={1} scale={s} width={250} style={{ left: 680 * s, top: 20 * s, transform: "rotate(24deg)" }} />
       </Reveal>}
-      <div style={{ position: "absolute", left: 50 * s, right: 50 * s, top: (src ? (theme.surface === "none" ? 1250 : 1030) : 560) * s, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 36 * s }}>
+      <div style={{ position: "absolute", left: 50 * s, right: 50 * s, top: (src ? (theme.surface === "none" ? 990 : 1030) : 560) * s, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 36 * s }}>
         <Reveal theme={theme} role="figure" f={f} at={nameAt} fps={fps} style={{ position: "relative", ...tilt(theme, -2) }}>
           <Label theme={theme} seed={32} scale={s} size={(src ? 150 : 190) * s} ink={theme.color.figure} pad={0.18}>
             <RevealText theme={theme} role="figure" f={f} at={nameAt} text={card.name} s={s} />
@@ -265,14 +267,14 @@ const BulletsPage: React.FC<PageProps<"bullets"> & { length: number }> = ({ card
   const items = card.items.slice(0, 3).map(() => next("item"));
   const lift = title ? 0 : 220;
   const stocks = [theme.color.sheet, theme.color.stripAlt, theme.color.strip];
-  const lefts = [50, 110, 70];
+  const lefts = theme.surface === "paper" ? [50, 110, 70] : [50, 50, 50];
   return (
     <Page theme={theme} s={s} f={f} length={length} inset={inset} k={k}
       punch={{ at: items[0] ?? 0, zoom: 1.08, x: 480, y: 600 }}
       shots={[{ at: 0, zoom: 1.3, x: 380, y: 290 }, { at: items[0] ?? 0, zoom: 1.3, x: 380, y: 290 }, { at: (items[0] ?? 0) + 12, zoom: 1, x: 540, y: 960 }]}>
       {theme.surface === "paper" && (
         <Paper theme={theme} seed={40} color={theme.color.stripAlt} scale={s} texture="kraft"
-          style={{ position: "absolute", left: 300 * s, top: 420 * s, width: 900 * s, height: 1600 * s, ...tilt(theme, 3) }} />
+          style={{ position: "absolute", left: 300 * s, top: 420 * s, width: 900 * s, height: 860 * s, ...tilt(theme, 3) }} />
       )}
       {title && (
         <Reveal theme={theme} role="title" f={f} at={titleAt} fps={fps} style={{ left: 50 * s, top: 200 * s, ...tilt(theme, -1) }}>
@@ -310,9 +312,10 @@ const QuotePage: React.FC<PageProps<"quote"> & { length: number }> = ({ card, th
       shots={[{ at: 0, zoom: 1.15, x: 520, y: 620 }, { at: byAt - 4, zoom: 1.15, x: 520, y: 620 }, { at: byAt + 10, zoom: 1, x: 540, y: 960 }]}>
       {theme.surface === "paper" && (
         <Paper theme={theme} seed={60} color={theme.color.strip} scale={s} texture="kraft"
-          style={{ position: "absolute", left: -80 * s, top: 700 * s, width: 820 * s, height: 1400 * s, ...tilt(theme, -3) }} />
+          style={{ position: "absolute", left: -80 * s, top: 700 * s, width: 820 * s, height: 600 * s, ...tilt(theme, -3) }} />
       )}
-      <Reveal theme={theme} role="title" f={f} at={textAt} fps={fps} style={{ left: 60 * s, top: 300 * s, width: 960 * s, ...tilt(theme, 1) }}>
+      <div style={{ position: "absolute", left: 60 * s, top: 300 * s, width: 960 * s, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 40 * s }}>
+      <Reveal theme={theme} role="title" f={f} at={textAt} fps={fps} style={{ position: "relative", width: "100%", ...tilt(theme, 1) }}>
         <Paper theme={theme} seed={61} color={theme.color.sheet} scale={s}>
           <div style={{ padding: `${40 * s}px ${70 * s}px ${90 * s}px` }}>
             <div style={{ ...fontOf(theme.type.display, 300 * s), color: theme.color.accent, height: 170 * s, lineHeight: 1 }}>“</div>
@@ -324,10 +327,11 @@ const QuotePage: React.FC<PageProps<"quote"> & { length: number }> = ({ card, th
         <Tape theme={theme} seed={2} scale={s} width={280} style={{ left: 340 * s, top: -30 * s, transform: "rotate(-4deg)" }} />
       </Reveal>
       {card.attribution && (
-        <Reveal theme={theme} role="label" f={f} at={byAt} fps={fps} style={{ left: 120 * s, top: 1110 * s, ...tilt(theme, -2) }}>
+        <Reveal theme={theme} role="label" f={f} at={byAt} fps={fps} style={{ position: "relative", marginLeft: 60 * s, ...tilt(theme, -2) }}>
           <Label theme={theme} seed={62} scale={s} size={64 * s}>{card.attribution}</Label>
         </Reveal>
       )}
+      </div>
     </Page>
   );
 };
@@ -362,7 +366,7 @@ const CompareRows: React.FC<PageProps<"compare"> & { length: number }> = ({ card
           <div style={{ display: "flex", alignItems: "center", gap: 18 * s }}>
             <div style={{ width: `${Math.max(10, (row.value / top) * 70)}%` }}>
               <Bar theme={theme} seed={82 + i} s={s} height={76}
-                color={row.subject ? theme.color.accent : theme.surface === "none" ? theme.color.muted : theme.color.stripAlt} />
+                color={row.subject ? theme.color.accent : theme.color.muted} />
             </div>
             <div style={{ ...fontOf(theme.type.label, 76 * s), fontWeight: 700,
               color: row.subject && theme.surface === "none" ? theme.color.accent : theme.color.ink }}>

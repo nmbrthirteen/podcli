@@ -6,7 +6,7 @@ import { FONT } from "../types";
 import { context, muted, track } from "./brand";
 import type { Brand } from "./brand";
 import {
-  emphasisRuns, GAP_SIZE, MEDIA_HEIGHT, MIN_FIT, SCENE_WIDTH, TYPE_SIZE, sceneHeight, stepType,
+  emphasisRuns, GAP_SIZE, MEDIA_HEIGHT, MIN_FIT, SCENE_WIDTH, TYPE_SIZE, sceneHeight, STEP_RISE, stepType, stepsStacked,
   sizeOf,
 } from "../scene";
 import type { Align, Block, Gap, Layout, Size, Tone } from "../scene";
@@ -273,6 +273,52 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
           <div style={{ width: `${share * 100}%`, height: "100%", backgroundColor: accent }} />
         </div>
       </>
+    );
+  }
+
+  if (block.type === "steps" && stepsStacked(block.points)) {
+    const last = block.points.length - 1;
+    const type = stepType(block.points, paint.width / unit);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch" }}>
+        {block.points.map((point, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "stretch", gap: 30 * unit, paddingBottom: i < last ? STEP_RISE * unit : 0 }}>
+            <div style={{ flex: "none", width: MARK.dot * unit, display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div
+                style={{
+                  flex: "none",
+                  width: MARK.dot * unit,
+                  height: MARK.dot * unit,
+                  borderRadius: "50%",
+                  backgroundColor: i === last ? accent : context(brand.ink),
+                  marginTop: type.value * 0.32 * unit,
+                }}
+              />
+              {i < last && (
+                <div
+                  style={{
+                    flex: 1,
+                    width: MARK.rule * unit,
+                    marginTop: 10 * unit,
+                    marginBottom: -(STEP_RISE + type.value * 0.32 - 10) * unit,
+                    background: i + 1 === last ? accent : context(brand.ink),
+                  }}
+                />
+              )}
+            </div>
+            <div>
+              <div style={{ fontFamily: paint.font, fontSize: type.value * unit, fontWeight: 700, color: brand.ink, lineHeight: 1.05 }}>
+                {point.value}
+              </div>
+              {point.note && (
+                <div style={{ fontFamily: paint.font, fontSize: type.note * unit, color: muted(brand.ink), marginTop: 6 * unit, lineHeight: 1.3 }}>
+                  {point.note}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     );
   }
 

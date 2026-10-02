@@ -345,7 +345,7 @@ const terminal: Theme = {
     figure: "#3DDC84",
   },
   type: {
-    display: face("Courier Prime", 400, { tracking: -1, lineHeight: 1.08 }),
+    display: face("Courier Prime", 400, { tracking: -1.5, lineHeight: 1.08, size: 0.78 }),
     label: face("Courier Prime", 400, { tracking: 0, lineHeight: 1.2 }),
     mono: face("Courier Prime", 400, { lineHeight: 1.45 }),
     caption: 56,
@@ -414,7 +414,7 @@ export const fontOf = (f: Face, size: number): React.CSSProperties => ({
   fontFamily: f.family,
   fontWeight: f.weight,
   fontStyle: f.italic ? "italic" : "normal",
-  fontSize: size,
-  letterSpacing: (f.tracking ?? 0) * (size / 60),
+  fontSize: size * (f.size ?? 1),
+  letterSpacing: (f.tracking ?? 0) * ((size * (f.size ?? 1)) / 60),
   lineHeight: f.lineHeight ?? 1.2,
 });

@@ -122,7 +122,7 @@ export const Label: React.FC<{
   const size = base * (theme.type.label.size ?? 1);
   if (theme.surface === "none") {
     return (
-      <div style={{ display: "inline-block", ...fontOf(theme.type.label, size), fontWeight: 700, lineHeight: 1,
+      <div style={{ display: "inline-block", ...fontOf({ ...theme.type.label, size: 1 }, size), fontWeight: 700, lineHeight: 1,
         color: ink ?? theme.color.accent, ...style }}>
         {children}
       </div>
@@ -139,7 +139,7 @@ export const Label: React.FC<{
       style={{ display: "inline-block", ...style }}
     >
       <div style={{
-        ...fontOf(theme.type.label, size), fontWeight: 700, lineHeight: 1,
+        ...fontOf({ ...theme.type.label, size: 1 }, size), fontWeight: 700, lineHeight: 1,
         color: ink ?? theme.color.onLabel,
         padding: `${size * pad}px ${size * 0.38}px ${size * (pad - 0.06)}px`,
       }}>
