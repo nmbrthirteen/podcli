@@ -929,7 +929,14 @@ def _run_multicam(args, mc, target: str):
     }
     if cut_edits:
         session = mc.update_mapping(session, cut_edits)
-    if args.cuts:
+    if args.timeline and (args.cuts or args.removals):
+        raise ValueError("--timeline sets the cut and the removals itself. Drop --cuts and --removals.")
+    if args.timeline:
+        got = mc.import_timeline(session, args.timeline)
+        print(f"  ✓ Took the cut from {os.path.basename(args.timeline)}: {got['shots']} shots, "
+              f"{got['removals']} stretches removed"
+              + (f", {got['skipped_clips']} clips of other files left out" if got["skipped_clips"] else ""))
+    elif args.cuts:
         session = mc.set_cuts(session, _load_cuts(args.cuts))
     elif not session.cuts:
         report, done = _multicam_progress("Cutting")
@@ -953,7 +960,7 @@ def _run_multicam(args, mc, target: str):
 
     for fmt in (["premiere", "fcpxml"] if args.export == "all" else [args.export] if args.export else []):
         try:
-            print(f"  ✓ {mc.export_xml(session, fmt)}")
+            print(f"  ✓ {mc.export_xml(session, fmt, review=args.review)}")
         except ValueError as e:
             print(f"  ! Skipped the {fmt} export: {e}", file=sys.stderr)
     if args.transcript:
@@ -4955,6 +4962,8 @@ def main():
                "  podcli multicam ~/Podcasts/ep12 --people \"Nika, Ana\"\n"
                "  podcli multicam ~/Podcasts/ep12 --set cam_b.mp4=camera:Ana --set zoom_lr.wav=mic:Nika,Ana -y\n"
                "  podcli multicam 3f9c2a1b7e40 --export premiere --no-render\n"
+               "  podcli multicam 3f9c2a1b7e40 --export premiere --review --no-render\n"
+               "  podcli multicam 3f9c2a1b7e40 --timeline ~/Desktop/edited.xml\n"
                "  podcli multicam list",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -4977,6 +4986,12 @@ def main():
     mc_p.add_argument("--look", choices=["none", "natural", "warm", "contrast"], help="Color look for the render")
     mc_p.add_argument("--export", choices=["premiere", "fcpxml", "all"],
                       help="Also write an editor timeline that points at the original files")
+    mc_p.add_argument("--review", action="store_true",
+                      help="With --export: keep the whole episode, every camera on its own track, and the removals in "
+                           "place, marked, for an editor to judge")
+    mc_p.add_argument("--timeline", metavar="FILE",
+                      help="Take the cut and removals from an edited FCP 7 XML timeline (Premiere, or Resolve's "
+                           "File > Export > Timeline > FCP 7 XML)")
     mc_p.add_argument("--no-render", action="store_true", dest="no_render", help="Skip the MP4 render (fast, export only)")
     mc_p.add_argument("--no-stems", action="store_true", dest="no_stems", help="Skip the per-person WAV files")
     mc_p.add_argument("--resync", action="store_true",

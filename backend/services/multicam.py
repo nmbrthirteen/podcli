@@ -1685,44 +1685,54 @@ class Piece:
     out_frame: int  # first frame in the finished episode
     frames: int
     tl_start: float  # timeline second shown on that first frame
+    removal: Optional[dict] = None  # set only in a review plan, where removed stretches stay in place
 
 
-def kept_segments(session: MulticamSession) -> list[tuple[float, float]]:
-    """The episode range minus the removed stretches, in timeline seconds."""
+def _segments(session: MulticamSession) -> list[tuple[float, float, Optional[dict]]]:
+    """The episode range in order, split at removals: (start, end, the removal or None)."""
     start, end = session.cuts[0]["start"], session.cuts[-1]["end"]
-    kept, cursor = [], start
+    out, cursor = [], start
     for r in session.removals:
         a, b = max(start, r["start"]), min(end, r["end"])
         if b <= cursor or a >= end:
             continue
         if a > cursor:
-            kept.append((cursor, a))
-        cursor = max(cursor, b)
+            out.append((cursor, a, None))
+        out.append((max(a, cursor), b, r))
+        cursor = b
     if cursor < end:
-        kept.append((cursor, end))
-    return kept
+        out.append((cursor, end, None))
+    return out
 
 
-def render_plan(session: MulticamSession, fps: float) -> list[Piece]:
+def kept_segments(session: MulticamSession) -> list[tuple[float, float]]:
+    """The episode range minus the removed stretches, in timeline seconds."""
+    return [(a, b) for a, b, r in _segments(session) if r is None]
+
+
+def render_plan(session: MulticamSession, fps: float, *, review: bool = False) -> list[Piece]:
     """Every shot, split at removals, laid end to end on one output frame grid.
 
     One grid over the whole episode keeps piece lengths from accumulating
     rounding drift against the audio; the MP4, the stems, and both editor
     timelines are all built from this list so they agree frame for frame.
+    A review plan keeps the removed stretches in place, tagged with their removal.
     """
     pieces: list[Piece] = []
     out_t, out_f = 0.0, 0
 
-    def emit(source_id: Optional[str], a: float, b: float) -> None:
+    def emit(source_id: Optional[str], a: float, b: float, removal: Optional[dict]) -> None:
         nonlocal out_t, out_f
         out_end = out_t + (b - a)
         f_end = round(out_end * fps)
         if f_end > out_f:
-            pieces.append(Piece(source_id, out_f, f_end - out_f, a + (out_f / fps - out_t)))
+            pieces.append(Piece(source_id, out_f, f_end - out_f, a + (out_f / fps - out_t), removal))
             out_f = f_end
         out_t = out_end
 
-    for a, b in kept_segments(session):
+    for a, b, removal in _segments(session):
+        if removal is not None and not review:
+            continue
         t = a
         for c in session.cuts:
             if c["end"] <= t:
@@ -1730,13 +1740,13 @@ def render_plan(session: MulticamSession, fps: float) -> list[Piece]:
             if c["start"] >= b:
                 break
             if c["start"] > t:
-                emit(None, t, c["start"])
+                emit(None, t, c["start"], removal)
                 t = c["start"]
             e = min(c["end"], b)
-            emit(c["source_id"], t, e)
+            emit(c["source_id"], t, e, removal)
             t = e
         if t < b:
-            emit(None, t, b)
+            emit(None, t, b, removal)
     return pieces
 
 
@@ -1896,7 +1906,7 @@ def render_session(
         shutil.rmtree(work, ignore_errors=True)
 
 
-def export_xml(session: MulticamSession, fmt: str) -> str:
+def export_xml(session: MulticamSession, fmt: str, *, review: bool = False) -> str:
     from services.integrations._shared import multicam_xml
 
     if not session.cuts:
@@ -1908,15 +1918,183 @@ def export_xml(session: MulticamSession, fmt: str) -> str:
                          "screen) yet. Render the MP4 instead.")
     width, height, fps = _output_format(session)
     out_dir = _output_dir(session)
+    tag = "-review" if review else ""
     if fmt == "premiere":
-        out = out_dir / "episode-premiere.xml"
-        multicam_xml.write_xmeml(session, out, width=width, height=height, fps=fps)
+        out = out_dir / f"episode{tag}-premiere.xml"
+        multicam_xml.write_xmeml(session, out, width=width, height=height, fps=fps, review=review)
     else:
-        out = out_dir / "episode.fcpxml"
-        multicam_xml.write_fcpxml(session, out, width=width, height=height, fps=fps)
-    session.outputs = {**session.outputs, fmt: str(out)}
+        out = out_dir / f"episode{tag}.fcpxml"
+        multicam_xml.write_fcpxml(session, out, width=width, height=height, fps=fps, review=review)
+    session.outputs = {**session.outputs, f"{fmt}_review" if review else fmt: str(out)}
     session.save()
     return str(out)
+
+
+MAX_TIMELINE_BYTES = 200 * 1024 * 1024
+
+
+def _xml_fps(el) -> Optional[float]:
+    rate = el.find("rate")
+    if rate is None or not (rate.findtext("timebase") or "").strip():
+        return None
+    base = float(rate.findtext("timebase"))
+    return base * 1000 / 1001 if (rate.findtext("ntsc") or "").strip().upper() == "TRUE" else base
+
+
+def _xml_path(pathurl: str) -> str:
+    from urllib.parse import unquote, urlparse
+
+    url = urlparse(pathurl)
+    path = unquote(url.path)
+    if re.match(r"^/[A-Za-z]:/", path):
+        path = path[1:]
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _merged(cuts: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for c in cuts:
+        if out and out[-1]["source_id"] == c["source_id"]:
+            out[-1]["end"] = c["end"]
+        else:
+            out.append(dict(c))
+    return out
+
+
+def import_timeline(session: MulticamSession, path: str) -> dict:
+    """Take the cut and removals from an edited FCP 7 XML timeline (Premiere, or Resolve's FCP 7 XML export).
+
+    Picture decides the edit: at every frame the topmost enabled clip of one of
+    this edit's cameras is on air, and episode time that no clip shows is
+    removed. Clips of other files (b-roll, titles) and the audio tracks are
+    left out, because podcli rebuilds the mics from the picture.
+    """
+    import xml.etree.ElementTree as ET
+
+    file = Path(path).expanduser()
+    if file.suffix.lower() != ".xml" or not file.is_file():
+        raise ValueError("Pass an FCP 7 XML timeline (.xml). In Resolve: File > Export > Timeline > FCP 7 XML.")
+    if file.stat().st_size > MAX_TIMELINE_BYTES:
+        raise ValueError("That timeline file is too big to be one episode")
+    try:
+        root = ET.parse(file).getroot()
+    except ET.ParseError as e:
+        raise ValueError(f"{file.name} isn't valid XML: {e}") from None
+    seq = root.find("sequence") if root.tag == "xmeml" else None
+    if seq is None:
+        seq = next(root.iter("sequence"), None)
+    if root.tag != "xmeml" or seq is None or seq.find("media/video") is None:
+        raise ValueError(f"{file.name} isn't an FCP 7 XML timeline with video")
+    seq_fps = _xml_fps(seq)
+    if not seq_fps:
+        raise ValueError("The timeline has no frame rate")
+
+    files = {}
+    for f in root.iter("file"):
+        if f.get("id") and f.findtext("pathurl"):
+            files[f.get("id")] = _xml_path(f.findtext("pathurl"))
+    cams = [c for c in session.cameras() if c.synced and not c.virtual]
+    by_path = {os.path.normcase(os.path.realpath(c.path)): c for c in cams}
+    by_name: dict[str, list[Source]] = {}
+    for c in cams:
+        by_name.setdefault(os.path.basename(c.path).lower(), []).append(c)
+
+    def camera_of(path: str) -> Optional[Source]:
+        if path in by_path:
+            return by_path[path]
+        same = by_name.get(os.path.basename(path).lower(), [])
+        return same[0] if len(same) == 1 else None
+
+    clips, skipped = [], 0
+    for level, track in enumerate(seq.findall("media/video/track")):
+        if (track.findtext("enabled") or "TRUE").strip().upper() == "FALSE":
+            continue
+        for item in track.findall("clipitem"):
+            if (item.findtext("enabled") or "TRUE").strip().upper() == "FALSE":
+                continue
+            ref = item.find("file")
+            cam = camera_of(files.get(ref.get("id"), "")) if ref is not None else None
+            if cam is None:
+                skipped += 1
+                continue
+            start, end = int(item.findtext("start", "-1")), int(item.findtext("end", "-1"))
+            src_in, src_out = int(item.findtext("in", "-1")), int(item.findtext("out", "-1"))
+            if start < 0 or end < 0:
+                raise ValueError("A camera clip touches a transition. Remove the transitions and export again.")
+            if end <= start:
+                continue
+            clip_fps = _xml_fps(item) or seq_fps
+            if abs((src_out - src_in) / clip_fps - (end - start) / seq_fps) > 1.5 / seq_fps:
+                raise ValueError(f"{os.path.basename(cam.path)} is sped up or slowed down at frame {start}. "
+                                 "podcli keeps the conversation at real speed, so remove the speed change.")
+            clips.append((start, end, level, cam, src_in / clip_fps))
+    if not clips:
+        raise ValueError("No clip on the timeline uses this edit's camera files")
+
+    clips.sort(key=lambda c: c[0])
+    edges = sorted({f for c in clips for f in (c[0], c[1])})
+    shots: list[list] = []
+    active: list[tuple] = []
+    k = 0
+    for a, b in zip(edges, edges[1:]):
+        while k < len(clips) and clips[k][0] <= a:
+            active.append(clips[k])
+            k += 1
+        active = [c for c in active if c[1] > a]
+        if not active:
+            continue
+        start, _, _, cam, src_seconds = max(active, key=lambda c: c[2])
+        tl_a = cam.timeline_start() + (src_seconds + (a - start) / seq_fps) * cam.speed
+        tl_b = tl_a + (b - a) / seq_fps
+        if shots and shots[-1][2] is cam and abs(shots[-1][1] - tl_a) < 1e-3:
+            shots[-1][1] = tl_b
+        else:
+            shots.append([tl_a, tl_b, cam])
+
+    tolerance = 1.5 / seq_fps
+    for (_, prev_end, _), (start, _, _) in zip(shots, shots[1:]):
+        if start < prev_end - tolerance:
+            raise ValueError(f"The timeline plays {start:.1f}s of the conversation again or out of order. "
+                             "podcli keeps it in order, so move that clip back or delete it.")
+
+    reasons = [r for r in session.removals if r.get("reason")]
+    removals = []
+    for (_, end, _), (nxt, _, _) in zip(shots, shots[1:]):
+        if nxt - end > tolerance:
+            known = next((r for r in reasons if r["start"] < nxt and r["end"] > end), None)
+            removals.append({"start": end, "end": nxt, **({"reason": known["reason"]} if known else {})})
+
+    def covers(cam: Source, a: float, b: float) -> bool:
+        return cam.timeline_start() <= a + 1e-3 and cam.timeline_end() >= b - 1e-3
+
+    cuts: list[dict] = []
+    for start, end, cam in shots:
+        start, end = max(start, cam.timeline_start()), min(end, cam.timeline_end())
+        if cuts and start > cuts[-1]["end"]:
+            prev = cuts[-1]
+            prev["end"] = min(start, session.source(prev["source_id"]).timeline_end())
+            start = max(prev["end"], cam.timeline_start())
+            if start > prev["end"] + 1e-3:
+                cover = next((c for c in cams if covers(c, prev["end"], start)), None)
+                if cover is None:
+                    raise ValueError(f"No camera was recording at {prev['end']:.1f}s, where the timeline removes "
+                                     "a stretch. Keep a little more around it.")
+                cuts.append({"start": prev["end"], "end": start, "source_id": cover.id})
+        elif cuts:
+            start = cuts[-1]["end"]
+        cuts.append({"start": start, "end": end, "source_id": cam.id})
+    for i, c in enumerate(cuts):
+        if c["end"] - c["start"] >= 0.1:
+            continue
+        for other in (cuts[i - 1] if i else None, cuts[i + 1] if i + 1 < len(cuts) else None):
+            if other and covers(session.source(other["source_id"]), c["start"], c["end"]):
+                c["source_id"] = other["source_id"]
+                break
+
+    session.removals = []
+    set_cuts(session, _merged(cuts))
+    set_removals(session, removals)
+    return {"shots": len(session.cuts), "removals": len(session.removals), "skipped_clips": skipped}
 
 
 # ---------------------------------------------------------------------------

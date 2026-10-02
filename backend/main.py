@@ -972,7 +972,8 @@ def handle_manage_multicam(task_id: str, params: dict):
     Actions: new (folder or files, people), list, show, map, sync, plan, cut
     (swap one shot's camera), set_cuts (replace the whole cut), activity (who
     speaks when), previews (stills), preview (playback proxies), render,
-    export (premiere|fcpxml), delete.
+    export (premiere|fcpxml, review keeps removals in place for an editor to judge),
+    import_timeline (path: an edited FCP 7 XML timeline becomes the cut and removals), delete.
     sync, plan and render apply any mapping fields sent with them first.
     """
     from services import multicam as mc
@@ -1037,7 +1038,12 @@ def handle_manage_multicam(task_id: str, params: dict):
                 raise ValueError("stems is true or false")
             mc.render_session(session, stems=stems, progress_callback=progress("rendering"))
         elif action == "export":
-            data["export_path"] = mc.export_xml(session, params.get("format", "premiere"))
+            data["export_path"] = mc.export_xml(session, params.get("format", "premiere"), review=bool(params.get("review")))
+        elif action == "import_timeline":
+            if not isinstance(params.get("path"), str):
+                raise ValueError("import_timeline needs path: an FCP 7 XML timeline exported from Premiere or Resolve")
+            data["imported"] = mc.import_timeline(session, params["path"])
+            session = mc.MulticamSession.load(session.session_id)
         elif action == "cloud":
             from services import multicam_cloud
             session = multicam_cloud.push(session, progress_callback=progress("sending"))

@@ -2237,10 +2237,13 @@ export function createServer(): McpServer {
       "'preview' (background job: playback proxies, a mic mix and stills, for a browser editor such as podcli cloud), 'delete'. " +
       "'cloud' (background job, needs podcli login and Pro: sends previews and the edit to the podcli cloud editor; camera files stay here) and " +
       "'pull' (background job: renders the cut made in that editor from the files here). " +
+      "'export' with review: true writes a review timeline: the whole episode, every camera on its own track under the cut, and each removal left in place, named 'Remove', labelled orange in Premiere and marked with its reason. " +
+      "'import_timeline' (path) reads an FCP 7 XML timeline edited in Premiere or Resolve back as the cut and removals: deleted stretches become removals, kept ones are restored. " +
+      "With the DaVinci Resolve MCP server connected, import the review timeline into a Resolve project, color the 'Remove' clips, let the editor review, export the timeline as FCP 7 XML, then call 'import_timeline'. " +
       "Call recordings work too: one file per person becomes a split screen, one gallery recording is split into a camera per tile; Premiere and FCPXML export refuse those layouts for now.",
     {
       action: z
-        .enum(["new", "list", "show", "map", "sync", "plan", "cut", "set_cuts", "activity", "previews", "preview", "render", "export", "cloud", "pull", "delete"])
+        .enum(["new", "list", "show", "map", "sync", "plan", "cut", "set_cuts", "activity", "previews", "preview", "render", "export", "import_timeline", "cloud", "pull", "delete"])
         .describe("What to do"),
       session_id: z.string().optional().describe("Session id returned by 'new' (every action except new/list)"),
       folder: z.string().optional().describe("For 'new': folder holding one episode's recordings, scanned recursively"),
@@ -2283,6 +2286,8 @@ export function createServer(): McpServer {
       force: z.boolean().optional().describe("For 'sync': also re-measure offsets that were set by hand"),
       stems: z.boolean().optional().describe("For 'render': also write one WAV per person (default true)"),
       format: z.enum(["premiere", "fcpxml"]).optional().describe("For 'export': premiere (FCP7 XML, also opens in Resolve) or fcpxml (Final Cut Pro, Resolve)"),
+      review: z.boolean().optional().describe("For 'export': keep the whole episode with every camera on its own track and the removals in place, marked"),
+      path: z.string().optional().describe("For 'import_timeline': an FCP 7 XML timeline exported from Premiere or Resolve"),
       index: z.number().int().min(0).optional().describe("For 'cut': 0-based shot index"),
       source_id: z.string().optional().describe("For 'cut': camera source id to use for that shot"),
       removals: z

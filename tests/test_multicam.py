@@ -810,3 +810,145 @@ def test_cli_json_always_prints_one_object(episode, monkeypatch, capsys, tmp_pat
     assert "error" in json.loads(capsys.readouterr().out)
     assert run_cli(monkeypatch, str(episode), "--delete", "--json") == 0
     assert json.loads(capsys.readouterr().out)["deleted"] is True
+
+
+# --- review timelines and importing an edited timeline ---------------------------
+
+def _two_camera_session(sandbox):
+    a = _source(str(sandbox / "cam_a.mp4"), role="camera", person="nika", offset=0.0)
+    b = _source(str(sandbox / "cam_b.mp4"), role="camera", person="ana", offset=1.0)
+    m = _source(str(sandbox / "room.wav"), kind="audio", role="mic", offset=0.0)
+    session = mc.MulticamSession(session_id="abc123abc777", name="ep", sources=[a, b, m], reference_id="room",
+                                 cuts=[{"start": 2.0, "end": 10.0, "source_id": "cam_a"},
+                                       {"start": 10.0, "end": 20.0, "source_id": "cam_b"},
+                                       {"start": 20.0, "end": 30.0, "source_id": "cam_a"}])
+    session.save()
+    return mc.set_removals(session, [{"start": 12.0, "end": 14.0, "reason": "retake"}])
+
+
+def _ripple_delete(xml_path, index):
+    """Delete one shot from the picture track and close the gap, as an editor would."""
+    tree = ET.parse(xml_path)
+    track = tree.getroot().findall("./sequence/media/video/track")[-1]
+    items = track.findall("clipitem")
+    gone = items[index]
+    length = int(gone.findtext("end")) - int(gone.findtext("start"))
+    track.remove(gone)
+    for item in items[index + 1:]:
+        for tag in ("start", "end"):
+            item.find(tag).text = str(int(item.findtext(tag)) - length)
+    tree.write(xml_path)
+
+
+def test_review_plan_keeps_removals_in_place_and_tagged(sandbox):
+    session = _two_camera_session(sandbox)
+    plan = mc.render_plan(session, 30.0, review=True)
+    assert sum(p.frames for p in plan) == 28 * 30
+    removed = [p for p in plan if p.removal]
+    assert [(p.source_id, p.out_frame, p.frames) for p in removed] == [("cam_b", 300, 60)]
+    assert removed[0].removal["reason"] == "retake"
+    assert sum(p.frames for p in mc.render_plan(session, 30.0)) == 26 * 30
+
+
+def test_review_export_stacks_every_camera_and_marks_removals(sandbox):
+    session = _two_camera_session(sandbox)
+    premiere = ET.parse(mc.export_xml(session, "premiere", review=True)).getroot()
+    tracks = premiere.findall("./sequence/media/video/track")
+    assert len(tracks) == 3
+    assert int(premiere.findtext("./sequence/duration")) == 28 * 30
+    flagged = [c for c in premiere.iter("clipitem") if c.findtext("labels/label2") == "Mango"]
+    assert len(flagged) == 4
+    assert all(c.findtext("name").startswith("Remove (retake): ") for c in flagged)
+    marker = premiere.find("./sequence/marker")
+    assert (marker.findtext("name"), marker.findtext("in"), marker.findtext("out")) == ("retake", "300", "360")
+    assert session.outputs["premiere_review"].endswith("episode-review-premiere.xml")
+
+    fcp = ET.parse(mc.export_xml(session, "fcpxml", review=True)).getroot()
+    assert {c.get("lane") for c in fcp.iter("asset-clip")} == {"1", "2", "3", "-1"}
+    assert [m.get("value") for m in fcp.iter("marker")] == ["retake"]
+
+    plain = ET.parse(mc.export_xml(session, "premiere")).getroot()
+    assert len(plain.findall("./sequence/media/video/track")) == 1
+    assert plain.find("./sequence/marker") is None
+
+
+def test_an_untouched_timeline_imports_as_the_same_edit(sandbox):
+    session = _two_camera_session(sandbox)
+    cuts, removals = [dict(c) for c in session.cuts], [dict(r) for r in session.removals]
+    got = mc.import_timeline(session, mc.export_xml(session, "premiere"))
+    assert got == {"shots": 3, "removals": 1, "skipped_clips": 0}
+    assert [c["source_id"] for c in session.cuts] == [c["source_id"] for c in cuts]
+    for new, old in zip(session.cuts, cuts):
+        assert new["start"] == pytest.approx(old["start"], abs=0.04)
+        assert new["end"] == pytest.approx(old["end"], abs=0.04)
+    assert session.removals[0]["start"] == pytest.approx(removals[0]["start"], abs=0.04)
+    assert session.removals[0]["end"] == pytest.approx(removals[0]["end"], abs=0.04)
+    assert session.removals[0]["reason"] == "retake"
+
+
+def test_keeping_a_marked_stretch_in_review_restores_it(sandbox):
+    session = _two_camera_session(sandbox)
+    mc.import_timeline(session, mc.export_xml(session, "premiere", review=True))
+    assert session.removals == []
+    assert session.cuts[0]["start"] == pytest.approx(2.0, abs=0.04)
+    assert session.cuts[-1]["end"] == pytest.approx(30.0, abs=0.04)
+
+
+def test_deleting_a_shot_in_the_editor_becomes_a_removal(sandbox):
+    session = _two_camera_session(sandbox)
+    mc.set_removals(session, [])
+    path = mc.export_xml(session, "premiere")
+    _ripple_delete(path, 1)
+    got = mc.import_timeline(session, path)
+    assert got["removals"] == 1
+    assert session.removals[0]["start"] == pytest.approx(10.0, abs=0.04)
+    assert session.removals[0]["end"] == pytest.approx(20.0, abs=0.04)
+    assert [c["source_id"] for c in session.cuts] == ["cam_a"]
+    assert session.cuts[0]["start"] == pytest.approx(2.0, abs=0.04)
+    assert session.cuts[0]["end"] == pytest.approx(30.0, abs=0.04)
+
+
+def test_import_refuses_reordered_or_foreign_timelines(sandbox):
+    session = _two_camera_session(sandbox)
+    path = mc.export_xml(session, "premiere")
+    tree = ET.parse(path)
+    items = tree.getroot().findall("./sequence/media/video/track")[-1].findall("clipitem")
+    first, last = items[0], items[-1]
+    length = int(last.findtext("out")) - int(last.findtext("in"))
+    last.find("in").text = first.findtext("in")
+    last.find("out").text = str(int(first.findtext("in")) + length)
+    tree.write(path)
+    before = [dict(c) for c in session.cuts]
+    with pytest.raises(ValueError, match="out of order"):
+        mc.import_timeline(session, path)
+    assert session.cuts == before
+
+    notes = sandbox / "notes.txt"
+    notes.write_text("hi")
+    with pytest.raises(ValueError, match="FCP 7 XML"):
+        mc.import_timeline(session, str(notes))
+    other = sandbox / "other.xml"
+    other.write_text('<?xml version="1.0"?><fcpxml version="1.10"/>')
+    with pytest.raises(ValueError, match="isn't an FCP 7 XML timeline"):
+        mc.import_timeline(session, str(other))
+
+
+def test_a_removal_where_cameras_stop_and_start_is_bridged_by_another_camera(sandbox):
+    a = _source(str(sandbox / "cam_a.mp4"), role="camera", person="nika", offset=0.0, duration=11.0)
+    b = _source(str(sandbox / "cam_b.mp4"), role="camera", person="ana", offset=13.0, duration=50.0)
+    w = _source(str(sandbox / "cam_w.mp4"), role="camera", person="wide", offset=0.0)
+    m = _source(str(sandbox / "room.wav"), kind="audio", role="mic", offset=0.0)
+    session = mc.MulticamSession(session_id="abc123abc778", name="ep", sources=[a, b, w, m], reference_id="room",
+                                 cuts=[{"start": 2.0, "end": 10.0, "source_id": "cam_a"},
+                                       {"start": 10.0, "end": 30.0, "source_id": "cam_w"}])
+    session.save()
+    mc.set_cuts(session, [{"start": 2.0, "end": 10.0, "source_id": "cam_a"},
+                          {"start": 10.0, "end": 16.0, "source_id": "cam_w"},
+                          {"start": 16.0, "end": 30.0, "source_id": "cam_b"}])
+    mc.set_removals(session, [{"start": 10.0, "end": 16.0}])
+    mc.import_timeline(session, mc.export_xml(session, "premiere"))
+    assert [c["source_id"] for c in session.cuts] == ["cam_a", "cam_w", "cam_b"]
+    assert session.cuts[0]["end"] == pytest.approx(11.0, abs=0.04)
+    assert session.cuts[1]["end"] == pytest.approx(13.0, abs=0.04)
+    assert session.removals[0]["start"] == pytest.approx(10.0, abs=0.04)
+    assert session.removals[0]["end"] == pytest.approx(16.0, abs=0.04)
