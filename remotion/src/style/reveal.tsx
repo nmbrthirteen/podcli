@@ -66,9 +66,10 @@ const scrambled = (char: string, n: number) => {
   return pool ? pool[n % pool.length] : char;
 };
 
-const NUMBER = /^(.*?)([-−]?)(\d[\d,]*)(?:\.(\d+))?(.*)$/s;
+const NUMBER = /^(.*?)([-−]?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(.*)$/s;
 
 export const countedTo = (text: string, p: number) => {
+  if (p >= 1) return text;
   const found = NUMBER.exec(text);
   if (!found) return text;
   const [, before, sign, whole, decimals = "", after] = found;

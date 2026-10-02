@@ -71,3 +71,13 @@ describe("counting a figure up", () => {
     expect(countedTo("3 weeks", 1)).toBe("3 weeks");
   });
 });
+
+describe("counting a figure that is not one number", () => {
+  it("leaves a comma that is punctuation alone", () => {
+    expect(countedTo("3, 2, 1", 0.5)).toBe("2, 2, 1");
+  });
+
+  it("shows the exact figure once the count lands", () => {
+    expect(countedTo("9,007,199,254,740,993", 1)).toBe("9,007,199,254,740,993");
+  });
+});
