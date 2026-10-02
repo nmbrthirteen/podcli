@@ -97,6 +97,11 @@ const Circle: React.FC<{ theme: Theme; f: number; at: number; s: number; inset: 
   );
 };
 
+const figureSize = (value: string) => {
+  const length = Array.from(value).length;
+  return length > 9 ? 150 : length > 6 ? 200 : 280;
+};
+
 const tilt = (theme: Theme, k: number) => ({ transform: `rotate(${theme.tilt * k}deg)` });
 
 const titleSize = (text: string, base: number) => {
@@ -169,7 +174,7 @@ const StatPage: React.FC<PageProps<"stat"> & { length: number }> = ({ card, them
         <Reveal theme={theme} role="figure" f={f} at={figureAt} fps={fps}
           style={{ position: "relative", alignSelf: "center", marginTop: 60 * s, ...tilt(theme, 1.8) }}>
           <div style={{ position: "relative" }}>
-            <Label theme={theme} seed={14} scale={s} size={280 * s} ink={theme.color.figure} pad={0.16}>
+            <Label theme={theme} seed={14} scale={s} size={figureSize(card.value) * s} ink={theme.color.figure} pad={0.16}>
               <RevealText theme={theme} role="figure" f={f} at={figureAt} text={card.value} s={s} />
             </Label>
             <Circle theme={theme} f={f} at={circleAt} s={s} inset={22} />
