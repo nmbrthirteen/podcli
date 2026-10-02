@@ -197,9 +197,14 @@ export const MOTIONS = {
 
 export type MotionId = keyof typeof MOTIONS;
 
+export type FontId = "grotesk" | "serif" | "condensed" | "mono";
+
+export const FONT_IDS: FontId[] = ["grotesk", "serif", "condensed", "mono"];
+
 export interface ThemeInput {
   pack: PackId;
   motion?: MotionId;
+  fonts?: { display?: FontId; label?: FontId };
   overrides?: DeepPartial<Theme>;
   textures?: Theme["textures"];
 }
@@ -439,9 +444,35 @@ const deepMerge = <T>(base: T, patch: unknown): T => {
   return out as T;
 };
 
+const FONTS: Record<FontId, { display: Face; label: Face }> = {
+  grotesk: {
+    display: face("DM Sans", 700, { tracking: -2.5, lineHeight: 1.02 }),
+    label: face("DM Sans", 700, { lineHeight: 1.1 }),
+  },
+  serif: {
+    display: face("Playfair Display", 900, { italic: true, tracking: -1, lineHeight: 1.02 }),
+    label: face("Playfair Display", 700, { italic: true, lineHeight: 1.1 }),
+  },
+  condensed: {
+    display: face("Barlow Condensed", 700, { tracking: -0.5, lineHeight: 0.95 }),
+    label: face("Barlow Condensed", 600, { tracking: 0.5, lineHeight: 1.05 }),
+  },
+  mono: {
+    display: face("Courier Prime", 400, { tracking: -1.5, lineHeight: 1.08, size: 0.78 }),
+    label: face("Courier Prime", 400, { lineHeight: 1.2 }),
+  },
+};
+
+const withFonts = (theme: Theme, fonts: ThemeInput["fonts"]): Theme => {
+  const display = fonts?.display && FONTS[fonts.display]?.display;
+  const label = fonts?.label && FONTS[fonts.label]?.label;
+  if (!display && !label) return theme;
+  return { ...theme, type: { ...theme.type, ...(display ? { display } : {}), ...(label ? { label } : {}) } };
+};
+
 export const resolveTheme = (input?: ThemeInput | null): Theme | null => {
   if (!input) return null;
-  const pack: Theme = PACKS[input.pack] ?? PACKS.collage;
+  const pack: Theme = withFonts(PACKS[input.pack] ?? PACKS.collage, input.fonts);
   const base = input.motion ? { ...pack, motion: MOTIONS[input.motion] ?? pack.motion } : pack;
   const merged = deepMerge(base, input.overrides ?? {});
   return { ...merged, textures: { ...merged.textures, ...(input.textures ?? {}) } };

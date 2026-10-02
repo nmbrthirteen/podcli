@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENTRANCES, MOTIONS, PACKS, ROLES, resolveTheme } from "./theme";
+import { ENTRANCES, FONT_IDS, MOTIONS, PACKS, ROLES, resolveTheme } from "./theme";
 
 describe("resolveTheme", () => {
   it("returns null without a style", () => {
@@ -68,6 +68,25 @@ describe("motion presets", () => {
       for (const motion of Object.keys(MOTIONS) as (keyof typeof MOTIONS)[]) {
         expect(resolveTheme({ pack, motion })?.motion).toEqual(MOTIONS[motion]);
       }
+    }
+  });
+});
+
+describe("fonts picked to match a reference", () => {
+  it("swap the display and label faces and leave the rest of the pack", () => {
+    const theme = resolveTheme({ pack: "clean", fonts: { display: "condensed", label: "mono" } });
+    expect(theme?.type.display.family).toContain("Barlow Condensed");
+    expect(theme?.type.label.family).toContain("Courier Prime");
+    expect(theme?.color).toEqual(PACKS.clean.color);
+  });
+
+  it("keep the pack's faces when none are picked", () => {
+    expect(resolveTheme({ pack: "editorial" })?.type).toEqual(PACKS.editorial.type);
+  });
+
+  it("offer every font on every pack", () => {
+    for (const font of FONT_IDS) {
+      expect(resolveTheme({ pack: "riso", fonts: { display: font } })?.type.display.family).toBeTruthy();
     }
   });
 });
