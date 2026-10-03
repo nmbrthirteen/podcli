@@ -2611,45 +2611,32 @@ def render_session(
             stem_paths = _render_stems(session, work, start, end - start, splice, gain)
 
         # Every piece rendered; publish video, stems and the session record
-        # together. There's no atomic rename across several files, so build
-        # the whole render in a fresh directory nothing points at yet, then
-        # flip the session to it in session.save()'s single tmp-file-plus-
-        # os.replace write. A crash before that save leaves the previous
-        # complete render exactly as it was; a crash during it can't leave a
-        # mix, because the new render's files are already complete by then
-        # and the old render's files haven't been touched.
-        old_outputs = session.outputs
-        publish_dir = Path(tempfile.mkdtemp(prefix="render-", dir=out_dir))
-        try:
-            video = publish_dir / "episode.mp4"
-            shutil.move(str(partial), str(video))  # falls back to copy+delete when work and output sit on different volumes.
-            stems = []
-            for stem in stem_paths:
-                dest = publish_dir / Path(stem).name
-                shutil.move(stem, str(dest))
-                stems.append(str(dest))
-        except Exception:
-            shutil.rmtree(publish_dir, ignore_errors=True)
-            raise
+        # together. A crash between these renames can only ever leave either
+        # the previous complete render or this one in place, never a mix.
+        video = out_dir / "episode.mp4"
+        tmp_video = video.with_name(video.name + ".publishing")
+        # shutil.move falls back to copy+delete when work and output sit on different volumes.
+        shutil.move(str(partial), str(tmp_video))
+        pending_stems = []
+        for stem in stem_paths:
+            dest = out_dir / Path(stem).name
+            tmp_stem = dest.with_name(dest.name + ".publishing")
+            shutil.move(stem, str(tmp_stem))
+            pending_stems.append((tmp_stem, dest))
+
+        os.replace(str(tmp_video), str(video))
+        for tmp_stem, dest in pending_stems:
+            os.replace(str(tmp_stem), str(dest))
 
         session.outputs = {
-            **old_outputs,
+            **session.outputs,
             "video": str(video),
-            "stems": stems,
+            "stems": [str(dest) for _, dest in pending_stems],
             "duration": round(duration, 3),
             "render_key": key,
             "validation": validation,
         }
         session.save()
-
-        # The session now points only at the new render; the old one (if
-        # it's one of our own versioned directories, not a path from before
-        # this layout existed) is unreachable. Drop it, which also clears
-        # out a stem for a person no longer in the edit instead of leaving
-        # it to look current.
-        old_dir = Path(old_outputs["video"]).parent if old_outputs.get("video") else None
-        if old_dir and old_dir != publish_dir and old_dir.parent == out_dir and old_dir.name.startswith("render-"):
-            shutil.rmtree(old_dir, ignore_errors=True)
         # Shots this edit no longer uses would pile up across re-cuts; keep only this render's.
         used = {c.parent for c in chunks}
         for d in shots_dir.iterdir() if shots_dir.exists() else []:
