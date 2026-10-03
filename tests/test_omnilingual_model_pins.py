@@ -63,3 +63,39 @@ def test_a_checksum_mismatch_leaves_nothing_behind(tmp_path, monkeypatch):
         omni.ensure_model(str(tmp_path))
 
     assert os.listdir(tmp_path) == []
+
+
+def test_transcribing_with_a_custom_model_path_never_downloads(tmp_path, monkeypatch):
+    from services import transcription as tr
+
+    model = tmp_path / "model.int8.onnx"
+    tokens = tmp_path / "tokens.txt"
+    model.write_bytes(b"m")
+    tokens.write_bytes(b"t")
+    media = tmp_path / "a.wav"
+    media.write_bytes(b"x")
+    monkeypatch.setattr(tr, "_omnilingual_model", lambda: str(model))
+    monkeypatch.setattr(tr, "_omnilingual_tokens", lambda: str(tokens))
+    monkeypatch.setattr(omni, "ensure_model", lambda *a, **k: pytest.fail("downloaded beside a custom model"))
+    monkeypatch.setattr(omni, "transcribe_file", lambda *a, **k: {"transcript": "", "segments": [], "words": [], "duration": 0.0, "language": "und"})
+
+    tr._transcribe_with_omnilingual(str(media), progress_callback=None)
+
+
+def test_transcribing_with_the_managed_model_folder_ensures_the_pinned_files(tmp_path, monkeypatch):
+    from services import transcription as tr
+
+    monkeypatch.setenv("PODCLI_HOME", str(tmp_path))
+    managed = tmp_path / "models" / "omnilingual"
+    managed.mkdir(parents=True)
+    (managed / "model.int8.onnx").write_bytes(b"m")
+    (managed / "tokens.txt").write_bytes(b"t")
+    media = tmp_path / "a.wav"
+    media.write_bytes(b"x")
+    calls = []
+    monkeypatch.setattr(omni, "ensure_model", lambda d, *a, **k: calls.append(d))
+    monkeypatch.setattr(omni, "transcribe_file", lambda *a, **k: {"transcript": "", "segments": [], "words": [], "duration": 0.0, "language": "und"})
+
+    tr._transcribe_with_omnilingual(str(media), progress_callback=None)
+
+    assert calls == [str(managed)]

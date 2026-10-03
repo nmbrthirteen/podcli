@@ -144,8 +144,11 @@ def _transcribe_with_omnilingual(file_path, progress_callback, wav_path=None):
 
     model = _omnilingual_model()
     tokens = _omnilingual_tokens()
-    if not (os.environ.get("PODCLI_OMNILINGUAL_MODEL") or os.environ.get("PODCLI_OMNILINGUAL_TOKENS")):
-        omni.ensure_model(os.path.dirname(model), progress_callback)
+    # Fetch only into podcli's own model folder; a custom model path is the
+    # caller's to provide, and must never trigger a 1 GB download beside it.
+    managed_dir = os.path.join(_managed_home(), "models", "omnilingual")
+    if os.path.dirname(model) == managed_dir and os.path.dirname(tokens) == managed_dir:
+        omni.ensure_model(managed_dir, progress_callback)
     if not os.path.exists(model) or not os.path.exists(tokens):
         raise FileNotFoundError(
             f"omnilingual model not found: {model}. "
