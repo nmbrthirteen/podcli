@@ -114,6 +114,7 @@ class Source:
     timecode: float = 0.0  # embedded start timecode in seconds; editors address media from here
     file_size: int = 0  # size at probe time; a mismatch on reopen means the file changed underneath us
     file_mtime_ns: int = 0  # mtime at probe time, nanosecond resolution
+    fps_warning: str = ""  # set when the container's frame rate looks variable or had to be guessed
     role: str = "ignore"  # "camera" | "mic" | "ignore"
     # camera: a person id or "wide"; mic: a person id, or "" for a shared room mic
     person: str = ""
@@ -343,13 +344,26 @@ def probe_source(path: str) -> Source:
     if duration <= 0:
         raise RuntimeError(f"Could not read the duration of {os.path.basename(path)}")
     fps = 0.0
+    fps_warning = ""
     if video:
-        num, _, den = str(video.get("avg_frame_rate") or video.get("r_frame_rate") or "0/1").partition("/")
-        try:
-            fps = float(num) / float(den or 1) if float(den or 1) else 0.0
-        except ValueError:
-            fps = 0.0
+        def rate(field: str) -> float:
+            num, _, den = str(video.get(field) or "0/1").partition("/")
+            try:
+                return float(num) / float(den or 1) if float(den or 1) else 0.0
+            except ValueError:
+                return 0.0
+
+        avg_fps, r_fps = rate("avg_frame_rate"), rate("r_frame_rate")
+        fps = avg_fps or r_fps
+        # r_frame_rate is the stream's time base, a ceiling on how fast frames
+        # could appear; avg_frame_rate is what actually played out. A material
+        # gap between them means some frames held longer than others, so a shot
+        # cut can't assume a fixed grid: the frame at a given timestamp drifts.
+        if avg_fps and r_fps and abs(avg_fps - r_fps) / r_fps > 0.01:
+            fps_warning = (f"Variable frame rate detected ({avg_fps:.3g} fps average, "
+                            f"{r_fps:.3g} fps max): cuts may drift by a frame or more.")
         if not 1 <= fps <= 240:
+            fps_warning = f"Could not read a usable frame rate ({fps or 'none'}); assuming 30 fps."
             fps = 30.0
     sample_rate = int(audio.get("sample_rate") or 0) if audio else 0
     stat = os.stat(path)
@@ -368,6 +382,7 @@ def probe_source(path: str) -> Source:
         timecode=round(_timecode_seconds(info, fps, sample_rate), 6),
         file_size=stat.st_size,
         file_mtime_ns=stat.st_mtime_ns,
+        fps_warning=fps_warning,
     )
 
 

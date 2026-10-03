@@ -1117,3 +1117,30 @@ def test_timecode_seconds_handles_ntsc_pulldown_and_drop_frame(fps, tc, expected
 def test_timecode_seconds_falls_back_to_time_reference_without_embedded_timecode():
     info = {"format": {"tags": {"time_reference": "48000"}}}
     assert mc._timecode_seconds(info, 29.97, 48000) == pytest.approx(1.0, abs=1e-6)
+
+
+def _fake_probe(tmp_path, monkeypatch, video_stream):
+    path = tmp_path / "cam.mov"
+    path.write_bytes(b"0")
+    info = {"format": {"duration": "10.0", "tags": {}}, "streams": [{"codec_type": "video", **video_stream}]}
+    monkeypatch.setattr(mc, "get_video_info", lambda p: info)
+    return mc.probe_source(str(path))
+
+
+def test_probe_source_warns_on_variable_frame_rate(tmp_path, monkeypatch):
+    # avg_frame_rate (what actually played) is far below r_frame_rate (the
+    # stream's time base): frames held variable lengths.
+    src = _fake_probe(tmp_path, monkeypatch, {"avg_frame_rate": "24/1", "r_frame_rate": "60/1"})
+    assert src.fps == pytest.approx(24.0)
+    assert "variable frame rate" in src.fps_warning.lower()
+
+
+def test_probe_source_does_not_warn_on_a_steady_frame_rate(tmp_path, monkeypatch):
+    src = _fake_probe(tmp_path, monkeypatch, {"avg_frame_rate": "30000/1001", "r_frame_rate": "30000/1001"})
+    assert src.fps_warning == ""
+
+
+def test_probe_source_warns_when_falling_back_to_the_default_frame_rate(tmp_path, monkeypatch):
+    src = _fake_probe(tmp_path, monkeypatch, {"avg_frame_rate": "0/0", "r_frame_rate": "0/0"})
+    assert src.fps == 30.0
+    assert "assuming 30 fps" in src.fps_warning.lower()
