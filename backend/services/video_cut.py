@@ -101,3 +101,35 @@ def cut_multi_segment(
                 os.remove(p)
         if os.path.exists(concat_file):
             os.remove(concat_file)
+
+
+def probe_has_audio_stream(path: str) -> bool:
+    """True if ffprobe finds at least one audio stream in the file."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=codec_type",
+        "-of", "csv=p=0",
+        path,
+    ]
+    result = proc_run(cmd, timeout=FFMPEG_TIMEOUT, check=False)
+    if result.returncode != 0:
+        return False
+    return "audio" in (result.stdout or "")
+
+
+def verify_full_decode(path: str) -> str | None:
+    """Decode the whole file and return ffmpeg's error output, or None if clean.
+
+    An ffmpeg render that exits 0 can still have written a truncated or
+    corrupt file — a moov atom cut short, a partial frame at the tail, a
+    stream copy/concat mismatch. Those only surface on a full decode, which
+    is what this runs: the same check as `ffmpeg -v error -i x -f null -`
+    from the command line.
+    """
+    cmd = ["ffmpeg", "-v", "error", "-i", path, "-f", "null", "-"]
+    result = proc_run(cmd, timeout=FFMPEG_TIMEOUT, check=False)
+    stderr = (result.stderr or "").strip()
+    if result.returncode != 0 or stderr:
+        return stderr[-1000:] if stderr else f"ffmpeg exited {result.returncode} decoding the output"
+    return None

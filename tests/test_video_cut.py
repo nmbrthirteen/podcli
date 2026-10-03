@@ -213,5 +213,67 @@ class CutContentAccuracyTests(unittest.TestCase):
         self._assert_frame_is(out, "cyan")
 
 
+@unittest.skipUnless(
+    shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg/ffprobe not installed"
+)
+class OutputVerificationTests(unittest.TestCase):
+    """probe_has_audio_stream and verify_full_decode are the post-render
+    checks that catch a 0-exit ffmpeg run that still wrote a bad file."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.mkdtemp(prefix="podcli-verify-test-")
+
+        cls.with_audio = os.path.join(cls.tmpdir, "with_audio.mp4")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=red:s=64x64:r=25:d=1",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                "-shortest", cls.with_audio,
+            ],
+            check=True, capture_output=True,
+        )
+
+        cls.no_audio = os.path.join(cls.tmpdir, "no_audio.mp4")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=25:d=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                cls.no_audio,
+            ],
+            check=True, capture_output=True,
+        )
+
+        # A truncated file: valid header, but chopped mid-stream so a full
+        # decode (not just ffprobe's duration read) turns up an error.
+        cls.truncated = os.path.join(cls.tmpdir, "truncated.mp4")
+        with open(cls.with_audio, "rb") as f:
+            data = f.read()
+        with open(cls.truncated, "wb") as f:
+            f.write(data[: len(data) // 2])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmpdir, ignore_errors=True)
+
+    def test_probe_has_audio_stream_true_when_present(self):
+        self.assertTrue(video_cut.probe_has_audio_stream(self.with_audio))
+
+    def test_probe_has_audio_stream_false_when_missing(self):
+        self.assertFalse(video_cut.probe_has_audio_stream(self.no_audio))
+
+    def test_probe_has_audio_stream_false_for_missing_file(self):
+        self.assertFalse(video_cut.probe_has_audio_stream("/no/such/file.mp4"))
+
+    def test_verify_full_decode_clean_file_returns_none(self):
+        self.assertIsNone(video_cut.verify_full_decode(self.with_audio))
+
+    def test_verify_full_decode_flags_truncated_file(self):
+        self.assertIsNotNone(video_cut.verify_full_decode(self.truncated))
+
+
 if __name__ == "__main__":
     unittest.main()

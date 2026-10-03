@@ -519,5 +519,49 @@ class OutputPathReservationTests(unittest.TestCase):
         self.assertTrue(base.endswith("same_title_short-2"))
 
 
+class BoundRangeToSourceTests(unittest.TestCase):
+    """A requested range past the end of the source must be clamped before
+    it reaches ffmpeg's -ss/-t cut, which would otherwise silently stop at
+    EOF and under-deliver instead of failing."""
+
+    def test_unknown_source_duration_leaves_range_untouched(self):
+        end, segs = cg._bound_range_to_source(10.0, 999.0, None, source_duration=0.0)
+        self.assertEqual(end, 999.0)
+        self.assertIsNone(segs)
+
+    def test_end_second_clamped_to_source_duration(self):
+        end, segs = cg._bound_range_to_source(5.0, 120.0, None, source_duration=42.0)
+        self.assertEqual(end, 42.0)
+        self.assertIsNone(segs)
+
+    def test_end_second_within_source_is_unchanged(self):
+        end, _ = cg._bound_range_to_source(5.0, 20.0, None, source_duration=42.0)
+        self.assertEqual(end, 20.0)
+
+    def test_start_at_or_past_source_duration_raises(self):
+        with self.assertRaises(ValueError):
+            cg._bound_range_to_source(42.0, 50.0, None, source_duration=42.0)
+        with self.assertRaises(ValueError):
+            cg._bound_range_to_source(50.0, 60.0, None, source_duration=42.0)
+
+    def test_keep_segments_clamped_and_out_of_range_ones_dropped(self):
+        segs_in = [
+            {"start": 5.0, "end": 10.0},
+            {"start": 35.0, "end": 60.0},  # end runs past source
+            {"start": 50.0, "end": 55.0},  # starts past source entirely
+        ]
+        end, segs = cg._bound_range_to_source(5.0, 60.0, segs_in, source_duration=42.0)
+        self.assertEqual(end, 42.0)
+        self.assertEqual(segs, [
+            {"start": 5.0, "end": 10.0},
+            {"start": 35.0, "end": 42.0},
+        ])
+
+    def test_all_keep_segments_dropped_falls_back_to_none(self):
+        segs_in = [{"start": 50.0, "end": 55.0}]
+        _, segs = cg._bound_range_to_source(5.0, 60.0, segs_in, source_duration=42.0)
+        self.assertIsNone(segs)
+
+
 if __name__ == "__main__":
     unittest.main()

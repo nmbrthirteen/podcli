@@ -32,6 +32,7 @@ from services.video_processor import (
     normalize_audio,
     concat_outro,
 )
+from services.video_cut import probe_has_audio_stream, verify_full_decode
 from config.caption_styles import get_style
 from services.formats import get_format
 
@@ -129,6 +130,35 @@ def _get_media_duration(path: str) -> float:
         return float((result.stdout or "0").strip() or 0.0)
     except Exception:
         return 0.0
+
+
+def _bound_range_to_source(
+    start_second: float,
+    end_second: float,
+    keep_segments: Optional[list[dict]],
+    source_duration: float,
+) -> tuple[float, Optional[list[dict]]]:
+    """Clamp the requested range (and any keep_segments) to the source's
+    actual duration, so a too-long end_second can't silently truncate the
+    render instead of failing. source_duration <= 0 means ffprobe couldn't
+    read it; skip bounding rather than clamp against an unknown length.
+    """
+    if source_duration <= 0:
+        return end_second, keep_segments
+    if start_second >= source_duration:
+        raise ValueError(
+            f"start_second ({start_second}s) is at or past the end of the "
+            f"source video ({source_duration:.2f}s)."
+        )
+    end_second = min(end_second, source_duration)
+    if keep_segments:
+        bounded_segments = []
+        for seg in keep_segments:
+            if seg["start"] >= source_duration:
+                continue
+            bounded_segments.append({**seg, "end": min(seg["end"], source_duration)})
+        keep_segments = bounded_segments or None
+    return end_second, keep_segments
 
 
 def _detect_scene_cuts(path: str, threshold: float = 0.22, max_cuts: int = 32) -> list[float]:
@@ -912,6 +942,15 @@ def generate_clip(
     if end_second <= start_second:
         raise ValueError("end_second must be greater than start_second")
 
+    # ffmpeg's -ss/-t cut silently stops at EOF when end_second runs past the
+    # source, so without this the render "succeeds" with a shorter clip than
+    # requested while duration/end_second in the result still say the planned
+    # (too-long) window. Bound every range to what the source actually has.
+    source_duration = _get_media_duration(video_path)
+    end_second, keep_segments = _bound_range_to_source(
+        start_second, end_second, keep_segments, source_duration
+    )
+
     spec = get_format(format)
 
     # An episode that was never filmed takes the other road entirely. Branching
@@ -1310,14 +1349,17 @@ def generate_clip(
             final_video_path = with_intro_path
             intro_offset = max(0.0, _get_media_duration(with_intro_path) - clip_duration)
 
+        outro_offset = 0.0
         if outro_path and os.path.exists(outro_path):
             if progress_callback:
                 progress_callback(85, f"Adding outro ({total_steps}/{total_steps})")
 
+            pre_outro_duration = _get_media_duration(final_video_path)
             with_outro_path = os.path.join(work_dir, "with_outro.mp4")
             concat_outro(final_video_path, outro_path, with_outro_path,
                          crossfade_duration=bookend_fade)
             final_video_path = with_outro_path
+            outro_offset = max(0.0, _get_media_duration(with_outro_path) - pre_outro_duration)
 
         # Step 6: Move to output
         if progress_callback:
@@ -1352,6 +1394,35 @@ def generate_clip(
                 designed=_designed_cuts(cards, offset=intro_offset),
             )
 
+        # A 0-exit ffmpeg run can still have written a short, silent, or
+        # corrupt file (source ran out under the requested range, a crop/
+        # caption/normalize pass dropped the audio track, a concat mismatch).
+        # Catch that here instead of returning a "successful" result that
+        # describes a different clip than what landed on disk.
+        expected_duration = duration + intro_offset + outro_offset
+        actual_duration = _get_media_duration(final_path)
+        duration_tolerance = max(0.75, 0.05 * expected_duration)
+        if actual_duration <= 0 or abs(actual_duration - expected_duration) > duration_tolerance:
+            os.remove(final_path)
+            raise RuntimeError(
+                f"Render produced a {actual_duration:.2f}s file but expected "
+                f"~{expected_duration:.2f}s (body {duration:.2f}s"
+                f"{f' + intro {intro_offset:.2f}s' if intro_offset else ''}"
+                f"{f' + outro {outro_offset:.2f}s' if outro_offset else ''}). "
+                f"The source video likely ended before the requested range, or "
+                f"the render failed partway through."
+            )
+        if not probe_has_audio_stream(final_path):
+            os.remove(final_path)
+            raise RuntimeError(
+                "Render completed but the output has no audio stream. "
+                "Re-check the source video and caption/crop pipeline."
+            )
+        decode_error = verify_full_decode(final_path)
+        if decode_error:
+            os.remove(final_path)
+            raise RuntimeError(f"Render produced an undecodable output: {decode_error}")
+
         # Get file size
         file_size = os.path.getsize(final_path)
         file_size_mb = round(file_size / (1024 * 1024), 2)
@@ -1361,7 +1432,10 @@ def generate_clip(
 
         out = {
             "output_path": final_path,
-            "duration": round(duration, 2),
+            # The probed duration of the file actually on disk, not the
+            # planned window — they can differ if intro/outro were added, or
+            # (now caught above instead) if the source ran out early.
+            "duration": round(actual_duration, 2),
             "file_size_mb": file_size_mb,
             "title": title,
             "start_second": start_second,
