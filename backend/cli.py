@@ -1298,7 +1298,12 @@ def cmd_process(args):
     if skip_transcript:
         # Reuse an existing transcript so highlight boundaries snap to whole sentences;
         # only skip transcription outright when there is none (true no-dialogue footage).
-        cached = load_cached_transcript_for_video(video_path)
+        cached = load_cached_transcript_for_video(
+            video_path,
+            engine=os.environ.get("PODCLI_ENGINE"),
+            model=config.get("whisper_model", "base"),
+            language=config.get("language"),
+        )
         if cached and not config.get("no_cache", False):
             words = cached["words"]
             segments = cached["segments"]
@@ -1339,8 +1344,16 @@ def cmd_process(args):
             else:
                 print("         No cached face map, crop falls back to per-clip face tracking")
     elif not skip_transcript:
-        # Check cache first
-        cached = load_cached_transcript_for_video(video_path)
+        # Check cache first — same (engine, model, language) the transcribe
+        # call below would run with, so a hit here is guaranteed to be the
+        # combo this invocation actually asked for, not a different one
+        # that happens to share the file.
+        cached = load_cached_transcript_for_video(
+            video_path,
+            engine=os.environ.get("PODCLI_ENGINE"),
+            model=config.get("whisper_model", "base"),
+            language=config.get("language"),
+        )
         if cached and not config.get("no_cache", False):
             print("  [1/4] Loaded from cache (instant)")
             words = cached["words"]
@@ -1400,8 +1413,16 @@ def cmd_process(args):
             segments = result["segments"]
             print(f"         Done: {len(segments)} segments, {len(words)} words")
 
-            # Save to cache for next run
-            save_cached_transcript_for_video(video_path, result)
+            # Save to cache for next run, under the same key the read above
+            # checked — result["engine"] is what actually ran, which can
+            # differ from the env var on a fallback (see transcribe_file).
+            save_cached_transcript_for_video(
+                video_path,
+                result,
+                engine=result.get("engine") or os.environ.get("PODCLI_ENGINE"),
+                model=config.get("whisper_model", "base"),
+                language=config.get("language"),
+            )
 
     # Apply word corrections (Whisper misheard proper nouns, brand names)
     from services.corrections import apply_corrections
