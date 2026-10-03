@@ -30,7 +30,7 @@ Each skill below is a self-contained instruction file in `commands/` (or `.claud
 
 - **role:** Episode Architect
 - **description:** Design questions, story arc, and moment map BEFORE recording
-- **allowed-tools:** Read, Write
+- **allowed-tools:** Read, Write, mcp__podcli__knowledge_base
 - **triggers:** plan episode, upcoming recording, guest prep, prepare for interview
 - **outputs:** episode plan written to `episodes/ep[XX]-[guest]-plan.md`
 - **next:** record → `/process-transcript`
@@ -39,7 +39,7 @@ Each skill below is a self-contained instruction file in `commands/` (or `.claud
 
 - **role:** Content Analyst
 - **description:** Extract, score, classify best moments from a raw transcript
-- **allowed-tools:** Read, Write
+- **allowed-tools:** Read, Write, mcp__podcli__knowledge_base
 - **triggers:** transcript, process transcript, extract moments, podcast transcript
 - **outputs:** moment brief with timestamps, scores, titles, thumbnails, descriptions
 - **next:** `/generate-titles` or `/produce-shorts`
@@ -48,7 +48,7 @@ Each skill below is a self-contained instruction file in `commands/` (or `.claud
 
 - **role:** Title Writer
 - **description:** Generate 8 verified title options for a clip or moment
-- **allowed-tools:** Read
+- **allowed-tools:** Read, mcp__podcli__knowledge_base
 - **triggers:** titles for, title options, write titles, generate titles
 - **outputs:** 8 titles + 2 top picks with rationale
 
@@ -80,7 +80,7 @@ Each skill below is a self-contained instruction file in `commands/` (or `.claud
 
 - **role:** Producer (master orchestrator)
 - **description:** Full pipeline from transcript to publish-ready content package
-- **allowed-tools:** Read, Write, Edit, Task
+- **allowed-tools:** Read, Write, Edit, Task, mcp__podcli__knowledge_base
 - **triggers:** process episode, produce shorts, full pipeline, prep episode, make content package
 - **outputs:** complete content package in `episodes/ep[XX]-[guest]-content-package.md`
 - **orchestrates:** process-transcript → generate-titles → generate-descriptions → plan-thumbnails → review-content

@@ -97,7 +97,7 @@ Clips land in `podcli-clips/` in the directory you ran it from, so each show kee
 
 **Shipping it**
 
-- 27 MCP tools, so an agent can transcribe, score, render, and publish through conversation
+- 28 MCP tools, so an agent can transcribe, score, render, and publish through conversation
 - YouTube publishing plus performance analytics to see which clips landed
 - DaVinci Resolve export as FCPXML when you want to finish by hand
 - Presets, clip history with duplicate detection, and a transcript cache
@@ -108,7 +108,7 @@ If you are weighing podcli against the cloud clippers, this is the difference:
 
 - Runs locally. Transcription and rendering happen on your machine by default, so episodes stay there. Only the optional cloud engine (AssemblyAI) and publishing to YouTube send anything out.
 - Free and open source under AGPL-3.0. Exports are unlimited, full quality, and watermark-free.
-- Agent-native. 27 MCP tools let Claude Code or Codex drive the whole flow, transcription through publishing.
+- Agent-native. 28 MCP tools let Claude Code or Codex drive the whole flow, transcription through publishing.
 - A knowledge base keeps titles, captions, and descriptions in your show's voice, and stops the engine from resuggesting moments you already published.
 - DaVinci Resolve handoff. Export any clip as FCPXML when you want to finish the edit yourself.
 
@@ -117,7 +117,7 @@ If you are weighing podcli against the cloud clippers, this is the difference:
 podcli is an [MCP](https://modelcontextprotocol.io) server, so an agent can transcribe, suggest clips, and render them through conversation.
 
 ```bash
-podcli mcp install    # registers it with Claude Code
+podcli mcp install    # registers it with Claude Code and Codex, whichever CLI is on PATH
 ```
 
 Claude Desktop and Codex setup is in the [MCP docs](https://podcli.com/docs/mcp-server).

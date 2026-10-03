@@ -31,7 +31,7 @@ Both share the same knowledge base at `.podcli/knowledge/`.
 
 ## MCP tools (podcli engine)
 
-All 27 tools registered by the MCP server.
+All 28 tools registered by the MCP server.
 
 **Transcription and input**
 
@@ -56,6 +56,7 @@ All 27 tools registered by the MCP server.
 | `batch_create_clips` | Render multiple clips in one batch |
 | `manage_reel` | Build a highlights reel: detect once, edit moments, rebuild without re-detecting |
 | `analyze_energy` | Analyze audio energy levels to find high-energy moments |
+| `record_decisions` | Record per-episode decisions (clip count, duration range, captions, language, thumbnails, delivery target) so later runs never re-ask |
 
 **Full-episode editing**
 

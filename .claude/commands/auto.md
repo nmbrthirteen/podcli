@@ -1,6 +1,6 @@
 ---
 description: One-verb pipeline — drop a video, confirm strategy, render clips
-allowed-tools: Read, Bash, mcp__podcli__transcribe_podcast, mcp__podcli__transcribe_start, mcp__podcli__job_status, mcp__podcli__get_ui_state, mcp__podcli__set_video, mcp__podcli__suggest_clips, mcp__podcli__batch_create_clips, mcp__podcli__knowledge_base, mcp__podcli__clip_history
+allowed-tools: Read, Bash, mcp__podcli__transcribe_podcast, mcp__podcli__transcribe_start, mcp__podcli__job_status, mcp__podcli__get_ui_state, mcp__podcli__set_video, mcp__podcli__suggest_clips, mcp__podcli__batch_create_clips, mcp__podcli__knowledge_base, mcp__podcli__clip_history, mcp__podcli__record_decisions
 argument-hint: [video-path-or-episode-slug] [optional: count e.g. "5 clips"]
 triggers:
   - auto
@@ -54,6 +54,8 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
 5. Call `clip_history` to see what's already been shipped for this episode. Avoid duplicates in the proposal.
 
 **Fallback**: if `transcribe_start` returns an error about the Web UI not running, tell the user and offer either (a) start the Web UI in another terminal then retry — `podcli studio` for a launcher install, `npm run ui` in a source checkout — or (b) fall back to the synchronous `transcribe_podcast` (no live progress, works silently).
+
+6. **Ask once, reuse the answer.** `get_ui_state` lists this episode's unanswered decisions under `OPEN QUESTIONS` (clip count, duration range, captions, language, thumbnails, delivery target). Ask whichever are relevant to this run — batched, not one dialog box per field — then call `record_decisions(video_path, ...)` with the answers. On every later run against this same video, those fields are already answered and won't appear in `OPEN QUESTIONS` again.
 
 ### Phase 2 — Topic Map (silent)
 

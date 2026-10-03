@@ -142,6 +142,32 @@ export interface UIState {
   lastUpdated?: number;
 }
 
+/**
+ * Decisions the user has already answered for one episode, so /auto and
+ * /produce-shorts ask each question once and reuse the answer on every later
+ * run against the same video — including after a Web UI restart, since this
+ * is keyed by video identity and stored independently of ui-state.json.
+ */
+export interface EpisodeDecisions {
+  videoPath: string;
+  fileSize: number;
+  clipCount?: number;
+  clipDurationRange?: { min: number; max: number };
+  captionStyle?: string;
+  captionsEnabled?: boolean;
+  language?: string;
+  thumbnailsWanted?: boolean;
+  deliveryTarget?: string;
+  notes?: string;
+  updatedAt: number;
+}
+
+/** One decision from EpisodeDecisions that has no answer yet. */
+export interface OpenQuestion {
+  field: keyof EpisodeDecisions;
+  question: string;
+}
+
 /** Who is speaking, shown as a lower third for the first seconds of a clip. */
 export interface NameCard {
   title: string;

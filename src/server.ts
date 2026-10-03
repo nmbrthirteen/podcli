@@ -29,6 +29,7 @@ import { KnowledgeBase } from "./services/knowledge-base.js";
 import { AssetManager, inferType } from "./services/asset-manager.js";
 import { ClipsHistory } from "./services/clips-history.js";
 import { TranscriptCache } from "./services/transcript-cache.js";
+import { EpisodeState } from "./services/episode-state.js";
 import { paths } from "./config/paths.js";
 import { webServerUrl } from "./config/server.js";
 import { childLogger } from "./utils/logger.js";
@@ -75,6 +76,7 @@ async function uiPing(body: Record<string, unknown>): Promise<void> {
 const kb = new KnowledgeBase();
 const assets = new AssetManager();
 const history = new ClipsHistory();
+const episodeState = new EpisodeState();
 
 /** Prepend knowledge base file listing to a tool result. */
 async function withKnowledge(result: string): Promise<string> {
@@ -271,6 +273,17 @@ async function getWorkflowGuidance(): Promise<string> {
         "  → Use get_ui_state(include_transcript: true) to find more moments\n" +
         "  → Try different caption styles (hormozi, karaoke, subtle, branded) for variety",
     );
+  }
+
+  const videoPath = state.videoPath || state.filePath;
+  if (videoPath) {
+    const openQuestions = await episodeState.openQuestions(videoPath).catch(() => []);
+    if (openQuestions.length > 0) {
+      lines.push(
+        "\nOPEN QUESTIONS for this episode — ask once, then call record_decisions so these never come up again:\n" +
+          openQuestions.map((q) => `  → ${q.question}`).join("\n"),
+      );
+    }
   }
 
   return lines.join("\n");
@@ -723,6 +736,9 @@ export function createServer(): McpServer {
             duration: parsed.duration,
             content_type: parsed.content_type,
             transcript_slice: parsed.transcript_slice,
+            payoff: parsed.payoff,
+            context_line: parsed.context_line,
+            preview_text: parsed.preview_text,
           });
           const uiStateForRecipe = await readUIState().catch(() => null);
           const recipeSettings = uiStateForRecipe?.settings ?? {};
@@ -1783,6 +1799,73 @@ export function createServer(): McpServer {
         }
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // =============================================
+  // Tool: record_decisions
+  // =============================================
+  server.tool(
+    "record_decisions",
+    "Record per-episode workflow decisions (clip count, clip duration range, caption style, captions on/off, " +
+      "language, whether thumbnails are wanted, delivery target, free-form notes) so later runs against the same " +
+      "video never ask the same question twice. Keyed by the video's path + file size, not by session, so these " +
+      "answers survive a new episode overwriting ui-state.json. Pass only the fields you have an answer for; " +
+      "existing answers are preserved unless explicitly overwritten. get_ui_state lists any fields still unanswered " +
+      "as open questions.",
+    {
+      video_path: z.string().describe("The episode's source video path (same path used with set_video/transcribe_podcast)"),
+      clip_count: z.number().optional().describe("How many clips to produce"),
+      clip_duration_min: z.number().optional().describe("Minimum target clip duration in seconds"),
+      clip_duration_max: z.number().optional().describe("Maximum target clip duration in seconds"),
+      caption_style: z.enum(["hormozi", "karaoke", "subtle", "branded"]).optional(),
+      captions_enabled: z.boolean().optional().describe("Whether clips should have captions burned in at all"),
+      language: z.string().optional().describe("The episode's spoken language"),
+      thumbnails_wanted: z.boolean().optional(),
+      delivery_target: z.string().optional().describe("Where clips are headed, e.g. youtube_shorts, tiktok, instagram, export_only"),
+      notes: z.string().optional().describe("Free-form notes that don't fit another field"),
+    },
+    async ({ video_path, clip_count, clip_duration_min, clip_duration_max, caption_style, captions_enabled, language, thumbnails_wanted, delivery_target, notes }) => {
+      try {
+        const decisions: Record<string, unknown> = {};
+        if (clip_count !== undefined) decisions.clipCount = clip_count;
+        if (clip_duration_min !== undefined || clip_duration_max !== undefined) {
+          const existing = await episodeState.get(video_path);
+          decisions.clipDurationRange = {
+            min: clip_duration_min ?? existing?.clipDurationRange?.min ?? 0,
+            max: clip_duration_max ?? existing?.clipDurationRange?.max ?? 0,
+          };
+        }
+        if (caption_style !== undefined) decisions.captionStyle = caption_style;
+        if (captions_enabled !== undefined) decisions.captionsEnabled = captions_enabled;
+        if (language !== undefined) decisions.language = language;
+        if (thumbnails_wanted !== undefined) decisions.thumbnailsWanted = thumbnails_wanted;
+        if (delivery_target !== undefined) decisions.deliveryTarget = delivery_target;
+        if (notes !== undefined) decisions.notes = notes;
+
+        if (Object.keys(decisions).length === 0) {
+          return {
+            content: [{ type: "text" as const, text: "No decisions provided. Pass at least one field to record." }],
+          };
+        }
+
+        const recorded = await episodeState.record(video_path, decisions);
+        const remaining = await episodeState.openQuestions(video_path);
+        const lines = [
+          `Recorded: ${Object.keys(decisions).join(", ")}`,
+          remaining.length > 0
+            ? `Still open: ${remaining.map((q) => q.question).join(" / ")}`
+            : "All episode decisions answered.",
+        ];
+        void recorded;
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text" as const, text: `Error recording decisions: ${msg}` }],
           isError: true,
         };
       }

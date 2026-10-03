@@ -81,6 +81,7 @@ export const paths = {
   clipsHistory: join(home, "history", "clips.json"),
   knowledge: join(home, "knowledge"),
   uiState: join(home, "ui-state.json"),
+  episodeDecisions: join(home, "episode-decisions.json"),
   corrections: join(home, "corrections.json"),
   thumbnailConfig: join(home, "thumbnail-config.json"),
   integrations: join(home, "integrations.json"),
