@@ -2,7 +2,7 @@ import { spawn } from "child_process";
 import { paths, pythonEnv } from "../config/paths.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import { buildChannelListArgs, buildVideoInfoArgs, isCookieBrowser } from "../utils/ytdlp-args.js";
-import { selectBestCaptionTrack, parseVtt, cuesToWords, type CaptionTrackRef } from "../utils/captions.js";
+import { selectBestCaptionTrack, parseVtt, parseJson3, cuesToWords, type CaptionTrackRef } from "../utils/captions.js";
 import type { WordTimestamp } from "../models/index.js";
 
 const history = new ClipsHistory();
@@ -156,9 +156,13 @@ export async function mineVideoCaptions(
   }
 
   const captionText = await deps.fetchText(track.url);
-  const cues = parseVtt(captionText);
-  const words = cuesToWords(cues);
-  const segments = cues.map((c) => ({ text: c.text, start: c.start, end: c.end }));
+  const { words, segments } =
+    track.ext === "json3"
+      ? parseJson3(captionText)
+      : (() => {
+          const cues = parseVtt(captionText);
+          return { words: cuesToWords(cues), segments: cues.map((c) => ({ text: c.text, start: c.start, end: c.end })) };
+        })();
   const language = track.lang.replace(/-orig$/, "");
 
   return {

@@ -2012,6 +2012,9 @@ def _audio_inputs(session: MulticamSession) -> list[tuple[Source, int]]:
     rooms = [s for s in session.sources if s.role == "mic" and s.synced]
     if rooms:
         return [(max(rooms, key=lambda s: s.duration), -1)]
+    # The reference is only chosen by the first sync, so a fresh edit has no mix yet.
+    if not session.reference_id:
+        return []
     return [(session.source(session.reference_id), -1)]
 
 
@@ -2388,7 +2391,7 @@ def render_session(
             _splice_audio(audio, work / "kept.wav", splice, ["-c:a", "pcm_s16le"])
             audio = work / "kept.wav"
         short = duration - _media_duration(audio)
-        if short > 0.5 / fps:
+        if short >= 1 / fps:
             warnings.append(f"The mixed audio is {short:.2f} s shorter than the picture; the end plays silent.")
 
         _emit(progress_callback, 88, "Joining shots")

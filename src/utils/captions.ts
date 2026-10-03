@@ -39,8 +39,9 @@ export function selectBestCaptionTrack(
     const lang = langs.find((l) => l.endsWith("-orig")) ?? langs[0];
     const tracks = dict[lang];
     if (!tracks?.length) return null;
-    const vtt = tracks.find((t) => t.ext === "vtt") ?? tracks[0];
-    return { lang, kind, ext: vtt.ext, url: vtt.url };
+    // json3 carries a start time per word; vtt only per cue.
+    const best = tracks.find((t) => t.ext === "json3") ?? tracks.find((t) => t.ext === "vtt") ?? tracks[0];
+    return { lang, kind, ext: best.ext, url: best.url };
   };
   return pick(subtitles, "manual") ?? pick(automaticCaptions, "auto");
 }
@@ -83,7 +84,7 @@ export function parseVtt(vtt: string): CaptionCue[] {
  * than the cue span itself.
  */
 function cueToWords(cue: CaptionCue): WordTimestamp[] {
-  const words = cue.text.split(/\s+/).filter(Boolean);
+  const words = captionTokens(cue.text);
   if (words.length === 0) return [];
   const step = (cue.end - cue.start) / words.length;
   return words.map((word, i) => ({
@@ -99,16 +100,83 @@ function cueToWords(cue: CaptionCue): WordTimestamp[] {
 /**
  * Convert caption cues into podcli's word-level transcript format.
  *
- * YouTube auto-captions commonly repeat the same line across several
- * overlapping "rolling" cues (each one just appends a word or two to the
- * last); kept verbatim, that reads as the transcript stuttering through
- * the same sentence 3-4 times. Drop a cue whose text is a prefix of the
- * next one, keeping only the fullest version of each rolling line.
+ * YouTube auto-captions roll: each cue repeats the previous cue's last line
+ * above the new one, and a ~10 ms cue between them repeats it once more.
+ * Kept verbatim, every line appears three times. Drop the carry cues, then
+ * strip from each cue the words it repeats from the end of the text so far.
+ * Manual tracks have no such overlap and pass through unchanged.
  */
 export function cuesToWords(cues: CaptionCue[]): WordTimestamp[] {
-  const deduped = cues.filter((cue, i) => {
-    const next = cues[i + 1];
-    return !(next && next.text.startsWith(cue.text));
+  const kept: CaptionCue[] = [];
+  let tail: string[] = [];
+  for (const cue of cues) {
+    if (cue.end - cue.start < 0.05) continue;
+    const words = captionTokens(cue.text);
+    let overlap = Math.min(words.length, tail.length);
+    while (overlap > 0 && tail.slice(-overlap).join(" ") !== words.slice(0, overlap).join(" ")) overlap--;
+    const fresh = words.slice(overlap);
+    tail = [...tail, ...fresh].slice(-64);
+    if (fresh.length) kept.push({ ...cue, text: fresh.join(" ") });
+  }
+  return kept.flatMap(cueToWords);
+}
+
+interface Json3Event {
+  tStartMs?: number;
+  dDurationMs?: number;
+  segs?: Array<{ utf8?: string; tOffsetMs?: number }>;
+}
+
+/**
+ * Caption text as spoken words: HTML entities decoded and YouTube's ">>"
+ * speaker-change marks dropped, since they are layout, not speech.
+ */
+export function captionTokens(text: string): string[] {
+  return text
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .split(/\s+/)
+    .filter((t) => t && !/^>+$/.test(t));
+}
+
+/**
+ * Words and segments from YouTube's json3 caption format. Auto-captions give
+ * each word its own offset, so timing comes from the source rather than being
+ * spread evenly across a cue. Events can overlap (a speaker change opens a new
+ * event before the old one closes), so words are ordered by start and each
+ * ends where the next begins.
+ */
+export function parseJson3(raw: string): { words: WordTimestamp[]; segments: CaptionCue[] } {
+  const events = (JSON.parse(raw) as { events?: Json3Event[] }).events ?? [];
+  const words: WordTimestamp[] = [];
+  const segments: CaptionCue[] = [];
+  for (const ev of events) {
+    const evStart = (ev.tStartMs ?? 0) / 1000;
+    const evEnd = evStart + (ev.dDurationMs ?? 0) / 1000;
+    const segs = (ev.segs ?? []).map((seg) => ({
+      tokens: captionTokens(seg.utf8 ?? ""),
+      start: evStart + (seg.tOffsetMs ?? 0) / 1000,
+    }));
+    const evWords: WordTimestamp[] = [];
+    segs.forEach((seg, i) => {
+      const segEnd = Math.max(seg.start, Math.min(segs[i + 1]?.start ?? evEnd, evEnd));
+      const step = (segEnd - seg.start) / Math.max(seg.tokens.length, 1);
+      seg.tokens.forEach((word, k) =>
+        evWords.push({ word, start: seg.start + k * step, end: seg.start + (k + 1) * step, confidence: 1 }),
+      );
+    });
+    if (!evWords.length) continue;
+    words.push(...evWords);
+    segments.push({ start: evStart, end: evEnd, text: evWords.map((w) => w.word).join(" ") });
+  }
+  words.sort((a, b) => a.start - b.start);
+  words.forEach((w, i) => {
+    const next = words[i + 1];
+    if (next && w.end > next.start) w.end = next.start;
   });
-  return deduped.flatMap(cueToWords);
+  segments.sort((a, b) => a.start - b.start);
+  return { words, segments };
 }

@@ -1601,3 +1601,11 @@ def test_exports_fit_cameras_of_another_size_inside_the_sequence(sandbox):
         fitted = [c.get("type") for c in clip.findall("adjust-conform")]
         expected = ["fit"] if clip.get("name") in ("uhd.mp4", "phone.mp4") else []
         assert fitted == expected, clip.get("name")
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_a_fresh_edit_with_no_people_summarizes_before_its_first_sync(episode):
+    session = mc.new_session(folder=str(episode))
+    assert session.reference_id == ""
+    data = mc.payload(session)
+    assert data["preview"] is None

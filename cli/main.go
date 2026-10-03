@@ -894,7 +894,7 @@ func mcpRegistrationChecks() []doctorCheck {
 		if mcpRegisteredToSelf() {
 			checks = append(checks, doctorCheck{Name: "mcp registration (Claude)", OK: true, Detail: "registered"})
 		} else {
-			checks = append(checks, doctorCheck{Name: "mcp registration (Claude)", OK: false, Detail: "not registered - run `podcli mcp install`"})
+			checks = append(checks, doctorCheck{Name: "mcp registration (Claude)", OK: false, Detail: "not registered for this folder - run `podcli mcp install` here"})
 		}
 	}
 	if _, err := exec.LookPath("codex"); err == nil {
