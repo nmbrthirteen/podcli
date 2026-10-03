@@ -97,6 +97,32 @@ export interface YtDlpListOptions {
   cookiesFromBrowser?: string;
 }
 
+const CHANNEL_TABS = ["videos", "shorts", "streams", "playlists", "live", "podcasts", "releases"];
+
+// A bare channel root (youtube.com/@handle, /channel/ID, /c/name, /user/name)
+// lists the channel's main feed, which YouTube mixes long-form uploads and
+// Shorts into. Pinning to the /videos tab keeps the listing to uploads only,
+// matching what the tool description promises. Already-specific urls
+// (a tab, a playlist, a single video) pass through unchanged.
+export function normalizeChannelUrl(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  const isChannelRoot = segments.length === 1 && segments[0].startsWith("@");
+  const isChannelIdRoot = segments.length === 2 && ["channel", "c", "user"].includes(segments[0]);
+  if (!isChannelRoot && !isChannelIdRoot) return url;
+
+  const lastSegment = segments.at(-1) ?? "";
+  if (CHANNEL_TABS.includes(lastSegment)) return url;
+
+  parsed.pathname = `${parsed.pathname.replace(/\/+$/, "")}/videos`;
+  return parsed.toString();
+}
+
 // One JSON object per line, tab would collide with titles that contain one.
 // --flat-playlist skips resolving each video's own page, so listing a
 // channel's uploads never pulls anything beyond the playlist metadata —

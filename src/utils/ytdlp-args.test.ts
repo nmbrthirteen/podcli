@@ -6,6 +6,7 @@ import {
   extractYouTubeVideoId,
   isCookieBrowser,
   isHttpUrl,
+  normalizeChannelUrl,
   ytDlpHint,
 } from "./ytdlp-args.js";
 
@@ -148,6 +149,44 @@ describe("extractYouTubeVideoId", () => {
 
   it("returns null when no video id is present, e.g. a channel url", () => {
     expect(extractYouTubeVideoId("https://www.youtube.com/@example/videos")).toBeNull();
+  });
+});
+
+describe("normalizeChannelUrl", () => {
+  it("pins a handle channel root to the videos tab", () => {
+    expect(normalizeChannelUrl("https://www.youtube.com/@deeptechdecodedai")).toBe(
+      "https://www.youtube.com/@deeptechdecodedai/videos",
+    );
+  });
+
+  it("pins a trailing-slash handle channel root to the videos tab", () => {
+    expect(normalizeChannelUrl("https://www.youtube.com/@deeptechdecodedai/")).toBe(
+      "https://www.youtube.com/@deeptechdecodedai/videos",
+    );
+  });
+
+  it("pins a /channel/<id> root to the videos tab", () => {
+    expect(normalizeChannelUrl("https://www.youtube.com/channel/UC12345")).toBe(
+      "https://www.youtube.com/channel/UC12345/videos",
+    );
+  });
+
+  it("leaves an already-specific tab url unchanged", () => {
+    expect(normalizeChannelUrl("https://www.youtube.com/@example/shorts")).toBe(
+      "https://www.youtube.com/@example/shorts",
+    );
+    expect(normalizeChannelUrl("https://www.youtube.com/@example/videos")).toBe(
+      "https://www.youtube.com/@example/videos",
+    );
+  });
+
+  it("leaves a non-channel url (playlist, watch) unchanged", () => {
+    const playlistUrl = "https://www.youtube.com/playlist?list=PL123";
+    expect(normalizeChannelUrl(playlistUrl)).toBe(playlistUrl);
+  });
+
+  it("returns the input unchanged when it isn't a valid url", () => {
+    expect(normalizeChannelUrl("not a url")).toBe("not a url");
   });
 });
 

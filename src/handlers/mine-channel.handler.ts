@@ -1,7 +1,13 @@
 import { spawn } from "child_process";
 import { paths, pythonEnv } from "../config/paths.js";
 import { ClipsHistory } from "../services/clips-history.js";
-import { buildChannelListArgs, buildVideoInfoArgs, extractYouTubeVideoId, isCookieBrowser } from "../utils/ytdlp-args.js";
+import {
+  buildChannelListArgs,
+  buildVideoInfoArgs,
+  extractYouTubeVideoId,
+  isCookieBrowser,
+  normalizeChannelUrl,
+} from "../utils/ytdlp-args.js";
 import { selectBestCaptionTrack, parseVtt, parseJson3, cuesToWords, type CaptionTrackRef } from "../utils/captions.js";
 import type { WordTimestamp } from "../models/index.js";
 
@@ -90,7 +96,7 @@ export async function listChannelUploads(
   input: { channel_url: string; limit?: number; cookies_from_browser?: string },
 ): Promise<ChannelUpload[]> {
   const args = buildChannelListArgs({
-    channelUrl: input.channel_url,
+    channelUrl: normalizeChannelUrl(input.channel_url),
     limit: input.limit,
     cookiesFromBrowser: isCookieBrowser(input.cookies_from_browser) ? input.cookies_from_browser : undefined,
   });
@@ -103,7 +109,10 @@ export async function listChannelUploads(
     .trim()
     .split("\n")
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as { id: string; title: string; duration?: number; upload_date?: string; url?: string })
+    .map((line) => JSON.parse(line) as { id?: string; title: string; duration?: number; upload_date?: string; url?: string })
+    // A tab or sub-playlist entry (e.g. "Shorts", "Live") has no video id of
+    // its own — only real uploads do.
+    .filter((u): u is { id: string; title: string; duration?: number; upload_date?: string; url?: string } => Boolean(u.id))
     .map((u) => ({
       video_id: u.id,
       title: u.title,
