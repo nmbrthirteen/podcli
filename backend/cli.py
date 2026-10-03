@@ -557,6 +557,8 @@ def cmd_studio(args):
             cmd += ["--progress-color", args.progress_color]
     if getattr(args, "cards", None):
         cmd += ["--cards", args.cards]
+    if getattr(args, "hook", None):
+        cmd += ["--hook", args.hook]
     if getattr(args, "brand", None):
         cmd += ["--brand", args.brand]
     if getattr(args, "style", None):
@@ -1720,6 +1722,7 @@ def cmd_process(args):
                         motion=config.get("motion"),
                         bookend_fade=config.get("bookend_fade", 0.0),
                         keep_segments=clip.get("segments"),
+                        hook=_clip_hook(clip),
                         face_map=face_map,
                         allow_ass_fallback=config.get("allow_ass_fallback", False),
                         use_ass_captions=config.get("use_ass_captions", False),
@@ -1947,6 +1950,7 @@ def cmd_process(args):
                                 outro_path=config.get("outro_path") or None,
                                 intro_path=config.get("intro_path") or None,
                                 keep_segments=clip.get("segments"),
+                                hook=_clip_hook(clip),
                                 face_map=face_map,
                                 allow_ass_fallback=config.get("allow_ass_fallback", False),
                                 use_ass_captions=config.get("use_ass_captions", False),
@@ -2198,6 +2202,24 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
                 print(f"         No additional suggestions found.")
 
 
+def _clip_hook(clip: dict) -> dict | None:
+    """The clip's opening hook when it still fits the clip, else None.
+
+    Review can move a clip's edges after the hook was proposed. A hook left
+    outside the body would fail the whole render, so it is dropped with a note
+    and the clip renders without it.
+    """
+    from services.opening_hook import validate_hook
+
+    if not clip.get("hook"):
+        return None
+    try:
+        return validate_hook(clip["hook"], clip["start_second"], clip["end_second"], clip.get("segments"))
+    except ValueError as e:
+        print(f"         Opening hook dropped: {e}")
+        return None
+
+
 def _filter_duplicate_clip_suggestions(candidates: list, existing: list, overlap_threshold: float = 5.0) -> list:
     """Drop suggestions that significantly overlap already-selected clips."""
     filtered = []
@@ -2274,6 +2296,7 @@ def _post_render_loop(
                     outro_path=config.get("outro_path") or None,
                     intro_path=config.get("intro_path") or None,
                     keep_segments=clip.get("segments"),
+                    hook=_clip_hook(clip),
                     face_map=face_map,
                     allow_ass_fallback=config.get("allow_ass_fallback", False),
                     use_ass_captions=config.get("use_ass_captions", False),
@@ -2461,6 +2484,7 @@ def _post_render_loop(
                                         outro_path=config.get("outro_path") or None,
                                         intro_path=config.get("intro_path") or None,
                                         keep_segments=f_clip.get("segments"),
+                                        hook=_clip_hook(f_clip),
                                         face_map=face_map,
                                         allow_ass_fallback=config.get("allow_ass_fallback", False),
                                         use_ass_captions=config.get("use_ass_captions", False),
@@ -2518,6 +2542,7 @@ def _post_render_loop(
                                         outro_path=config.get("outro_path") or None,
                                         intro_path=config.get("intro_path") or None,
                                         keep_segments=nc.get("segments"),
+                                        hook=_clip_hook(nc),
                                         face_map=face_map,
                                         allow_ass_fallback=config.get("allow_ass_fallback", False),
                                         use_ass_captions=config.get("use_ass_captions", False),
@@ -5105,6 +5130,10 @@ def main():
                         help="Draw how much of the clip is left along the bottom edge")
     studio.add_argument("--progress-color", dest="progress_color")
     studio.add_argument("--cards", help="On-screen cards as JSON, each with kind/start/end")
+    studio.add_argument("--hook", help='Opening hook as JSON, on the source clock: '
+                                       '{"start":41.2,"end":45.8,"mode":"repeat"}. '
+                                       "Plays a 1-15 s passage from inside the fragment first; "
+                                       '"move" lifts it out of the body')
     studio.add_argument("--brand", help="Show colours as JSON: "
                                         '{"accent":"#4C9DF5","ink":"#FFFFFF","surface":"#0A0D14"}')
     studio.add_argument("--style", help='Visual theme as JSON: '
