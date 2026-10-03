@@ -209,6 +209,22 @@ async function readUIState(): Promise<ServerUIState | null> {
   }
 }
 
+/**
+ * Resolve the path episode decisions should be keyed on. A silence-removal
+ * pass rewrites the working video to a new path with a different size, which
+ * would otherwise orphan decisions already recorded against the original.
+ * When videoPath is the UI's current (derivative) video and a silenceOriginal
+ * is on record, key on the original instead so decisions carry over.
+ */
+async function resolveEpisodeKeyPath(videoPath: string): Promise<string> {
+  const state = await readUIState();
+  const original = state?.silenceOriginal?.videoPath;
+  if (original && (state?.videoPath === videoPath || state?.filePath === videoPath)) {
+    return original;
+  }
+  return videoPath;
+}
+
 /** Generate workflow guidance based on current state. */
 async function getWorkflowGuidance(): Promise<string> {
   const state = await readUIState();
@@ -283,7 +299,11 @@ async function getWorkflowGuidance(): Promise<string> {
 
   const videoPath = state.videoPath || state.filePath;
   if (videoPath) {
-    const openQuestions = await episodeState.openQuestions(videoPath).catch(() => []);
+    // A silence-removal pass rewrites the video to a new path with a different
+    // size, which would otherwise orphan decisions already recorded against the
+    // original. Key on the original so they carry over to its derivative.
+    const episodeKeyPath = state.silenceOriginal?.videoPath ?? videoPath;
+    const openQuestions = await episodeState.openQuestions(episodeKeyPath).catch(() => []);
     if (openQuestions.length > 0) {
       lines.push(
         "\nOPEN QUESTIONS for this episode — ask once, then call record_decisions so these never come up again:\n" +
@@ -1907,10 +1927,11 @@ export function createServer(): McpServer {
     },
     async ({ video_path, clip_count, clip_duration_min, clip_duration_max, caption_style, captions_enabled, language, thumbnails_wanted, delivery_target, notes }) => {
       try {
+        const keyPath = await resolveEpisodeKeyPath(video_path);
         const decisions: Record<string, unknown> = {};
         if (clip_count !== undefined) decisions.clipCount = clip_count;
         if (clip_duration_min !== undefined || clip_duration_max !== undefined) {
-          const existing = await episodeState.get(video_path);
+          const existing = await episodeState.get(keyPath);
           decisions.clipDurationRange = {
             min: clip_duration_min ?? existing?.clipDurationRange?.min ?? 0,
             max: clip_duration_max ?? existing?.clipDurationRange?.max ?? 0,
@@ -1929,8 +1950,8 @@ export function createServer(): McpServer {
           };
         }
 
-        const recorded = await episodeState.record(video_path, decisions);
-        const remaining = await episodeState.openQuestions(video_path);
+        const recorded = await episodeState.record(keyPath, decisions);
+        const remaining = await episodeState.openQuestions(keyPath);
         const lines = [
           `Recorded: ${Object.keys(decisions).join(", ")}`,
           remaining.length > 0

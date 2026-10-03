@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -79,5 +79,37 @@ describe("EpisodeState", () => {
     const state = new EpisodeState();
     expect(await state.keyFor(join(tmp, "nope.mp4"))).toBeNull();
     expect(await state.get(join(tmp, "nope.mp4"))).toBeNull();
+  });
+
+  it("loses no update when two record() calls race (serialized read-modify-write)", async () => {
+    const state = new EpisodeState();
+    // Both start from the same on-disk snapshot if record() doesn't serialize
+    // its read-modify-write; whichever write lands second would otherwise
+    // clobber the first field instead of merging with it.
+    await Promise.all([
+      state.record(videoA, { clipCount: 5 }),
+      state.record(videoA, { captionsEnabled: true }),
+    ]);
+    const got = await state.get(videoA);
+    expect(got?.clipCount).toBe(5);
+    expect(got?.captionsEnabled).toBe(true);
+  });
+
+  it("quarantines a corrupt decisions file instead of wiping it", async () => {
+    const state = new EpisodeState();
+    await state.record(videoA, { clipCount: 5 });
+    const decisionsPath = join(tmp, "home", "episode-decisions.json");
+    writeFileSync(decisionsPath, "{ not valid json");
+
+    const got = await state.get(videoA);
+    expect(got).toBeNull(); // corrupt file reads back as empty, not an error
+
+    const quarantined = readdirSync(join(tmp, "home")).filter((f) => f.includes(".corrupt-"));
+    expect(quarantined.length).toBe(1);
+    expect(existsSync(decisionsPath)).toBe(false); // moved aside, not left in place
+
+    // Recording after the quarantine starts a clean file rather than refusing.
+    await state.record(videoA, { clipCount: 9 });
+    expect((await state.get(videoA))?.clipCount).toBe(9);
   });
 });
