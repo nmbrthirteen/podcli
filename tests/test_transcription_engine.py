@@ -271,6 +271,57 @@ class ResolveEngineInfoTests(unittest.TestCase):
         self.assertEqual(tr.resolve_engine_info("whisper-py")["engine"], "whisper-py")
 
 
+class WhisperPyFallbackSharedPathTests(unittest.TestCase):
+    """resolve_engine_info (a cheap cache-key prediction) and transcribe_file
+    (about to actually transcribe) make the same fallback decision through
+    one shared function, _resolve_whisper_py_fallback, differing only in
+    whether they load the model weights to check it."""
+
+    def setUp(self):
+        self._orig_wcpp = tr._transcribe_with_whispercpp
+        self._orig_ready = tr._whispercpp_ready
+        tr._transcribe_with_whispercpp = lambda *a, **k: {"engine": "whispercpp"}
+        tr._whispercpp_ready = lambda size: True
+        self._saved_engine = os.environ.pop("PODCLI_ENGINE", None)
+        self._tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        self._tmp.write(b"x")
+        self._tmp.close()
+
+        # Simulate "import whisper" succeeding but whisper.load_model()
+        # failing — the one gap resolve_engine_info's cheap check can't see.
+        class _BrokenWhisperModule:
+            @staticmethod
+            def load_model(size):
+                raise RuntimeError("corrupt model weights")
+
+        self._had_whisper = sys.modules.get("whisper", "__absent__")
+        sys.modules["whisper"] = _BrokenWhisperModule()
+
+    def tearDown(self):
+        tr._transcribe_with_whispercpp = self._orig_wcpp
+        tr._whispercpp_ready = self._orig_ready
+        if self._had_whisper == "__absent__":
+            sys.modules.pop("whisper", None)
+        else:
+            sys.modules["whisper"] = self._had_whisper
+        os.unlink(self._tmp.name)
+        if self._saved_engine is None:
+            os.environ.pop("PODCLI_ENGINE", None)
+        else:
+            os.environ["PODCLI_ENGINE"] = self._saved_engine
+
+    def test_transcribe_file_falls_back_to_whispercpp_on_a_load_model_failure(self):
+        result = tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=False)
+        self.assertEqual(result["engine"], "whispercpp")
+
+    def test_resolve_engine_info_cannot_see_this_failure_by_design(self):
+        # Documents the known, acceptable gap: resolve_engine_info only
+        # checks the import, so it still predicts whisper-py here even
+        # though transcribe_file will fall back — a one-time cache miss,
+        # not a wrong cache write (that's keyed by what actually ran).
+        self.assertEqual(tr.resolve_engine_info(None, "base")["engine"], "whisper-py")
+
+
 class WhisperCppModelAliasTests(unittest.TestCase):
     """"large" alone doesn't name a real ggml file upstream (v1/v2/v3/v3-turbo
     are separate downloads); provisioning always fetches large-v3, so the
