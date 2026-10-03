@@ -644,6 +644,35 @@ class SidecarsAndCleanVariantTests(unittest.TestCase):
         clean_duration = cg._get_media_duration(clean_path)
         self.assertAlmostEqual(main_duration, clean_duration, delta=0.5)
 
+    def test_video_only_source_does_not_require_an_audio_stream(self):
+        from services import clip_generator as cg
+
+        silent_src = os.path.join(self.tmpdir, "silent_src.mp4")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=3",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                silent_src,
+            ],
+            check=True, capture_output=True,
+        )
+        self.assertFalse(cg.probe_has_audio_stream(silent_src))
+
+        out_dir = os.path.join(self.tmpdir, "out_silent")
+        result = cg.generate_clip(
+            video_path=silent_src,
+            start_second=0,
+            end_second=2.5,
+            caption_style="subtle",
+            crop_strategy="center",
+            title="silent_source_test",
+            output_dir=out_dir,
+            captions=False,
+            clean_fillers=False,
+        )
+        self.assertTrue(os.path.exists(result["output_path"]))
+
     def test_no_sidecars_when_captions_off_and_not_explicitly_requested(self):
         from services import clip_generator as cg
 

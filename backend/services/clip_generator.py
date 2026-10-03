@@ -960,6 +960,12 @@ def generate_clip(
     if end_second <= start_second:
         raise ValueError("end_second must be greater than start_second")
 
+    # A video-only source (e.g. a silent screen recording) never gets an
+    # audio stream from any of the steps below, so requiring one would
+    # reject every render of it as "broken" instead of a legitimately
+    # silent clip.
+    source_has_audio = probe_has_audio_stream(video_path)
+
     # ffmpeg's -ss/-t cut silently stops at EOF when end_second runs past the
     # source, so without this the render "succeeds" with a shorter clip than
     # requested while duration/end_second in the result still say the planned
@@ -1486,7 +1492,7 @@ def generate_clip(
                 f"The source video likely ended before the requested range, or "
                 f"the render failed partway through."
             )
-        if not probe_has_audio_stream(final_path):
+        if source_has_audio and not probe_has_audio_stream(final_path):
             os.remove(final_path)
             raise RuntimeError(
                 "Render completed but the output has no audio stream. "
