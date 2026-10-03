@@ -973,6 +973,40 @@ def handle_analyze_silence(task_id: str, params: dict):
         emit_result(task_id, "error", error=str(e))
 
 
+def handle_compare_engines(task_id: str, params: dict):
+    """Transcribe the same sample window with two engines and report where
+    they disagree — see services/engine_comparison.py for the scoring."""
+    import time as _time
+    from config.paths import paths
+    from services.engine_comparison import compare_engines
+
+    file_path = params.get("file_path", "")
+    if not file_path or not os.path.exists(file_path):
+        emit_result(task_id, "error", error=f"File not found: {file_path}")
+        return
+
+    output_dir = params.get("output_dir") or os.path.join(
+        paths["output"], "engine-comparisons", f"{int(_time.time())}"
+    )
+    try:
+        emit_progress(task_id, "comparing", 10, f"Transcribing with {params.get('engine_a')}...")
+        report = compare_engines(
+            file_path,
+            params.get("engine_a", "whispercpp"),
+            params.get("engine_b", "whisper-py"),
+            start_seconds=params.get("start_seconds", 0.0) or 0.0,
+            duration_seconds=params.get("duration_seconds", 120.0) or 120.0,
+            window_seconds=params.get("window_seconds", 20.0) or 20.0,
+            model_size=params.get("model_size", "base"),
+            language=params.get("language"),
+            output_dir=output_dir,
+        )
+        emit_progress(task_id, "comparing", 100, "Comparison complete")
+        emit_result(task_id, "success", data=report)
+    except (FileNotFoundError, RuntimeError, ValueError) as e:
+        emit_result(task_id, "error", error=str(e))
+
+
 def handle_render_silence_removed(task_id: str, params: dict):
     """Render the approved local cut plan and remap transcript timestamps."""
     from config.paths import paths
@@ -1130,6 +1164,7 @@ TASK_HANDLERS = {
     "ping": handle_ping,
     "resolve_transcribe_engine": handle_resolve_transcribe_engine,
     "transcribe": handle_transcribe,
+    "compare_engines": handle_compare_engines,
     "parse_transcript": handle_parse_transcript,
     "create_clip": handle_create_clip,
     "batch_clips": handle_batch_clips,

@@ -11,6 +11,10 @@ import {
   handleJobStatus,
 } from "./handlers/transcribe.handler.js";
 import {
+  compareEnginesToolDef,
+  handleCompareEngines,
+} from "./handlers/compare-engines.handler.js";
+import {
   suggestClipsToolDef,
   suggestClipsInputShape,
   handleSuggestClips,
@@ -2622,6 +2626,39 @@ export function createServer(): McpServer {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
         };
+      }
+    },
+  );
+
+  // =============================================
+  // Tool: compare_transcription_engines
+  // =============================================
+  server.tool(
+    compareEnginesToolDef.name,
+    compareEnginesToolDef.description,
+    {
+      file_path: z.string().describe("Absolute path to the podcast file"),
+      engine_a: z.enum(["whisper-py", "whispercpp", "assemblyai"]).describe("First engine to compare"),
+      engine_b: z.enum(["whisper-py", "whispercpp", "assemblyai"]).describe("Second engine to compare"),
+      start_seconds: z.number().optional().describe("Sample start, seconds into the source. Default: 0."),
+      duration_seconds: z.number().optional().describe("Sample length in seconds. Default: 120."),
+      window_seconds: z.number().optional().describe("Report window size in seconds. Default: 20."),
+      model_size: z
+        .enum(["tiny", "base", "small", "medium", "large"])
+        .optional()
+        .describe("Model size for engines that take one. Default: base."),
+      language: z.string().optional().describe("ISO language code. Leave empty for auto-detect."),
+      output_dir: z
+        .string()
+        .optional()
+        .describe("Where to write comparison.json/.html. Defaults under the podcli output directory."),
+    },
+    async (input) => {
+      try {
+        const text = await handleCompareEngines(input);
+        return { content: [{ type: "text" as const, text }] };
+      } catch (err: unknown) {
+        return mcpError(err);
       }
     },
   );

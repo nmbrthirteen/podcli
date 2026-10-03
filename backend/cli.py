@@ -4088,6 +4088,40 @@ def cmd_cache(args):
     print(f"  {gray}Run {accent}podcli cache clear{reset} {gray}to delete all{reset}\n")
 
 
+def cmd_compare_engines(args):
+    """Transcribe the same sample window with two engines and report where they disagree."""
+    from services.engine_comparison import compare_engines
+
+    accent = "\033[38;2;212;135;74m"
+    gray = "\033[38;5;245m"
+    reset = "\033[0m"
+
+    if not os.path.exists(args.video):
+        print(f"podcli: file not found: {args.video}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Comparing {accent}{args.engine_a}{reset} vs {accent}{args.engine_b}{reset} "
+          f"on {args.duration:.0f}s starting at {args.start:.0f}s...")
+
+    report = compare_engines(
+        args.video,
+        args.engine_a,
+        args.engine_b,
+        start_seconds=args.start,
+        duration_seconds=args.duration,
+        window_seconds=args.window,
+        model_size=args.model_size,
+        language=args.language,
+        output_dir=args.output,
+    )
+
+    print(f"\nOverall disagreement: {accent}{report['overall_disagreement']:.2f}{reset} "
+          f"(0 = identical output, 1 = completely different; not accuracy against a transcript)")
+    if report["both_empty_window_count"]:
+        print(f"{gray}{report['both_empty_window_count']} window(s) had no words from either engine{reset}")
+    print(f"{gray}Wrote {report['json_path']} and {report['html_path']}{reset}")
+
+
 def cmd_info(args):
     """Show system info."""
     from services.encoder import get_encoder_info
@@ -5324,6 +5358,21 @@ def main():
     # ── info ──
     sub.add_parser("info", help="Show system info (encoder, etc.)")
 
+    # ── compare-engines ──
+    cmp_p = sub.add_parser(
+        "compare-engines",
+        help="Transcribe the same sample window with two engines and report where they disagree",
+    )
+    cmp_p.add_argument("video", help="Path to podcast video/audio file")
+    cmp_p.add_argument("engine_a", choices=["whisper-py", "whispercpp", "assemblyai", "omnilingual"])
+    cmp_p.add_argument("engine_b", choices=["whisper-py", "whispercpp", "assemblyai", "omnilingual"])
+    cmp_p.add_argument("--start", type=float, default=0.0, help="Sample start, seconds into the source (default: 0)")
+    cmp_p.add_argument("--duration", type=float, default=120.0, help="Sample length in seconds (default: 120)")
+    cmp_p.add_argument("--window", type=float, default=20.0, help="Report window size in seconds (default: 20)")
+    cmp_p.add_argument("--model-size", default="base", help="Model size for engines that take one (default: base)")
+    cmp_p.add_argument("--language", help="ISO language code. Auto-detect if omitted.")
+    cmp_p.add_argument("-o", "--output", default="./engine-comparison", help="Output directory for comparison.json/.html")
+
     init_thumb = sub.add_parser(
         "init-thumbnail",
         help="Scaffold .podcli/thumbnail-config.json so podcli generates thumbnails for you",
@@ -5404,6 +5453,8 @@ def main():
         cmd_cache(args)
     elif args.command == "info":
         cmd_info(args)
+    elif args.command == "compare-engines":
+        cmd_compare_engines(args)
     elif args.command == "init-thumbnail":
         cmd_init_thumbnail(args)
     elif args.command in ("ui", "webui"):
