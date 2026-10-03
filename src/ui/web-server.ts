@@ -1582,6 +1582,9 @@ app.post("/api/batch-clips", async (req, res) => {
       job.progress = 100;
       job.message = "Batch complete!";
       job.result = data;
+      // Persist here too: the studio tab may be closed (an MCP-driven
+      // export), and it only stores results when it hears job-complete.
+      uiState.results = data?.results ?? [];
       // Record successful clips to history
       try {
         await historyRecorder.recordRemaining(result.data?.results);
@@ -4754,6 +4757,7 @@ app.post("/api/mcp/export", async (req, res) => {
       job.progress = 100;
       job.message = "Export complete!";
       job.result = data;
+      uiState.results = data?.results ?? [];
       // Record clips to history
       try {
         await historyRecorder.recordRemaining(result.data?.results);

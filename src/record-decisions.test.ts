@@ -130,3 +130,16 @@ describe("recordDecisionsInputSchema", () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe("record_decisions duration range", () => {
+  it("stores only the side given, never a 0 for the missing one", async () => {
+    const { EpisodeState } = await import("./services/episode-state.js");
+    const fresh = join(tmp, "fresh-episode.mp4");
+    writeFileSync(fresh, "another fake video");
+    const handler = getHandler("record_decisions");
+    await handler({ video_path: fresh, clip_duration_min: 30 }, {});
+    expect((await new EpisodeState().get(fresh))?.clipDurationRange).toEqual({ min: 30 });
+    await handler({ video_path: fresh, clip_duration_max: 60 }, {});
+    expect((await new EpisodeState().get(fresh))?.clipDurationRange).toEqual({ min: 30, max: 60 });
+  });
+});

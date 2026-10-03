@@ -11,10 +11,24 @@ The model takes no language conditioning — there's no -l equivalent. It
 decodes everything through the same multilingual weights.
 """
 
+import hashlib
 import json
 import os
+import shutil
+import urllib.request
+import uuid
 import wave
 from typing import Optional
+
+# Mirrors the pins in cli/internal/provision/provision.go so the studio and
+# MCP paths can fetch the model on first use, not only the launcher.
+MODEL_REVISION = "5243e02858d1428b8fbeeb5f7f1cc6fccf4d9433"
+MODEL_REPO = "csukuangfj2/sherpa-onnx-omnilingual-asr-1600-languages-1B-ctc-v2-int8-2026-02-05"
+MODEL_FILES = {
+    "model.int8.onnx": ("8af72da192fc2c8567c328d4f8059bdf47f182a0369077893c295ef39740c637", 1032239439),
+    "tokens.txt": ("7d99997ef207ff14c2cfe825f2aa037528ea250113cc3c6392bfe49326884ba6", 90630),
+    "LICENSE": ("a70a523bafbb595c2844104feb313d204904dac91c3d186c05f22a10a71c7a94", 581),
+}
 
 # Decode window: 20s cores tiled across the file, each padded with 1s of
 # context on each side (clipped to file bounds) so CTC isn't starved of
@@ -35,6 +49,42 @@ SEGMENT_PAUSE_SECONDS = 0.5
 WORD_END_PAD_SECONDS = 0.02
 
 _WORD_BOUNDARY = " "
+
+
+def _sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def ensure_model(model_dir: str, progress_callback=None) -> None:
+    """Download any missing or outdated pinned model file into model_dir.
+
+    Files only land through a hash-checked rename, so an existing file of the
+    pinned size is trusted without rehashing 1 GB on every run. A size
+    mismatch means an older model (the 300M one) and gets replaced.
+    """
+    os.makedirs(model_dir, exist_ok=True)
+    for name, (sha, size) in MODEL_FILES.items():
+        dest = os.path.join(model_dir, name)
+        if os.path.exists(dest) and os.path.getsize(dest) == size:
+            continue
+        if progress_callback:
+            progress_callback(5, f"Downloading the omnilingual model, {size / 1e9:.1f} GB on first use ({name})")
+        url = f"https://huggingface.co/{MODEL_REPO}/resolve/{MODEL_REVISION}/{name}"
+        tmp = os.path.join(model_dir, f".{name}.{uuid.uuid4().hex}.download")
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "podcli"})
+            with urllib.request.urlopen(request, timeout=60) as response, open(tmp, "wb") as target:
+                shutil.copyfileobj(response, target, 4 * 1024 * 1024)
+            if _sha256(tmp) != sha:
+                raise RuntimeError(f"omnilingual {name} checksum mismatch; download again")
+            os.replace(tmp, dest)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
 
 
 def _read_wav_mono16(wav_path: str):

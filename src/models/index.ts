@@ -186,7 +186,7 @@ export interface EpisodeDecisions {
   videoPath: string;
   fileSize: number;
   clipCount?: number;
-  clipDurationRange?: { min: number; max: number };
+  clipDurationRange?: { min?: number; max?: number };
   captionStyle?: string;
   captionsEnabled?: boolean;
   language?: string;

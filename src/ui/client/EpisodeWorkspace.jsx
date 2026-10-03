@@ -1018,7 +1018,7 @@ const onKeyActivate = (fn) => (e) => {
           const fileData = await api('/select-file', { method: 'POST', body: JSON.stringify({ file_path: vp }) });
           if (fileData.error) { setTranscribing(false); return; }
           setFile(fileData);
-          const engine = transcriptionEngine === 'assemblyai' ? 'assemblyai' : undefined;
+          const engine = transcriptionEngine === 'whisper' ? undefined : transcriptionEngine;
           const data = await api('/transcribe', { method: 'POST', body: JSON.stringify({
             file_path: vp,
             model_size: whisperModel,
@@ -2000,6 +2000,7 @@ const onKeyActivate = (fn) => (e) => {
                         <label className="field-label">Engine</label>
                         <select value={transcriptionEngine} onChange={e => { setTranscriptionEngine(e.target.value); setTranscript(null); setCachedTranscript(false); autoTranscribeRef.current = ''; }} disabled={isProcessing || transcribing}>
                           <option value="whisper">Whisper</option>
+                          <option value="omnilingual">Omnilingual (1600 languages)</option>
                           <option value="assemblyai">AssemblyAI</option>
                         </select>
                       </div>
@@ -2014,6 +2015,11 @@ const onKeyActivate = (fn) => (e) => {
                         </div>
                       )}
                     </div>
+                    {transcriptionEngine === 'omnilingual' && (
+                      <p className="hint" style={{ marginBottom: 10 }}>
+                        Runs on this machine. The first run downloads a 1 GB model. Text comes back lowercase with no punctuation.
+                      </p>
+                    )}
                     {transcriptionEngine === 'assemblyai' && (
                       <div style={{ marginBottom: 10 }}>
                         <label className="field-label">AssemblyAI API key</label>

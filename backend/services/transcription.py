@@ -144,6 +144,8 @@ def _transcribe_with_omnilingual(file_path, progress_callback, wav_path=None):
 
     model = _omnilingual_model()
     tokens = _omnilingual_tokens()
+    if not (os.environ.get("PODCLI_OMNILINGUAL_MODEL") or os.environ.get("PODCLI_OMNILINGUAL_TOKENS")):
+        omni.ensure_model(os.path.dirname(model), progress_callback)
     if not os.path.exists(model) or not os.path.exists(tokens):
         raise FileNotFoundError(
             f"omnilingual model not found: {model}. "

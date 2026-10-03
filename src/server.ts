@@ -1992,9 +1992,12 @@ export function createServer(): McpServer {
         if (clip_count !== undefined) decisions.clipCount = clip_count;
         if (clip_duration_min !== undefined || clip_duration_max !== undefined) {
           const existing = await episodeState.get(keyPath);
+          // A side nobody gave stays absent; 0 would read as a real limit.
+          const min = clip_duration_min ?? existing?.clipDurationRange?.min;
+          const max = clip_duration_max ?? existing?.clipDurationRange?.max;
           decisions.clipDurationRange = {
-            min: clip_duration_min ?? existing?.clipDurationRange?.min ?? 0,
-            max: clip_duration_max ?? existing?.clipDurationRange?.max ?? 0,
+            ...(min !== undefined && { min }),
+            ...(max !== undefined && { max }),
           };
         }
         if (caption_style !== undefined) decisions.captionStyle = caption_style;
