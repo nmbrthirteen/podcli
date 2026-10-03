@@ -115,6 +115,9 @@ class Source:
     file_size: int = 0  # size at probe time; a mismatch on reopen means the file changed underneath us
     file_mtime_ns: int = 0  # mtime at probe time, nanosecond resolution
     fps_warning: str = ""  # set when the container's frame rate looks variable or had to be guessed
+    audio_stream_count: int = 1  # separate audio streams in the container (not channels within one stream)
+    audio_stream_index: int = 0  # which audio stream to use, for MXF-style cameras with one mono stream per mic
+    audio_stream_channels: list[int] = field(default_factory=list)  # channel count per audio stream, by index
     role: str = "ignore"  # "camera" | "mic" | "ignore"
     # camera: a person id or "wide"; mic: a person id, or "" for a shared room mic
     person: str = ""
@@ -337,7 +340,8 @@ def probe_source(path: str) -> Source:
          and not (s.get("disposition") or {}).get("attached_pic")),
         None,
     )
-    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+    audio = audio_streams[0] if audio_streams else None
     durations = [float(info.get("format", {}).get("duration") or 0)]
     durations += [float(s.get("duration") or 0) for s in streams]
     duration = max(durations)
@@ -383,6 +387,8 @@ def probe_source(path: str) -> Source:
         file_size=stat.st_size,
         file_mtime_ns=stat.st_mtime_ns,
         fps_warning=fps_warning,
+        audio_stream_count=len(audio_streams),
+        audio_stream_channels=[int(a.get("channels") or 0) for a in audio_streams],
     )
 
 
@@ -952,6 +958,15 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
         if "channel_people" in edit:
             chans = [c if c in valid else "" for c in (edit["channel_people"] or [])]
             s.channel_people = chans[: max(0, s.audio_channels)] if any(chans) else []
+        if "audio_stream_index" in edit:
+            idx = edit["audio_stream_index"]
+            if not isinstance(idx, int) or not 0 <= idx < max(1, s.audio_stream_count):
+                raise ValueError(f"{os.path.basename(s.path)} has {s.audio_stream_count} audio "
+                                 f"stream(s); audio_stream_index must be between 0 and {s.audio_stream_count - 1}")
+            s.audio_stream_index = idx
+            if idx < len(s.audio_stream_channels):
+                s.audio_channels = s.audio_stream_channels[idx]
+            s.channel_people = []
         if (("offset" in edit and edit["offset"] is not None) or "nudge" in edit) and s.virtual:
             raise ValueError("A tile or split screen moves with the files it comes from. Move those instead.")
         if "offset" in edit and edit["offset"] is not None:
@@ -1008,7 +1023,7 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
 
 def _cut_inputs(session: MulticamSession) -> str:
     return json.dumps([
-        [(s.id, s.role, s.person, s.channel_people, s.offset) for s in session.sources],
+        [(s.id, s.role, s.person, s.channel_people, s.audio_stream_index, s.offset) for s in session.sources],
         [(p.id, p.role) for p in session.people], session.range_start, session.range_end,
         session.cut_settings, session.speaker_map,
     ], default=str)
@@ -1033,7 +1048,7 @@ def _extract(source: Source, out: Path, channel: int = -1, rate: int = SYNC_RATE
     # clock the render and editors use; audio often starts 20-100 ms after video.
     proc_run([
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-i", source.path, "-vn", "-map", "0:a:0",
+        "-i", source.path, "-vn", "-map", f"0:a:{source.audio_stream_index}",
         "-af", f"aresample=async=1:first_pts=0,{pick}",
         "-ar", str(rate), "-acodec", "pcm_s16le", str(tmp),
     ], timeout=3600, check=True)
@@ -1259,7 +1274,8 @@ def sync_session(
 # ---------------------------------------------------------------------------
 
 def _activity_key(session: MulticamSession) -> str:
-    feeds = [(s.id, _file_identity(s), ch, pid, s.offset, s.speed) for s, ch, pid in session.person_mics()]
+    feeds = [(s.id, _file_identity(s), s.audio_stream_index, ch, pid, s.offset, s.speed)
+             for s, ch, pid in session.person_mics()]
     blob = json.dumps([feeds, session.speaker_map, session.person_ids()], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
@@ -1831,7 +1847,8 @@ def _write_mix(session: MulticamSession, out: Path, start: float, duration: floa
 
 def _mix_key(session: MulticamSession) -> str:
     """Changes whenever which mics are mixed, or where they sit, changes."""
-    feeds = [(s.id, ch, s.offset, s.speed, os.path.getmtime(s.path)) for s, ch in _audio_inputs(session)]
+    feeds = [(s.id, s.audio_stream_index, ch, s.offset, s.speed, os.path.getmtime(s.path))
+             for s, ch in _audio_inputs(session)]
     return hashlib.sha1(json.dumps(feeds, default=str).encode()).hexdigest()[:12]
 
 
@@ -2014,7 +2031,7 @@ def set_removals(session: MulticamSession, removals: list) -> MulticamSession:
 def _render_key(session: MulticamSession, stems: bool) -> str:
     """Everything the MP4 depends on, so an unchanged edit isn't rendered twice."""
     used = {c["source_id"] for c in session.cuts} | {s.id for s, _ in _audio_inputs(session)}
-    files = [(s.id, s.offset, s.speed, s.channel_people, s.person, os.path.getmtime(s.path))
+    files = [(s.id, s.offset, s.speed, s.channel_people, s.audio_stream_index, s.person, os.path.getmtime(s.path))
              for s in session.sources if s.id in used and os.path.exists(s.path)]
     blob = json.dumps([session.cuts, session.removals, session.look, stems, files], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:16]

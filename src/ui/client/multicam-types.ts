@@ -30,9 +30,12 @@ export interface McSource {
   duration: number;
   has_audio: boolean;
   audio_channels: number;
+  audio_stream_count?: number;
+  audio_stream_index?: number;
   width?: number;
   height?: number;
   fps?: number;
+  fps_warning?: string;
   role: McRole;
   person: string;
   channel_people: string[];

@@ -1127,6 +1127,54 @@ def _fake_probe(tmp_path, monkeypatch, video_stream):
     return mc.probe_source(str(path))
 
 
+def test_probe_source_counts_multiple_audio_streams(tmp_path, monkeypatch):
+    path = tmp_path / "cam.mxf"
+    path.write_bytes(b"0")
+    info = {"format": {"duration": "10.0", "tags": {}}, "streams": [
+        {"codec_type": "video", "avg_frame_rate": "30/1", "r_frame_rate": "30/1"},
+        {"codec_type": "audio", "channels": 1},
+        {"codec_type": "audio", "channels": 1},
+    ]}
+    monkeypatch.setattr(mc, "get_video_info", lambda p: info)
+    src = mc.probe_source(str(path))
+    assert src.audio_stream_count == 2
+    assert src.audio_stream_channels == [1, 1]
+    assert src.audio_stream_index == 0
+
+
+def test_update_mapping_validates_audio_stream_index(sandbox):
+    session = mc.MulticamSession(
+        session_id="abc123abc999", name="ep",
+        people=[mc.Person("nika", "Nika")],
+        sources=[mc.Source(id="a", path="/x/cam_a.mov", kind="video", duration=9, has_audio=True,
+                            audio_channels=1, audio_stream_count=2, audio_stream_channels=[1, 2])],
+    )
+    with pytest.raises(ValueError, match="audio_stream_index"):
+        mc.update_mapping(session, {"sources": [{"id": "a", "audio_stream_index": 5}]})
+    session = mc.update_mapping(session, {"sources": [{"id": "a", "audio_stream_index": 1}]})
+    src = session.source("a")
+    assert src.audio_stream_index == 1
+    assert src.audio_channels == 2  # recomputed from the selected stream, not the first one
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_extract_reads_the_selected_audio_stream_not_always_the_first(sandbox):
+    path = sandbox / "two_streams.mp4"
+    _ffmpeg("-f", "lavfi", "-i", "color=s=160x90:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+            "-f", "lavfi", "-i", "sine=f=440:r=48000:d=2",
+            "-map", "0:v", "-map", "1:a", "-map", "2:a", "-shortest",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path))
+    src = mc.probe_source(str(path))
+    assert src.audio_stream_count == 2
+
+    silent = mc._read_wav(mc._extract(src, sandbox / "stream0.wav"))
+    assert np.abs(silent).mean() < 50  # stream 0 is anullsrc: near silence
+
+    src.audio_stream_index = 1
+    tone = mc._read_wav(mc._extract(src, sandbox / "stream1.wav"))
+    assert np.abs(tone).mean() > 1000  # stream 1 is a 440 Hz tone
+
+
 def test_probe_source_warns_on_variable_frame_rate(tmp_path, monkeypatch):
     # avg_frame_rate (what actually played) is far below r_frame_rate (the
     # stream's time base): frames held variable lengths.

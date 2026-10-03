@@ -2260,6 +2260,7 @@ export function createServer(): McpServer {
             role: z.enum(["camera", "mic", "ignore"]).optional(),
             person: z.string().optional().describe("Camera: a person id or 'wide'. Mic: a person id, or '' for a shared room mic"),
             channel_people: z.array(z.string()).optional().describe("Mic: one person id per channel when a recorder puts two people on L/R"),
+            audio_stream_index: z.number().int().min(0).optional().describe("Which audio stream in the container to use, for cameras (often MXF) that carry one mono stream per mic instead of packing channels into a single stream"),
             offset: z.number().optional().describe("Timeline seconds where this file starts, to override sync"),
             nudge: z.number().optional().describe("Seconds to shift the synced offset by"),
           }),
