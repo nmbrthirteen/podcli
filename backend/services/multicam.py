@@ -2610,9 +2610,10 @@ def render_session(
             # discarded along with it instead of being published alone.
             stem_paths = _render_stems(session, work, start, end - start, splice, gain)
 
-        # Every piece rendered; publish video, stems and the session record
-        # together. A crash between these renames can only ever leave either
-        # the previous complete render or this one in place, never a mix.
+        # Every piece rendered and staged beside its final name, so publishing
+        # is a run of same-volume renames that takes milliseconds. Paths stay
+        # stable across renders; a crash inside that window can still pair a
+        # new video with old stems, which the next render overwrites.
         video = out_dir / "episode.mp4"
         tmp_video = video.with_name(video.name + ".publishing")
         # shutil.move falls back to copy+delete when work and output sit on different volumes.
@@ -2627,6 +2628,11 @@ def render_session(
         os.replace(str(tmp_video), str(video))
         for tmp_stem, dest in pending_stems:
             os.replace(str(tmp_stem), str(dest))
+        # A person dropped from the edit would otherwise keep last render's stem.
+        current = {str(dest) for _, dest in pending_stems}
+        for old in session.outputs.get("stems") or []:
+            if old not in current and Path(old).parent == out_dir and os.path.exists(old):
+                os.remove(old)
 
         session.outputs = {
             **session.outputs,

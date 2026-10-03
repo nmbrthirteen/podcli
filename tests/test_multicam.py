@@ -280,6 +280,30 @@ def test_a_stems_failure_does_not_strand_a_video_with_no_outputs_record(episode,
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_a_rerender_keeps_stable_paths_and_drops_stems_nobody_needs(episode):
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    mc.update_mapping(session, {"sources": [
+        {"id": s.id, "role": "camera", "person": "nika" if "one" in os.path.basename(s.path) else "ana"}
+        for s in session.sources if s.kind == "video"
+    ]})
+    session = mc.plan_session(mc.sync_session(session))
+    out_dir = mc._output_dir(session)
+    first = mc.render_session(session)
+    assert first["video"] == str(out_dir / "episode.mp4")
+
+    stale = out_dir / "former-guest.wav"
+    stale.write_bytes(b"old stem")
+    session = mc.MulticamSession.load(session.session_id)
+    session.outputs = {**session.outputs, "stems": [*session.outputs["stems"], str(stale)], "render_key": ""}
+    session.save()
+
+    second = mc.render_session(session)
+    assert second["video"] == first["video"]
+    assert not stale.exists()
+    assert all(os.path.exists(p) for p in second["stems"])
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 def test_sync_measures_clock_drift(sandbox):
     folder = sandbox / "drift"
     folder.mkdir()
