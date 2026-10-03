@@ -51,6 +51,7 @@ import {
   findSuggestionSegments,
   reconcileSegmentsForRange,
 } from "../utils/transcript.js";
+import { formatSrtTime, formatVttTime } from "../utils/srt-time.js";
 import { errMsg } from "../utils/errors.js";
 import { resolveByteRange } from "../utils/http-range.js";
 import {
@@ -2155,15 +2156,8 @@ app.get("/api/export-transcript", (_req, res) => {
     });
   }
 
-  const fmtSrt = (s: number) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = Math.floor(s % 60);
-    const ms = Math.round((s % 1) * 1000);
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
-  };
-
-  const fmtVtt = (s: number) => fmtSrt(s).replace(",", ".");
+  const fmtSrt = formatSrtTime;
+  const fmtVtt = formatVttTime;
 
   if (format === "vtt") {
     let vtt = "WEBVTT\n\n";
