@@ -1910,10 +1910,23 @@ def _audio_inputs(session: MulticamSession) -> list[tuple[Source, int]]:
     return [(session.source(session.reference_id), -1)]
 
 
+MIX_RATE = 48000
+# asetrate only takes whole rates, so at 48 kHz the nearest one can be 10 ppm
+# off the drift; labelling the audio 1000 times faster first lets one resample
+# step land within 0.01 ppm, and the resample itself stays near 1:1.
+DRIFT_LABEL_SCALE = 1000
+
+
+def _drift_steps(speed: float) -> list[str]:
+    """Filter steps stretching MIX_RATE audio by `speed` through a resample, keeping its length exact."""
+    fast = MIX_RATE * DRIFT_LABEL_SCALE
+    return [f"asetrate={fast}", f"aresample={round(fast * speed)}", f"asetrate={MIX_RATE}"]
+
+
 def _aligned_input(s: Source, channel: int, start: float, duration: float) -> tuple[list[str], list[str]]:
-    """ffmpeg input args and mono filter steps that place a source on [start, start + duration]."""
+    """ffmpeg input args and mono MIX_RATE filter steps that place a source on [start, start + duration]."""
     src_start = s.source_time(start)
-    steps = ["aresample=async=1:first_pts=0"]
+    steps = [f"aresample={MIX_RATE}:async=1:first_pts=0"]
     if channel >= 0:
         steps.append(f"pan=mono|c0=c{channel}")
     elif s.audio_channels >= 2:
@@ -1921,11 +1934,11 @@ def _aligned_input(s: Source, channel: int, start: float, duration: float) -> tu
     else:
         steps.append("pan=mono|c0=c0")
     if abs(s.speed - 1.0) > 1e-7:
-        steps.append(f"atempo={1.0 / s.speed:.8f}")
+        steps += _drift_steps(s.speed)
     if src_start < 0:
-        steps.append(f"adelay={int(round(-src_start * 1000))}")
-    steps.append(f"apad,atrim=0:{duration:.4f}")
-    return ["-ss", f"{max(0.0, src_start):.4f}", "-i", s.path], steps
+        steps.append(f"adelay={round(-src_start * s.speed * MIX_RATE)}S")
+    steps.append(f"apad,atrim=0:{duration:.6f}")
+    return ["-ss", f"{max(0.0, src_start):.6f}", "-i", s.path], steps
 
 
 def _write_mix(session: MulticamSession, out: Path, start: float, duration: float, *,
@@ -1953,20 +1966,58 @@ def _mix_key(session: MulticamSession) -> str:
     return hashlib.sha1(json.dumps(feeds, default=str).encode()).hexdigest()[:12]
 
 
-def _render_audio(session: MulticamSession, out: Path, start: float, duration: float) -> None:
-    _write_mix(
-        session, out, start, duration,
-        per_feed=("dynaudnorm=f=250:g=15:p=0.9",),
-        after="loudnorm=I=-16:TP=-1.5:LRA=11,aformat=channel_layouts=stereo",
-        encode=("-ar", "48000", "-c:a", "pcm_s16le"),
-    )
+# Rumble and handling noise sit under 70 Hz; a gentle high-pass takes them
+# out before leveling would lift them along with the voice.
+VOICE_CHAIN = ("highpass=f=70:poles=2", "dynaudnorm=f=250:g=15:p=0.9")
+
+
+def _normalization(path: Path) -> tuple[float, bool]:
+    """The linear gain (dB) that brings a mix to LOUDNESS_TARGET, and whether peaks then need limiting."""
+    from services.audio_normalize import _parse_loudnorm_stats
+
+    res = proc_run([
+        "ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
+        "-af", f"loudnorm=I={LOUDNESS_TARGET}:TP={TRUE_PEAK_CEILING}:LRA=11:print_format=json", "-f", "null", "-",
+    ], timeout=3600, check=False)
+    stats = _parse_loudnorm_stats(res.stderr)
+    if not stats:
+        return 0.0, False
+    gain = LOUDNESS_TARGET - float(stats["input_i"])
+    return gain, float(stats["input_tp"]) + gain > TRUE_PEAK_CEILING
+
+
+def _render_audio(session: MulticamSession, out: Path, start: float, duration: float) -> float:
+    """The episode mix: every mic high-passed and leveled, then one measured gain to LOUDNESS_TARGET.
+
+    Returns that gain in dB so the stems can carry it too. Only peaks the gain
+    would push past TRUE_PEAK_CEILING meet a limiter, and only on the mix.
+    """
+    premix = out.with_name(f"{out.stem}.premix.wav")
+    # Float keeps a sum of hot mics from clipping before the gain brings it down.
+    _write_mix(session, premix, start, duration, per_feed=VOICE_CHAIN, encode=("-c:a", "pcm_f32le"))
+    gain, limit = _normalization(premix)
+    steps = [f"volume={gain:.3f}dB"]
+    if limit:
+        # alimiter reads sample peaks; half a dB under the ceiling leaves room for the peaks between samples.
+        ceiling = 10 ** ((TRUE_PEAK_CEILING - 0.5) / 20)
+        steps.append(f"alimiter=limit={ceiling:.4f}:level=0:latency=1")
+    proc_run([
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(premix),
+        "-af", ",".join([*steps, "aformat=channel_layouts=stereo"]), "-ar", str(MIX_RATE), "-c:a", "pcm_s16le", str(out),
+    ], timeout=3600, check=True)
+    premix.unlink(missing_ok=True)
+    return gain
 
 
 def _render_stems(
     session: MulticamSession, out_dir: Path, start: float, duration: float,
-    splice: Optional[list[tuple[float, float]]] = None,
+    splice: Optional[list[tuple[float, float]]] = None, gain: float = 0.0,
 ) -> list[str]:
-    """One WAV per person; a person recorded across several files (recorder splits) gets them mixed in."""
+    """One WAV per person, processed like the mix and carrying its gain, so the stems sum to it.
+
+    A person recorded across several files (recorder splits) gets them mixed
+    in. Float samples keep a stem the mix's limiter caught from clipping here.
+    """
     stems = []
     for pid in session.person_ids():
         feeds = [(s, ch) for s, ch, who in session.person_mics() if who == pid and s.synced]
@@ -1976,18 +2027,20 @@ def _render_stems(
         for i, (s, ch) in enumerate(feeds):
             inp, steps = _aligned_input(s, ch, start, duration)
             args += inp
-            chains.append(f"[{i}:a:0]{','.join(steps)}[a{i}]")
+            chains.append(f"[{i}:a:0]{','.join([*steps, *VOICE_CHAIN])}[a{i}]")
         mix = "".join(f"[a{i}]" for i in range(len(feeds)))
-        graph = ";".join(chains) + (f";{mix}amix=inputs={len(feeds)}:normalize=0[out]" if len(feeds) > 1 else ";[a0]anull[out]")
+        level = f"volume={gain:.3f}dB"
+        graph = ";".join(chains) + (f";{mix}amix=inputs={len(feeds)}:normalize=0,{level}[out]" if len(feeds) > 1
+                                    else f";[a0]{level}[out]")
         # Person ids are unique slugs, so two people never share a file name.
         out = out_dir / f"{pid}.wav"
         full = out.with_name(f"{pid}.full.wav") if splice else out
         proc_run([
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args,
-            "-filter_complex", graph, "-map", "[out]", "-ar", "48000", "-c:a", "pcm_s24le", str(full),
+            "-filter_complex", graph, "-map", "[out]", "-ar", str(MIX_RATE), "-c:a", "pcm_f32le", str(full),
         ], timeout=3600, check=True)
         if splice:
-            _splice_audio(full, out, splice, ["-c:a", "pcm_s24le"])
+            _splice_audio(full, out, splice, ["-c:a", "pcm_f32le"])
             full.unlink(missing_ok=True)
         stems.append(str(out))
     return stems
@@ -2156,7 +2209,8 @@ def _render_key(session: MulticamSession, stems: bool) -> str:
     used = {c["source_id"] for c in session.cuts} | {s.id for s, _ in _audio_inputs(session)}
     files = [(s.id, s.offset, s.speed, s.channel_people, s.audio_stream_index, s.person, os.path.getmtime(s.path))
              for s in session.sources if s.id in used and os.path.exists(s.path)]
-    blob = json.dumps([session.cuts, session.removals, session.look, stems, files], sort_keys=True, default=str)
+    audio = [VOICE_CHAIN, LOUDNESS_TARGET, TRUE_PEAK_CEILING]
+    blob = json.dumps([session.cuts, session.removals, session.look, stems, files, audio], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
 
@@ -2220,7 +2274,7 @@ def render_session(
 
         _emit(progress_callback, 82, "Mixing microphones")
         audio = work / "audio.wav"
-        _render_audio(session, audio, start, end - start)
+        gain = _render_audio(session, audio, start, end - start)
         if splice:
             _splice_audio(audio, work / "kept.wav", splice, ["-c:a", "pcm_s16le"])
             audio = work / "kept.wav"
@@ -2250,7 +2304,7 @@ def render_session(
             # Built into `work`, not `out_dir`: if this fails, nothing at the
             # canonical output path changes, and the video built above is
             # discarded along with it instead of being published alone.
-            stem_paths = _render_stems(session, work, start, end - start, splice)
+            stem_paths = _render_stems(session, work, start, end - start, splice, gain)
 
         # Every piece rendered; publish video, stems and the session record
         # together. A crash between these renames can only ever leave either

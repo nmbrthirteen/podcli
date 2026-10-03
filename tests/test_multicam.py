@@ -1330,7 +1330,7 @@ def test_render_warns_when_a_camera_runs_out_or_the_mix_is_short(sandbox, monkey
     real_audio = mc._render_audio
 
     def short_audio(session, out, start, duration):
-        real_audio(session, out, start, duration - 1.0)
+        return real_audio(session, out, start, duration - 1.0)
 
     monkeypatch.setattr(mc, "_render_audio", short_audio)
     outputs = mc.render_session(session, stems=False)
@@ -1356,3 +1356,78 @@ def test_render_fails_on_decode_errors_or_a_wrong_frame_count(episode, monkeypat
     with pytest.raises(RuntimeError, match="frames"):
         mc.render_session(session)
     assert not (out_dir / "episode.mp4").exists()
+
+
+# --- audio chain --------------------------------------------------------------------
+
+def _read_f32(path, channels=1):
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "f32le", "-ac", str(channels), "-"],
+                         check=True, capture_output=True).stdout
+    return np.frombuffer(raw, dtype=np.float32)
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_drift_correction_resamples_to_the_exact_length_without_audible_pitch_shift(sandbox):
+    speed = 1.0 + 100e-6
+    t = np.arange(60 * RATE) / RATE
+    _write_wav(sandbox / "tone.wav", np.sin(2 * np.pi * 1000 * t) * 0.6)
+    tone = _source(str(sandbox / "tone.wav"), kind="audio", role="mic", offset=0.5, speed=speed)
+    session = mc.MulticamSession(session_id="abc123abc901", name="ep", sources=[tone])
+    out = sandbox / "stretched.wav"
+    mc._write_mix(session, out, 0.0, 62.0, encode=("-c:a", "pcm_f32le"), feeds=[(tone, -1)])
+    y = _read_f32(out)
+    sounding = np.flatnonzero(np.abs(y) > 1e-3)
+    first, last = sounding[0] / RATE, (sounding[-1] + 1) / RATE
+    assert first == pytest.approx(0.5, abs=1e-3)
+    # 60 s of source lasts 60 * speed on the timeline: 6 ms longer, matched to under a millisecond.
+    assert last - first == pytest.approx(60 * speed, abs=1e-3)
+    seg = y[int(10 * RATE):int(50 * RATE)]
+    spectrum = np.abs(np.fft.rfft(seg * np.hanning(len(seg)), 1 << 23))
+    freq = np.argmax(spectrum) * RATE / (1 << 23)
+    cents = 1200 * np.log2(freq / 1000)
+    assert abs(cents) < 0.5
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_the_mix_high_passes_each_mic_before_leveling(sandbox):
+    t = np.arange(20 * RATE) / RATE
+    voice = _speech(20, 11)
+    _write_wav(sandbox / "rumble.wav", 0.5 * voice + 0.4 * np.sin(2 * np.pi * 30 * t))
+    mic = _source(str(sandbox / "rumble.wav"), kind="audio", role="mic", offset=0.0, duration=20.0)
+    session = mc.MulticamSession(session_id="abc123abc902", name="ep", sources=[mic])
+    assert mc.VOICE_CHAIN[0].startswith("highpass=f=70") and mc.VOICE_CHAIN[1].startswith("dynaudnorm")
+
+    def hum_share(x):
+        spectrum = np.abs(np.fft.rfft(x)) ** 2
+        f = np.fft.rfftfreq(len(x), 1 / RATE)
+        return spectrum[(f > 25) & (f < 35)].sum() / spectrum[(f > 500) & (f < 4000)].sum()
+
+    out = sandbox / "mixed.wav"
+    mc._write_mix(session, out, 0.0, 20.0, per_feed=mc.VOICE_CHAIN, encode=("-c:a", "pcm_f32le"), feeds=[(mic, -1)])
+    before = hum_share(_read_f32(sandbox / "rumble.wav"))
+    after = hum_share(_read_f32(out))
+    assert 10 * np.log10(before / after) > 10
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_two_pass_mix_hits_the_target_and_the_stems_sum_to_it(episode, monkeypatch):
+    session = _planned(episode)
+    work = mc._work_dir(session.session_id)
+    start, end = session.cuts[0]["start"], session.cuts[-1]["end"]
+    gain = mc._render_audio(session, work / "mix.wav", start, end - start)
+    stems = mc._render_stems(session, work, start, end - start, None, gain)
+    assert len(stems) == 2
+    mix = _read_f32(work / "mix.wav")
+    total = sum(_read_f32(p) for p in stems)
+    assert len(total) == len(mix)
+    # The limiter only touches peaks the gain pushed past the ceiling; everywhere else the stems add up exactly.
+    calm = np.abs(total) < 10 ** ((mc.TRUE_PEAK_CEILING - 1.0) / 20)
+    assert calm.mean() > 0.9
+    assert np.abs(total[calm] - mix[calm]).max() < 2e-3
+
+    lufs, _ = mc._loudness(work / "mix.wav")
+    assert lufs == pytest.approx(mc.LOUDNESS_TARGET, abs=0.5)
+    v = mc.render_session(session, stems=False)["validation"]
+    assert v["lufs"] == pytest.approx(mc.LOUDNESS_TARGET, abs=1.0)
+    assert v["true_peak"] <= mc.TRUE_PEAK_CEILING + 0.5
+    assert v["warnings"] == []
