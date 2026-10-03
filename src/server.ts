@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 
 import {
   transcribeToolDef,
@@ -165,16 +165,39 @@ interface ImportTranscriptResult extends ApiError {
   };
 }
 
-async function readUIState(): Promise<ServerUIState | null> {
+/**
+ * Read session state straight off disk (paths.uiState) instead of the Web
+ * UI's HTTP API. Used when the Web UI isn't running — the state file is the
+ * same JSON the UI persists on every change, so the agent isn't blind just
+ * because nothing is listening on webServerUrl.
+ */
+function readUIStateFromDisk(): ServerUIState | null {
   try {
-    const res = await fetch(`${webServerUrl}/api/ui-state`);
-    if (!res.ok) return null;
-    return (await res.json()) as ServerUIState;
+    if (!existsSync(paths.uiState)) return null;
+    const raw = JSON.parse(readFileSync(paths.uiState, "utf-8")) as UIState;
+    const words = raw.transcript?.words;
+    return {
+      ...raw,
+      transcriptWordCount: Array.isArray(words) ? words.length : 0,
+    };
   } catch (err) {
-    log.debug("readUIState failed (UI likely not running)", {
+    log.debug("readUIStateFromDisk failed", {
       err: err instanceof Error ? err.message : String(err),
     });
     return null;
+  }
+}
+
+async function readUIState(): Promise<ServerUIState | null> {
+  try {
+    const res = await fetch(`${webServerUrl}/api/ui-state`);
+    if (!res.ok) return readUIStateFromDisk();
+    return (await res.json()) as ServerUIState;
+  } catch (err) {
+    log.debug("readUIState via Web UI failed, falling back to disk", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return readUIStateFromDisk();
   }
 }
 
@@ -1358,9 +1381,11 @@ export function createServer(): McpServer {
     },
     async ({ include_transcript }) => {
       try {
-        const res = await fetch(`${webServerUrl}/api/ui-state`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const state = (await res.json()) as ServerUIState;
+        const state = await readUIState();
+        if (!state) {
+          const guidance = await getWorkflowGuidance();
+          return { content: [{ type: "text" as const, text: guidance }] };
+        }
 
         const lines: string[] = [];
         lines.push(`Phase: ${state.phase}`);
@@ -1452,17 +1477,6 @@ export function createServer(): McpServer {
         return { content: [{ type: "text" as const, text: lines.join("\n") }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          const guidance = await getWorkflowGuidance();
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Web UI is not running. Start with: ${studioStartCommand()}\n\n${guidance}`,
-              },
-            ],
-          };
-        }
         return {
           content: [
             { type: "text" as const, text: `Error reading UI state: ${msg}` },
