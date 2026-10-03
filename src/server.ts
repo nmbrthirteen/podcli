@@ -106,6 +106,39 @@ function withNextStep(result: string, nextStep: string): string {
 // long episode; cap what goes into a tool response.
 const TRANSCRIPT_FALLBACK_CAP = 50_000;
 
+// Every other tool's schema uses z.object's default behavior, which strips
+// an unknown key silently, so a caller passing captions: true instead of
+// captions_enabled gets no error and nothing recorded. record_decisions is
+// strict on purpose: it's meant to be the durable record of a decision, so a
+// typo'd key should fail loudly rather than quietly not stick.
+const recordDecisionsInputShape = {
+  video_path: z.string().describe("The episode's source video path (same path used with set_video/transcribe_podcast)"),
+  clip_count: z.number().optional().describe("How many clips to produce"),
+  clip_duration_min: z.number().optional().describe("Minimum target clip duration in seconds"),
+  clip_duration_max: z.number().optional().describe("Maximum target clip duration in seconds"),
+  caption_style: z.enum(["hormozi", "karaoke", "subtle", "branded"]).optional(),
+  captions_enabled: z.boolean().optional().describe("Whether clips should have captions burned in at all"),
+  language: z.string().optional().describe("The episode's spoken language"),
+  thumbnails_wanted: z.boolean().optional(),
+  delivery_target: z.string().optional().describe("Where clips are headed, e.g. youtube_shorts, tiktok, instagram, export_only"),
+  notes: z.string().optional().describe("Free-form notes that don't fit another field"),
+};
+
+export const recordDecisionsInputSchema = z
+  .object(recordDecisionsInputShape, {
+    errorMap: (issue, ctx) => {
+      if (issue.code === "unrecognized_keys") {
+        return {
+          message:
+            `Unknown field(s): ${issue.keys.join(", ")}. Valid fields: ` +
+            Object.keys(recordDecisionsInputShape).join(", "),
+        };
+      }
+      return { message: ctx.defaultError };
+    },
+  })
+  .strict();
+
 function capTranscriptText(text: string): string {
   if (text.length <= TRANSCRIPT_FALLBACK_CAP) return text;
   return (
@@ -1886,25 +1919,17 @@ export function createServer(): McpServer {
   // =============================================
   // Tool: record_decisions
   // =============================================
-  server.tool(
+  server.registerTool(
     "record_decisions",
-    "Record per-episode workflow decisions (clip count, clip duration range, caption style, captions on/off, " +
-      "language, whether thumbnails are wanted, delivery target, free-form notes) so later runs against the same " +
-      "video never ask the same question twice. Keyed by the video's path + file size, not by session, so these " +
-      "answers survive a new episode overwriting ui-state.json. Pass only the fields you have an answer for; " +
-      "existing answers are preserved unless explicitly overwritten. get_ui_state lists any fields still unanswered " +
-      "as open questions.",
     {
-      video_path: z.string().describe("The episode's source video path (same path used with set_video/transcribe_podcast)"),
-      clip_count: z.number().optional().describe("How many clips to produce"),
-      clip_duration_min: z.number().optional().describe("Minimum target clip duration in seconds"),
-      clip_duration_max: z.number().optional().describe("Maximum target clip duration in seconds"),
-      caption_style: z.enum(["hormozi", "karaoke", "subtle", "branded"]).optional(),
-      captions_enabled: z.boolean().optional().describe("Whether clips should have captions burned in at all"),
-      language: z.string().optional().describe("The episode's spoken language"),
-      thumbnails_wanted: z.boolean().optional(),
-      delivery_target: z.string().optional().describe("Where clips are headed, e.g. youtube_shorts, tiktok, instagram, export_only"),
-      notes: z.string().optional().describe("Free-form notes that don't fit another field"),
+      description:
+        "Record per-episode workflow decisions (clip count, clip duration range, caption style, captions on/off, " +
+        "language, whether thumbnails are wanted, delivery target, free-form notes) so later runs against the same " +
+        "video never ask the same question twice. Keyed by the video's path + file size, not by session, so these " +
+        "answers survive a new episode overwriting ui-state.json. Pass only the fields you have an answer for; " +
+        "existing answers are preserved unless explicitly overwritten. get_ui_state lists any fields still unanswered " +
+        "as open questions.",
+      inputSchema: recordDecisionsInputSchema,
     },
     async ({ video_path, clip_count, clip_duration_min, clip_duration_max, caption_style, captions_enabled, language, thumbnails_wanted, delivery_target, notes }) => {
       try {
