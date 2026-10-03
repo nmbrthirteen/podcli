@@ -67,6 +67,18 @@ def handle_ping(task_id: str, params: dict):
     emit_result(task_id, "success", data={"message": "pong", "version": VERSION})
 
 
+def handle_resolve_transcribe_engine(task_id: str, params: dict):
+    """Predict transcribe_file's engine resolution without transcribing, so
+    callers can build the right cache key before deciding whether to run it."""
+    from services.transcription import resolve_engine_info
+
+    emit_result(
+        task_id,
+        "success",
+        data=resolve_engine_info(params.get("engine"), params.get("model_size", "base")),
+    )
+
+
 def handle_transcribe(task_id: str, params: dict):
     """Transcribe a podcast video/audio file with speaker detection."""
     from services.transcription import transcribe_file
@@ -83,14 +95,21 @@ def handle_transcribe(task_id: str, params: dict):
     if params.get("assemblyai_api_key"):
         os.environ["ASSEMBLYAI_API_KEY"] = params["assemblyai_api_key"]
 
+    start_seconds = params.get("start_seconds")
+    duration_seconds = params.get("duration_seconds")
+    is_sample = start_seconds is not None or duration_seconds is not None
+
     # One shared 16 kHz mono wav feeds transcription, energy and reactions
-    # instead of decoding the source three times.
+    # instead of decoding the source three times. Skipped for a sample run —
+    # transcribe_file extracts its own trimmed window, and decoding the full
+    # source here would undo the whole point of a quick sample.
     shared_wav = None
-    try:
-        from services.audio_extract import extract_wav_16k_mono
-        shared_wav = extract_wav_16k_mono(file_path)
-    except Exception:
-        shared_wav = None
+    if not is_sample:
+        try:
+            from services.audio_extract import extract_wav_16k_mono
+            shared_wav = extract_wav_16k_mono(file_path)
+        except Exception:
+            shared_wav = None
 
     try:
         result = transcribe_file(
@@ -100,46 +119,54 @@ def handle_transcribe(task_id: str, params: dict):
             language=params.get("language"),
             enable_diarization=params.get("enable_diarization", True),
             num_speakers=params.get("num_speakers"),
+            start_seconds=start_seconds,
+            duration_seconds=duration_seconds,
             progress_callback=lambda pct, msg: emit_progress(task_id, "transcribing", pct, msg),
             wav_path=shared_wav,
         )
         # Apply word corrections (Whisper misheard proper nouns)
         apply_corrections(result.get("words", []), result.get("segments", []))
 
-        energy_data = None
-        try:
-            from services.audio_analyzer import extract_audio_energy
-            energy_data = extract_audio_energy(file_path, wav_path=shared_wav)
-        except Exception:
-            pass  # energy is a nice-to-have
+        # A sample is a throwaway language/quality check on a slice of the
+        # source — energy/event signals and the packed view are keyed by the
+        # full file and meant to describe the whole episode, so skip them
+        # rather than caching partial (or source-wide-but-wrongly-expensive)
+        # data under those keys.
+        if not is_sample:
+            energy_data = None
+            try:
+                from services.audio_analyzer import extract_audio_energy
+                energy_data = extract_audio_energy(file_path, wav_path=shared_wav)
+            except Exception:
+                pass  # energy is a nice-to-have
 
-        events_data = None
-        try:
-            from services.audio_events import extract_audio_events
-            events_data = extract_audio_events(file_path, wav_path=shared_wav)
-        except Exception:
-            pass  # reactions are a nice-to-have
+            events_data = None
+            try:
+                from services.audio_events import extract_audio_events
+                events_data = extract_audio_events(file_path, wav_path=shared_wav)
+            except Exception:
+                pass  # reactions are a nice-to-have
 
-        # Cached so clip suggestion reuses these instead of decoding the source again.
-        from services.signal_cache import save_signals
-        save_signals(file_path, energy_data=energy_data, events_data=events_data)
+            # Cached so clip suggestion reuses these instead of decoding the source again.
+            from services.signal_cache import save_signals
+            save_signals(file_path, energy_data=energy_data, events_data=events_data)
 
-        # Auto-pack: emit compact LLM-readable markdown alongside raw JSON.
-        # Pulls energy data so the packed view includes peak moments for clip reasoning.
-        try:
-            cache_hash = compute_cache_hash(file_path) + engine_cache_suffix(result.get("engine") or engine)
-            packed_path, packed_md = write_packed(
-                result,
-                cache_hash,
-                source_label=os.path.basename(file_path),
-                energy_data=energy_data,
-                events_data=events_data,
-            )
-            result["packed_path"] = packed_path
-            result["packed_size_bytes"] = len(packed_md.encode("utf-8"))
-        except Exception as e:
-            # Non-fatal — transcription result is still useful without the packed view
-            emit_progress(task_id, "packing", 99, f"Packer skipped: {e}")
+            # Auto-pack: emit compact LLM-readable markdown alongside raw JSON.
+            # Pulls energy data so the packed view includes peak moments for clip reasoning.
+            try:
+                cache_hash = compute_cache_hash(file_path) + engine_cache_suffix(result.get("engine") or engine)
+                packed_path, packed_md = write_packed(
+                    result,
+                    cache_hash,
+                    source_label=os.path.basename(file_path),
+                    energy_data=energy_data,
+                    events_data=events_data,
+                )
+                result["packed_path"] = packed_path
+                result["packed_size_bytes"] = len(packed_md.encode("utf-8"))
+            except Exception as e:
+                # Non-fatal — transcription result is still useful without the packed view
+                emit_progress(task_id, "packing", 99, f"Packer skipped: {e}")
     finally:
         if previous_engine is None:
             os.environ.pop("PODCLI_ENGINE", None)
@@ -331,13 +358,16 @@ def handle_parse_transcript(task_id: str, params: dict):
     raw_text = params.get("raw_text", "")
     total_duration = params.get("total_duration")
     time_adjust = params.get("time_adjust", 0.0)
+    language = params.get("language")
 
     if not raw_text:
         emit_result(task_id, "error", error="raw_text is required")
         return
 
     emit_progress(task_id, "parsing", 50, "Parsing transcript...")
-    result = detect_and_parse(raw_text, total_duration=total_duration, time_adjust=time_adjust)
+    result = detect_and_parse(
+        raw_text, total_duration=total_duration, time_adjust=time_adjust, language=language
+    )
 
     if "error" in result:
         emit_result(task_id, "error", error=result["error"])
@@ -943,6 +973,40 @@ def handle_analyze_silence(task_id: str, params: dict):
         emit_result(task_id, "error", error=str(e))
 
 
+def handle_compare_engines(task_id: str, params: dict):
+    """Transcribe the same sample window with two engines and report where
+    they disagree — see services/engine_comparison.py for the scoring."""
+    import time as _time
+    from config.paths import paths
+    from services.engine_comparison import compare_engines
+
+    file_path = params.get("file_path", "")
+    if not file_path or not os.path.exists(file_path):
+        emit_result(task_id, "error", error=f"File not found: {file_path}")
+        return
+
+    output_dir = params.get("output_dir") or os.path.join(
+        paths["output"], "engine-comparisons", f"{int(_time.time())}"
+    )
+    try:
+        emit_progress(task_id, "comparing", 10, f"Transcribing with {params.get('engine_a')}...")
+        report = compare_engines(
+            file_path,
+            params.get("engine_a", "whispercpp"),
+            params.get("engine_b", "whisper-py"),
+            start_seconds=params.get("start_seconds", 0.0) or 0.0,
+            duration_seconds=params.get("duration_seconds", 120.0) or 120.0,
+            window_seconds=params.get("window_seconds", 20.0) or 20.0,
+            model_size=params.get("model_size", "base"),
+            language=params.get("language"),
+            output_dir=output_dir,
+        )
+        emit_progress(task_id, "comparing", 100, "Comparison complete")
+        emit_result(task_id, "success", data=report)
+    except (FileNotFoundError, RuntimeError, ValueError) as e:
+        emit_result(task_id, "error", error=str(e))
+
+
 def handle_render_silence_removed(task_id: str, params: dict):
     """Render the approved local cut plan and remap transcript timestamps."""
     from config.paths import paths
@@ -1098,7 +1162,9 @@ def handle_run_integration_tool(task_id: str, params: dict):
 
 TASK_HANDLERS = {
     "ping": handle_ping,
+    "resolve_transcribe_engine": handle_resolve_transcribe_engine,
     "transcribe": handle_transcribe,
+    "compare_engines": handle_compare_engines,
     "parse_transcript": handle_parse_transcript,
     "create_clip": handle_create_clip,
     "batch_clips": handle_batch_clips,

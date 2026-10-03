@@ -184,7 +184,8 @@ func runEngine(args []string) int {
 	if wantsStudio(args) {
 		refreshStudioBundles()
 	}
-	if transcribeEngine(args) == "whispercpp" {
+	switch transcribeEngine(args) {
+	case "whispercpp":
 		model, err := provision.EnsureModel(transcribeModel(args))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "podcli: provisioning model:", err)
@@ -192,6 +193,15 @@ func runEngine(args []string) int {
 		}
 		os.Setenv("PODCLI_ENGINE", "whispercpp")
 		os.Setenv("PODCLI_WHISPERCPP_MODEL", model)
+	case "omnilingual":
+		model, tokens, err := provision.EnsureOmnilingualModel()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "podcli: provisioning omnilingual model:", err)
+			return 1
+		}
+		os.Setenv("PODCLI_ENGINE", "omnilingual")
+		os.Setenv("PODCLI_OMNILINGUAL_MODEL", model)
+		os.Setenv("PODCLI_OMNILINGUAL_TOKENS", tokens)
 	}
 	code, err := engine.Run(args)
 	if err != nil {
@@ -202,12 +212,37 @@ func runEngine(args []string) int {
 }
 
 func transcribeModel(args []string) string {
+	fast := false
 	for _, arg := range args {
 		if arg == "--fast" {
-			return "tiny.en"
+			fast = true
+			break
 		}
 	}
-	return "base"
+	if !fast {
+		return "base"
+	}
+	// tiny.en is English-only; unset language runs auto-detection, which
+	// needs the multilingual tiny model same as any non-English request.
+	lang := strings.ToLower(transcribeLanguage(args))
+	if lang == "en" || lang == "english" {
+		return "tiny.en"
+	}
+	return "tiny"
+}
+
+// transcribeLanguage extracts --language/--language=<value> the same way
+// transcribeEngine extracts --engine.
+func transcribeLanguage(args []string) string {
+	lang := ""
+	for i, a := range args {
+		if a == "--language" && i+1 < len(args) {
+			lang = args[i+1]
+		} else if strings.HasPrefix(a, "--language=") {
+			lang = strings.TrimPrefix(a, "--language=")
+		}
+	}
+	return lang
 }
 
 func configCmd(args []string) int {
@@ -809,36 +844,45 @@ func pythonBackendCheck() doctorCheck {
 	return doctorCheck{Name: "python backend", OK: true, Detail: fmt.Sprintf("%s imports %s", engine.Python(), strings.Join(modules, ", "))}
 }
 
+// modelHashCheck reports ok=false when the file is absent: an unprovisioned
+// model is a valid state, not a failure.
+func modelHashCheck(name, p, want string) (doctorCheck, bool) {
+	if !fileExists(p) {
+		return doctorCheck{}, false
+	}
+	got, err := provision.Sha256File(p)
+	if err != nil {
+		return doctorCheck{Name: name, OK: false, Detail: fmt.Sprintf("could not hash %s: %v", p, err)}, true
+	}
+	if got != want {
+		return doctorCheck{Name: name, OK: false, Detail: fmt.Sprintf("%s hash mismatch: got %s, want %s", p, got, want)}, true
+	}
+	return doctorCheck{Name: name, OK: true, Detail: p}, true
+}
+
 func modelChecks() []doctorCheck {
 	var checks []doctorCheck
 	sizes := provision.KnownModelSizes()
 	sort.Strings(sizes)
 	for _, size := range sizes {
-		p := provision.ModelPath(size)
-		if !fileExists(p) {
-			continue // not provisioned; that's a valid state, not a failure
-		}
 		want, _ := provision.ModelSHA256(size)
-		got, err := provision.Sha256File(p)
-		name := "model " + size
-		if err != nil {
-			checks = append(checks, doctorCheck{Name: name, OK: false, Detail: fmt.Sprintf("could not hash %s: %v", p, err)})
-			continue
+		if c, ok := modelHashCheck("model "+size, provision.ModelPath(size), want); ok {
+			checks = append(checks, c)
 		}
-		if got != want {
-			checks = append(checks, doctorCheck{Name: name, OK: false, Detail: fmt.Sprintf("%s hash mismatch: got %s, want %s", p, got, want)})
-			continue
-		}
-		checks = append(checks, doctorCheck{Name: name, OK: true, Detail: p})
 	}
-	if vp := provision.VADModelPath(); fileExists(vp) {
-		got, err := provision.Sha256File(vp)
-		if err != nil {
-			checks = append(checks, doctorCheck{Name: "model vad", OK: false, Detail: fmt.Sprintf("could not hash %s: %v", vp, err)})
-		} else if want := provision.VADModelSHA256(); got != want {
-			checks = append(checks, doctorCheck{Name: "model vad", OK: false, Detail: fmt.Sprintf("%s hash mismatch: got %s, want %s", vp, got, want)})
-		} else {
-			checks = append(checks, doctorCheck{Name: "model vad", OK: true, Detail: vp})
+	if c, ok := modelHashCheck("model vad", provision.VADModelPath(), provision.VADModelSHA256()); ok {
+		checks = append(checks, c)
+	}
+	files := provision.OmnilingualFileHashes()
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		p := filepath.Join(provision.OmnilingualDir(), name)
+		if c, ok := modelHashCheck("model omnilingual "+name, p, files[name]); ok {
+			checks = append(checks, c)
 		}
 	}
 	return checks

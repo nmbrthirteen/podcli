@@ -81,6 +81,8 @@ def engine_cache_suffix(engine: str | None) -> str:
         return "-whispercpp"
     if engine == "assemblyai":
         return "-assemblyai"
+    if engine == "omnilingual":
+        return "-omnilingual"
     return ""
 
 

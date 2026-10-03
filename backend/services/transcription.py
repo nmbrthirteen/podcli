@@ -19,7 +19,7 @@ import urllib.parse
 import urllib.request
 from typing import Optional, Callable
 
-from services.engines import is_assemblyai_engine, normalize_engine
+from services.engines import is_assemblyai_engine, is_omnilingual_engine, normalize_engine
 
 
 def _managed_home() -> str:
@@ -48,14 +48,37 @@ def _whispercpp_cli() -> Optional[str]:
     return hermetic if os.path.exists(hermetic) else None
 
 
+
+# "large" alone doesn't name a real ggml file (upstream ships v1/v2/v3/v3-turbo
+# builds); provisioning always fetches large-v3, so resolve the same way here.
+_WHISPERCPP_MODEL_ALIASES = {"large": "large-v3"}
+
+
 def _whispercpp_model(model_size: str) -> str:
+    resolved = _WHISPERCPP_MODEL_ALIASES.get(model_size, model_size)
     return os.environ.get("PODCLI_WHISPERCPP_MODEL") or os.path.join(
-        _managed_home(), "models", f"ggml-{model_size}.bin"
+        _managed_home(), "models", f"ggml-{resolved}.bin"
     )
 
 
 def _whispercpp_ready(model_size: str) -> bool:
     return _whispercpp_cli() is not None and os.path.exists(_whispercpp_model(model_size))
+
+
+def _omnilingual_model() -> str:
+    return os.environ.get("PODCLI_OMNILINGUAL_MODEL") or os.path.join(
+        _managed_home(), "models", "omnilingual", "model.int8.onnx"
+    )
+
+
+def _omnilingual_tokens() -> str:
+    return os.environ.get("PODCLI_OMNILINGUAL_TOKENS") or os.path.join(
+        _managed_home(), "models", "omnilingual", "tokens.txt"
+    )
+
+
+def _omnilingual_ready() -> bool:
+    return os.path.exists(_omnilingual_model()) and os.path.exists(_omnilingual_tokens())
 
 
 def _whisper_threads() -> int:
@@ -91,6 +114,45 @@ def _transcribe_with_whispercpp(file_path, model_size, language, progress_callba
         vad_model=os.environ.get("PODCLI_WHISPERCPP_VAD_MODEL") or None,
         wav_path=wav_path,
         threads=_whisper_threads(),
+    )
+    if progress_callback:
+        progress_callback(50, "Transcription complete")
+    return result
+
+
+def _transcribe_with_omnilingual(file_path, progress_callback, wav_path=None):
+    from config.paths import paths
+    from services import transcribe_runs
+    from services import transcription_omnilingual as omni
+
+    if progress_callback:
+        progress_callback(10, "Transcribing with omnilingual...")
+
+    model = _omnilingual_model()
+    tokens = _omnilingual_tokens()
+    if not os.path.exists(model) or not os.path.exists(tokens):
+        raise FileNotFoundError(
+            f"omnilingual model not found: {model}. "
+            "Set PODCLI_OMNILINGUAL_MODEL/PODCLI_OMNILINGUAL_TOKENS or run provisioning."
+        )
+
+    # Resumable: a crash partway through a long file loses at most the
+    # window that was decoding, not the whole run — a rerun with the same
+    # file/model/language skips every window that already has a receipt.
+    run_dir = transcribe_runs.run_dir(paths["cache"], file_path, "omnilingual", model_size="int8", language="und")
+
+    def window_progress(pct, msg):
+        if progress_callback:
+            progress_callback(10 + int(pct * 0.4), msg)
+
+    result = omni.transcribe_file(
+        file_path,
+        model_path=model,
+        tokens_path=tokens,
+        wav_path=wav_path,
+        threads=_whisper_threads(),
+        run_dir=run_dir,
+        progress_callback=window_progress,
     )
     if progress_callback:
         progress_callback(50, "Transcription complete")
@@ -288,34 +350,56 @@ def _assemblyai_result(data: dict) -> dict:
 
 
 def _transcribe_with_assemblyai(file_path, language, enable_diarization, num_speakers, progress_callback):
+    from config.paths import paths
+    from services import transcribe_runs
+
     api_key = os.environ.get("ASSEMBLYAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("ASSEMBLYAI_API_KEY is required when PODCLI_ENGINE=assemblyai")
 
     base_url = _assemblyai_base_url()
-    if progress_callback:
-        progress_callback(10, "Uploading media to AssemblyAI...")
-    upload_url = _assemblyai_upload(file_path, api_key, base_url)
+    # A restarted job (crash, kill, machine reboot) must resume by polling
+    # the transcript it already started, not re-upload the file and pay for
+    # a second AssemblyAI job. The receipt is keyed by exactly what affects
+    # the AssemblyAI request (language, diarization, speaker count) so a
+    # different request for the same file never adopts someone else's job.
+    directory = transcribe_runs.run_dir(
+        paths["cache"], file_path, "assemblyai",
+        model_size=f"diar{int(bool(enable_diarization))}-spk{num_speakers or 0}",
+        language=language,
+    )
+    receipt = transcribe_runs.read_receipt(directory, "assemblyai.json")
+    transcript_id = receipt.get("transcript_id") if receipt else None
 
-    payload = {
-        "audio_url": upload_url,
-        "punctuate": True,
-        "format_text": True,
-        "speaker_labels": bool(enable_diarization),
-    }
-    if language:
-        payload["language_code"] = language
-    else:
-        payload["language_detection"] = True
-    if num_speakers:
-        payload["speakers_expected"] = num_speakers
-
-    if progress_callback:
-        progress_callback(20, "Starting AssemblyAI transcript...")
-    started = _assemblyai_json_request("POST", f"{base_url}/transcript", api_key, payload, 60)
-    transcript_id = started.get("id")
     if not transcript_id:
-        raise RuntimeError(f"AssemblyAI transcript response missing id: body={started}")
+        if progress_callback:
+            progress_callback(10, "Uploading media to AssemblyAI...")
+        upload_url = _assemblyai_upload(file_path, api_key, base_url)
+
+        payload = {
+            "audio_url": upload_url,
+            "punctuate": True,
+            "format_text": True,
+            "speaker_labels": bool(enable_diarization),
+        }
+        if language:
+            payload["language_code"] = language
+        else:
+            payload["language_detection"] = True
+        if num_speakers:
+            payload["speakers_expected"] = num_speakers
+
+        if progress_callback:
+            progress_callback(20, "Starting AssemblyAI transcript...")
+        started = _assemblyai_json_request("POST", f"{base_url}/transcript", api_key, payload, 60)
+        transcript_id = started.get("id")
+        if not transcript_id:
+            raise RuntimeError(f"AssemblyAI transcript response missing id: body={started}")
+        # Written before the poll loop starts: if the process dies mid-poll,
+        # the next run finds this and resumes instead of re-uploading.
+        transcribe_runs.write_receipt(directory, "assemblyai.json", {"transcript_id": transcript_id})
+    elif progress_callback:
+        progress_callback(20, f"Resuming AssemblyAI transcript {transcript_id}...")
 
     url = f"{base_url}/transcript/{transcript_id}"
     for _ in range(720):
@@ -324,8 +408,10 @@ def _transcribe_with_assemblyai(file_path, language, enable_diarization, num_spe
         if status == "completed":
             if progress_callback:
                 progress_callback(50, "AssemblyAI transcription complete")
+            transcribe_runs.clear_run(directory)
             return _assemblyai_result(data)
         if status == "error":
+            transcribe_runs.clear_run(directory)
             raise RuntimeError(
                 f"AssemblyAI transcript failed: transcript_id={transcript_id} error={data.get('error')}"
             )
@@ -456,6 +542,31 @@ def _attach_speakers_and_faces(
     return base
 
 
+def resolve_engine_info(requested: Optional[str], model_size: str = "base") -> dict:
+    """Predict which engine transcribe_file will actually use, without doing
+    any transcription work. Callers cache transcripts by engine; the cache
+    key has to match what transcribe_file resolves to, not the raw request,
+    or an unset engine writes under one key and reads under another.
+
+    This mirrors the fallback in transcribe_file but checks only `import
+    whisper` rather than whisper.load_model(), so it can't catch the rarer
+    case where the import succeeds but loading the model weights fails. That
+    case still falls back correctly inside transcribe_file itself; it just
+    means a cache lookup for it can miss once before the result is written
+    under the engine it actually ran with.
+    """
+    requested = requested if requested is not None else os.environ.get("PODCLI_ENGINE", "")
+    engine = normalize_engine(requested)
+    if engine != "whisper-py":
+        return {"engine": engine, "model_size": model_size}
+    try:
+        import whisper  # noqa: F401
+    except Exception:
+        if not requested and _whispercpp_ready(model_size):
+            return {"engine": "whispercpp", "model_size": model_size}
+    return {"engine": "whisper-py", "model_size": model_size}
+
+
 def transcribe_file(
     file_path: str,
     model_size: str = "base",
@@ -465,12 +576,23 @@ def transcribe_file(
     num_speakers: Optional[int] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
     wav_path: Optional[str] = None,
+    start_seconds: Optional[float] = None,
+    duration_seconds: Optional[float] = None,
 ) -> dict:
     """
     Transcribe a video/audio file with word-level timestamps and speaker detection.
 
     wav_path: optional pre-extracted 16 kHz mono WAV shared across analysis
     stages — used by whisper.cpp and diarization instead of re-decoding.
+
+    start_seconds/duration_seconds: sample mode — transcribe only a window of
+    the source (e.g. to test a language on 40s before committing to a full
+    run) instead of the whole file. The result is marked complete: False and
+    its timestamps are relative to the sample window, not the source;
+    sample_offset_seconds carries where in the source the window started.
+    Diarization and face analysis are skipped — a throwaway sample isn't
+    worth the extra passes, and both would need frame/audio access to the
+    original file that the trimmed clip doesn't carry.
 
     Returns:
         {
@@ -486,16 +608,77 @@ def transcribe_file(
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
 
+    is_sample = start_seconds is not None or duration_seconds is not None
+    if is_sample:
+        from services.audio_extract import extract_wav_16k_mono
+
+        sample_wav = extract_wav_16k_mono(
+            file_path,
+            start_seconds=start_seconds or 0.0,
+            duration_seconds=duration_seconds,
+        )
+        try:
+            result = _transcribe_file_inner(
+                sample_wav,
+                model_size=model_size,
+                engine=engine,
+                language=language,
+                enable_diarization=False,
+                num_speakers=num_speakers,
+                progress_callback=progress_callback,
+                wav_path=sample_wav,
+            )
+        finally:
+            try:
+                os.unlink(sample_wav)
+            except OSError:
+                pass
+        result["complete"] = False
+        result["sample_offset_seconds"] = start_seconds or 0.0
+        return result
+
+    return _transcribe_file_inner(
+        file_path,
+        model_size=model_size,
+        engine=engine,
+        language=language,
+        enable_diarization=enable_diarization,
+        num_speakers=num_speakers,
+        progress_callback=progress_callback,
+        wav_path=wav_path,
+    )
+
+
+def _transcribe_file_inner(
+    file_path: str,
+    model_size: str = "base",
+    engine: Optional[str] = None,
+    language: Optional[str] = None,
+    enable_diarization: bool = True,
+    num_speakers: Optional[int] = None,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    wav_path: Optional[str] = None,
+) -> dict:
+
     requested = engine if engine is not None else os.environ.get("PODCLI_ENGINE", "")
     engine = normalize_engine(requested)
     use_cpp = engine == "whispercpp"
     use_assemblyai = is_assemblyai_engine(engine)
+    use_omnilingual = is_omnilingual_engine(engine)
 
     if use_assemblyai:
         base = _transcribe_with_assemblyai(
             file_path, language, enable_diarization, num_speakers, progress_callback
         )
         return _attach_speakers_and_faces(file_path, base, False, num_speakers, progress_callback)
+
+    if use_omnilingual:
+        base = _transcribe_with_omnilingual(file_path, progress_callback, wav_path=wav_path)
+        base["engine"] = "omnilingual"
+        # Same no-torch constraint as whisper.cpp: skip diarization, keep face analysis.
+        return _attach_speakers_and_faces(
+            file_path, base, False, num_speakers, progress_callback, wav_path=wav_path
+        )
 
     # Native installs ship whisper.cpp, not openai-whisper. Fall back to it
     # automatically — whether whisper is missing OR a broken install fails to

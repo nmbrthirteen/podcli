@@ -106,8 +106,15 @@ def _voiced_intervals(wav_path: str, bridge: float = 0.3, thresh_ratio: float = 
     if len(samples) < frame:
         return []
     nf = 1 + (len(samples) - frame) // hop
-    idx = np.arange(nf)[:, None] * hop + np.arange(frame)[None, :]
-    rms = np.sqrt((samples[idx] ** 2).mean(axis=1))
+    # The old (nf, frame) index matrix gathered every window at once —
+    # ~1GB of int64 indices alone for a 1-hour 16kHz file, before even
+    # touching the gathered samples. A running sum of squares gives the same
+    # per-frame RMS in O(n) memory instead of O(nf * frame).
+    sq = samples * samples
+    csum = np.concatenate(([0.0], np.cumsum(sq, dtype=np.float32)))
+    starts = np.arange(nf) * hop
+    window_sums = csum[starts + frame] - csum[starts]
+    rms = np.sqrt(np.maximum(window_sums, 0.0) / frame)
     peak = float(rms.max())
     if peak <= 0:
         return []
@@ -164,7 +171,7 @@ def transcribe_file(
     model_path: str,
     whisper_cli: str = "whisper-cli",
     ffmpeg: str = "ffmpeg",
-    language: Optional[str] = "en",
+    language: Optional[str] = None,
     dtw_model: Optional[str] = None,
     threads: int = 4,
     vad: bool = False,
@@ -196,8 +203,9 @@ def transcribe_file(
             # systematic early bias (silence-removal remapping). Off by default;
             # the energy-snap below addresses the same defect without the bias.
             cmd += ["--vad", "--vad-model", vad_model]
-        if language:
-            cmd += ["-l", language]
+        # An unset language must not fall through to whisper-cli's own "en"
+        # default; "auto" makes it run language detection instead.
+        cmd += ["-l", language or "auto"]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=7200)
 
         with open(out_base + ".json", encoding="utf-8") as f:
@@ -224,7 +232,15 @@ def transcribe_file(
             "segments": segments,
             "words": words,
             "duration": segments[-1]["end"] if segments else 0.0,
-            "language": (data.get("params") or {}).get("language") or language or "en",
+            # whisper-cli reports the language it actually detected under
+            # "result"; "params" only echoes back what we passed in ("auto"
+            # when unset), so it can't label the output.
+            "language": (
+                (data.get("result") or {}).get("language")
+                or (data.get("params") or {}).get("language")
+                or language
+                or "en"
+            ),
         }
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

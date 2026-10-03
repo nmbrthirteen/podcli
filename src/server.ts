@@ -11,6 +11,10 @@ import {
   handleJobStatus,
 } from "./handlers/transcribe.handler.js";
 import {
+  compareEnginesToolDef,
+  handleCompareEngines,
+} from "./handlers/compare-engines.handler.js";
+import {
   suggestClipsToolDef,
   suggestClipsInputShape,
   handleSuggestClips,
@@ -310,7 +314,7 @@ export function createServer(): McpServer {
         .default("base")
         .describe("Whisper model size"),
       engine: z
-        .enum(["whisper-py", "whispercpp", "assemblyai"])
+        .enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"])
         .optional()
         .describe("Transcription engine"),
       language: z.string().optional().describe("ISO language code"),
@@ -329,6 +333,18 @@ export function createServer(): McpServer {
         .describe(
           "Exact number of speakers if known (e.g. 2). Auto-detects if omitted.",
         ),
+      start_seconds: z
+        .number()
+        .optional()
+        .describe(
+          "Sample mode: only transcribe a window starting here (seconds into the source), " +
+            "instead of the whole file — e.g. to test a language on 40s before committing to " +
+            "a full run. Pair with duration_seconds. Not written to the main transcript cache.",
+        ),
+      duration_seconds: z
+        .number()
+        .optional()
+        .describe("Sample mode window length in seconds. Defaults start_seconds to 0 if omitted."),
     },
     async ({
       file_path,
@@ -337,6 +353,8 @@ export function createServer(): McpServer {
       language,
       enable_diarization,
       num_speakers,
+      start_seconds,
+      duration_seconds,
     }) => {
       try {
         const result = await handleTranscribe({
@@ -346,13 +364,29 @@ export function createServer(): McpServer {
           language,
           enable_diarization,
           num_speakers,
+          start_seconds,
+          duration_seconds,
         });
 
         // Push FULL transcript (words[] + segments[]) to Web UI state from the
         // on-disk cache — NOT the trimmed MCP response. Without words in UI
         // state, downstream batch_create_clips can't burn captions.
+        // Skipped for a sample: it's never written to this cache, and it's a
+        // slice of the file, not something that belongs in the UI session.
+        const isSample = start_seconds !== undefined || duration_seconds !== undefined;
         try {
-          const cached = await transcriptCache.get(file_path, engine);
+          // handleTranscribe's result carries the engine it actually resolved
+          // to and cached under; the request-time `engine` can be unset while
+          // the write landed under "whispercpp", so reading with it misses.
+          const resolvedEngine =
+            (JSON.parse(result) as { engine?: string }).engine ?? engine;
+          const cached = isSample
+            ? null
+            : await transcriptCache.get(file_path, {
+                engine: resolvedEngine,
+                model: model_size,
+                language,
+              });
           if (cached) {
             await uiPing({
               videoPath: file_path,
@@ -392,7 +426,7 @@ export function createServer(): McpServer {
         .optional()
         .default("base"),
       language: z.string().optional(),
-      engine: z.enum(["whisper-py", "whispercpp", "assemblyai"]).optional(),
+      engine: z.enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"]).optional(),
       enable_diarization: z.boolean().optional().default(true),
       num_speakers: z.number().optional(),
     },
@@ -2618,8 +2652,15 @@ export function createServer(): McpServer {
         .optional()
         .default(0)
         .describe("Offset in seconds to add to all timestamps"),
+      language: z
+        .string()
+        .optional()
+        .describe(
+          "ISO language code of the transcript (e.g. 'ka'). This format has no language " +
+            "info of its own, so omitting it labels the result 'und' rather than guessing.",
+        ),
     },
-    async ({ file_path, raw_text, total_duration, time_adjust }) => {
+    async ({ file_path, raw_text, total_duration, time_adjust, language }) => {
       try {
         const res = await fetch(`${webServerUrl}/api/parse-transcript`, {
           method: "POST",
@@ -2629,6 +2670,7 @@ export function createServer(): McpServer {
             raw_text,
             total_duration,
             time_adjust,
+            language,
           }),
         });
         if (!res.ok) {
@@ -2705,6 +2747,39 @@ export function createServer(): McpServer {
     async (input) => {
       try {
         const text = await handleMineChannel(input);
+        return { content: [{ type: "text" as const, text }] };
+      } catch (err: unknown) {
+        return mcpError(err);
+      }
+    },
+  );
+
+  // =============================================
+  // Tool: compare_transcription_engines
+  // =============================================
+  server.tool(
+    compareEnginesToolDef.name,
+    compareEnginesToolDef.description,
+    {
+      file_path: z.string().describe("Absolute path to the podcast file"),
+      engine_a: z.enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"]).describe("First engine to compare"),
+      engine_b: z.enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"]).describe("Second engine to compare"),
+      start_seconds: z.number().optional().describe("Sample start, seconds into the source. Default: 0."),
+      duration_seconds: z.number().optional().describe("Sample length in seconds. Default: 120."),
+      window_seconds: z.number().optional().describe("Report window size in seconds. Default: 20."),
+      model_size: z
+        .enum(["tiny", "base", "small", "medium", "large"])
+        .optional()
+        .describe("Model size for engines that take one. Default: base."),
+      language: z.string().optional().describe("ISO language code. Leave empty for auto-detect."),
+      output_dir: z
+        .string()
+        .optional()
+        .describe("Where to write comparison.json/.html. Defaults under the podcli output directory."),
+    },
+    async (input) => {
+      try {
+        const text = await handleCompareEngines(input);
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         return mcpError(err);

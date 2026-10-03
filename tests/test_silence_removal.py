@@ -1,14 +1,18 @@
 import os
 import sys
 
+import pytest
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND_ROOT = os.path.join(ROOT, "backend")
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
 from services.silence_removal import (
+    _map_range,
     plan_silence_removal,
     probabilities_to_speech_segments,
+    remap_timed_items,
     remap_transcript,
 )
 
@@ -62,6 +66,50 @@ def test_remap_transcript_closes_removed_gaps():
     assert remapped["words"][1]["start"] == 2.0
     assert remapped["segments"][0] == {"text": "one two", "start": 0.5, "end": 2.4}
     assert remapped["duration"] == 3.0
+
+
+def test_zero_duration_word_inside_a_kept_range_is_kept_as_a_point():
+    keep_segments = [{"start": 0.5, "end": 2.0}, {"start": 4.5, "end": 6.0}]
+    words = [{"word": "", "start": 1.2, "end": 1.2}]
+
+    remapped = remap_timed_items(words, keep_segments, assign_by_midpoint=True)
+
+    assert len(remapped) == 1
+    assert remapped[0]["start"] == remapped[0]["end"] == 0.7
+
+
+def test_zero_duration_word_in_a_removed_range_is_dropped():
+    keep_segments = [{"start": 0.5, "end": 2.0}, {"start": 4.5, "end": 6.0}]
+    words = [{"word": "", "start": 3.0, "end": 3.0}]
+
+    assert remap_timed_items(words, keep_segments, assign_by_midpoint=True) == []
+
+
+def test_word_straddling_a_removed_gap_with_no_owning_side_is_dropped():
+    # Word runs 1.8-2.2 across a removed gap from 1.9-4.0. Its midpoint (2.0)
+    # falls inside that gap, so neither side owns it; it's dropped rather
+    # than stitched across the cut.
+    keep_segments = [{"start": 0.0, "end": 1.9}, {"start": 4.0, "end": 6.0}]
+    mapped = _map_range(1.8, 2.2, keep_segments, assign_by_midpoint=True)
+    assert mapped is None
+
+
+def test_word_straddling_a_cut_is_not_stitched_across_it():
+    keep_segments = [{"start": 0.0, "end": 2.0}, {"start": 2.0, "end": 4.0}]
+    # Midpoint 2.05 belongs to the second segment; the old stitching behavior
+    # would have spanned from the first segment's overlap through the
+    # second's, inflating the word's output duration across the cut.
+    mapped = _map_range(1.9, 2.2, keep_segments, assign_by_midpoint=True)
+    assert mapped == (2.0, 2.2)
+
+
+def test_segments_still_stitch_across_a_removed_gap():
+    # Sentence-level segments intentionally keep the old stitching behavior
+    # (see test_remap_transcript_closes_removed_gaps) — only words are
+    # reassigned by midpoint.
+    keep_segments = [{"start": 0.5, "end": 2.0}, {"start": 4.5, "end": 6.0}]
+    mapped = _map_range(1.0, 5.4, keep_segments)
+    assert mapped == pytest.approx((0.5, 2.4))
 
 
 def test_probability_hysteresis_ignores_short_noise():

@@ -1,9 +1,18 @@
 import { createHash } from "crypto";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile, writeFile, mkdir, rename } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { paths } from "../config/paths.js";
 import type { TranscriptResult } from "../models/index.js";
+
+/** Cache key parts beyond the file hash. A bare string is shorthand for
+ * { engine: string }, the call shape every existing caller already used. */
+export interface CacheKeyParts {
+  engine?: string;
+  model?: string;
+  language?: string;
+}
+export type CacheKey = string | CacheKeyParts;
 
 /**
  * Caches transcripts by file hash so we don't re-transcribe
@@ -86,6 +95,13 @@ export class TranscriptCache {
     });
   }
 
+  /**
+   * Engine-only suffix, matching backend/services/transcript_packer.py's
+   * engine_cache_suffix(). The packed markdown is written there without
+   * model/language in its key, so looking it up has to use the same narrower
+   * key as the write, not the richer {engine, model, language} key the raw
+   * JSON cache (get/set below) uses.
+   */
   async getFileHashForEngine(filePath: string, engine?: string): Promise<string> {
     return `${await this.getFileHash(filePath)}${this.engineSuffix(engine)}`;
   }
@@ -98,13 +114,36 @@ export class TranscriptCache {
     if (["assemblyai", "assembly-ai", "aai"].includes(value)) {
       return "-assemblyai";
     }
+    if (["omnilingual", "omni", "omnilingual-asr"].includes(value)) {
+      return "-omnilingual";
+    }
     return "";
   }
 
-  async get(filePath: string, engine?: string): Promise<TranscriptResult | null> {
+  /**
+   * Full cache key suffix: engine + model + language. A plain string argument
+   * (the pre-existing call shape) is treated as engine-only.
+   *
+   * base model and auto/empty language contribute no suffix, so a cache
+   * written before model/language were tracked — always base, whisper-py (or
+   * whatever engine was passed), auto-detected language — still reads back
+   * under the same key. Any other model or language gets its own key instead
+   * of silently colliding with that implicit default.
+   */
+  private keySuffix(key?: CacheKey): string {
+    const parts = typeof key === "string" ? { engine: key } : key ?? {};
+    const engineSuffix = this.engineSuffix(parts.engine);
+    const model = (parts.model ?? "").trim().toLowerCase();
+    const modelSuffix = model && model !== "base" ? `-m${model}` : "";
+    const language = (parts.language ?? "").trim().toLowerCase();
+    const languageSuffix = language && language !== "auto" ? `-l${language}` : "";
+    return `${engineSuffix}${modelSuffix}${languageSuffix}`;
+  }
+
+  async get(filePath: string, key?: CacheKey): Promise<TranscriptResult | null> {
     try {
       const hash = await this.getFileHash(filePath);
-      const cachePath = join(this.cacheDir, `${hash}${this.engineSuffix(engine)}.json`);
+      const cachePath = join(this.cacheDir, `${hash}${this.keySuffix(key)}.json`);
 
       if (!existsSync(cachePath)) return null;
 
@@ -115,11 +154,15 @@ export class TranscriptCache {
     }
   }
 
-  async set(filePath: string, transcript: TranscriptResult, engine?: string): Promise<void> {
+  async set(filePath: string, transcript: TranscriptResult, key?: CacheKey): Promise<void> {
     await this.ensureDir();
     const hash = await this.getFileHash(filePath);
-    const cachePath = join(this.cacheDir, `${hash}${this.engineSuffix(engine)}.json`);
-    await writeFile(cachePath, JSON.stringify(transcript), "utf-8");
+    const cachePath = join(this.cacheDir, `${hash}${this.keySuffix(key)}.json`);
+    // Write-then-rename: a reader never observes a half-written cache file,
+    // and a crash mid-write leaves only an orphaned .tmp, not a corrupt entry.
+    const tmpPath = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tmpPath, JSON.stringify(transcript), "utf-8");
+    await rename(tmpPath, cachePath);
   }
 
   /**

@@ -7,6 +7,9 @@ numpy>=2.5.2
 # Audio-event detection (YAMNet laughter/reaction channel) runs on ONNX Runtime —
 # no torch/TF, so it stays on the hermetic native path.
 onnxruntime>=1.28.0
+# --engine omnilingual: Meta's Omnilingual ASR CTC model via sherpa-onnx, for
+# languages whisper.cpp handles poorly. No torch — stays on the hermetic path.
+sherpa-onnx>=1.13.8
 Pillow>=12.3.0
 questionary>=2.1.1
 python-dotenv>=1.2.2

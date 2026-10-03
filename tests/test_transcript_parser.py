@@ -135,6 +135,36 @@ class SpeakerTranscriptTests(unittest.TestCase):
         # First word start near 3600s
         self.assertGreaterEqual(result["words"][0]["start"], 3600.0 - 1.0)
 
+    def test_language_defaults_to_undetermined_not_english(self):
+        raw = "Alice (00:00)\nHello\n"
+        result = tp.parse_speaker_transcript(raw, total_duration=5.0)
+        self.assertEqual(result["language"], "und")
+
+    def test_language_passthrough(self):
+        raw = "Alice (00:00)\nHello\n"
+        result = tp.parse_speaker_transcript(raw, total_duration=5.0, language="ka")
+        self.assertEqual(result["language"], "ka")
+
+    def test_detect_and_parse_threads_language_to_each_format(self):
+        speaker_raw = "Alice (00:00)\nHello\n"
+        srt_raw = "1\n00:00:00,000 --> 00:00:01,000\nHello\n"
+        vtt_raw = "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello\n"
+        for raw in (speaker_raw, srt_raw, vtt_raw):
+            with self.subTest(raw=raw):
+                result = tp.detect_and_parse(raw, total_duration=5.0, language="ka")
+                self.assertEqual(result["language"], "ka")
+
+    def test_speaker_segments_apply_time_adjust_like_words_and_segments(self):
+        # Regression: speaker_segments previously used the raw block
+        # start/end, ignoring time_adjust, while words and segments applied
+        # it — the three arrays drifted out of sync for any non-zero adjust.
+        raw = "Alice (00:10)\nHello there\n"
+        result = tp.parse_speaker_transcript(raw, total_duration=30.0, time_adjust=-2.0)
+        seg = result["speaker_segments"][0]
+        self.assertAlmostEqual(seg["start"], result["segments"][0]["start"], places=3)
+        self.assertAlmostEqual(seg["end"], result["segments"][0]["end"], places=3)
+        self.assertAlmostEqual(seg["start"], 8.0, places=3)
+
 
 if __name__ == "__main__":
     unittest.main()

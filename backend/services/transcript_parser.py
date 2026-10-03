@@ -34,7 +34,12 @@ def parse_vtt_timestamp(ts: str) -> float:
     return 0.0
 
 
-def parse_srt(text: str, total_duration: Optional[float] = None, time_adjust: float = 0.0) -> Dict[str, Any]:
+def parse_srt(
+    text: str,
+    total_duration: Optional[float] = None,
+    time_adjust: float = 0.0,
+    language: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Parse an SRT subtitle file into structured data with word-level timestamps.
 
@@ -98,10 +103,15 @@ def parse_srt(text: str, total_duration: Optional[float] = None, time_adjust: fl
     if not blocks:
         return {"error": "No subtitle blocks found in SRT"}
 
-    return _blocks_to_result(blocks, total_duration, time_adjust, fmt="srt")
+    return _blocks_to_result(blocks, total_duration, time_adjust, fmt="srt", language=language)
 
 
-def parse_vtt(text: str, total_duration: Optional[float] = None, time_adjust: float = 0.0) -> Dict[str, Any]:
+def parse_vtt(
+    text: str,
+    total_duration: Optional[float] = None,
+    time_adjust: float = 0.0,
+    language: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Parse a WebVTT subtitle file into structured data with word-level timestamps.
 
@@ -185,10 +195,16 @@ def parse_vtt(text: str, total_duration: Optional[float] = None, time_adjust: fl
     if not blocks:
         return {"error": "No subtitle blocks found in VTT"}
 
-    return _blocks_to_result(blocks, total_duration, time_adjust, fmt="vtt")
+    return _blocks_to_result(blocks, total_duration, time_adjust, fmt="vtt", language=language)
 
 
-def _blocks_to_result(blocks: List[Dict], total_duration: Optional[float], time_adjust: float, fmt: str) -> Dict[str, Any]:
+def _blocks_to_result(
+    blocks: List[Dict],
+    total_duration: Optional[float],
+    time_adjust: float,
+    fmt: str,
+    language: Optional[str] = None,
+) -> Dict[str, Any]:
     """Convert parsed subtitle blocks into the standard output format."""
     all_words = []
     segments = []
@@ -227,7 +243,10 @@ def _blocks_to_result(blocks: List[Dict], total_duration: Optional[float], time_
         "words": all_words,
         "segments": segments,
         "duration": round(duration, 2),
-        "language": "en",
+        # These formats carry no language info of their own; caller-supplied
+        # language wins, "und" (undetermined) otherwise. Previously this
+        # always claimed "en", which is simply wrong for anything else.
+        "language": language or "und",
         "speakers": [],
         "speaker_segments": [],
         "imported": True,
@@ -235,7 +254,12 @@ def _blocks_to_result(blocks: List[Dict], total_duration: Optional[float], time_
     }
 
 
-def detect_and_parse(text: str, total_duration: Optional[float] = None, time_adjust: float = 0.0) -> Dict[str, Any]:
+def detect_and_parse(
+    text: str,
+    total_duration: Optional[float] = None,
+    time_adjust: float = 0.0,
+    language: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Auto-detect transcript format and parse accordingly.
 
@@ -249,12 +273,12 @@ def detect_and_parse(text: str, total_duration: Optional[float] = None, time_adj
 
     # VTT detection
     if stripped.startswith("WEBVTT"):
-        return parse_vtt(text, total_duration=total_duration, time_adjust=time_adjust)
+        return parse_vtt(text, total_duration=total_duration, time_adjust=time_adjust, language=language)
 
     # SRT detection: first line is a digit, second line contains -->
     lines = stripped.split("\n", 3)
     if len(lines) >= 2 and re.match(r'^\d+$', lines[0].strip()) and '-->' in lines[1]:
-        return parse_srt(text, total_duration=total_duration, time_adjust=time_adjust)
+        return parse_srt(text, total_duration=total_duration, time_adjust=time_adjust, language=language)
 
     # JSON detection
     if stripped.startswith("{") or stripped.startswith("["):
@@ -276,7 +300,9 @@ def detect_and_parse(text: str, total_duration: Optional[float] = None, time_adj
                 "words": words,
                 "segments": segments_list,
                 "duration": round(duration, 2),
-                "language": "en",
+                "language": (data.get("language") if isinstance(data, dict) else None)
+                or language
+                or "und",
                 "speakers": [],
                 "speaker_segments": [],
                 "imported": True,
@@ -286,7 +312,9 @@ def detect_and_parse(text: str, total_duration: Optional[float] = None, time_adj
             pass  # Fall through to speaker format
 
     # Default: speaker format
-    return parse_speaker_transcript(text, total_duration=total_duration, time_adjust=time_adjust)
+    return parse_speaker_transcript(
+        text, total_duration=total_duration, time_adjust=time_adjust, language=language
+    )
 
 
 def parse_timestamp(ts: str) -> float:
@@ -299,7 +327,12 @@ def parse_timestamp(ts: str) -> float:
     return 0.0
 
 
-def parse_speaker_transcript(raw_text: str, total_duration: Optional[float] = None, time_adjust: float = 0.0) -> Dict[str, Any]:
+def parse_speaker_transcript(
+    raw_text: str,
+    total_duration: Optional[float] = None,
+    time_adjust: float = 0.0,
+    language: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Parse a speaker-labeled transcript into structured data with word-level timestamps.
 
@@ -309,6 +342,8 @@ def parse_speaker_transcript(raw_text: str, total_duration: Optional[float] = No
         raw_text: The raw transcript text
         total_duration: Total duration of the podcast in seconds
         time_adjust: Seconds to add/subtract from all timestamps (e.g., -1.0 to shift 1s earlier)
+        language: Language of the transcript, if known. Defaults to "und" (undetermined) —
+            this format carries no language info of its own to detect it from.
     """
     lines = raw_text.strip().split("\n")
 
@@ -434,10 +469,17 @@ def parse_speaker_transcript(raw_text: str, total_duration: Optional[float] = No
         "words": all_words,
         "segments": segments,
         "duration": round(duration, 2),
-        "language": "en",
+        "language": language or "und",
         "speakers": speakers_list,
+        # words/segments above apply time_adjust and clamp to 0; this has to
+        # match or a speaker's segment boundaries drift out of sync with the
+        # words and segments supposedly inside them.
         "speaker_segments": [
-            {"speaker": b["speaker"], "start": b["start"], "end": b["end"]}
+            {
+                "speaker": b["speaker"],
+                "start": round(max(0, b["start"] + time_adjust), 3),
+                "end": round(max(0, b["end"] + time_adjust), 3),
+            }
             for b in blocks
         ],
         "imported": True,
