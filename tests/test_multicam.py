@@ -280,6 +280,69 @@ def test_a_stems_failure_does_not_strand_a_video_with_no_outputs_record(episode,
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_a_crash_right_before_publish_never_exposes_a_mix_of_old_and_new_outputs(episode, monkeypatch):
+    """Publishing used to swap the live video into place, then the live stems,
+
+    as two separate renames: a crash between them left the new video sitting
+    next to the old stems. Simulate that same kind of crash right at the one
+    spot that's supposed to make the whole publish atomic, and check the old,
+    complete render is still exactly what the session points at.
+    """
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    mc.update_mapping(session, {"sources": [
+        {"id": s.id, "role": "camera", "person": "nika" if "one" in os.path.basename(s.path) else "ana"}
+        for s in session.sources if s.kind == "video"
+    ]})
+    session = mc.plan_session(mc.sync_session(session))
+
+    first = mc.render_session(session)
+    old_video, old_stems = first["video"], first["stems"]
+    assert os.path.exists(old_video) and all(os.path.exists(s) for s in old_stems)
+    old_mtimes = {p: os.path.getmtime(p) for p in [old_video, *old_stems]}
+
+    session = mc.MulticamSession.load(session.session_id)
+    mc.update_mapping(session, {"look": "warm"})  # forces a different render_key
+
+    monkeypatch.setattr(mc.MulticamSession, "save", lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError, match="boom"):
+        mc.render_session(session)
+
+    # Read the session straight off disk: MulticamSession.load is still patched.
+    on_disk = json.loads((mc._sessions_dir() / f"{session.session_id}.json").read_text())
+    reloaded = type(session)(**{**on_disk,
+                                 "people": [mc.Person(**p) for p in on_disk["people"]],
+                                 "sources": [mc.Source(**s) for s in on_disk["sources"]]})
+    assert reloaded.outputs["video"] == old_video
+    assert reloaded.outputs["stems"] == old_stems
+    # Not just the same paths: the bytes the session record still names must
+    # be literally untouched, not quietly overwritten by the failed render.
+    assert {p: os.path.getmtime(p) for p in [old_video, *old_stems]} == old_mtimes
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_removing_a_person_drops_their_old_stem_from_the_published_outputs(episode):
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    mc.update_mapping(session, {"sources": [
+        {"id": s.id, "role": "camera", "person": "nika" if "one" in os.path.basename(s.path) else "ana"}
+        for s in session.sources if s.kind == "video"
+    ]})
+    session = mc.plan_session(mc.sync_session(session))
+    first = mc.render_session(session)
+    assert len(first["stems"]) == 2
+    old_stems = first["stems"]
+
+    # Ana leaves the edit: her camera and her mic are both ignored.
+    ana_sources = [s for s in session.sources if s.person == "ana"]
+    session = mc.update_mapping(session, {"sources": [{"id": s.id, "role": "ignore"} for s in ana_sources]})
+    session = mc.plan_session(mc.sync_session(session))
+    second = mc.render_session(session)
+
+    assert len(second["stems"]) == 1
+    # Her old stem isn't left behind looking like it's still part of this edit.
+    assert not any(os.path.exists(s) for s in old_stems if "ana" in os.path.basename(s))
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 def test_sync_measures_clock_drift(sandbox):
     folder = sandbox / "drift"
     folder.mkdir()
