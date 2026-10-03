@@ -306,14 +306,20 @@ def test_sync_review_reasons_flag_a_fit_that_looks_clean_but_isnt():
     good_match = sig.CoarseMatch(lag_seconds=0.0, score=30.0, peak_ratio=0.1)
     assert mc._sync_review_reasons(clean, good_match, overlap_seconds=1200.0) == []
 
-    # Speed was forced back to 1.0, and the full-checkpoint residual (500 ms)
-    # is nothing like the tidy inlier residual (5 ms) the caller would see if
-    # it only looked at residual_ms.
+    # Speed was forced back to 1.0: flagged for that even though the inlier
+    # residual (5 ms) is tidy.
     bad_fallback = sig.ClockFit(offset=0.0, speed=1.0, residual_ms=5.0, checkpoints=2, total_checkpoints=2,
                                  residual_all_ms=500.0, speed_fallback=True)
     reasons = mc._sync_review_reasons(bad_fallback, good_match, overlap_seconds=60.0)
-    assert any("residual" in r for r in reasons)
     assert any("implausible" in r for r in reasons)
+
+    # One checkpoint was a real outlier and got correctly dropped (4 of 5
+    # survive, under the 40% dropped threshold): residual_all_ms is large
+    # only because it still includes that outlier. The fit the sync actually
+    # used is the tidy inlier one, so this must not flag for review.
+    one_outlier_dropped = sig.ClockFit(offset=0.0, speed=1.0, residual_ms=5.0, checkpoints=4, total_checkpoints=5,
+                                        residual_all_ms=500.0, speed_fallback=False)
+    assert mc._sync_review_reasons(one_outlier_dropped, good_match, overlap_seconds=60.0) == []
 
     # Too few checkpoints over a long overlap, and most checkpoints dropped.
     sparse = sig.ClockFit(offset=0.0, speed=1.0, residual_ms=1.0, checkpoints=1, total_checkpoints=6,

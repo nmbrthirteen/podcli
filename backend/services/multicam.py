@@ -1310,9 +1310,12 @@ def _sync_review_reasons(fit: sig.ClockFit, match: sig.CoarseMatch, overlap_seco
     checkpoints to trust a long overlap's drift estimate.
     """
     reasons = []
-    worst_residual_ms = max(fit.residual_ms, fit.residual_all_ms)
-    if worst_residual_ms > 30.0:
-        reasons.append(f"residual {worst_residual_ms:.0f} ms")
+    # residual_all_ms includes the checkpoints the fit already rejected as
+    # outliers, so one bad checkpoint correctly thrown out would otherwise
+    # flag an inlier fit that's actually clean. Judge the fit on the
+    # residual it was actually built from; residual_all_ms is still reported.
+    if fit.residual_ms > 30.0:
+        reasons.append(f"residual {fit.residual_ms:.0f} ms")
     if fit.speed_fallback:
         reasons.append("drift fit was implausible, so speed was forced back to 1.0")
     dropped = fit.total_checkpoints - fit.checkpoints
