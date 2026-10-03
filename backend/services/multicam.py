@@ -2169,7 +2169,8 @@ def _normalization(path: Path) -> tuple[float, bool]:
     return gain, float(stats["input_tp"]) + gain > TRUE_PEAK_CEILING
 
 
-def _render_audio(session: MulticamSession, out: Path, start: float, duration: float) -> float:
+def _render_audio(session: MulticamSession, out: Path, start: float, duration: float,
+                   splice: Optional[list[tuple[float, float]]] = None) -> float:
     """The episode mix: every mic high-passed and leveled, then one measured gain to LOUDNESS_TARGET.
 
     Returns that gain in dB so the stems can carry it too. Only peaks the gain
@@ -2178,6 +2179,15 @@ def _render_audio(session: MulticamSession, out: Path, start: float, duration: f
     premix = out.with_name(f"{out.stem}.premix.wav")
     # Float keeps a sum of hot mics from clipping before the gain brings it down.
     _write_mix(session, premix, start, duration, per_feed=VOICE_CHAIN, encode=("-c:a", "pcm_f32le"))
+    if splice:
+        # Measure loudness on what actually airs: a retake or a dead patch
+        # removed from the episode shouldn't pull the target gain around,
+        # whether it's silence (would ask for too much gain) or loud
+        # cross-talk no one hears in the final cut (would ask for too little).
+        kept = out.with_name(f"{out.stem}.premix-kept.wav")
+        _splice_audio(premix, kept, splice, ["-c:a", "pcm_f32le"])
+        premix.unlink(missing_ok=True)
+        premix = kept
     gain, limit = _normalization(premix)
     steps = [f"volume={gain:.3f}dB"]
     if limit:
@@ -2461,10 +2471,7 @@ def render_session(
 
         _emit(progress_callback, 82, "Mixing microphones")
         audio = work / "audio.wav"
-        gain = _render_audio(session, audio, start, end - start)
-        if splice:
-            _splice_audio(audio, work / "kept.wav", splice, ["-c:a", "pcm_s16le"])
-            audio = work / "kept.wav"
+        gain = _render_audio(session, audio, start, end - start, splice)
         short = duration - _media_duration(audio)
         if short >= 1 / fps:
             warnings.append(f"The mixed audio is {short:.2f} s shorter than the picture; the end plays silent.")

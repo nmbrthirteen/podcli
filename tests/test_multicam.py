@@ -1566,8 +1566,8 @@ def test_render_warns_when_a_camera_runs_out_or_the_mix_is_short(sandbox, monkey
 
     real_audio = mc._render_audio
 
-    def short_audio(session, out, start, duration):
-        return real_audio(session, out, start, duration - 1.0)
+    def short_audio(session, out, start, duration, splice=None):
+        return real_audio(session, out, start, duration - 1.0, splice)
 
     monkeypatch.setattr(mc, "_render_audio", short_audio)
     outputs = mc.render_session(session, stems=False)
@@ -1668,6 +1668,31 @@ def test_two_pass_mix_hits_the_target_and_the_stems_sum_to_it(episode, monkeypat
     assert v["lufs"] == pytest.approx(mc.LOUDNESS_TARGET, abs=1.0)
     assert v["true_peak"] <= mc.TRUE_PEAK_CEILING + 0.5
     assert v["warnings"] == []
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_loudness_gain_is_measured_on_the_kept_audio_not_the_removed_stretch(sandbox):
+    """A removed stretch (a retake, a long silence) shouldn't pull the
+
+    target gain around: it never airs. Measuring it on the whole premix
+    instead of what the splice keeps asks for the wrong gain for the
+    episode anyone actually hears.
+    """
+    kept = _speech(10, 21)
+    # A removed stretch, loud enough to drag a whole-file measurement's
+    # target gain down well below what the kept 10 s alone would ask for.
+    loud_removed = 8.0 * _speech(5, 22)
+    _write_wav(sandbox / "mic.wav", np.concatenate([kept, loud_removed]))
+    mic = _source(str(sandbox / "mic.wav"), kind="audio", role="mic", offset=0.0, duration=15.0)
+    session = mc.MulticamSession(session_id="abc123abc907", name="ep", sources=[mic])
+
+    gain_whole = mc._render_audio(session, sandbox / "whole.wav", 0.0, 15.0)
+    gain_kept = mc._render_audio(session, sandbox / "kept.wav", 0.0, 15.0, splice=[(0.0, 10.0)])
+    assert gain_kept != pytest.approx(gain_whole, abs=0.5)
+
+    lufs_kept, _ = mc._loudness(sandbox / "kept.wav")
+    assert lufs_kept == pytest.approx(mc.LOUDNESS_TARGET, abs=0.5)
+    assert mc._media_duration(sandbox / "kept.wav") == pytest.approx(10.0, abs=0.05)
 
 
 # --- manual drift anchors -------------------------------------------------------------
