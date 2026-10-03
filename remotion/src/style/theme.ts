@@ -479,7 +479,9 @@ export const resolveTheme = (input?: ThemeInput | null): Theme | null => {
   if (!input) return null;
   const pack: Theme = withFonts(PACKS[input.pack] ?? PACKS.collage, input.fonts);
   const base = input.motion ? { ...pack, motion: MOTIONS[input.motion] ?? pack.motion } : pack;
-  const merged = { ...deepMerge(base, input.overrides ?? {}), placement: PLACEMENTS.includes(input.placement as Placement) ? input.placement as Placement : base.placement };
+  const overridden = deepMerge(base, input.overrides ?? {});
+  const wanted = input.placement ?? overridden.placement;
+  const merged = { ...overridden, placement: PLACEMENTS.includes(wanted) ? wanted : base.placement };
   return { ...merged, textures: { ...merged.textures, ...(input.textures ?? {}) } };
 };
 

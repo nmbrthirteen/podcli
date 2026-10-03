@@ -102,6 +102,10 @@ describe("card placement", () => {
     expect(resolveTheme({ pack: "swiss", placement: "overlay" })?.placement).toBe("overlay");
   });
 
+  it("takes a placement given through overrides", () => {
+    expect(resolveTheme({ pack: "swiss", overrides: { placement: "overlay" } })?.placement).toBe("overlay");
+  });
+
   it("ignores a placement the renderer does not know", () => {
     const theme = resolveTheme({ pack: "poster", placement: "corner" as (typeof PLACEMENTS)[number] });
     expect(theme?.placement).toBe("page");

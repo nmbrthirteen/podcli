@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, useCurrentFrame, useVideoConfig } from "remotion";
+import { Img, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 import type { Card } from "../cards";
 import { fontOf } from "./theme";
 import type { Theme } from "./theme";
@@ -84,7 +84,7 @@ const EntityBody: React.FC<Props<"entity">> = ({ card, theme, s, f, fps }) => {
     <div style={{ display: "flex", alignItems: "center", gap: 32 * s }}>
       {card.src && (
         <Reveal theme={theme} role="media" f={f} at={mediaAt} fps={fps} style={{ position: "relative", flex: "none" }}>
-          <img src={card.src} alt="" style={{ display: "block", width: 200 * s, height: 200 * s, objectFit: "cover" }} />
+          <Img src={card.src} alt="" style={{ display: "block", width: 200 * s, height: 200 * s, objectFit: "cover" }} />
         </Reveal>
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 * s, minWidth: 0 }}>
@@ -175,6 +175,7 @@ const ChangeBody: React.FC<Props<"change">> = ({ card, theme, s, f, fps }) => {
       <div style={{ display: "flex", alignItems: "baseline", gap: 28 * s, flexWrap: "wrap" }}>
         <Reveal theme={theme} role="item" f={f} at={fromAt} fps={fps} style={{ position: "relative" }}>
           <div style={{ ...fontOf(theme.type.display, 72 * s), color: theme.color.muted }}>{card.from.value}</div>
+          {card.from.note && <div style={{ ...fontOf(theme.type.label, 36 * s), color: theme.color.muted, marginTop: 8 * s }}>{card.from.note}</div>}
         </Reveal>
         <Reveal theme={theme} role="item" f={f} at={fromAt + 4} fps={fps} style={{ position: "relative" }}>
           <div style={{ ...fontOf(theme.type.label, 64 * s), color: theme.color.accent }}>→</div>
@@ -183,6 +184,7 @@ const ChangeBody: React.FC<Props<"change">> = ({ card, theme, s, f, fps }) => {
           <Figure theme={theme} s={s} size={100}>
             <RevealText theme={theme} role="figure" f={f} at={toAt} text={card.to.value} s={s} />
           </Figure>
+          {card.to.note && <div style={{ ...fontOf(theme.type.label, 36 * s), color: theme.color.ink, marginTop: 8 * s }}>{card.to.note}</div>}
         </Reveal>
       </div>
     </>
