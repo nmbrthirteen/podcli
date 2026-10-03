@@ -1,7 +1,7 @@
 import { spawn } from "child_process";
 import { paths, pythonEnv } from "../config/paths.js";
 import { ClipsHistory } from "../services/clips-history.js";
-import { buildChannelListArgs, buildVideoInfoArgs, isCookieBrowser } from "../utils/ytdlp-args.js";
+import { buildChannelListArgs, buildVideoInfoArgs, extractYouTubeVideoId, isCookieBrowser } from "../utils/ytdlp-args.js";
 import { selectBestCaptionTrack, parseVtt, parseJson3, cuesToWords, type CaptionTrackRef } from "../utils/captions.js";
 import type { WordTimestamp } from "../models/index.js";
 
@@ -137,6 +137,17 @@ export async function mineVideoCaptions(
     subtitles?: Record<string, CaptionTrackRef[]>;
     automatic_captions?: Record<string, CaptionTrackRef[]>;
   };
+
+  // --no-playlist stops a playlist/mix url from resolving to its first entry,
+  // but a url that already names one video (e.g. a stale redirect) can still
+  // resolve to a different id than the one asked for — catch that here rather
+  // than silently returning the wrong video's captions.
+  const requestedId = extractYouTubeVideoId(input.video_url);
+  if (requestedId && requestedId !== info.id) {
+    throw new Error(
+      `yt-dlp resolved ${input.video_url} to video ${info.id}, not the requested ${requestedId}`,
+    );
+  }
 
   const minedIds = await deps.minedVideoIds();
   const alreadyMined = minedIds.has(info.id);

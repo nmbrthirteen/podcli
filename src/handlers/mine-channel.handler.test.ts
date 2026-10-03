@@ -124,4 +124,14 @@ describe("mineVideoCaptions", () => {
       }),
     ).rejects.toThrow("video unavailable");
   });
+
+  it("throws when yt-dlp resolves the url to a different video than requested", async () => {
+    // VIDEO_INFO_WITH_ORIGINAL_TRACK is for vid1; asking with a url naming vid2
+    // (e.g. a playlist/mix redirect) must not be returned as if it were vid2's captions.
+    await expect(
+      mineVideoCaptions(depsReturning({ stdout: VIDEO_INFO_WITH_ORIGINAL_TRACK, captionText: FIXTURE_VTT }), {
+        video_url: "https://www.youtube.com/watch?v=vid2",
+      }),
+    ).rejects.toThrow(/resolved .* to video vid1, not the requested vid2/);
+  });
 });

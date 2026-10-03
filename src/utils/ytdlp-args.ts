@@ -124,9 +124,32 @@ export function buildVideoInfoArgs(opts: YtDlpVideoInfoOptions): string[] {
   const args = ["-m", "yt_dlp"];
   args.push("--ignore-config", "--no-config-locations", "--no-plugin-dirs");
   args.push("--skip-download", "--no-warnings");
+  // A url pointing at a playlist or a channel's "radio" mix would otherwise
+  // dump the first entry's info instead of erroring, silently mining the
+  // wrong video's captions.
+  args.push("--no-playlist");
   if (opts.cookiesFromBrowser) args.push("--cookies-from-browser", opts.cookiesFromBrowser);
   args.push("--dump-json", "--", opts.videoUrl);
   return args;
+}
+
+// Pulls the video id out of the handful of URL shapes yt-dlp/YouTube use, so
+// the id yt-dlp actually resolved can be checked against what was asked for.
+export function extractYouTubeVideoId(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const vParam = parsed.searchParams.get("v");
+    if (vParam) return vParam;
+    const pathMatch = parsed.pathname.match(/\/(?:shorts|embed|live)\/([^/?]+)/);
+    if (pathMatch) return pathMatch[1];
+    if (parsed.hostname === "youtu.be") {
+      const id = parsed.pathname.slice(1).split("/")[0];
+      return id || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** Turns a yt-dlp failure into one line naming what to do about it. */

@@ -3,6 +3,7 @@ import {
   buildYtDlpArgs,
   buildChannelListArgs,
   buildVideoInfoArgs,
+  extractYouTubeVideoId,
   isCookieBrowser,
   isHttpUrl,
   ytDlpHint,
@@ -123,6 +124,30 @@ describe("buildVideoInfoArgs", () => {
     const args = buildVideoInfoArgs({ videoUrl });
     expect(args.at(-2)).toBe("--");
     expect(args.at(-1)).toBe(videoUrl);
+  });
+
+  it("refuses to follow a playlist/mix to its first entry", () => {
+    expect(buildVideoInfoArgs({ videoUrl })).toContain("--no-playlist");
+  });
+});
+
+describe("extractYouTubeVideoId", () => {
+  it("reads the v= query param off a watch url", () => {
+    expect(extractYouTubeVideoId("https://www.youtube.com/watch?v=abc123")).toBe("abc123");
+  });
+
+  it("reads the id off a youtu.be short url", () => {
+    expect(extractYouTubeVideoId("https://youtu.be/abc123")).toBe("abc123");
+  });
+
+  it("reads the id off shorts/embed/live path shapes", () => {
+    expect(extractYouTubeVideoId("https://www.youtube.com/shorts/abc123")).toBe("abc123");
+    expect(extractYouTubeVideoId("https://www.youtube.com/embed/abc123")).toBe("abc123");
+    expect(extractYouTubeVideoId("https://www.youtube.com/live/abc123")).toBe("abc123");
+  });
+
+  it("returns null when no video id is present, e.g. a channel url", () => {
+    expect(extractYouTubeVideoId("https://www.youtube.com/@example/videos")).toBeNull();
   });
 });
 
