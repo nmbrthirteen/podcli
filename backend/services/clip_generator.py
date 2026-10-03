@@ -35,6 +35,12 @@ from services.video_processor import (
 from services.video_cut import probe_has_audio_stream, verify_full_decode
 from services.glyph_coverage import check_caption_font_coverage
 from services.subtitle_export import write_sidecars
+from services.opening_hook import (
+    validate_hook,
+    snap_hook_to_words,
+    order_with_hook,
+    keyframes_to_playback,
+)
 from config.caption_styles import get_style
 from services.formats import get_format
 
@@ -891,6 +897,7 @@ def generate_clip(
     bookend_fade: float = 0.0,
     clean_fillers: bool = True,
     keep_segments: list[dict] = None,
+    hook: Optional[dict] = None,
     trim_opening: Optional[bool] = None,
     preserve_timing: bool = False,
     allow_ass_fallback: bool = False,
@@ -920,6 +927,9 @@ def generate_clip(
         title: Clip title (used in filename)
         output_dir: Where to save the final clip (defaults to temp)
         logo_path: Path to logo image (PNG). Used with "branded" style.
+        hook: Optional {"start", "end", "mode"} on the source clock: a passage
+            from inside the body played first. "repeat" plays it again in
+            place, "move" removes it from the body.
         progress_callback: Optional (percent, message) callback
 
     Returns:
@@ -954,6 +964,10 @@ def generate_clip(
         start_second, end_second, keep_segments, source_duration
     )
 
+    # Checked against the requested body, before any tightening moves it.
+    hook = validate_hook(hook, start_second, end_second, keep_segments)
+    requested_start = start_second
+
     spec = get_format(format)
 
     # An episode that was never filmed takes the other road entirely. Branching
@@ -962,6 +976,11 @@ def generate_clip(
     # back is the same dict describing the same window.
     from services.audiogram import is_audio_only
     if is_audio_only(video_path):
+        if hook:
+            raise ValueError(
+                "An opening hook needs a video source. Audiogram clips play one "
+                "continuous range. Drop the hook to render this audio-only clip."
+            )
         from services.audiogram import render_audiogram
         return render_audiogram(
             audio_path=video_path,
@@ -1067,6 +1086,16 @@ def generate_clip(
             keep_segments = None
             duration = end_second - start_second
 
+    # The body is final here. The hook is cut as given (widened only to whole
+    # words) and put ahead of it, so every later step reads play_ranges, in
+    # playback order, never re-sorted. None means one continuous range.
+    play_ranges = keep_segments if keep_segments and len(keep_segments) > 1 else None
+    if hook:
+        hook = snap_hook_to_words(hook, transcript_words)
+        body = keep_segments or [{"start": start_second, "end": end_second}]
+        play_ranges = order_with_hook(body, hook)
+        duration = sum(r["end"] - r["start"] for r in play_ranges)
+
     length_warning = None
     # A clip that asks for captions and renders without them used to be
     # indistinguishable from a clip that never wanted them. Two shipped clips
@@ -1091,24 +1120,25 @@ def generate_clip(
 
         # Step 1: Cut the segment(s) from the source video
         if progress_callback:
-            n_segs = len(keep_segments) if keep_segments else 1
+            n_segs = len(play_ranges) if play_ranges else 1
             msg = f"Cutting {n_segs} segment{'s' if n_segs > 1 else ''} (1/{total_steps})"
             progress_callback(10, msg)
 
         segment_path = os.path.join(work_dir, "segment.mp4")
         part_durations: Optional[list[float]] = None
-        with timed("render", "cut", segments=len(keep_segments) if keep_segments else 1):
-            if keep_segments and len(keep_segments) > 1:
-                _, part_durations = cut_multi_segment(video_path, segment_path, keep_segments)
+        with timed("render", "cut", segments=len(play_ranges) if play_ranges else 1):
+            if play_ranges:
+                _, part_durations = cut_multi_segment(video_path, segment_path, play_ranges)
             else:
                 cut_segment(video_path, segment_path, start_second, end_second)
 
-        # Remap transcript words for multi-segment clips.
+        # Remap transcript words for multi-segment clips, range by range in
+        # playback order, so a repeated hook's words appear twice.
         # Needed before crop (speaker detection) and captions.
-        if keep_segments and len(keep_segments) > 1 and transcript_words:
-            remapped_words = []
+        remapped_words: list[dict] = []
+        if play_ranges and transcript_words:
             cumulative_t = 0.0
-            for i, seg in enumerate(keep_segments):
+            for i, seg in enumerate(play_ranges):
                 seg_words = [
                     w for w in transcript_words
                     if w["end"] > seg["start"] and w["start"] < seg["end"]
@@ -1129,7 +1159,7 @@ def generate_clip(
                 for w in seg_words:
                     # Clamp to segment bounds to avoid negative/overflow timestamps
                     # for words that straddle a segment boundary
-                    remapped_start = max(0, cumulative_t + (w["start"] - seg["start"]))
+                    remapped_start = max(cumulative_t, cumulative_t + (w["start"] - seg["start"]))
                     remapped_end = min(cumulative_t + actual_duration, cumulative_t + (w["end"] - seg["start"]))
                     if remapped_end > remapped_start:
                         remapped_words.append({
@@ -1154,6 +1184,13 @@ def generate_clip(
         if progress_callback:
             progress_callback(30, f"Resizing for {spec.name} format (2/{total_steps})")
 
+        playback_keyframes = keyframes_to_playback(
+            crop_keyframes,
+            requested_start,
+            play_ranges or [{"start": start_second, "end": end_second}],
+            part_durations,
+        ) if crop_keyframes else crop_keyframes
+
         cropped_path = os.path.join(work_dir, "cropped.mp4")
         with timed("render", "crop", strategy=crop_strategy if spec.reframe else "fit"):
             if spec.reframe:
@@ -1163,7 +1200,7 @@ def generate_clip(
                     transcript_words=crop_words,
                     clip_start=crop_clip_start,
                     face_map=face_map,
-                    crop_keyframes=crop_keyframes,
+                    crop_keyframes=playback_keyframes,
                     target_dims=spec.dims,
                 )
             else:
@@ -1213,7 +1250,7 @@ def generate_clip(
             if progress_callback:
                 progress_callback(50, f"Adding {caption_style} captions (3/{total_steps})")
 
-            if keep_segments and len(keep_segments) > 1:
+            if play_ranges:
                 clip_words = remapped_words
             else:
                 clip_words = [
@@ -1412,15 +1449,18 @@ def generate_clip(
             reframe=spec.reframe,
             crop_strategy=crop_strategy,
             crop_keyframes=crop_keyframes,
-            keep_segments=keep_segments,
+            keep_segments=play_ranges,
         )
         if max_autofix_passes > 0:
             if progress_callback:
                 progress_callback(97, "Quality gate: checking transitions...")
+            # The cut from the hook into the body is deliberate. Smoothing
+            # it would blur the first beat the hook exists to land.
+            hook_cut = [intro_offset + (part_durations[0] if part_durations else 0.0)] if hook else []
             _auto_fix_transition_jumps(
                 final_path,
                 max_passes=max_autofix_passes,
-                designed=_designed_cuts(cards, offset=intro_offset),
+                designed=_designed_cuts(cards, offset=intro_offset) + hook_cut,
             )
 
         # A 0-exit ffmpeg run can still have written a short, silent, or
@@ -1515,6 +1555,8 @@ def generate_clip(
         }
         if clean_output_path:
             out["clean_output_path"] = clean_output_path
+        if hook:
+            out["hook"] = hook
         warnings = [w for w in (caption_warning, length_warning, glyph_warning) if w]
         if warnings:
             out["warning"] = "; ".join(warnings)
