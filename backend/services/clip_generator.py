@@ -33,6 +33,7 @@ from services.video_processor import (
     concat_outro,
 )
 from services.video_cut import probe_has_audio_stream, verify_full_decode
+from services.glyph_coverage import check_caption_font_coverage
 from config.caption_styles import get_style
 from services.formats import get_format
 
@@ -1069,6 +1070,7 @@ def generate_clip(
     # indistinguishable from a clip that never wanted them. Two shipped clips
     # went out silent that way.
     caption_warning = None
+    glyph_warning = None
     if duration > spec.dur_max:
         length_warning = f"{duration:.0f}s, over the {spec.dur_max}s {spec.name} target"
         print(f"  {length_warning}", file=sys.stderr, flush=True)
@@ -1231,6 +1233,15 @@ def generate_clip(
                     )
                 )
                 print(f"  {caption_warning}", file=sys.stderr, flush=True)
+
+            if clip_words and captions:
+                caption_text = " ".join(w.get("word", "") for w in clip_words)
+                glyph_warning = check_caption_font_coverage(
+                    caption_text, style_config["font_name"], bool(style_config["bold"]),
+                    use_ass=use_ass_captions,
+                )
+                if glyph_warning:
+                    print(f"  {glyph_warning}", file=sys.stderr, flush=True)
 
             if (clip_words and captions) or wants_overlay:
                 if progress_callback:
@@ -1457,7 +1468,7 @@ def generate_clip(
             "crop_strategy": crop_strategy,
             "format": spec.name,
         }
-        warnings = [w for w in (caption_warning, length_warning) if w]
+        warnings = [w for w in (caption_warning, length_warning, glyph_warning) if w]
         if warnings:
             out["warning"] = "; ".join(warnings)
         if keep_caption_overlay and caption_overlay_path and os.path.exists(caption_overlay_path):
