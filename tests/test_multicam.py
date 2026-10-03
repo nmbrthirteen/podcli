@@ -952,3 +952,35 @@ def test_a_removal_where_cameras_stop_and_start_is_bridged_by_another_camera(san
     assert session.cuts[1]["end"] == pytest.approx(13.0, abs=0.04)
     assert session.removals[0]["start"] == pytest.approx(10.0, abs=0.04)
     assert session.removals[0]["end"] == pytest.approx(16.0, abs=0.04)
+
+
+@pytest.mark.parametrize(
+    "fps,tc,expected",
+    [
+        # 25 fps: integer rate, plain frames/fps.
+        (25.0, "01:00:00:10", 3600 + 10 / 25),
+        # 29.97 non-drop frame: separator is ':', frame count is not adjusted,
+        # but each frame is 1001/30000 s rather than 1/30 s.
+        (29.97, "00:01:00:00", (30 * 60) * (1001 / 30000)),
+        # 29.97 drop frame: separator is ';' before the frame field. At 1 minute
+        # in, drop-frame counting has skipped 2 frame numbers versus wall time,
+        # so :00;00 lands earlier than non-drop ':00:00:00' would.
+        (29.97, "00:01:00;00", (30 * 60 - 2) * (1001 / 30000)),
+        # 29.97 drop frame at the tenth minute: drop frame skips 2 counts at
+        # the start of every minute except every tenth, so by minute 10 the
+        # cumulative skip is 2 * (10 - 1) = 18 frames, not 0.
+        (29.97, "00:10:00;00", (30 * 600 - 18) * (1001 / 30000)),
+        # 59.94 drop frame: 4 frames skipped per non-tenth minute.
+        (59.94, "00:01:00;00", (60 * 60 - 4) * (1001 / 60000)),
+        # 23.976 non-drop: nominal 24 fps grid, real frame duration 1001/24000 s.
+        (23.976, "00:00:10:00", (24 * 10) * (1001 / 24000)),
+    ],
+)
+def test_timecode_seconds_handles_ntsc_pulldown_and_drop_frame(fps, tc, expected):
+    info = {"format": {"tags": {"timecode": tc}}}
+    assert mc._timecode_seconds(info, fps, 48000) == pytest.approx(expected, abs=1e-6)
+
+
+def test_timecode_seconds_falls_back_to_time_reference_without_embedded_timecode():
+    info = {"format": {"tags": {"time_reference": "48000"}}}
+    assert mc._timecode_seconds(info, 29.97, 48000) == pytest.approx(1.0, abs=1e-6)

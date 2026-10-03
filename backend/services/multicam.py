@@ -275,16 +275,50 @@ def scan_folder(folder: str) -> list[str]:
     return found
 
 
+_TIMECODE_RE = re.compile(r"^(\d{2})([:;])(\d{2})([:;])(\d{2})([:;])(\d{2})$")
+
+
+def _ntsc_frame_duration(fps: float) -> tuple[float, int]:
+    """Exact frame duration and the nominal (rounded) frame rate for an NTSC-pulldown fps.
+
+    29.97 is really 30000/1001 fps, so each frame lasts 1001/30000 s, not 1/30 s. The
+    same pulldown ratio applies to 59.94 and 23.976. Integer rates (25, 24, 30 exactly)
+    have no pulldown and use a plain 1/fps duration.
+    """
+    rounded = round(fps)
+    if rounded <= 0:
+        return 0.0, 0
+    if abs(fps - rounded) > 1e-3:
+        return 1001.0 / (rounded * 1000.0), rounded
+    return 1.0 / rounded, rounded
+
+
 def _timecode_seconds(info: dict, fps: float, sample_rate: int) -> float:
-    """Embedded start timecode (pro cameras) or BWF time reference (field recorders), in seconds."""
+    """Embedded start timecode (pro cameras) or BWF time reference (field recorders), in seconds.
+
+    Honors drop-frame timecode (separator ';' before the frame field): drop-frame
+    counters skip frame numbers :00 and :01 at the start of every minute except every
+    tenth, so the raw H:M:S:F reading overstates elapsed time unless those skipped
+    counts are added back before converting to seconds.
+    """
     tags = [info.get("format", {}).get("tags") or {}] + [s.get("tags") or {} for s in info.get("streams", [])]
     for t in tags:
         tc = t.get("timecode") or t.get("TIMECODE")
         if tc and fps > 0:
-            parts = re.split(r"[:;.]", tc)
-            if len(parts) == 4 and all(p.isdigit() for p in parts):
-                h, m, sec, frames = (int(p) for p in parts)
-                return h * 3600 + m * 60 + sec + frames / round(fps)
+            m = _TIMECODE_RE.match(str(tc).strip())
+            if m:
+                h, m1, mi, m2, sec, m3, frames = m.groups()
+                h, mi, sec, frames = int(h), int(mi), int(sec), int(frames)
+                drop_frame = m3 == ";"
+                frame_duration, fps_round = _ntsc_frame_duration(fps)
+                if fps_round <= 0:
+                    continue
+                total_frames = fps_round * 3600 * h + fps_round * 60 * mi + fps_round * sec + frames
+                if drop_frame:
+                    drop_per_min = 2 if fps_round == 30 else (4 if fps_round == 60 else 0)
+                    total_minutes = 60 * h + mi
+                    total_frames -= drop_per_min * (total_minutes - total_minutes // 10)
+                return total_frames * frame_duration
     for t in tags:
         ref = t.get("time_reference")
         if ref and str(ref).isdigit() and sample_rate > 0:
