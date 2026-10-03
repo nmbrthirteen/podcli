@@ -1230,19 +1230,16 @@ def test_a_long_shot_on_a_drifting_camera_stays_within_half_a_frame(sandbox):
     assert abs(cam.source_time(10.0) + 600.0 - cam.source_time(610.0)) > 0.05
 
 
-def test_drift_split_reaches_the_render_seek_and_both_editor_timelines(sandbox, monkeypatch):
+def test_drift_split_reaches_the_render_seek_and_both_editor_timelines(sandbox):
     session = _drifting_session(sandbox)
     cam = session.source("cam")
     fps = 30.0
     plan = mc.render_plan(session, fps)
 
-    seen = []
-    monkeypatch.setattr(mc, "proc_run", lambda cmd, **k: seen.append(cmd))
     piece = plan[1]
-    mc._render_shot(session, cam, sandbox / "shot.mp4", piece.tl_start, piece.frames, 320, 180, fps, "none")
-    seek = float(seen[0][seen[0].index("-ss") + 1])
+    command = mc._shot_command(session, cam, piece.tl_start, piece.frames, 320, 180, fps, "none")
+    seek = float(command[command.index("-ss") + 1])
     assert seek == pytest.approx(cam.source_in(piece.tl_start, piece.frames / fps), abs=1e-4)
-    monkeypatch.undo()
 
     premiere = ET.parse(mc.export_xml(session, "premiere")).getroot()
     assert len(premiere.findall("./sequence/media/video/track/clipitem")) == len(plan)
@@ -1256,3 +1253,106 @@ def test_drift_split_reaches_the_render_seek_and_both_editor_timelines(sandbox, 
         middle = 10.0 + offset + duration / 2
         # Each mic piece is pinned at its middle; a sample of rounding is all that's left there.
         assert abs(start + duration / 2 - session.source("mic").source_time(middle)) < 1e-3
+
+
+# --- render validation and the shot cache ------------------------------------------
+
+def _planned(folder):
+    session = mc.new_session(folder=str(folder), people=["Nika", "Ana"])
+    mc.update_mapping(session, {"sources": [
+        {"id": s.id, "role": "camera", "person": "nika" if "one" in os.path.basename(s.path) else "ana"}
+        for s in session.sources if s.kind == "video"
+    ]})
+    return mc.plan_session(mc.sync_session(session))
+
+
+def _counting_encodes(monkeypatch):
+    real = mc.proc_run
+    encodes = []
+
+    def run(cmd, **kw):
+        if "-frames:v" in cmd and "-filter_complex" in cmd or "lavfi" in cmd and "-frames:v" in cmd:
+            encodes.append(cmd)
+        return real(cmd, **kw)
+
+    monkeypatch.setattr(mc, "proc_run", run)
+    return encodes
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_render_reports_validation_and_reuses_cached_shots(episode, monkeypatch):
+    session = _planned(episode)
+    encodes = _counting_encodes(monkeypatch)
+    outputs = mc.render_session(session)
+    shots = len(mc.render_plan(session, 30.0))
+    assert len(encodes) == shots
+    v = outputs["validation"]
+    assert v["frames_expected"] == v["frames_actual"] == sum(p.frames for p in mc.render_plan(session, 30.0))
+    assert v["duration"] == pytest.approx(v["frames_expected"] / 30.0, abs=0.05)
+    assert v["lufs"] is not None and v["true_peak"] is not None
+    assert isinstance(v["warnings"], list)
+    assert mc.MulticamSession.load(session.session_id).outputs["validation"] == v
+
+    # Dropping the stems changes the render but not one shot's pixels: nothing re-encodes.
+    encodes.clear()
+    mc.render_session(session, stems=False)
+    assert encodes == []
+    # A removal re-encodes only the pieces it splits.
+    mc.set_removals(session, [{"start": 5.0, "end": 6.0}])
+    mc.render_session(session)
+    assert 0 < len(encodes) < len(mc.render_plan(session, 30.0))
+    encodes.clear()
+
+    # A cached shot that lost frames is caught by its count and encoded again.
+    cached = sorted((mc._work_dir(session.session_id) / "shots").glob("*/shot.mp4"))
+    cached[0].write_bytes(cached[0].read_bytes()[: cached[0].stat().st_size // 3])
+    session.outputs.pop("render_key")
+    again = mc.render_session(session)["validation"]
+    assert again["frames_actual"] == again["frames_expected"] == v["frames_expected"] - 30
+    assert len(encodes) == 1
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_render_warns_when_a_camera_runs_out_or_the_mix_is_short(sandbox, monkeypatch):
+    folder = sandbox / "short"
+    folder.mkdir()
+    voice = _speech(40, 9)
+    _write_wav(folder / "rec_Tr1.wav", voice)
+    _write_wav(sandbox / "cam.wav", voice * 0.6)
+    # The picture stops 2 s before the camera's own sound does.
+    _ffmpeg("-f", "lavfi", "-i", "color=c=red:s=160x90:r=30:d=38", "-i", str(sandbox / "cam.wav"),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(folder / "cam_one.mp4"))
+    session = mc.sync_session(mc.new_session(folder=str(folder), people=["Nika"]))
+    cam = next(s for s in session.sources if s.kind == "video")
+    mc.update_mapping(session, {"sources": [{"id": cam.id, "role": "camera", "person": "nika"}]})
+    mc.set_cuts(session, [{"start": 1.0, "end": cam.timeline_end() - 0.1, "source_id": cam.id}])
+
+    real_audio = mc._render_audio
+
+    def short_audio(session, out, start, duration):
+        real_audio(session, out, start, duration - 1.0)
+
+    monkeypatch.setattr(mc, "_render_audio", short_audio)
+    outputs = mc.render_session(session, stems=False)
+    v = outputs["validation"]
+    assert any("cam_one.mp4 ran out" in w for w in v["warnings"])
+    assert any("shorter than the picture" in w for w in v["warnings"])
+    # The short mix no longer trims the picture to fit.
+    assert v["frames_actual"] == v["frames_expected"]
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_render_fails_on_decode_errors_or_a_wrong_frame_count(episode, monkeypatch):
+    session = _planned(episode)
+    out_dir = mc._output_dir(session)
+    monkeypatch.setattr(mc, "_decode_errors", lambda path: "Invalid NAL unit size")
+    with pytest.raises(RuntimeError, match="decode"):
+        mc.render_session(session)
+    assert not (out_dir / "episode.mp4").exists()
+    monkeypatch.undo()
+
+    real = mc._frame_count
+    monkeypatch.setattr(mc, "_frame_count", lambda p: real(p) - (2 if p.name == "episode.mp4" else 0))
+    with pytest.raises(RuntimeError, match="frames"):
+        mc.render_session(session)
+    assert not (out_dir / "episode.mp4").exists()

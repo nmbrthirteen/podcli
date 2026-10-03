@@ -77,10 +77,20 @@ export interface McStats {
   share?: Record<string, number>;
 }
 
+export interface McValidation {
+  frames_expected: number;
+  frames_actual: number;
+  duration: number;
+  lufs: number | null;
+  true_peak: number | null;
+  warnings: string[];
+}
+
 export interface McOutputs {
   video?: string;
   stems?: string[];
   duration?: number;
+  validation?: McValidation;
   premiere?: string;
   fcpxml?: string;
 }

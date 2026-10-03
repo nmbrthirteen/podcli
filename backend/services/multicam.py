@@ -1782,32 +1782,122 @@ def _output_dir(session: MulticamSession) -> Path:
     return d
 
 
-def _render_shot(session: MulticamSession, cam: Optional[Source], out: Path, tl_start: float, frames: int,
-                 width: int, height: int, fps: float, look: str) -> None:
-    """Encode exactly `frames` frames starting at timeline second tl_start.
+# Bump when the shot pipeline changes in a way its cached files can't show,
+# so a rerun re-encodes instead of reusing shots built the old way.
+RENDER_VERSION = 1
+SHOT_ENCODE = ("-c:v", "libx264", "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p",
+               "-video_track_timescale", "90000")
+
+
+def _shot_command(session: MulticamSession, cam: Optional[Source], tl_start: float, frames: int,
+                  width: int, height: int, fps: float, look: str) -> list[str]:
+    """The ffmpeg command, minus its output path, that encodes exactly `frames` frames from timeline second tl_start.
 
     cam None renders black, which keeps picture and sound aligned across a
     stretch no camera covered.
     """
-    common = [
-        "-frames:v", str(frames), "-an",
-        "-c:v", "libx264", "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p",
-        "-video_track_timescale", "90000", str(out),
-    ]
+    common = ["-frames:v", str(frames), "-an", *SHOT_ENCODE]
     if cam is None:
-        proc_run([
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r={fps:.6f}", *common,
-        ], timeout=600, check=True)
-        return
+        return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r={fps:.6f}", *common]
     args, graph = _picture(session, cam, tl_start, width, height, frames / fps)
     # A camera that stops a few frames early would shorten the shot and slip
     # every later shot against the audio; holding its last frame prevents that.
     tail = [f"fps={fps:.6f}", "tpad=stop_mode=clone:stop=-1", *([LOOKS[look]] if LOOKS.get(look) else [])]
-    proc_run([
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args,
-        "-filter_complex", f"{graph};[pic]{','.join(tail)}[v]", "-map", "[v]", *common,
-    ], timeout=3600, check=True)
+    return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args,
+            "-filter_complex", f"{graph};[pic]{','.join(tail)}[v]", "-map", "[v]", *common]
+
+
+def _picture_files(session: MulticamSession, cam: Source) -> list[Source]:
+    """The recordings a camera's picture is read from: itself, its call recording, or each split member's files."""
+    if cam.parent:
+        return [session.source(cam.parent)]
+    if cam.members:
+        return [c for c in session.cameras() if not c.virtual and c.person in cam.members]
+    return [cam]
+
+
+def _shot_key(session: MulticamSession, cam: Optional[Source], command: list[str]) -> str:
+    """Names a cached shot by everything that decides its pixels.
+
+    The command carries the seek point, frame range, crop, look and encoder
+    settings; the files it reads are fingerprinted live so a re-export under
+    the same name can't serve an old shot.
+    """
+    files = []
+    for f in _picture_files(session, cam) if cam else []:
+        try:
+            st = os.stat(f.path)
+            files.append((f.path, st.st_size, st.st_mtime_ns, f.offset, f.speed))
+        except OSError:
+            files.append((f.path, None, None, f.offset, f.speed))
+    blob = json.dumps([RENDER_VERSION, command, files], default=str)
+    return hashlib.sha1(blob.encode()).hexdigest()[:20]
+
+
+def _probe_value(path: Path, *args: str) -> str:
+    res = proc_run(["ffprobe", "-v", "error", *args, "-of", "csv=p=0", str(path)], timeout=1800, check=False)
+    lines = res.stdout.strip().splitlines() if res.returncode == 0 else []
+    return lines[0].strip().rstrip(",") if lines else ""
+
+
+def _frame_count(path: Path) -> int:
+    """Video frames actually in a file, counted packet by packet rather than trusting the header."""
+    value = _probe_value(path, "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets")
+    return int(value) if value.isdigit() else -1
+
+
+def _media_duration(path: Path, stream: str = "") -> float:
+    value = _probe_value(path, *(["-select_streams", stream, "-show_entries", "stream=duration"] if stream
+                                 else ["-show_entries", "format=duration"]))
+    try:
+        return float(value)
+    except ValueError:
+        return 0.0
+
+
+LOUDNESS_TARGET = -16.0
+TRUE_PEAK_CEILING = -1.5
+
+
+def _loudness(path: Path) -> tuple[Optional[float], Optional[float]]:
+    """Integrated loudness (LUFS) and true peak (dBTP) of a file's first audio stream, by EBU R128."""
+    res = proc_run([
+        "ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-map", "0:a:0",
+        "-af", "ebur128=peak=true", "-f", "null", "-",
+    ], timeout=3600, check=False)
+    summary = res.stderr[res.stderr.rfind("Summary:"):] if "Summary:" in res.stderr else ""
+    lufs = re.search(r"I:\s+(-?[\d.]+|-inf) LUFS", summary)
+    peak = re.search(r"True peak:\s+Peak:\s+(-?[\d.]+|-inf) dBFS", summary)
+
+    def number(m) -> Optional[float]:
+        return float(m.group(1)) if m and m.group(1) != "-inf" else None
+
+    return number(lufs), number(peak)
+
+
+def _decode_errors(path: Path) -> str:
+    """Whatever ffmpeg complains about while decoding every frame and sample, or '' when clean."""
+    res = proc_run(["ffmpeg", "-hide_banner", "-v", "error", "-i", str(path), "-f", "null", "-"],
+                   timeout=7200, check=False)
+    return res.stderr.strip() or (f"ffmpeg exited with {res.returncode}" if res.returncode else "")
+
+
+def _ran_out(session: MulticamSession, cam: Source, piece: "Piece", fps: float, ends: dict[str, float]) -> list[str]:
+    """Warnings for files that stop before a piece does, so tpad holds their last frame."""
+    out = []
+    span = piece.frames / fps
+    files = _picture_files(session, cam)
+    if cam.members:
+        files = [f for f in files if f.timeline_start() <= piece.tl_start < f.timeline_end()]
+    for f in files:
+        if f.path not in ends:
+            ends[f.path] = _media_duration(Path(f.path), "v:0") or f.duration
+        short = f.source_in(piece.tl_start, span) + span - ends[f.path]
+        if short > 0.5 / fps:
+            out.append(f"{os.path.basename(f.path)} ran out {short:.2f} s before the end of the shot at "
+                       f"{piece.tl_start:.1f} s; its last frame is held.")
+    return out
 
 
 def _audio_inputs(session: MulticamSession) -> list[tuple[Source, int]]:
@@ -1944,17 +2034,10 @@ def drift_parts(seconds: float, drift: float, fps: float) -> int:
 
 def _camera_drift(session: MulticamSession, source_id: str) -> float:
     """|speed - 1| of the worst-drifting file a camera draws its picture from."""
-    by_id = {s.id: s for s in session.sources}
-    cam = by_id.get(source_id)
+    cam = next((s for s in session.sources if s.id == source_id), None)
     if cam is None:
         return 0.0
-    if cam.parent:
-        files = [by_id.get(cam.parent)]
-    elif cam.members:
-        files = [c for c in session.cameras() if not c.virtual and c.person in cam.members]
-    else:
-        files = [cam]
-    return max((abs(f.speed - 1.0) for f in files if f), default=0.0)
+    return max((abs(f.speed - 1.0) for f in _picture_files(session, cam)), default=0.0)
 
 
 def render_plan(session: MulticamSession, fps: float, *, review: bool = False) -> list[Piece]:
@@ -2103,39 +2186,63 @@ def render_session(
         splice = [(a - start, b - start) for a, b in kept_segments(session)] if session.removals else None
         done = [0, 0]
         lock = threading.Lock()
+        shots_dir = _work_dir(session.session_id) / "shots"
+        warnings: list[str] = []
+        video_ends: dict[str, float] = {}
 
         def run(item):
             i, piece = item
-            chunk = work / f"shot-{i:05d}.mp4"
             cam = session.source(piece.source_id) if piece.source_id else None
-            _render_shot(session, cam, chunk, piece.tl_start, piece.frames, width, height, fps, session.look)
+            command = _shot_command(session, cam, piece.tl_start, piece.frames, width, height, fps, session.look)
+            chunk = shots_dir / _shot_key(session, cam, command) / "shot.mp4"
+            if not (chunk.exists() and _frame_count(chunk) == piece.frames):
+                chunk.parent.mkdir(parents=True, exist_ok=True)
+                tmp = chunk.with_name(f"shot.{i}.tmp.mp4")
+                proc_run([*command, str(tmp)], timeout=600 if cam is None else 3600, check=True)
+                got = _frame_count(tmp)
+                if abs(got - piece.frames) > 1:
+                    raise RuntimeError(f"Shot {i + 1} came out {got} frames long instead of {piece.frames}.")
+                os.replace(tmp, chunk)
+                if got != piece.frames:
+                    with lock:
+                        warnings.append(f"Shot {i + 1} came out {got} frames long instead of {piece.frames}.")
+            held = _ran_out(session, cam, piece, fps, video_ends) if cam is not None else []
             with lock:
+                warnings.extend(held)
                 done[0] += piece.frames
                 done[1] += 1
-                _emit(progress_callback, 3 + 80 * done[0] / total_frames, f"Cut {done[1]} of {len(jobs)} shots")
+                _emit(progress_callback, 3 + 78 * done[0] / total_frames, f"Cut {done[1]} of {len(jobs)} shots")
             return chunk
 
         workers = max(1, min(4, (os.cpu_count() or 2) // 2))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             chunks = list(pool.map(run, enumerate(jobs)))
 
-        _emit(progress_callback, 84, "Mixing microphones")
+        _emit(progress_callback, 82, "Mixing microphones")
         audio = work / "audio.wav"
         _render_audio(session, audio, start, end - start)
         if splice:
             _splice_audio(audio, work / "kept.wav", splice, ["-c:a", "pcm_s16le"])
             audio = work / "kept.wav"
+        short = duration - _media_duration(audio)
+        if short > 0.5 / fps:
+            warnings.append(f"The mixed audio is {short:.2f} s shorter than the picture; the end plays silent.")
 
-        _emit(progress_callback, 92, "Joining shots")
+        _emit(progress_callback, 88, "Joining shots")
         listing = work / "shots.txt"
         listing.write_text("".join(f"file '{c.as_posix()}'\n" for c in chunks), encoding="utf-8")
         partial = work / "episode.mp4"
+        # Capped at the plan's length rather than -shortest, which would quietly
+        # cut the picture to fit a short mix instead of letting the check above see it.
         proc_run([
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-f", "concat", "-safe", "0", "-i", str(listing), "-i", str(audio),
-            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
-            "-movflags", "+faststart", str(partial),
+            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{duration:.6f}", "-movflags", "+faststart", str(partial),
         ], timeout=3600, check=True)
+
+        _emit(progress_callback, 91, "Checking the episode")
+        validation = _validate(partial, total_frames, fps, warnings)
 
         stem_paths = []
         if stems:
@@ -2169,12 +2276,55 @@ def render_session(
             "stems": [str(dest) for _, dest in pending_stems],
             "duration": round(duration, 3),
             "render_key": key,
+            "validation": validation,
         }
         session.save()
-        _emit(progress_callback, 100, "Episode ready")
+        # Shots this edit no longer uses would pile up across re-cuts; keep only this render's.
+        used = {c.parent for c in chunks}
+        for d in shots_dir.iterdir() if shots_dir.exists() else []:
+            if d not in used:
+                shutil.rmtree(d, ignore_errors=True)
+        _emit(progress_callback, 100, "Episode ready" if not validation["warnings"]
+              else f"Episode ready with {len(validation['warnings'])} warning(s)")
         return session.outputs
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _validate(video: Path, frames_expected: int, fps: float, warnings: list[str]) -> dict:
+    """Check the muxed episode against its plan; raises on a broken file, warns on everything else.
+
+    A decode error or a picture more than a frame off the plan means the file
+    can't be trusted at all. Loudness off target or a held frame still makes
+    a usable episode, so those are reported, not fatal.
+    """
+    errors = _decode_errors(video)
+    if errors:
+        raise RuntimeError(f"The rendered episode doesn't decode cleanly: {errors[:400]}")
+    frames_actual = _frame_count(video)
+    if abs(frames_actual - frames_expected) > 1:
+        raise RuntimeError(f"The rendered episode has {frames_actual} frames; the cut needs {frames_expected}.")
+    warnings = list(warnings)
+    if frames_actual != frames_expected:
+        warnings.append(f"The episode has {frames_actual} frames; the cut planned {frames_expected}.")
+    duration = _media_duration(video)
+    if abs(duration - frames_expected / fps) > 1.5 / fps:
+        warnings.append(f"The episode runs {duration:.3f} s; the cut planned {frames_expected / fps:.3f} s.")
+    lufs, true_peak = _loudness(video)
+    if lufs is None:
+        warnings.append("The episode's audio is silent.")
+    elif abs(lufs - LOUDNESS_TARGET) > 1.0:
+        warnings.append(f"Loudness is {lufs:.1f} LUFS; the target is {LOUDNESS_TARGET:.0f} LUFS.")
+    if true_peak is not None and true_peak > TRUE_PEAK_CEILING + 0.5:
+        warnings.append(f"True peak is {true_peak:.1f} dBTP, above the {TRUE_PEAK_CEILING} dBTP ceiling.")
+    return {
+        "frames_expected": frames_expected,
+        "frames_actual": frames_actual,
+        "duration": round(duration, 3),
+        "lufs": lufs,
+        "true_peak": true_peak,
+        "warnings": warnings,
+    }
 
 
 def export_xml(session: MulticamSession, fmt: str, *, review: bool = False) -> str:

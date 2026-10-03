@@ -2231,7 +2231,8 @@ export function createServer(): McpServer {
       "'new' returns the session with guessed roles; calling it again on the same files reopens that edit. " +
       "'sync', 'plan' and 'render' start a background job and return job_id: poll job_status, then call 'show'. " +
       "Mapping fields (people, sources, range_start, range_end, cut_settings, speaker_map, look, removals) apply on 'map', 'sync' and 'plan'; 'render' takes only look and stems. " +
-      "Changing who is in a file or where it sits clears the cut, so run 'plan' again. 'render' skips work when nothing changed. " +
+      "Changing who is in a file or where it sits clears the cut, so run 'plan' again. 'render' skips work when nothing changed and reuses shots it already encoded. " +
+      "Every render checks the finished file (frame count, a full decode, loudness and true peak) and reports outputs.validation; only a broken decode or a picture more than a frame off the cut fails it, the rest are warnings. " +
       "Other actions: 'list', 'cut' (index, source_id: swap one shot's camera), 'set_cuts' (cuts: replace the whole cut with back-to-back shots), " +
       "'activity' (who speaks when, as spans per person), 'previews' (still frames per camera, looks: true adds color-look stills), " +
       "'preview' (background job: playback proxies, a mic mix and stills, for a browser editor such as podcli cloud), 'delete'. " +
@@ -2316,12 +2317,16 @@ export function createServer(): McpServer {
             isError: true,
           };
         }
+        const validation = (data.outputs as { validation?: { warnings?: string[] } } | undefined)?.validation;
+        const warnings = validation?.warnings?.length
+          ? `\n\n[Render warnings]\n${validation.warnings.map((w) => `  - ${w}`).join("\n")}`
+          : "";
         const text = typeof data.job_id === "string"
           ? withNextStep(
               JSON.stringify(data, null, 2),
               `Poll job_status("${data.job_id}", wait_seconds: 30) until done, then manage_multicam(action: "show", session_id) to read the result.`,
             )
-          : JSON.stringify(data, null, 2);
+          : JSON.stringify(data, null, 2) + warnings;
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
