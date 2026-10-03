@@ -61,8 +61,14 @@ behavior, not a roadmap.
 - Layout and copy are generated together: an LLM writes the HTML/CSS, and
   Playwright renders it (`backend/services/thumbnail_ai.py`).
 - Split-screen/multicam source frames are detected and cropped to the half
-  containing the speaking face. There's no true multi-person composited
-  layout (two subjects placed and sized independently in one frame).
+  containing the speaking face.
+- The `pair` layout places two people side by side, each cut from their own
+  frame of the clip. It tells people apart only by seat (two faces in one
+  shot or two call panes) or by a multicam edit whose render is the clip's
+  source. A single camera that cuts between people falls back to one face.
+- Without a multicam edit, the guest is the speaker who talks more in the
+  clip. Without diarized speakers mapped to seats, sides follow the footage.
+  `--swap` or explicit images fix either case.
 - Headline copy is written to match the clip's theme, not quoted verbatim
   from the transcript. There's no automated check that the headline's
   claim matches what's actually said in the clip.

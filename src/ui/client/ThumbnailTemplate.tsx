@@ -13,6 +13,10 @@ const GROUPS: { group: string; items: Field[] }[] = [
     { k: "bg_color", t: "color" },
     { k: "font_family", t: "text", wide: true }, { k: "font_import_url", t: "text", wide: true },
   ]},
+  { group: "Layout", items: [
+    { k: "layout", t: "select", opts: ["single", "pair"] },
+    { k: "pair_photo_height", t: "text" }, { k: "pair_box_y", t: "text" }, { k: "pair_divider_width", t: "num" },
+  ]},
   { group: "Frame & box", items: [
     { k: "frame_border_width", t: "num" },
     { k: "box_x", t: "text" }, { k: "box_y", t: "text" },

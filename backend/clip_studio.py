@@ -196,6 +196,23 @@ def _json_file(raw, name):
         return None
 
 
+def _hook_arg(raw, start, end):
+    """The --hook object checked against the fragment, or nothing.
+
+    Checked as soon as the fragment's range is known, so a bad hook stops the
+    run before the face scan and the render. It stops rather than drops,
+    because someone asked for it.
+    """
+    hook = _json_object_arg(raw, "--hook")
+    if hook is None:
+        return None
+    from services.opening_hook import validate_hook
+    try:
+        return validate_hook(hook, start, end)
+    except ValueError as exc:
+        raise SystemExit(f"Error: --hook {exc}")
+
+
 # The crops that cannot place a frame without knowing where the faces are.
 _WANTS_FACES = ("face", "speaker", "speaker-hardcut")
 
@@ -249,7 +266,7 @@ def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt=
                      logo=None, name_card=None, motion=None, caption_position="auto",
                      caption_scale=1.0, logo_position="top-left", logo_scale=1.0,
                      topic=None, progress=None, cards=None, brand=None, theme=None, font_family=None,
-                     captions=True, face_map=None, crop_keyframes=None):
+                     captions=True, face_map=None, crop_keyframes=None, hook=None):
     """Render the fragment with face-crop + captions via the existing engine."""
     from services.clip_generator import generate_clip
     print(f"  [fragment] rendering {start:.1f}s–{end:.1f}s ({style}, crop={crop}, {fmt})", flush=True)
@@ -263,7 +280,7 @@ def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt=
         transcript_words=words, title=title, output_dir=out_dir,
         logo_path=logo, name_card=name_card, motion=motion,
         topic=topic, progress=progress, cards=cards, brand=brand, theme=theme, font_family=font_family,
-        captions=captions,
+        captions=captions, hook=hook,
         clean_fillers=True, allow_ass_fallback=True,
         progress_callback=lambda p, m: print(f"    {p}% {m}", flush=True),
     )
@@ -388,6 +405,9 @@ def main():
                     help="Path to hand-placed crop positions as JSON. Used by --crop manual.")
     ap.add_argument("--cards", default=None,
                     help="On-screen cards as JSON, each with kind/start/end")
+    ap.add_argument("--hook", default=None,
+                    help='Opening hook as JSON on the source clock: {"start","end","mode"}. '
+                         'mode is "repeat" or "move"')
     ap.add_argument("--brand", default=None,
                     help='Show colours as JSON: {"accent":"#4C9DF5","ink":"#FFF","surface":"#000"}')
     ap.add_argument("--style", default=None,
@@ -447,6 +467,8 @@ def main():
         start, end = args.start, args.end
     else:
         raise SystemExit("Provide either --start/--end or --paragraph")
+
+    hook = _hook_arg(args.hook, start, end)
 
     # The canvas every part is rendered and stitched on. One lookup, so the
     # fragment, the bookends and the concat cannot disagree about the shape.
@@ -511,6 +533,7 @@ def main():
         captions=not args.no_captions,
         face_map=face_map,
         crop_keyframes=_json_file(args.crop_keyframes, "--crop-keyframes"),
+        hook=hook,
     )
 
     platforms = [p.strip() for p in platforms_str.split(",") if p.strip()]

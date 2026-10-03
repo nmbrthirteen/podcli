@@ -66,6 +66,7 @@ What is the single most compelling image or concept?
 - Guest photo requirements
 - Background suggestion
 - Special visual elements
+- **Layout:** `single` (one face) or `pair` (two people). Propose `pair` for interview clips where the exchange is the point: a question and its answer, a disagreement, a reaction. podcli takes both faces from the clip itself, guest on the left and host on the right. Set it with `manage_thumbnail_config` (`set_layout`), the "Two people" toggle on the clip page, or `podcli thumbnails --layout pair`. Add `--swap` to flip sides, or `--left-image` and `--right-image` to name the people. It falls back to `single` when podcli cannot tell two people apart, so keep a single-face brief ready.
 
 ### Step 4: Quality Check
 - [ ] Readable at phone screen size
@@ -88,6 +89,7 @@ What is the single most compelling image or concept?
 
 **Shorts (9:16):**
 - Text: "[LINE 1] / [LINE 2 — accent]"
+- Layout: [single / pair: guest left, host right]
 - Visual: [action shot / dramatic imagery / B-roll]
 - Text position: Lower third, centered
 

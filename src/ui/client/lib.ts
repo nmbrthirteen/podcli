@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import type { ThumbnailPerson } from "../../utils/thumbnail-layout";
 
 // Rolls into hours past 3600s: podcast timestamps ran past "78:31" without it.
 export const fmt = (s: number) => {
@@ -10,6 +11,16 @@ export const fmt = (s: number) => {
   const ss = String(seconds).padStart(2, "0");
   return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
 };
+
+/** "guest at 0:12, host at 0:41": where each face on a pair thumbnail came from. */
+export function describePeople(people: ThumbnailPerson[]): string {
+  return people
+    .map((p) => {
+      const who = p.role ?? `${p.side} person`;
+      return p.source_time == null ? who : `${who} at ${fmt(p.source_time)}`;
+    })
+    .join(", ");
+}
 
 export const fmtMs = (s: number) =>
   `${fmt(s)}.${String(Math.floor((s % 1) * 1000)).padStart(3, "0")}`;

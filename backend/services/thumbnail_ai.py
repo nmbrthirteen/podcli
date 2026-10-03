@@ -178,6 +178,37 @@ def _face_expression_quality(frame, x1: int, y1: int, x2: int, y2: int) -> float
     return max(0.15, min(1.0, quality))
 
 
+# Below either floor a face is blurred, blinking or turned away. Kept only
+# when nothing better exists, so a clip still gets a picture.
+EXPRESSION_FLOOR = 0.25
+SHARPNESS_FLOOR = 12.0
+
+
+def face_portrait_score(frame, x1: int, y1: int, x2: int, y2: int, confidence: float) -> tuple[float, float, float]:
+    """How well one detected face would read on a thumbnail.
+
+    Returns (score, sharpness, expression quality). Favors a confident,
+    sharp, front-facing face at a natural portrait size over an extreme
+    close-up or a speck in the background.
+    """
+    h, w = frame.shape[:2]
+    face_area_pct = (x2 - x1) * (y2 - y1) / max(1, w * h) * 100
+    sharpness = _frame_sharpness(frame, (x1, y1, x2, y2))
+    expression_quality = _face_expression_quality(frame, x1, y1, x2, y2)
+
+    if face_area_pct > 35:
+        size_factor = 0.4
+    elif face_area_pct > 25:
+        size_factor = 0.7
+    elif face_area_pct < 3:
+        size_factor = 0.5
+    else:
+        size_factor = 1.0
+
+    score = (confidence ** 2) * (sharpness ** 0.5) * size_factor * expression_quality
+    return score, sharpness, expression_quality
+
+
 def extract_candidate_frames(
     video_path: str,
     output_dir: str,
@@ -240,8 +271,6 @@ def extract_candidate_frames(
     sample_count = max(count * 10, 40)
     candidates = []
     best_rejected = None
-    expression_floor = 0.25
-    sharpness_floor = 12.0
 
     for i in range(sample_count):
         t = start_t + i * (end_t - start_t) / sample_count
@@ -272,25 +301,14 @@ def extract_candidate_frames(
             if not is_portrait and 0.4 * w < face_cx < 0.6 * w and fw < w * 0.15:
                 continue
 
-            face_area_pct = (fw * fh) / (w * h) * 100
-            sharpness = _frame_sharpness(frame, (x1, y1, x2, y2))
-            expression_quality = _face_expression_quality(frame, x1, y1, x2, y2)
+            face_score, sharpness, expression_quality = face_portrait_score(frame, x1, y1, x2, y2, conf)
 
             mid_t = (start_t + end_t) / 2
             span = max(0.1, end_t - start_t)
             distance_from_mid = abs(t - mid_t) / (span / 2)
             position_boost = 1.0 - 0.4 * min(1.0, distance_from_mid)
 
-            if face_area_pct > 35:
-                size_factor = 0.4
-            elif face_area_pct > 25:
-                size_factor = 0.7
-            elif face_area_pct < 3:
-                size_factor = 0.5
-            else:
-                size_factor = 1.0
-
-            score = (conf ** 2) * (sharpness ** 0.5) * size_factor * expression_quality * position_boost
+            score = face_score * position_boost
 
             entry = {
                 "frame": frame.copy(),
@@ -304,7 +322,7 @@ def extract_candidate_frames(
                 "score": score,
             }
 
-            if sharpness < sharpness_floor or expression_quality < expression_floor:
+            if sharpness < SHARPNESS_FLOOR or expression_quality < EXPRESSION_FLOOR:
                 if best_rejected is None or score > best_rejected["score"]:
                     best_rejected = entry
                 continue
@@ -637,6 +655,7 @@ def generate_thumbnail_with_template(
     line1_override: Optional[str] = None,
     line2_override: Optional[str] = None,
     grounding: Optional[dict] = None,
+    people: Optional[list[dict]] = None,
 ) -> Optional[str]:
     """
     Template + AI layout. Claude decides all dynamic values per frame.
@@ -644,6 +663,7 @@ def generate_thumbnail_with_template(
 
     When line1_override is given, the two lines are used verbatim and the
     Claude rewrite is skipped — the caller controls the exact split.
+    `people` carries the two panels of the pair layout from thumbnail_pair.
     """
     from services.thumbnail_html import generate_thumbnail, _load_config, _prepare_thumbnail_lines
 
@@ -685,10 +705,50 @@ def generate_thumbnail_with_template(
         config=cfg,
         variation=variation,
         face_info=frame_info,
+        people=people,
     )
 
 
-def generate_variations(
+def resolve_pair(
+    cfg: dict,
+    output_dir: str,
+    video_path: Optional[str] = None,
+    start_second: Optional[float] = None,
+    end_second: Optional[float] = None,
+    layout: Optional[str] = None,
+    left_image: Optional[str] = None,
+    right_image: Optional[str] = None,
+    swap: bool = False,
+    face_map: Optional[dict] = None,
+    segments: Optional[list[dict]] = None,
+) -> Optional[dict]:
+    """The two-person panels when the pair layout is asked for, else None.
+
+    Asked for by `layout`, by the template's own layout, or by naming images
+    for both sides. The answer is thumbnail_pair's result, which says why when
+    it falls back to one face.
+    """
+    from services.thumbnail_html import _load_config, pair_panel_size
+    from services.thumbnail_pair import pick_pair
+
+    wanted = layout or cfg.get("layout") or "single"
+    if wanted != "pair" and not (left_image or right_image):
+        return None
+    sized = {**_load_config(), **cfg}
+    return pick_pair(
+        video_path, start_second, end_second,
+        os.path.join(output_dir, "_pair"), pair_panel_size(sized),
+        left_image=left_image, right_image=right_image, swap=swap,
+        face_map=face_map, segments=segments,
+    )
+
+
+def generate_variations(*args, **kwargs) -> list[str]:
+    """Generate thumbnail variations and return their paths. See render_variations."""
+    return render_variations(*args, **kwargs)["paths"]
+
+
+def render_variations(
     title: str,
     output_dir: str,
     photo_path: Optional[str] = None,
@@ -699,15 +759,24 @@ def generate_variations(
     config: Optional[dict] = None,
     line1: Optional[str] = None,
     line2: Optional[str] = None,
-) -> list[str]:
+    grounding: Optional[dict] = None,
+    layout: Optional[str] = None,
+    left_image: Optional[str] = None,
+    right_image: Optional[str] = None,
+    swap: bool = False,
+    face_map: Optional[dict] = None,
+    segments: Optional[list[dict]] = None,
+) -> dict:
     """
     Generate thumbnail variations using AI.
 
-    1. Extract candidate frames from video (if no photo provided)
+    1. Extract candidate frames from video (if no photo provided), or two
+       people's panels for the pair layout
     2. For each variation, Claude generates the HTML layout
     3. Playwright renders to PNG
 
     Falls back to template-based generation if Claude is unavailable.
+    Returns {"paths": [...], "pair": thumbnail_pair's result or None}.
     """
     cfg = _load_brand_config()
     if config:
@@ -716,9 +785,19 @@ def generate_variations(
     os.makedirs(output_dir, exist_ok=True)
     n = cfg.get("variations", 3)
 
+    pair = resolve_pair(
+        cfg, output_dir, video_path, start_second, end_second, layout,
+        left_image, right_image, swap, face_map, segments,
+    )
+    people = pair["people"] if pair and pair["layout"] == "pair" else None
+    if pair and not people:
+        log_event("thumbnail-ai", "pair layout fell back to one face", reason=pair["reason"])
+
     # Get frames
     frames = []
-    if photo_path and os.path.exists(photo_path):
+    if people:
+        frames = [{"path": None}]
+    elif photo_path and os.path.exists(photo_path):
         frames = [{"path": photo_path}]
     elif video_path:
         frames_dir = os.path.join(output_dir, "_frames")
@@ -731,7 +810,7 @@ def generate_variations(
             end_second=end_second,
         )
 
-    if not frames and video_path:
+    if not frames and video_path and not people:
         # Fallback: simpler face extraction with less aggressive filters
         try:
             from services.thumbnail_generator import extract_face_frame
@@ -753,7 +832,7 @@ def generate_variations(
     # the variations differ in wording — not just in frame/styling.
     headlines: list[tuple[str, str]] = []
     if line1 is None:
-        headlines = generate_headline_variations(title, n, config=cfg)
+        headlines = generate_headline_variations(title, n, config=cfg, grounding=grounding)
 
     paths = []
     for i in range(n):
@@ -775,12 +854,14 @@ def generate_variations(
             variation=i,
             line1_override=v_line1,
             line2_override=v_line2,
+            grounding=grounding,
+            people=people,
         )
 
         if result:
             paths.append(result)
 
-    return paths
+    return {"paths": paths, "pair": pair}
 
 
 def thumbnail_to_video_frame(

@@ -89,6 +89,14 @@ def _load_config() -> dict:
         # Photo
         "photo_brightness": 0.85,
 
+        # Layout: "single" is one face behind the headline. "pair" puts two
+        # people from the clip side by side, the guest left and the host right,
+        # over the top of the canvas, with the headline in the clear space below.
+        "layout": "single",
+        "pair_photo_height": "70%",
+        "pair_box_y": "85%",
+        "pair_divider_width": 4,
+
         # Gradients
         "gradient_top_height": "25%",
         "gradient_top_start_color": "rgba(0,0,0,0.5)",
@@ -406,6 +414,80 @@ def _layer_html(layers) -> str:
     return "\n    ".join(drawn)
 
 
+def pair_panel_size(config: dict) -> tuple[int, int]:
+    """Pixel size of one person's panel in the pair layout."""
+    height_pct = float(str(config.get("pair_photo_height", "70%")).rstrip("%") or 70)
+    return int(config["width"]) // 2, int(int(config["height"]) * height_pct / 100)
+
+
+def _single_photo_layer(cfg: dict, photo_path: str) -> tuple[str, str]:
+    """CSS and markup for one photo filling the canvas."""
+    w, h = cfg["width"], cfg["height"]
+    # as_uri() rather than an f-string: a '#' or '?' anywhere in the path is
+    # a fragment or a query to the browser, so the image silently drops and
+    # the card renders as bg_color with a broken-image glyph.
+    photo_uri = Path(photo_path).absolute().as_uri()
+    css = f"""
+        .photo {{
+            position: absolute; top: 0; left: 0; width: {w}px; height: {h}px;
+            overflow: hidden;
+            z-index: 1;
+        }}
+        .photo img {{
+            width: 100%; height: 100%;
+            object-fit: cover;
+            object-position: {cfg.get("photo_object_position", "center center")};
+            filter: brightness({cfg.get("photo_brightness", 0.85)});
+        }}
+        .photo-vignette {{
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 1;
+        }}
+        """
+    return css, f'<div class="photo"><img src="{photo_uri}" /></div><div class="photo-vignette"></div>'
+
+
+def _pair_photo_layer(cfg: dict, people: list[dict]) -> tuple[str, str]:
+    """CSS and markup for two portrait panels side by side, split by an accent rule."""
+    panel_h = cfg.get("pair_photo_height", "70%")
+    accent = cfg.get("frame_border_color") or cfg["accent_color"]
+    css = f"""
+        .pair {{
+            position: absolute; top: 0; width: 50%; height: {panel_h};
+            overflow: hidden;
+            z-index: 1;
+        }}
+        .pair-left {{ left: 0; }}
+        .pair-right {{ right: 0; }}
+        .pair img {{
+            width: 100%; height: 100%;
+            object-fit: cover;
+            object-position: center top;
+            filter: brightness({cfg.get("photo_brightness", 0.85)});
+        }}
+        .pair-divider {{
+            position: absolute; top: 0; left: 50%; height: {panel_h};
+            width: {cfg.get("pair_divider_width", 4)}px; transform: translateX(-50%);
+            background: {accent};
+            z-index: 3;
+        }}
+        """
+    panels = "".join(
+        f'<div class="pair pair-{p["side"]}"><img src="{Path(p["path"]).absolute().as_uri()}" /></div>'
+        for p in people
+    )
+    return css, panels + '<div class="pair-divider"></div>'
+
+
+def _usable_pair(people: Optional[list[dict]]) -> bool:
+    return bool(
+        people
+        and len(people) == 2
+        and {p.get("side") for p in people} == {"left", "right"}
+        and all(p.get("path") and os.path.exists(p["path"]) for p in people)
+    )
+
+
 def _build_html(
     line1: str,
     line2: str,
@@ -414,12 +496,15 @@ def _build_html(
     config: Optional[dict] = None,
     variation: int = 0,
     face_info: Optional[dict] = None,
+    people: Optional[list[dict]] = None,
 ) -> str:
     """Build the HTML for a single thumbnail — all values from config.
 
     Args:
         face_info: Dict with face_y_pct, face_h_pct etc. from frame extraction.
                    Used to auto-position the text box below the face.
+        people: Two portrait panels from thumbnail_pair, each with a side and
+                a path. When given, they replace the single photo.
     """
     cfg = _load_config()
     if config:
@@ -438,10 +523,13 @@ def _build_html(
     l1 = safe_upper(line1) if cfg.get("line1_uppercase", True) else line1
     l2 = safe_upper(line2) if cfg.get("line2_uppercase", True) else line2
 
-    has_photo = photo_path and os.path.exists(str(photo_path))
+    pair = _usable_pair(people)
+    has_photo = pair or (photo_path and os.path.exists(str(photo_path)))
 
     # Auto-position text box below face if we have face data
-    if face_info and has_photo:
+    if pair:
+        default_y = cfg.get("pair_box_y", "85%")
+    elif face_info and has_photo:
         face_y = face_info.get("face_y_pct", 50)
         face_h = face_info.get("face_h_pct", 20)
         # Bottom edge of face as percentage
@@ -462,32 +550,11 @@ def _build_html(
     elif variation == 2:
         box_y = f"calc({default_y} + {offset_down})"
 
-    # Photo CSS
-    photo_css = ""
-    photo_uri = ""
-    if has_photo:
-        # as_uri() rather than an f-string: a '#' or '?' anywhere in the path is
-        # a fragment or a query to the browser, so the image silently drops and
-        # the card renders as bg_color with a broken-image glyph.
-        photo_uri = Path(photo_path).absolute().as_uri()
-        brightness = cfg.get("photo_brightness", 0.85)
-        photo_css = f"""
-        .photo {{
-            position: absolute; top: 0; left: 0; width: {w}px; height: {h}px;
-            overflow: hidden;
-            z-index: 1;
-        }}
-        .photo img {{
-            width: 100%; height: 100%;
-            object-fit: cover;
-            object-position: {cfg.get("photo_object_position", "center center")};
-            filter: brightness({brightness});
-        }}
-        .photo-vignette {{
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            z-index: 1;
-        }}
-        """
+    photo_css, photo_html = "", ""
+    if pair:
+        photo_css, photo_html = _pair_photo_layer(cfg, people)
+    elif has_photo:
+        photo_css, photo_html = _single_photo_layer(cfg, photo_path)
 
     # Logo
     logo_html = ""
@@ -689,7 +756,7 @@ body {{
 </head>
 <body>
     <div class="frame"></div>
-    {f'<div class="photo"><img src="{photo_uri}" /></div><div class="photo-vignette"></div>' if has_photo else ''}
+    {photo_html}
     <div class="gradient-top"></div>
     <div class="gradient-bottom"></div>
     <div class="text-box">
@@ -711,13 +778,14 @@ def generate_thumbnail(
     config: Optional[dict] = None,
     variation: int = 0,
     face_info: Optional[dict] = None,
+    people: Optional[list[dict]] = None,
 ) -> str:
     """Generate a single thumbnail via HTML + headless browser screenshot."""
     cfg = _load_config()
     if config:
         cfg.update(config)
 
-    html = _build_html(line1, line2, photo_path, logo_path, cfg, variation, face_info=face_info)
+    html = _build_html(line1, line2, photo_path, logo_path, cfg, variation, face_info=face_info, people=people)
 
     # Write HTML to temp file
     tmp_html = tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w")

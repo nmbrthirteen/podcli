@@ -23,6 +23,7 @@ from services.audio_events import compute_event_scores, dominant_reaction
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from presets import DEFAULT_PRESET, MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 from services.formats import get_format
+from services.opening_hook import HOOK_MODES, validate_hook
 from utils.text import clean_title
 from services import ai_provider, podcli_cloud
 from services.ai_cli import (
@@ -126,7 +127,7 @@ KB_FILES = [
 # Bump when the selection rules in _build_prompt change. Folded into the
 # suggestion cache key for the same reason the knowledge base is: replaying old
 # picks under new rules teaches people the rules do nothing.
-PROMPT_VERSION = 5
+PROMPT_VERSION = 6
 
 
 def kb_signature() -> str:
@@ -243,6 +244,26 @@ def _total_score(clip: dict) -> float:
 
 
 MAX_REACTION_ANCHORS = 40
+
+
+def _suggested_hook(clip: dict, start: float, end: float, segments: list[dict]) -> Optional[dict]:
+    """The opening hook the model proposed for this clip, or None.
+
+    A hook that is malformed or falls outside the clip it opens is dropped
+    rather than failing the clip: the moment is still worth rendering without it.
+    """
+    raw = clip.get("hook")
+    if not isinstance(raw, dict) or raw.get("mode") not in HOOK_MODES:
+        return None
+    try:
+        hook = {
+            "start": round(float(raw.get("start")), 1),
+            "end": round(float(raw.get("end")), 1),
+            "mode": raw["mode"],
+        }
+        return validate_hook(hook, start, end, segments)
+    except (TypeError, ValueError):
+        return None
 
 
 def _format_reaction_anchors(reaction_times: list[float] | None) -> str:
@@ -400,6 +421,12 @@ SEGMENTS RULES:
 - "duration" = total kept time (sum of all segment lengths), NOT end - start
 - "start_second" / "end_second" = outer bounds (first segment start, last segment end)
 - Example: speaker makes great point (10s), rambles (8s), delivers punchline (12s) → 2 segments, 22s total
+
+HOOK (optional):
+- If the sharpest line sits mid-clip, add "hook": {{"start": X, "end": Y, "mode": "repeat"}} so it plays first.
+- It must be 1-15 seconds of words actually spoken inside the clip's segments. Never invent text.
+- "repeat" plays it again where it belongs. "move" lifts it out of the body.
+- Leave "hook" out when the clip already opens on its strongest line.
 
 Rules:
 - Final clip duration (sum of segments) MUST be {b.dur_min}-{b.dur_max} seconds (target {b.target_min}-{b.target_max}s)
@@ -576,6 +603,8 @@ RULES:
 - In "needs", name what the viewer must already know, or "nothing". If it is anything
   else, move start_second back until the clip covers it. "context_line" is a note for
   the editor, not a fix: nothing burns it into the video.
+- Optional "hook": {{"start": X, "end": Y, "mode": "repeat" or "move"}}, 1-15 seconds of
+  words spoken inside the clip, played first. Leave it out when the clip opens strong.
 
 Return this JSON:
 {{
@@ -633,11 +662,14 @@ Transcript:
                 if not bounds.keeps(kept_duration):
                     continue
 
+                clip_start = keep_segments[0]["start"] if keep_segments else start_sec
+                clip_end = keep_segments[-1]["end"] if keep_segments else end_sec
                 found.append({
                     "title": clean_title(c.get("title", "Untitled")),
-                    "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
-                    "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
+                    "start_second": clip_start,
+                    "end_second": clip_end,
                     "segments": keep_segments,
+                    "hook": _suggested_hook(c, clip_start, clip_end, keep_segments),
                     "duration": round(kept_duration),
                     "score": total,
                     "content_type": c.get("content_type", "unknown"),
@@ -839,11 +871,14 @@ def suggest_with_claude(
         if not bounds.keeps(kept_duration):
             continue
 
+        clip_start = keep_segments[0]["start"] if keep_segments else start_sec
+        clip_end = keep_segments[-1]["end"] if keep_segments else end_sec
         normalized.append({
             "title": clean_title(c.get("title", "Untitled")),
-            "start_second": keep_segments[0]["start"] if keep_segments else start_sec,
-            "end_second": keep_segments[-1]["end"] if keep_segments else end_sec,
+            "start_second": clip_start,
+            "end_second": clip_end,
             "segments": keep_segments,
+            "hook": _suggested_hook(c, clip_start, clip_end, keep_segments),
             "duration": round(kept_duration),
             "score": total,
             "content_type": c.get("content_type", "unknown"),

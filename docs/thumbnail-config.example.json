@@ -60,6 +60,12 @@
   "gradient_bottom_end_color": "#0D0D0D",
   "gradient_bottom_fade_point": "70%",
 
+  "_comment_layout": "single draws one face behind the headline. pair draws two people from the clip side by side, the guest on the left and the host on the right, over the top pair_photo_height of the canvas, with the headline centred at pair_box_y. pair falls back to single when podcli cannot tell two people apart in the clip.",
+  "layout": "single",
+  "pair_photo_height": "70%",
+  "pair_box_y": "85%",
+  "pair_divider_width": 4,
+
   "_comment_logo": "Position one of: top-left, top-right, top-center, bottom-center, none. Logo image lives under .podcli/assets/ (register via manage_assets).",
   "logo_position": "bottom-center",
   "logo_height": "50px",
