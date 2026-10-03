@@ -850,6 +850,19 @@ def needs_sync(session: MulticamSession) -> bool:
     return any(_in_use(session, s) and not s.virtual and not s.synced for s in session.sources)
 
 
+def sync_basis_signature(session: MulticamSession) -> str:
+    """Fingerprint of where every in-use source currently sits on the timeline.
+
+    A cut or removal made in an external editor (the podcli cloud editor)
+    references timeline seconds measured against this placement. If sync,
+    a nudge, or a re-map moves anything after the edit was sent out, applying
+    that cut back silently lands on the wrong footage: this lets callers
+    detect that before it happens.
+    """
+    feeds = sorted((s.id, s.offset, s.speed) for s in session.sources if _in_use(session, s) and not s.virtual)
+    return hashlib.sha1(json.dumps(feeds, default=str).encode()).hexdigest()[:16]
+
+
 def _in_use(session: MulticamSession, s: Source) -> bool:
     """Mapped to something, or the recording a tile in use is cut from (even when the whole frame is ignored)."""
     return s.role != "ignore" or any(v.parent == s.id and v.role != "ignore" for v in session.sources)
