@@ -175,10 +175,19 @@ func installCommands(project string) (installReport, error) {
 		currentHash := sha256Hex(current)
 
 		if !tracked {
-			// Predates the manifest: don't know if this is a stock file or a
-			// user edit, so leave it and adopt its current state as the baseline.
-			manifest.Files[name] = currentHash
-			changed = true
+			// Predates the manifest. Only adopt it as the baseline if it's
+			// actually the stock file (hash matches what's embedded) — that's
+			// the "installed before tracking existed" case. If it doesn't
+			// match, it's a user edit (or something else entirely); leave it
+			// untracked rather than recording its current hash as a baseline,
+			// which would make the next run believe it's unmodified and
+			// overwrite it once the embedded version changes.
+			if currentHash == embeddedHash {
+				manifest.Files[name] = currentHash
+				changed = true
+				return nil
+			}
+			report.UserModified = append(report.UserModified, name)
 			return nil
 		}
 
@@ -309,8 +318,12 @@ func installCodexSkills() error {
 		lastInstalledHash, tracked := manifest.Files[name]
 		currentHash := sha256Hex(current)
 		if !tracked {
-			manifest.Files[name] = currentHash
-			changed = true
+			// Same reasoning as installCommands: only adopt an untracked file
+			// as the baseline if it's actually the stock skill content.
+			if currentHash == contentHash {
+				manifest.Files[name] = currentHash
+				changed = true
+			}
 			return nil
 		}
 		if currentHash != lastInstalledHash || currentHash == contentHash {

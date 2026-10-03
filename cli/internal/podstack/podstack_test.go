@@ -195,9 +195,60 @@ func TestInstallCommandsAdoptsPreManifestFilesWithoutOverwriting(t *testing.T) {
 		t.Fatal("pre-manifest file content was changed, but it should have been adopted as-is")
 	}
 
+	// The legacy content here is not the stock embedded file, so it must not
+	// be adopted as a baseline — doing so is what let the second run in
+	// TestInstallCommandsNeverOverwritesAPreManifestUserEditOnASecondRun
+	// clobber a genuine user edit.
 	manifest := readManifest(dest)
-	if manifest.Files["auto.md"] == "" {
-		t.Fatal("expected a baseline hash to be recorded for the adopted file")
+	if manifest.Files["auto.md"] != "" {
+		t.Fatal("a pre-manifest file that doesn't match the stock content must not get a baseline hash recorded")
+	}
+	found := false
+	for _, f := range report.UserModified {
+		if f == "auto.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the non-stock pre-manifest file to be reported as user-modified, got %+v", report)
+	}
+}
+
+// Regression test for the bug where a pre-manifest, user-edited file was
+// adopted with its *current* hash as the baseline on first sight. The next
+// run then saw "unmodified relative to baseline" and overwrote it with the
+// embedded version, destroying the user's edit instead of leaving it alone.
+func TestInstallCommandsNeverOverwritesAPreManifestUserEditOnASecondRun(t *testing.T) {
+	project := t.TempDir()
+	dest := filepath.Join(project, ".claude", "commands")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	legacy := filepath.Join(dest, "auto.md")
+	edited := []byte("# a pre-existing, hand-edited auto.md\n")
+	if err := os.WriteFile(legacy, edited, 0o644); err != nil {
+		t.Fatalf("seed legacy file: %v", err)
+	}
+
+	if _, err := installCommands(project); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	report, err := installCommands(project)
+	if err != nil {
+		t.Fatalf("second install: %v", err)
+	}
+	for _, f := range report.Updated {
+		if f == "auto.md" {
+			t.Fatal("a pre-manifest user edit must never be adopted as a baseline and then overwritten")
+		}
+	}
+
+	after, err := os.ReadFile(legacy)
+	if err != nil {
+		t.Fatalf("read after second install: %v", err)
+	}
+	if string(after) != string(edited) {
+		t.Fatal("pre-manifest user edit was overwritten on the second install run")
 	}
 }
 
@@ -276,5 +327,41 @@ func TestInstallCodexSkillsLeavesUserEditsAlone(t *testing.T) {
 	}
 	if string(after) != string(edited) {
 		t.Fatal("user-edited skill file was overwritten")
+	}
+}
+
+// Same regression as TestInstallCommandsNeverOverwritesAPreManifestUserEditOnASecondRun,
+// for the Codex skills installer: a skill file that predates manifest
+// tracking, and doesn't match the stock content, must never be adopted as a
+// baseline and then overwritten on a later install.
+func TestInstallCodexSkillsNeverOverwritesAPreManifestUserEditOnASecondRun(t *testing.T) {
+	withHome(t)
+	skillsDir, err := codexSkillsDir()
+	if err != nil {
+		t.Fatalf("codexSkillsDir: %v", err)
+	}
+	skillDir := filepath.Join(skillsDir, "auto")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	target := filepath.Join(skillDir, "SKILL.md")
+	edited := []byte("---\nname: auto\ndescription: hand-edited before manifest tracking existed\n---\n\nbody\n")
+	if err := os.WriteFile(target, edited, 0o644); err != nil {
+		t.Fatalf("seed legacy skill file: %v", err)
+	}
+
+	if err := installCodexSkills(); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	if err := installCodexSkills(); err != nil {
+		t.Fatalf("second install: %v", err)
+	}
+
+	after, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read after second install: %v", err)
+	}
+	if string(after) != string(edited) {
+		t.Fatal("pre-manifest user edit was overwritten on the second install run")
 	}
 }
