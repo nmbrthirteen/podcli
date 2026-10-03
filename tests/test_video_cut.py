@@ -279,6 +279,39 @@ class OutputVerificationTests(unittest.TestCase):
         self.assertIsNotNone(video_cut.verify_full_decode(self.truncated))
 
 
+class VerifyFullDecodeThresholdTests(unittest.TestCase):
+    """verify_full_decode used to delete the output on any `-v error` line at
+    all, even with a 0 exit code — a single benign warning (e.g. a
+    non-monotonic DTS line from a concat/re-encode) was enough to flag a
+    clip that decoded and played fine. These exercise the counting logic
+    against a mocked proc_run so they don't depend on finding a real file
+    that reliably produces exactly one or many such lines."""
+
+    @mock.patch.object(video_cut, "proc_run")
+    def test_tolerates_a_handful_of_error_lines_on_a_clean_exit(self, mock_run):
+        mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="one benign line\n")
+        self.assertIsNone(video_cut.verify_full_decode("clip.mp4"))
+
+    @mock.patch.object(video_cut, "proc_run")
+    def test_flags_many_error_lines_even_on_a_clean_exit(self, mock_run):
+        stderr = "\n".join(f"decode error {i}" for i in range(10))
+        mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr=stderr)
+        self.assertIsNotNone(video_cut.verify_full_decode("clip.mp4"))
+
+    @mock.patch.object(video_cut, "proc_run")
+    def test_nonzero_exit_always_fails_regardless_of_stderr(self, mock_run):
+        mock_run.return_value = mock.Mock(returncode=1, stdout="", stderr="")
+        self.assertIsNotNone(video_cut.verify_full_decode("clip.mp4"))
+
+    @mock.patch.object(video_cut, "proc_run")
+    def test_runs_with_threads_auto_for_a_cheaper_decode(self, mock_run):
+        mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+        video_cut.verify_full_decode("clip.mp4")
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("-threads", cmd)
+        self.assertEqual(cmd[cmd.index("-threads") + 1], "auto")
+
+
 @unittest.skipUnless(
     shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg/ffprobe not installed"
 )
