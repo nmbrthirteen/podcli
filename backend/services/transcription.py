@@ -8,6 +8,7 @@ Produces word-level timestamps with speaker labels by:
 """
 
 import json
+import hashlib
 import http.client
 import os
 import shutil
@@ -166,6 +167,16 @@ def _assemblyai_base_url() -> str:
     return "https://api.assemblyai.com/v2"
 
 
+class AssemblyAIHTTPError(RuntimeError):
+    """Carries the HTTP status so callers can tell a bad/expired resource
+    (4xx — e.g. the transcript a resumed receipt points at no longer exists)
+    from a transient server error, without re-parsing the message string."""
+
+    def __init__(self, message: str, status: int):
+        super().__init__(message)
+        self.status = status
+
+
 def _assemblyai_json_request(method: str, url: str, api_key: str, payload: Optional[dict], timeout: int) -> dict:
     body = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {"Authorization": api_key}
@@ -179,8 +190,9 @@ def _assemblyai_json_request(method: str, url: str, api_key: str, payload: Optio
                 return json.loads(res.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", errors="replace")
-            last_error = RuntimeError(
-                f"AssemblyAI request failed: method={method} url={url} status={e.code} body={detail}"
+            last_error = AssemblyAIHTTPError(
+                f"AssemblyAI request failed: method={method} url={url} status={e.code} body={detail}",
+                status=e.code,
             )
             if e.code not in (408, 409, 425, 429) and e.code < 500:
                 raise last_error from e
@@ -358,71 +370,94 @@ def _transcribe_with_assemblyai(file_path, language, enable_diarization, num_spe
         raise RuntimeError("ASSEMBLYAI_API_KEY is required when PODCLI_ENGINE=assemblyai")
 
     base_url = _assemblyai_base_url()
+    region = os.environ.get("ASSEMBLYAI_REGION", "").strip().lower() or "us"
+    key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:8]
     # A restarted job (crash, kill, machine reboot) must resume by polling
     # the transcript it already started, not re-upload the file and pay for
     # a second AssemblyAI job. The receipt is keyed by exactly what affects
-    # the AssemblyAI request (language, diarization, speaker count) so a
-    # different request for the same file never adopts someone else's job.
+    # the AssemblyAI request (language, diarization, speaker count, region,
+    # which account) so a different request for the same file never adopts
+    # someone else's job — a region or key mismatch would otherwise poll a
+    # transcript ID that belongs to a different account/API surface.
     directory = transcribe_runs.run_dir(
         paths["cache"], file_path, "assemblyai",
-        model_size=f"diar{int(bool(enable_diarization))}-spk{num_speakers or 0}",
+        model_size=f"diar{int(bool(enable_diarization))}-spk{num_speakers or 0}-{region}-{key_hash}",
         language=language,
     )
-    receipt = transcribe_runs.read_receipt(directory, "assemblyai.json")
-    transcript_id = receipt.get("transcript_id") if receipt else None
 
-    if not transcript_id:
-        if progress_callback:
-            progress_callback(10, "Uploading media to AssemblyAI...")
-        upload_url = _assemblyai_upload(file_path, api_key, base_url)
+    # A resumed transcript_id that 4xxs on the resume GET (e.g. AssemblyAI
+    # deleted it after its retention window, or it belonged to a key that's
+    # since been rotated) is permanently bad — retrying it forever would
+    # never succeed. Clear the receipt and fall through to a fresh upload,
+    # once.
+    for resume_attempt in (True, False):
+        receipt = transcribe_runs.read_receipt(directory, "assemblyai.json") if resume_attempt else None
+        transcript_id = receipt.get("transcript_id") if receipt else None
+        resumed = transcript_id is not None
 
-        payload = {
-            "audio_url": upload_url,
-            "punctuate": True,
-            "format_text": True,
-            "speaker_labels": bool(enable_diarization),
-        }
-        if language:
-            payload["language_code"] = language
-        else:
-            payload["language_detection"] = True
-        if num_speakers:
-            payload["speakers_expected"] = num_speakers
-
-        if progress_callback:
-            progress_callback(20, "Starting AssemblyAI transcript...")
-        started = _assemblyai_json_request("POST", f"{base_url}/transcript", api_key, payload, 60)
-        transcript_id = started.get("id")
         if not transcript_id:
-            raise RuntimeError(f"AssemblyAI transcript response missing id: body={started}")
-        # Written before the poll loop starts: if the process dies mid-poll,
-        # the next run finds this and resumes instead of re-uploading.
-        transcribe_runs.write_receipt(directory, "assemblyai.json", {"transcript_id": transcript_id})
-    elif progress_callback:
-        progress_callback(20, f"Resuming AssemblyAI transcript {transcript_id}...")
-
-    url = f"{base_url}/transcript/{transcript_id}"
-    for _ in range(720):
-        data = _assemblyai_json_request("GET", url, api_key, None, 60)
-        status = data.get("status")
-        if status == "completed":
             if progress_callback:
-                progress_callback(50, "AssemblyAI transcription complete")
-            transcribe_runs.clear_run(directory)
-            return _assemblyai_result(data)
-        if status == "error":
-            transcribe_runs.clear_run(directory)
-            raise RuntimeError(
-                f"AssemblyAI transcript failed: transcript_id={transcript_id} error={data.get('error')}"
-            )
-        if status not in ("queued", "processing"):
-            raise RuntimeError(
-                f"AssemblyAI transcript returned unknown status: transcript_id={transcript_id} status={status} body={data}"
-            )
-        if progress_callback:
-            progress_callback(30, f"AssemblyAI transcript {status}...")
-        time.sleep(5)
-    raise TimeoutError(f"AssemblyAI transcript timed out: transcript_id={transcript_id}")
+                progress_callback(10, "Uploading media to AssemblyAI...")
+            upload_url = _assemblyai_upload(file_path, api_key, base_url)
+
+            payload = {
+                "audio_url": upload_url,
+                "punctuate": True,
+                "format_text": True,
+                "speaker_labels": bool(enable_diarization),
+            }
+            if language:
+                payload["language_code"] = language
+            else:
+                payload["language_detection"] = True
+            if num_speakers:
+                payload["speakers_expected"] = num_speakers
+
+            if progress_callback:
+                progress_callback(20, "Starting AssemblyAI transcript...")
+            started = _assemblyai_json_request("POST", f"{base_url}/transcript", api_key, payload, 60)
+            transcript_id = started.get("id")
+            if not transcript_id:
+                raise RuntimeError(f"AssemblyAI transcript response missing id: body={started}")
+            # Written before the poll loop starts: if the process dies mid-poll,
+            # the next run finds this and resumes instead of re-uploading.
+            transcribe_runs.write_receipt(directory, "assemblyai.json", {"transcript_id": transcript_id})
+        elif progress_callback:
+            progress_callback(20, f"Resuming AssemblyAI transcript {transcript_id}...")
+
+        url = f"{base_url}/transcript/{transcript_id}"
+        try:
+            for _ in range(720):
+                data = _assemblyai_json_request("GET", url, api_key, None, 60)
+                status = data.get("status")
+                if status == "completed":
+                    if progress_callback:
+                        progress_callback(50, "AssemblyAI transcription complete")
+                    transcribe_runs.clear_run(directory)
+                    return _assemblyai_result(data)
+                if status == "error":
+                    transcribe_runs.clear_run(directory)
+                    raise RuntimeError(
+                        f"AssemblyAI transcript failed: transcript_id={transcript_id} error={data.get('error')}"
+                    )
+                if status not in ("queued", "processing"):
+                    raise RuntimeError(
+                        f"AssemblyAI transcript returned unknown status: transcript_id={transcript_id} status={status} body={data}"
+                    )
+                if progress_callback:
+                    progress_callback(30, f"AssemblyAI transcript {status}...")
+                time.sleep(5)
+            raise TimeoutError(f"AssemblyAI transcript timed out: transcript_id={transcript_id}")
+        except AssemblyAIHTTPError as e:
+            if resumed and 400 <= e.status < 500:
+                transcribe_runs.clear_run(directory)
+                if progress_callback:
+                    progress_callback(
+                        10, f"Saved AssemblyAI transcript {transcript_id} is gone (status {e.status}); re-uploading..."
+                    )
+                continue
+            raise
+    raise RuntimeError("AssemblyAI resume retry exhausted")  # unreachable — loop always returns or raises
 
 
 def _attach_speakers_and_faces(
