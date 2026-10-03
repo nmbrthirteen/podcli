@@ -605,6 +605,21 @@ def test_turn_edges_follow_sentences_not_loose_timestamps():
     mc._settle_turn_edges(w, [0.0, 15.0, 15.0])
     assert [x["person"] for x in w] == ["a", "a", "b"]
 
+    # Georgian has no letter case, so a sentence opener there can't pass an
+    # isupper() check. It must still move to the next speaker.
+    w = words([("დამიდა.", "g"), ("კარგი,", "g"),
+               ("ამიტაო", "h")])
+    mc._settle_turn_edges(w, [0.0] * len(w))
+    assert [x["person"] for x in w] == ["g", "h", "h"]
+
+
+def test_sentence_opener_detection_handles_caseless_scripts():
+    assert mc._looks_like_sentence_opener("კარგი")  # Georgian, no case
+    assert mc._looks_like_sentence_opener("Right,")
+    assert not mc._looks_like_sentence_opener("right,")
+    assert not mc._looks_like_sentence_opener("123")
+    assert not mc._looks_like_sentence_opener("")
+
 
 # --- Remote recordings ------------------------------------------------------------
 

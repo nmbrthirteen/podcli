@@ -1522,6 +1522,29 @@ def transcript(session: MulticamSession, *, model_size: str = "base", engine: Op
 _SENTENCE_END = (".", "?", "!")
 
 
+_GEORGIAN_RANGES = ((0x10A0, 0x10FF), (0x1C90, 0x1CBF))
+
+
+def _looks_like_sentence_opener(text: str) -> bool:
+    """True if `text` could start a new sentence, by case or by having none.
+
+    `str.isupper()` alone misses caseless scripts: CJK, Arabic, Thai, and
+    Hebrew letters are never upper or lower (`ch.upper() == ch.lower()`
+    catches those). Georgian is a special case: Unicode still carries a
+    Mtavruli uppercase mapping for it, so `str.isupper()`/`islower()` report
+    it as cased, but real Georgian text is written only in the lowercase
+    Mkhedruli form and never uses that case distinction, so every opener was
+    silently dropped. Treat Georgian letters as potential openers too.
+    """
+    ch = text[:1]
+    if not ch.isalpha():
+        return False
+    if ch.isupper() or ch.upper() == ch.lower():
+        return True
+    cp = ord(ch)
+    return any(lo <= cp <= hi for lo, hi in _GEORGIAN_RANGES)
+
+
 def _settle_turn_edges(words: list[dict], margins: list[float], clear: float = 6.0) -> None:
     """Fix credits that loose word timestamps get wrong around a turn change.
 
@@ -1542,7 +1565,7 @@ def _settle_turn_edges(words: list[dict], margins: list[float], clear: float = 6
     for i in range(1, len(words) - 1):
         prev, word, nxt = words[i - 1], words[i], words[i + 1]
         if (margins[i] < clear and word["person"] == prev["person"] != nxt["person"]
-                and prev["text"].endswith(_SENTENCE_END) and word["text"][:1].isupper()):
+                and prev["text"].endswith(_SENTENCE_END) and _looks_like_sentence_opener(word["text"])):
             word["person"] = nxt["person"]
     # Moving a sentence opener can leave the word after it stranded; rejoin it too.
     rejoin_strays()
