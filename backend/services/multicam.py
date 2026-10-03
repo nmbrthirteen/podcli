@@ -1756,6 +1756,12 @@ def previews(session: MulticamSession, *, looks: bool = False, at: Optional[floa
         t = moment(s)
         out = work / f"frame-{s.id}-{int(t * 10)}-{_still_basis(session, s)}.jpg"
         if not out.exists():
+            # A nudge or re-sync changes the basis (and often the moment), so the
+            # old filename never matches again; delete it rather than let every
+            # edit leave one more still behind.
+            for stale in work.glob(f"frame-{s.id}-*.jpg"):
+                if stale != out:
+                    stale.unlink(missing_ok=True)
             _still(session, s, t, out)
         frames["cameras"][s.id] = str(out)
     if looks:
@@ -1766,6 +1772,9 @@ def previews(session: MulticamSession, *, looks: bool = False, at: Optional[floa
             for name in LOOKS:
                 out = work / f"look-{cam.id}-{name}-{int(t * 10)}-{_still_basis(session, cam)}.jpg"
                 if not out.exists():
+                    for stale in work.glob(f"look-{cam.id}-{name}-*.jpg"):
+                        if stale != out:
+                            stale.unlink(missing_ok=True)
                     _still(session, cam, t, out, look=name, width=640)
                 frames["looks"][cam.id][name] = str(out)
     return frames

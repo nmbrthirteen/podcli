@@ -702,6 +702,10 @@ def test_preview_stills_regenerate_after_a_nudge_instead_of_serving_a_stale_fram
     look_after = frames["looks"][cam.id]["natural"]
     assert after != before and os.path.exists(after)
     assert look_after != look_before and os.path.exists(look_after)
+    # The pre-nudge stills aren't left behind: every nudge would otherwise
+    # pile up one more frame and one more look per camera, forever.
+    assert not os.path.exists(before)
+    assert not os.path.exists(look_before)
 
 
 def test_reopening_a_session_with_an_unchanged_camera_keeps_its_sync(episode):
