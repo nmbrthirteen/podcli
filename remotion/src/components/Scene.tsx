@@ -10,6 +10,7 @@ import {
   sizeOf,
 } from "../scene";
 import type { Align, Block, Gap, Layout, Size, Tone } from "../scene";
+import { safeUpper } from "../text";
 
 /**
  * Blocks, drawn.
@@ -92,13 +93,17 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
           fontWeight: WEIGHT[size],
           lineHeight: LINE_HEIGHT[size],
           letterSpacing: TRACKING[size] * unit,
-          textTransform: block.caps ? "uppercase" : undefined,
+          // Resolved per-run below via safeUpper — CSS text-transform would
+          // still remap caseless scripts like Georgian to a different alphabet.
+          textTransform: "none",
           color: toneOf(brand, accent, block.tone, size === "xs" ? "muted" : "ink"),
           textAlign: block.align ?? "start",
         }}
       >
         {emphasisRuns(block.text, block.emphasis).map((run, i) => (
-          <span key={i} style={run.mark ? { color: accent } : undefined}>{run.text}</span>
+          <span key={i} style={run.mark ? { color: accent } : undefined}>
+            {block.caps ? safeUpper(run.text) : run.text}
+          </span>
         ))}
       </div>
     );

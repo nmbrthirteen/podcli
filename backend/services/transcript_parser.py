@@ -14,6 +14,16 @@ import json
 from typing import List, Dict, Any, Optional
 
 
+def _clean_caption_text(text: str) -> str:
+    """Strip markup that isn't spoken text: HTML-like tags and ASS/SSA
+    override blocks such as {\\an8} that some SRT/VTT exports carry over.
+    Left in place, they get imported as literal words.
+    """
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'\{[^}]*\}', '', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
 def parse_srt_timestamp(ts: str) -> float:
     """Convert SRT timestamp HH:MM:SS,mmm to seconds."""
     ts = ts.strip().replace(",", ".")
@@ -76,8 +86,7 @@ def parse_srt(
                 # End of block
                 text_content = " ".join(current_text_lines).strip()
                 # Strip HTML-like tags
-                text_content = re.sub(r'<[^>]+>', '', text_content)
-                text_content = re.sub(r'\s+', ' ', text_content).strip()
+                text_content = _clean_caption_text(text_content)
                 if text_content:
                     blocks.append({
                         "start": current_start,
@@ -91,8 +100,7 @@ def parse_srt(
     # Handle last block if file doesn't end with blank line
     if state == "text" and current_text_lines:
         text_content = " ".join(current_text_lines).strip()
-        text_content = re.sub(r'<[^>]+>', '', text_content)
-        text_content = re.sub(r'\s+', ' ', text_content).strip()
+        text_content = _clean_caption_text(text_content)
         if text_content:
             blocks.append({
                 "start": current_start,
@@ -148,8 +156,7 @@ def parse_vtt(
             # Save previous block
             if in_text and current_text_lines:
                 text_content = " ".join(current_text_lines).strip()
-                text_content = re.sub(r'<[^>]+>', '', text_content)
-                text_content = re.sub(r'\s+', ' ', text_content).strip()
+                text_content = _clean_caption_text(text_content)
                 if text_content:
                     blocks.append({
                         "start": current_start,
@@ -166,8 +173,7 @@ def parse_vtt(
         if in_text:
             if line_stripped == "":
                 text_content = " ".join(current_text_lines).strip()
-                text_content = re.sub(r'<[^>]+>', '', text_content)
-                text_content = re.sub(r'\s+', ' ', text_content).strip()
+                text_content = _clean_caption_text(text_content)
                 if text_content:
                     blocks.append({
                         "start": current_start,
@@ -183,8 +189,7 @@ def parse_vtt(
     # Handle last block
     if in_text and current_text_lines:
         text_content = " ".join(current_text_lines).strip()
-        text_content = re.sub(r'<[^>]+>', '', text_content)
-        text_content = re.sub(r'\s+', ' ', text_content).strip()
+        text_content = _clean_caption_text(text_content)
         if text_content:
             blocks.append({
                 "start": current_start,

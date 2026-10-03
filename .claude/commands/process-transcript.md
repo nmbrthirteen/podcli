@@ -96,6 +96,8 @@ Before scoring, fix each flagged moment's edges and state its payoff.
 
 **Then run the standalone check.** Name what the viewer must already know. If it is anything other than nothing, the start moves back until the clip covers it. If it cannot, drop the moment.
 
+**Optionally mark an opening hook.** If the sharpest line sits mid-clip, it can play first as a `hook` (1-15 seconds, `repeat` replays it in place, `move` lifts it out). It must be a line actually spoken inside the clip, quoted verbatim with its timestamps. Never invent hook text.
+
 ### Phase 4: Score Each Moment
 
 For every flagged moment, score on four dimensions (1-5 each):
@@ -182,6 +184,7 @@ Format: comma-separated, under 500 characters.
 **Payoff:** [What the viewer walks away with. One sentence, second person.]
 **Needs:** [nothing | what the viewer must already know]
 **Setup line:** [The question this answers, in one line, or omit when the clip carries its own setup]
+**Opening hook:** [Optional. "Verbatim line" XX:XX-XX:XX, repeat or move. Omit when the clip opens strong on its own]
 
 **Why it works:** [One sentence explaining the appeal]
 

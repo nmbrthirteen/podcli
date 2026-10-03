@@ -51,12 +51,15 @@ class CutSegmentTests(unittest.TestCase):
 
 class CutMultiSegmentTests(unittest.TestCase):
     def test_single_segment_delegates_to_cut_segment(self):
-        with mock.patch.object(video_cut, "cut_segment", return_value="/out.mp4") as cs:
-            out = video_cut.cut_multi_segment(
+        with mock.patch.object(video_cut, "cut_segment", return_value="/out.mp4") as cs, \
+             mock.patch.object(video_cut, "probe_duration", return_value=5.0) as pd:
+            out, durations = video_cut.cut_multi_segment(
                 "/in.mp4", "/out.mp4", [{"start": 0, "end": 5}]
             )
             self.assertEqual(out, "/out.mp4")
+            self.assertEqual(durations, [5.0])
             cs.assert_called_once_with("/in.mp4", "/out.mp4", 0, 5)
+            pd.assert_called_once_with("/out.mp4")
 
     def test_multi_segment_invokes_cut_then_concat(self):
         # Two-segment flow: two cut_segment calls + one proc_run for concat
@@ -75,7 +78,7 @@ class CutMultiSegmentTests(unittest.TestCase):
             ) as cs, mock.patch.object(
                 video_cut, "proc_run", return_value=_ok()
             ) as mocked:
-                out = video_cut.cut_multi_segment(
+                out, durations = video_cut.cut_multi_segment(
                     "/in.mp4",
                     out_path,
                     [
@@ -84,6 +87,7 @@ class CutMultiSegmentTests(unittest.TestCase):
                     ],
                 )
                 self.assertEqual(out, out_path)
+                self.assertEqual(len(durations), 2)
                 self.assertEqual(cs.call_count, 2)
                 # concat call
                 cmd = mocked.call_args.args[0]
@@ -211,6 +215,121 @@ class CutContentAccuracyTests(unittest.TestCase):
         out = os.path.join(self.tmpdir, "cut_on_kf.mp4")
         video_cut.cut_segment(self.src, out, 4.0, 5.0)
         self._assert_frame_is(out, "cyan")
+
+
+@unittest.skipUnless(
+    shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg/ffprobe not installed"
+)
+class OutputVerificationTests(unittest.TestCase):
+    """probe_has_audio_stream and verify_full_decode are the post-render
+    checks that catch a 0-exit ffmpeg run that still wrote a bad file."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.mkdtemp(prefix="podcli-verify-test-")
+
+        cls.with_audio = os.path.join(cls.tmpdir, "with_audio.mp4")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=red:s=64x64:r=25:d=1",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                "-shortest", cls.with_audio,
+            ],
+            check=True, capture_output=True,
+        )
+
+        cls.no_audio = os.path.join(cls.tmpdir, "no_audio.mp4")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=25:d=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                cls.no_audio,
+            ],
+            check=True, capture_output=True,
+        )
+
+        # A truncated file: valid header, but chopped mid-stream so a full
+        # decode (not just ffprobe's duration read) turns up an error.
+        cls.truncated = os.path.join(cls.tmpdir, "truncated.mp4")
+        with open(cls.with_audio, "rb") as f:
+            data = f.read()
+        with open(cls.truncated, "wb") as f:
+            f.write(data[: len(data) // 2])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmpdir, ignore_errors=True)
+
+    def test_probe_has_audio_stream_true_when_present(self):
+        self.assertTrue(video_cut.probe_has_audio_stream(self.with_audio))
+
+    def test_probe_has_audio_stream_false_when_missing(self):
+        self.assertFalse(video_cut.probe_has_audio_stream(self.no_audio))
+
+    def test_probe_has_audio_stream_false_for_missing_file(self):
+        self.assertFalse(video_cut.probe_has_audio_stream("/no/such/file.mp4"))
+
+    def test_verify_full_decode_clean_file_returns_none(self):
+        self.assertIsNone(video_cut.verify_full_decode(self.with_audio))
+
+    def test_verify_full_decode_flags_truncated_file(self):
+        self.assertIsNotNone(video_cut.verify_full_decode(self.truncated))
+
+
+@unittest.skipUnless(
+    shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg/ffprobe not installed"
+)
+class MultiSegmentPartDurationTests(unittest.TestCase):
+    """Captions for a multi-cut clip are timed by summing part durations
+    (clip_generator.py). Each part's actual encoded length can be a few ms
+    off the requested end - start, and that drift compounds across cuts —
+    so the probed durations cut_multi_segment now returns must track the
+    real concatenated output, not the planned request."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.mkdtemp(prefix="podcli-multiseg-test-")
+        cls.src = os.path.join(cls.tmpdir, "src.mp4")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc=size=64x64:rate=30:duration=20",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=20",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
+                cls.src,
+            ],
+            check=True, capture_output=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmpdir, ignore_errors=True)
+
+    def test_sum_of_part_durations_matches_the_concatenated_output(self):
+        # Deliberately off-grid, irregular lengths so frame-snap rounding
+        # doesn't cancel out across segments.
+        segments = [
+            {"start": 0.13, "end": 0.46},
+            {"start": 1.02, "end": 1.58},
+            {"start": 2.21, "end": 2.69},
+            {"start": 3.07, "end": 3.91},
+            {"start": 4.44, "end": 4.77},
+            {"start": 5.10, "end": 5.88},
+        ]
+        out_path = os.path.join(self.tmpdir, "multi.mp4")
+        _, part_durations = video_cut.cut_multi_segment(self.src, out_path, segments)
+
+        self.assertEqual(len(part_durations), len(segments))
+        actual_total = video_cut.probe_duration(out_path)
+
+        # One frame at 30fps; the probed per-part durations summed should
+        # land within a frame of the real concatenated output.
+        frame = 1.0 / 30
+        self.assertLessEqual(abs(sum(part_durations) - actual_total), frame)
 
 
 if __name__ == "__main__":

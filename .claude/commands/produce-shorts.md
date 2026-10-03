@@ -54,6 +54,8 @@ Each phase calls the corresponding skill's logic. Each phase reports its own Com
 
 Extract guest info, flag 15-20 moments, anchor each one (boundaries by meaning, question pulled in or carried as a setup line, payoff written before any title), score them, select top moments, classify by content type, check for duplicates.
 
+A moment may open with a `hook`: a 1-15 second line spoken inside the clip, played first. Quote it from the transcript. Never invent it.
+
 ### Phase 2: Title Development
 *Runs `/generate-titles` logic per moment*
 

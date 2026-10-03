@@ -12,6 +12,27 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.caption_styles import get_style
 from utils.timing_utils import seconds_to_ass
+from utils.text import safe_upper
+
+
+def _sanitize_ass_text(text: str) -> str:
+    """Neutralize characters that mean something to the ASS/libass parser
+    when they show up in transcribed word text instead of our own markup.
+
+    A literal backslash isn't escapable in the plain-text part of a
+    Dialogue line: libass still reads \\N, \\n and \\h out of it (that's how
+    an uppercase transform can turn a stray "\\n" into a forced \\N
+    linebreak), and a literal "{" opens a new override block early, letting
+    anything after it (including a following "}") be read as ASS tags
+    instead of rendered as text. There's no escape sequence for any of
+    these in plain text, so swap in a full-width look-alike glyph that
+    renders the same character shape without being special to the parser.
+    """
+    return (
+        text.replace("\\", "＼")
+        .replace("{", "｛")
+        .replace("}", "｝")
+    )
 
 
 def generate_ass_header(style: dict, play_res_x: int = 1080, play_res_y: int = 1920) -> str:
@@ -207,7 +228,7 @@ def _render_hormozi(words: list[dict], style: dict, offset: float) -> str:
         parts = []
         for w in chunk:
             duration_cs = int((w["end"] - w["start"]) * 100)
-            text = w["word"].upper() if uppercase else w["word"]
+            text = _sanitize_ass_text(safe_upper(w["word"]) if uppercase else w["word"])
             parts.append(f"{{\\kf{duration_cs}}}{text}")
 
         # \c = active (filled) color, \2c = inactive (unfilled) color
@@ -246,7 +267,7 @@ def _render_karaoke(words: list[dict], style: dict, offset: float) -> str:
         parts = []
         for w in sentence:
             duration_cs = int((w["end"] - w["start"]) * 100)
-            text = w["word"]
+            text = _sanitize_ass_text(w["word"])
             parts.append(f"{{\\kf{duration_cs}}}{text}")
 
         line_text = " ".join(parts)
@@ -279,7 +300,7 @@ def _render_subtle(words: list[dict], style: dict, offset: float) -> str:
         line_start = max(0, line_words[0]["start"] - offset)
         line_end = _hold_through_gap(lines, idx, max(0, line_words[-1]["end"] - offset), offset)
 
-        line_text = " ".join(w["word"] for w in line_words)
+        line_text = " ".join(_sanitize_ass_text(w["word"]) for w in line_words)
 
         start_ts = seconds_to_ass(line_start)
         end_ts = seconds_to_ass(line_end)
@@ -544,9 +565,9 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
         # Normalize casing
         normalized = []
         for j, w in enumerate(chunk):
-            text = _normalize_case(w["word"])
+            text = _sanitize_ass_text(_normalize_case(w["word"]))
             if j == 0:
-                text = text[0].upper() + text[1:] if len(text) > 1 else text.upper()
+                text = safe_upper(text[0]) + text[1:] if len(text) > 1 else safe_upper(text)
             normalized.append(text)
 
         # Measure word widths for pill positioning.

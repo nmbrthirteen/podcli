@@ -18,6 +18,7 @@ import {
   suggestClipsToolDef,
   suggestClipsInputShape,
   handleSuggestClips,
+  hookSchema,
 } from "./handlers/suggest-clips.handler.js";
 import {
   createClipToolDef,
@@ -40,7 +41,7 @@ import { webServerUrl } from "./config/server.js";
 import { childLogger } from "./utils/logger.js";
 import { mcpError } from "./utils/errors.js";
 import { podcliVersion, studioStartCommand } from "./version.js";
-import type { Format, SuggestedClip, UIState, WordTimestamp } from "./models/index.js";
+import type { ClipHook, Format, SuggestedClip, UIState, WordTimestamp } from "./models/index.js";
 
 const log = childLogger("server");
 
@@ -601,6 +602,19 @@ export function createServer(): McpServer {
         .describe(
           "Keep ProRes 4444 alpha caption overlay beside the render (for DaVinci Resolve export). Returns caption_overlay_path and cropped_source_path.",
         ),
+      write_clean_variant: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Also render a second file with the same audio, loudness, and intro/outro but no burned captions. Returns clean_output_path.",
+        ),
+      hook: hookSchema
+        .nullable()
+        .optional()
+        .describe(
+          "Opening hook for this render. Auto-loaded from clip_number if omitted; null renders without one.",
+        ),
     },
     async (params) => {
       try {
@@ -612,6 +626,7 @@ export function createServer(): McpServer {
 
         // Resolve clip_number from UI state BEFORE routing
         let keepSegments: Array<{ start: number; end: number }> | null = null;
+        let hook: ClipHook | null = params.hook ?? null;
         if (
           params.clip_number != null &&
           (params.start_second == null || params.end_second == null)
@@ -658,6 +673,7 @@ export function createServer(): McpServer {
           if (segs && segs.length > 0) {
             keepSegments = segs;
           }
+          if (params.hook === undefined && suggestion.hook) hook = suggestion.hook;
         }
 
         // Check for duplicates
@@ -699,7 +715,9 @@ export function createServer(): McpServer {
                   format: params.format || "vertical",
                   allow_ass_fallback: params.allow_ass_fallback === true,
                   keep_caption_overlay: params.keep_caption_overlay === true,
+                  write_clean_variant: params.write_clean_variant === true,
                   ...(keepSegments && { segments: keepSegments }),
+                  hook,
                 },
               ],
               transcript_words: params.transcript_words,
@@ -709,6 +727,7 @@ export function createServer(): McpServer {
                 clean_fillers: params.clean_fillers,
               }),
               keep_caption_overlay: params.keep_caption_overlay === true,
+              write_clean_variant: params.write_clean_variant === true,
             }),
           });
           if (webRes.ok) {
@@ -753,7 +772,7 @@ export function createServer(): McpServer {
           // Notify UI that export is starting
           await uiPing({ phase: "exporting" });
 
-          finalResult = await handleCreateClip(params);
+          finalResult = await handleCreateClip({ ...params, hook });
           const parsed = JSON.parse(finalResult);
 
           // Record to history
@@ -784,6 +803,7 @@ export function createServer(): McpServer {
             introPath: recipeSettings.introPath || null,
             cleanFillers: params.clean_fillers ?? recipeSettings.cleanFillers ?? true,
             keepSegments: keepSegments ?? undefined,
+            hook,
           });
 
           // Notify UI that export is done
@@ -830,11 +850,19 @@ export function createServer(): McpServer {
             format: z.enum(["vertical", "horizontal", "square"]).optional(),
             allow_ass_fallback: z.boolean().optional(),
             keep_caption_overlay: z.boolean().optional(),
+            write_clean_variant: z.boolean().optional(),
+            hook: hookSchema.nullable().optional(),
           }),
         )
         .optional()
         .describe(
           "Array of clips to create. Auto-loaded from suggestions if omitted.",
+        ),
+      write_clean_variant: z
+        .boolean()
+        .optional()
+        .describe(
+          "Also render a clean (no burned captions) variant per clip, batch-level default; per-clip overrides. Returns clean_output_path.",
         ),
       keep_caption_overlay: z
         .boolean()
@@ -916,6 +944,7 @@ export function createServer(): McpServer {
                 allow_ass_fallback: false,
                 ...(s.segments &&
                   s.segments.length > 0 && { keep_segments: s.segments }),
+                hook: s.hook ?? null,
               })) as any;
           } else if (params.clip_numbers) {
             resolvedClips = (params.clip_numbers as number[])
@@ -935,6 +964,7 @@ export function createServer(): McpServer {
                   allow_ass_fallback: false,
                   ...(s.segments &&
                     s.segments.length > 0 && { keep_segments: s.segments }),
+                  hook: s.hook ?? null,
                 };
               }) as any;
           }
@@ -956,6 +986,7 @@ export function createServer(): McpServer {
                 clean_fillers: params.clean_fillers,
               }),
               keep_caption_overlay: params.keep_caption_overlay === true,
+              write_clean_variant: params.write_clean_variant === true,
             }),
           });
           if (webRes.ok) {
@@ -1469,7 +1500,11 @@ export function createServer(): McpServer {
                 ? `${Math.round(end - start)}s`
                 : "?";
             const style = clip.suggested_caption_style || "hormozi";
-            const tag = deselected.includes(i) ? " [DESELECTED]" : "";
+            const tag = deselected.includes(i)
+              ? " [DESELECTED]"
+              : clip.changedSinceSelection
+                ? " [CHANGED SINCE SELECTION — re-confirm before exporting]"
+                : "";
             lines.push(
               `  #${num}: "${title}" (${start}s–${end}s, ${duration}) [${style}]${tag}`,
             );
@@ -1543,7 +1578,7 @@ export function createServer(): McpServer {
   // =============================================
   server.tool(
     "modify_clip",
-    "Adjust a suggested clip before exporting. Change timing, title, or caption style. " +
+    "Adjust a suggested clip before exporting. Change timing, title, caption style, or opening hook. " +
       "Use action='delete' to remove a clip entirely. Reference clips by clip_number (from get_ui_state).",
     {
       clip_number: z
@@ -1576,6 +1611,10 @@ export function createServer(): McpServer {
           suggested_caption_style: z
             .enum(["hormozi", "karaoke", "subtle", "branded"])
             .optional(),
+          hook: hookSchema
+            .nullable()
+            .optional()
+            .describe("Set the opening hook, or pass null to clear it."),
         })
         .optional()
         .describe(
@@ -1589,7 +1628,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "No updates provided. Specify at least one field: title, start_second, end_second, payoff, standalone, context_line, reasoning, preview_text, or suggested_caption_style.",
+                text: "No updates provided. Specify at least one field: title, start_second, end_second, payoff, standalone, context_line, reasoning, preview_text, suggested_caption_style, or hook.",
               },
             ],
           };
@@ -1641,7 +1680,10 @@ export function createServer(): McpServer {
           content: [
             {
               type: "text" as const,
-              text: `Updated clip #${data.index + 1}: "${data.clip.title}" (${data.clip.start_second}s–${data.clip.end_second}s, ${data.clip.duration}s)`,
+              text: `Updated clip #${data.index + 1}: "${data.clip.title}" (${data.clip.start_second}s-${data.clip.end_second}s, ${data.clip.duration}s` +
+                (data.clip.hook
+                  ? `, opens with a ${data.clip.hook.mode} hook ${data.clip.hook.start}s-${data.clip.hook.end}s)`
+                  : ")"),
             },
           ],
         };

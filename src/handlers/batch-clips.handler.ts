@@ -6,6 +6,8 @@ import { paths } from "../config/paths.js";
 import { webServerUrl } from "../config/server.js";
 import { validateClipRange } from "../utils/clip-validation.js";
 import { findContentType } from "../utils/transcript.js";
+import { validateHook } from "../utils/clip-hook.js";
+import { transcriptVideoMismatch } from "../utils/video-identity.js";
 import { childLogger } from "../utils/logger.js";
 import type {
   BatchClipsInput,
@@ -84,6 +86,12 @@ export const batchClipsToolDef = {
             allow_ass_fallback: {
               type: "boolean",
             },
+            hook: {
+              type: ["object", "null"],
+              description:
+                "Opening hook: { start, end, mode: repeat|move }, a 1-15s passage from inside the clip played first. " +
+                "Null renders without one.",
+            },
           },
           required: ["start_second", "end_second"],
         },
@@ -104,6 +112,12 @@ export const batchClipsToolDef = {
         type: "boolean",
         description:
           "Keep ProRes 4444 alpha caption overlays for DaVinci Resolve export. Default: false.",
+        default: false,
+      },
+      write_clean_variant: {
+        type: "boolean",
+        description:
+          "Also render a clean (no burned captions) variant per clip, with the same audio, loudness, and intro/outro. Returns clean_output_path per clip. Default: false.",
         default: false,
       },
       transcript_words: {
@@ -147,6 +161,16 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     return JSON.stringify({ error: "video_path is required (no video in session state)" });
   }
 
+  // When the caller relies on the session transcript (rather than passing
+  // transcript_words explicitly), refuse to render against a video that was
+  // swapped in after that transcript was generated.
+  if (input.transcript_words == null && transcript) {
+    const mismatch = transcriptVideoMismatch(state?.transcriptVideoIdentity, videoPath);
+    if (mismatch) {
+      return JSON.stringify({ error: mismatch });
+    }
+  }
+
   // Auto-resolve transcript words
   const transcriptWords = input.transcript_words ?? transcript?.words ?? [];
 
@@ -166,8 +190,10 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     format: batchFormat,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
+    write_clean_variant: input.write_clean_variant === true,
     logo_path: settings.logoPath || null,
     ...(s.segments && s.segments.length > 0 && { keep_segments: s.segments }),
+    ...(s.hook && { hook: s.hook }),
   });
 
   if (input.export_selected) {
@@ -212,6 +238,9 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   if (input.keep_caption_overlay === true) {
     clips = clips.map((c) => ({ ...c, keep_caption_overlay: c.keep_caption_overlay ?? true }));
   }
+  if (input.write_clean_variant === true) {
+    clips = clips.map((c) => ({ ...c, write_clean_variant: c.write_clean_variant ?? true }));
+  }
 
   for (let i = 0; i < clips.length; i++) {
     const rangeError = validateClipRange(
@@ -221,6 +250,15 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     );
     if (rangeError) {
       return JSON.stringify({ error: `Clip ${i + 1}: ${rangeError}` });
+    }
+    const hookError = validateHook(
+      clips[i].hook,
+      clips[i].start_second,
+      clips[i].end_second,
+      clips[i].keep_segments,
+    );
+    if (hookError) {
+      return JSON.stringify({ error: `Clip ${i + 1}: ${hookError}` });
     }
   }
 
@@ -242,6 +280,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
           outro_path: settings.outroPath || null,
           intro_path: settings.introPath || null,
           keep_caption_overlay: input.keep_caption_overlay === true,
+          write_clean_variant: input.write_clean_variant === true,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
@@ -271,6 +310,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     clean_fillers: cleanFillers,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
+    write_clean_variant: input.write_clean_variant === true,
     output_dir: paths.output,
     logo_path: settings.logoPath || null,
     outro_path: settings.outroPath || null,

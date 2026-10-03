@@ -2,6 +2,7 @@ import React from "react";
 import { useVideoConfig } from "remotion";
 import { captionScale, FONT, LOGO_EDGE, LOGO_INSET } from "../types";
 import type { LogoPosition } from "../types";
+import { safeUpper } from "../text";
 
 export interface TopicChipProps {
   /** What the clip is about, in two or three words. */
@@ -62,7 +63,9 @@ export const TopicChip: React.FC<TopicChipProps> = ({
         fontSize: 30 * s,
         fontWeight: 700,
         letterSpacing: 3 * s,
-        textTransform: "uppercase",
+        // Resolved below via safeUpper, not here — CSS text-transform would
+        // still remap caseless scripts like Georgian to a different alphabet.
+        textTransform: "none",
         color,
         background,
         ...(padded
@@ -70,7 +73,7 @@ export const TopicChip: React.FC<TopicChipProps> = ({
           : { textShadow: "0 2px 12px rgba(0,0,0,0.8)" }),
       }}
     >
-      {label}
+      {safeUpper(label)}
     </div>
   );
 };

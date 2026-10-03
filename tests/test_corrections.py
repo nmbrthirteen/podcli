@@ -95,6 +95,75 @@ class CorrectionsTests(unittest.TestCase):
         _, s = corrections.apply_corrections([], segments)
         self.assertEqual(s[0]["text"], "we maintain A.I. systems")
 
+    def test_apply_corrections_merges_multiword_word_run(self):
+        # "open AI" split across two words must merge into one caption word,
+        # not just fix the segment text and leave "open"/"AI" as-is.
+        self._set({"open AI": "OpenAI"})
+        words = [
+            {"word": "open", "start": 1.0, "end": 1.4, "speaker": "SPEAKER_00"},
+            {"word": "AI", "start": 1.4, "end": 1.8, "speaker": "SPEAKER_00"},
+        ]
+        segments = [{"text": "I love open AI"}]
+        w, s = corrections.apply_corrections(words, segments)
+        self.assertEqual([x["word"] for x in w], ["OpenAI"])
+        self.assertAlmostEqual(w[0]["start"], 1.0)
+        self.assertAlmostEqual(w[0]["end"], 1.8)
+        self.assertEqual(w[0]["speaker"], "SPEAKER_00")
+        self.assertEqual(s[0]["text"], "I love OpenAI")
+
+    def test_apply_corrections_multiword_merge_is_case_insensitive(self):
+        self._set({"open AI": "OpenAI"})
+        words = [
+            {"word": "Open", "start": 0.0, "end": 0.5},
+            {"word": "ai", "start": 0.5, "end": 1.0},
+        ]
+        w, _ = corrections.apply_corrections(words, [])
+        self.assertEqual([x["word"] for x in w], ["OpenAI"])
+
+    def test_apply_corrections_multiword_merge_ignores_punctuation(self):
+        self._set({"open AI": "OpenAI"})
+        words = [
+            {"word": "open", "start": 0.0, "end": 0.5},
+            {"word": "AI.", "start": 0.5, "end": 1.0},
+        ]
+        w, _ = corrections.apply_corrections(words, [])
+        self.assertEqual([x["word"] for x in w], ["OpenAI"])
+
+    def test_apply_corrections_multiword_replacement_splits_time_across_words(self):
+        # A multi-word replacement distributes the merged span evenly across
+        # its own word count, rather than collapsing into a single word.
+        self._set({"open ai": "Open AI"})
+        words = [
+            {"word": "open", "start": 0.0, "end": 1.0},
+            {"word": "ai", "start": 1.0, "end": 2.0},
+        ]
+        w, _ = corrections.apply_corrections(words, [])
+        self.assertEqual([x["word"] for x in w], ["Open", "AI"])
+        self.assertAlmostEqual(w[0]["start"], 0.0)
+        self.assertAlmostEqual(w[0]["end"], 1.0)
+        self.assertAlmostEqual(w[1]["start"], 1.0)
+        self.assertAlmostEqual(w[1]["end"], 2.0)
+
+    def test_apply_corrections_multiword_longest_match_wins_in_words(self):
+        self._set({"open AI": "OpenAI", "AI": "A.I."})
+        words = [
+            {"word": "open", "start": 0.0, "end": 0.5},
+            {"word": "AI", "start": 0.5, "end": 1.0},
+        ]
+        w, _ = corrections.apply_corrections(words, [])
+        self.assertEqual([x["word"] for x in w], ["OpenAI"])
+
+    def test_apply_corrections_leaves_non_matching_words_alone(self):
+        self._set({"open AI": "OpenAI"})
+        words = [
+            {"word": "I", "start": 0.0, "end": 0.2},
+            {"word": "love", "start": 0.2, "end": 0.5},
+            {"word": "open", "start": 0.5, "end": 0.8},
+            {"word": "AI", "start": 0.8, "end": 1.0},
+        ]
+        w, _ = corrections.apply_corrections(words, [])
+        self.assertEqual([x["word"] for x in w], ["I", "love", "OpenAI"])
+
     def test_apply_corrections_returns_same_list_objects(self):
         self._set({"Foo": "Bar"})
         words = [{"word": "Foo"}]

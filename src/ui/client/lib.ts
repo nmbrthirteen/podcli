@@ -26,6 +26,37 @@ export const labelStyle: CSSProperties = {
   display: "block",
 };
 
+// Scripts with no case distinction whose letters Unicode nonetheless assigns
+// an uppercase mapping for display styling (Georgian Mkhedruli -> Mtavruli).
+// Kept in sync with remotion/src/text.ts and backend/utils/text.py's
+// safe_upper — this is the same fix for the studio's live caption/thumbnail
+// preview, so it doesn't show a different alphabet than the final render.
+const CASELESS_SCRIPT_RANGES: Array<[number, number]> = [
+  [0x10a0, 0x10ff], // Georgian (Mkhedruli, Asomtavruli)
+  [0x1c90, 0x1cbf], // Georgian Extended (Mtavruli)
+  [0x2d00, 0x2d2f], // Georgian Supplement
+];
+
+function isCaselessScriptChar(ch: string): boolean {
+  const cp = ch.codePointAt(0) ?? 0;
+  return CASELESS_SCRIPT_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi);
+}
+
+export function safeUpper(text: string): string {
+  if (!text) return text;
+  let hasCaseless = false;
+  for (const ch of text) {
+    if (isCaselessScriptChar(ch)) {
+      hasCaseless = true;
+      break;
+    }
+  }
+  if (!hasCaseless) return text.toUpperCase();
+  return Array.from(text)
+    .map((ch) => (isCaselessScriptChar(ch) ? ch : ch.toUpperCase()))
+    .join("");
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,

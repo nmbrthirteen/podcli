@@ -166,5 +166,60 @@ class SpeakerTranscriptTests(unittest.TestCase):
         self.assertAlmostEqual(seg["start"], 8.0, places=3)
 
 
+class CaptionMarkupStrippingTests(unittest.TestCase):
+    """SRT/VTT override tags like {\\an8} aren't spoken text and must not
+    end up imported as literal words in the transcript."""
+
+    def test_parse_srt_strips_ass_override_blocks(self):
+        raw = (
+            "1\n"
+            "00:00:01,000 --> 00:00:04,000\n"
+            "{\\an8}Hello this is text\n"
+        )
+        result = tp.parse_srt(raw)
+        self.assertNotIn("error", result)
+        self.assertEqual(result["segments"][0]["text"], "Hello this is text")
+        self.assertNotIn("an8", result["transcript"])
+        self.assertNotIn("{", result["transcript"])
+
+    def test_parse_srt_strips_html_tags(self):
+        raw = (
+            "1\n"
+            "00:00:01,000 --> 00:00:04,000\n"
+            "<b>Hello</b> <i>world</i>\n"
+        )
+        result = tp.parse_srt(raw)
+        self.assertEqual(result["segments"][0]["text"], "Hello world")
+
+    def test_parse_srt_strips_override_block_in_trailing_block(self):
+        # No trailing blank line, so this exercises the "last block" path.
+        raw = (
+            "1\n"
+            "00:00:01,000 --> 00:00:04,000\n"
+            "{\\an8}No trailing blank line"
+        )
+        result = tp.parse_srt(raw)
+        self.assertEqual(result["segments"][0]["text"], "No trailing blank line")
+
+    def test_parse_vtt_strips_ass_override_blocks(self):
+        raw = (
+            "WEBVTT\n\n"
+            "00:00:01.000 --> 00:00:04.000\n"
+            "{\\an8}Hello this is text\n"
+        )
+        result = tp.parse_vtt(raw)
+        self.assertNotIn("error", result)
+        self.assertEqual(result["segments"][0]["text"], "Hello this is text")
+
+    def test_parse_vtt_strips_override_block_in_trailing_block(self):
+        raw = (
+            "WEBVTT\n\n"
+            "00:00:01.000 --> 00:00:04.000\n"
+            "{\\an8}No trailing blank line"
+        )
+        result = tp.parse_vtt(raw)
+        self.assertEqual(result["segments"][0]["text"], "No trailing blank line")
+
+
 if __name__ == "__main__":
     unittest.main()

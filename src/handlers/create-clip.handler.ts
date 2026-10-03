@@ -6,6 +6,8 @@ import type { ClipResult, CreateClipInput, SuggestedClip, UIState } from "../mod
 import { childLogger } from "../utils/logger.js";
 import { sliceTranscript } from "../utils/transcript.js";
 import { validateClipRange } from "../utils/clip-validation.js";
+import { validateHook } from "../utils/clip-hook.js";
+import { transcriptVideoMismatch } from "../utils/video-identity.js";
 
 const log = childLogger("create-clip");
 const executor = new PythonExecutor();
@@ -135,6 +137,18 @@ export const createClipToolDef = {
           "Keep ProRes 4444 alpha caption overlay for DaVinci Resolve. Returns caption_overlay_path and cropped_source_path.",
         default: false,
       },
+      write_clean_variant: {
+        type: "boolean",
+        description:
+          "Also render a second file with the same audio, loudness, and intro/outro but no burned captions. Returns clean_output_path.",
+        default: false,
+      },
+      hook: {
+        type: ["object", "null"],
+        description:
+          "Opening hook: { start, end, mode: repeat|move }, a 1-15s passage from inside the clip played first. " +
+          "Auto-loaded from clip_number if omitted; null renders without one.",
+      },
     },
     required: [],
   },
@@ -179,6 +193,19 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
 
   // Pull multi-cut segments from suggestion (if available)
   const keepSegments = suggestion?.segments ?? null;
+  const hook = input.hook !== undefined ? input.hook : suggestion?.hook ?? null;
+
+  // When the caller relies on the session transcript (rather than passing
+  // transcript_words explicitly), refuse to render against a video that was
+  // swapped in after that transcript was generated — set_video clears the
+  // transcript itself, but older sessions or a stale on-disk state file can
+  // still carry a mismatched one.
+  if (input.transcript_words == null && transcript) {
+    const mismatch = transcriptVideoMismatch(state?.transcriptVideoIdentity, videoPath);
+    if (mismatch) {
+      return JSON.stringify({ error: mismatch });
+    }
+  }
 
   // Validate required fields
   if (!videoPath) {
@@ -192,6 +219,10 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
   const rangeError = validateClipRange(startSecond, endSecond, format);
   if (rangeError) {
     return JSON.stringify({ error: rangeError });
+  }
+  const hookError = validateHook(hook, startSecond, endSecond, keepSegments);
+  if (hookError) {
+    return JSON.stringify({ error: hookError });
   }
 
   const result = await executor.execute<ClipResult>("create_clip", {
@@ -207,12 +238,14 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     clean_fillers: input.clean_fillers ?? settings.cleanFillers ?? true,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
+    write_clean_variant: input.write_clean_variant === true,
     logo_path: logoPath,
     outro_path: outroPath,
     intro_path: introPath,
     ...(input.name_card ? { name_card: input.name_card } : {}),
     ...(input.motion ? { motion: input.motion } : {}),
     ...(keepSegments && { keep_segments: keepSegments }),
+    ...(hook && { hook }),
   });
 
   if (!result.data) {
@@ -230,6 +263,10 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     context_line: suggestion?.context_line,
     preview_text: suggestion?.preview_text,
     transcript_slice: sliceTranscript(transcriptWords, startSecond, endSecond),
+    ...(data.srt_path && { srt_path: data.srt_path }),
+    ...(data.vtt_path && { vtt_path: data.vtt_path }),
+    ...(data.clean_output_path && { clean_output_path: data.clean_output_path }),
+    ...(data.hook && { hook: data.hook }),
     message: `Clip created successfully! ${data.duration}s, ${data.file_size_mb}MB`,
   });
 }

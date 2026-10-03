@@ -73,6 +73,68 @@ def _replace_match(match: re.Match, corrections: dict[str, str]) -> str:
     return replacement if replacement is not None else matched
 
 
+def _strip_for_match(text: str) -> str:
+    return text.strip(".,!?;:\"'()-")
+
+
+def _merge_multiword_corrections(words: list[dict], corrections: dict[str, str]) -> list[dict]:
+    """
+    Merge consecutive words matching a multi-word correction key (e.g.
+    "open AI" -> "OpenAI") into the corrected word(s).
+
+    Segment text gets multi-word corrections for free from the regex pass
+    below, but captions are burned from individual words — left split,
+    "open" and "AI" render as two separate caption words instead of the
+    fix. The merged word(s) span from the start of the first matched word
+    to the end of the last one, so caption timing stays continuous.
+    """
+    multiword = {k: v for k, v in corrections.items() if len(k.split()) > 1}
+    if not multiword or not words:
+        return words
+
+    # Longest key first so a 3-word phrase wins over a 2-word prefix of it.
+    key_tokens = sorted(
+        ((key.split(), value) for key, value in multiword.items()),
+        key=lambda kv: len(kv[0]),
+        reverse=True,
+    )
+
+    merged: list[dict] = []
+    i = 0
+    n = len(words)
+    while i < n:
+        match = None
+        for tokens, replacement in key_tokens:
+            span = len(tokens)
+            if i + span > n:
+                continue
+            candidate = words[i : i + span]
+            candidate_norm = [_strip_for_match(w.get("word", "")).lower() for w in candidate]
+            if candidate_norm == [t.lower() for t in tokens]:
+                match = (candidate, replacement)
+                break
+        if match is None:
+            merged.append(words[i])
+            i += 1
+            continue
+
+        candidate, replacement = match
+        first, last = candidate[0], candidate[-1]
+        repl_words = replacement.split() or [replacement]
+        span_start = first["start"]
+        span_end = last["end"]
+        span_dur = max(0.0, span_end - span_start)
+        per = span_dur / len(repl_words)
+        speaker = first.get("speaker")
+        for idx, rw in enumerate(repl_words):
+            w_start = span_start + per * idx
+            w_end = span_end if idx == len(repl_words) - 1 else span_start + per * (idx + 1)
+            merged.append({"word": rw, "start": w_start, "end": w_end, "speaker": speaker})
+        i += len(candidate)
+
+    return merged
+
+
 def apply_corrections(
     words: list[dict],
     segments: list[dict],
@@ -81,7 +143,11 @@ def apply_corrections(
     Apply corrections to transcript words and segments in-place.
 
     Modifies the 'word' field in each word dict and the 'text' field
-    in each segment dict. Returns the same lists (mutated).
+    in each segment dict. Multi-word corrections can change the number of
+    words (several words merge into the correction's word(s)), so the
+    `words` list itself is replaced in-place via slice assignment —
+    callers that hold a reference to the original list still see the
+    update. Returns the same lists (mutated).
     """
     corrections = _load_corrections()
     if not corrections:
@@ -92,6 +158,12 @@ def apply_corrections(
         return words, segments
 
     replacer = lambda m: _replace_match(m, corrections)
+
+    # Merge multi-word corrections first so captions (built from words) read
+    # the fix the same way the segment text already does.
+    merged_words = _merge_multiword_corrections(words, corrections)
+    if merged_words is not words:
+        words[:] = merged_words
 
     # Fix individual words (strip punctuation for matching, preserve it in output)
     for w in words:

@@ -98,5 +98,64 @@ class BrandedEventVolumeTests(unittest.TestCase):
         self.assertEqual(len(ends), 1)
 
 
+class AssTextSanitizationTests(unittest.TestCase):
+    """Words containing backslash/brace characters must not corrupt the ASS
+    override-block syntax or get read as \\N/\\n/\\h control codes."""
+
+    def _residual_text(self, content: str) -> str:
+        # Strip the override blocks we generate ourselves; anything left
+        # over came from word text and must not contain raw \, { or }.
+        import re
+        stripped = re.sub(r"\{\\[^}]*\}", "", content)
+        return stripped
+
+    def test_sanitize_replaces_control_characters(self):
+        self.assertEqual(cr._sanitize_ass_text("C:\\path"), "C:＼path")
+        self.assertEqual(cr._sanitize_ass_text("{weird}"), "｛weird｝")
+        self.assertEqual(cr._sanitize_ass_text(r"a\nb"), "a＼nb")
+
+    def test_render_hormozi_escapes_backslash_and_braces(self):
+        style = get_style("hormozi")
+        words = _flowing_words(["a\\nb", "{curly}"])
+        content = cr._render_hormozi(words, style, 0.0)
+        residual = self._residual_text(content)
+        self.assertNotIn("\\n", residual)
+        self.assertNotIn("{curly}", content)
+        self.assertIn("＼", content)
+        # hormozi uppercases word text; the braces are swapped regardless of case.
+        self.assertIn("｛CURLY｝" if style["uppercase"] else "｛curly｝", content)
+
+    def test_render_karaoke_escapes_backslash_and_braces(self):
+        style = get_style("karaoke")
+        words = _flowing_words(["a\\nb", "{curly}"])
+        content = cr._render_karaoke(words, style, 0.0)
+        self.assertIn("＼", content)
+        self.assertIn("｛curly｝", content)
+
+    def test_render_subtle_escapes_backslash_and_braces(self):
+        style = get_style("subtle")
+        words = _flowing_words(["a\\nb", "{curly}"])
+        content = cr._render_subtle(words, style, 0.0)
+        self.assertIn("＼", content)
+        self.assertIn("｛curly｝", content)
+
+    def test_render_branded_escapes_backslash_and_braces(self):
+        style = get_style("branded")
+        words = _flowing_words(["a\\nb", "{curly}"])
+        content = cr._render_branded(words, style, 0.0)
+        self.assertIn("＼", content)
+        self.assertIn("｛curly｝", content)
+
+    def test_uppercase_does_not_turn_escaped_backslash_into_linebreak(self):
+        # Before the fix, a literal "\n" surviving into hormozi's uppercase
+        # transform became the literal two characters "\" + "N", which
+        # libass reads as a forced line break control code.
+        style = get_style("hormozi")
+        words = _flowing_words(["a\\nb"])
+        content = cr._render_hormozi(words, style, 0.0)
+        self.assertNotIn("\\N", content)
+        self.assertNotIn("\\n", content)
+
+
 if __name__ == "__main__":
     unittest.main()

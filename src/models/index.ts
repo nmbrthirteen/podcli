@@ -1,3 +1,7 @@
+import type { ClipHook } from "../utils/clip-hook.js";
+
+export type { ClipHook, HookMode } from "../utils/clip-hook.js";
+
 // === Task Communication Models ===
 
 export interface TaskRequest {
@@ -96,6 +100,13 @@ export interface ClipResult {
   format?: Format;
   caption_overlay_path?: string;
   cropped_source_path?: string;
+  /** Sidecar subtitles, retimed to the exported file's own playback clock. */
+  srt_path?: string;
+  vtt_path?: string;
+  /** Same audio/loudness/intro/outro, without burned captions. */
+  clean_output_path?: string;
+  /** The hook as rendered, edges widened to whole words. */
+  hook?: ClipHook;
 }
 
 export interface SuggestedClip {
@@ -110,11 +121,17 @@ export interface SuggestedClip {
   reasoning: string;
   preview_text: string;
   segments?: Array<{ start: number; end: number }>;
+  /** Spoken passage from inside the clip, played before it. */
+  hook?: ClipHook;
   suggested_caption_style?: string;
   timestamp_display?: string;
   content_type?: string;
   score?: number;
   rank?: number;
+  /** Fingerprint of render-relevant fields, stamped when the clip is selected for export. */
+  selectionHash?: string;
+  /** True when the clip was edited after selectionHash was stamped — the selection may be stale. */
+  changedSinceSelection?: boolean;
 }
 
 export interface UIState {
@@ -122,6 +139,8 @@ export interface UIState {
   filePath?: string;
   activeExportJobId?: string | null;
   transcript?: TranscriptResult | null;
+  /** Identity (path + size + mtime) of the video the transcript was generated from. */
+  transcriptVideoIdentity?: { path: string; size: number; mtimeMs: number } | null;
   rawTranscriptText?: string;
   silenceOriginal?: { videoPath: string; transcript: TranscriptResult } | null;
   silencePlan?: Record<string, unknown> | null;
@@ -217,6 +236,9 @@ export interface CreateClipInput {
   clean_fillers?: boolean;
   allow_ass_fallback?: boolean;
   keep_caption_overlay?: boolean;
+  write_clean_variant?: boolean;
+  /** Overrides the suggestion's hook; null renders without one. */
+  hook?: ClipHook | null;
 }
 
 export interface BatchClipSpec {
@@ -230,7 +252,9 @@ export interface BatchClipSpec {
   intro_path?: string | null;
   allow_ass_fallback?: boolean;
   keep_caption_overlay?: boolean;
+  write_clean_variant?: boolean;
   keep_segments?: Array<{ start: number; end: number }>;
+  hook?: ClipHook | null;
 }
 
 export interface BatchClipsInput {
@@ -243,6 +267,7 @@ export interface BatchClipsInput {
   clean_fillers?: boolean;
   allow_ass_fallback?: boolean;
   keep_caption_overlay?: boolean;
+  write_clean_variant?: boolean;
   /**
    * When true, POST to the Web UI's /api/batch-clips and return a job_id
    * immediately so the caller can poll job_status and emit live progress.
@@ -269,6 +294,9 @@ export interface BatchClipsResult {
     title?: string;
     file_size_mb?: number;
     duration?: number;
+    srt_path?: string;
+    vtt_path?: string;
+    clean_output_path?: string;
     error?: string;
   }>;
 }

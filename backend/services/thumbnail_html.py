@@ -16,6 +16,7 @@ import shutil
 import subprocess
 from config.paths import paths
 from utils.proc import run as proc_run, ProcError
+from utils.text import safe_upper
 import sys
 import tempfile
 from typing import Optional
@@ -434,8 +435,8 @@ def _build_html(
     # Clean any stray slashes from title split
     line1 = line1.strip().strip("/").strip()
     line2 = line2.strip().strip("/").strip()
-    l1 = line1.upper() if cfg.get("line1_uppercase", True) else line1
-    l2 = line2.upper() if cfg.get("line2_uppercase", True) else line2
+    l1 = safe_upper(line1) if cfg.get("line1_uppercase", True) else line1
+    l2 = safe_upper(line2) if cfg.get("line2_uppercase", True) else line2
 
     has_photo = photo_path and os.path.exists(str(photo_path))
 
@@ -648,7 +649,10 @@ body {{
     font-weight: {l1_weight};
     letter-spacing: {l1_spacing};
     color: {l1_color};
-    text-transform: uppercase;
+    /* Casing is already resolved in Python via safe_upper(), which skips
+       caseless scripts (e.g. Georgian) that CSS text-transform would
+       otherwise still remap to a different alphabet (Mkhedruli -> Mtavruli). */
+    text-transform: none;
     text-align: center;
     line-height: {l1_lh};
     margin-bottom: {l1_mb};
@@ -668,7 +672,8 @@ body {{
     font-weight: {l2_weight};
     font-style: {l2_style};
     letter-spacing: {l2_spacing};
-    text-transform: uppercase;
+    /* See .line1 above — casing is resolved in Python, not here. */
+    text-transform: none;
     line-height: {l2_lh};
     background: {hl_color};
     color: {l2_text_color};

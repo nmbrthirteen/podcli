@@ -88,6 +88,7 @@ Work inside one topic at a time. Set boundaries by meaning, not by the clock.
 - The question has to be inside the clip. `context_line` is a note for the editor, not a fix: nothing burns it into the video yet, so a clip that relies on it still ships with no setup.
 - If the question rambles past roughly 8 seconds, use `segments` to keep the asked part and cut the rambling, or drop the moment.
 - Never open on a word pointing back before the cut: "that", "it", "they", "yeah", "so", "exactly", "right", "which is why". Widen the start until the reference is inside the clip.
+- If the sharpest line sits mid-clip, you may pass it as `hook` (`{start, end, mode}`, 1-15 seconds) so it plays first. It must be a line actually spoken inside the clip, never invented text. `repeat` replays it in place; `move` lifts it out.
 
 **end_second**
 

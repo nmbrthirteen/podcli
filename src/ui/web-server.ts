@@ -41,11 +41,23 @@ import { paths, pythonEnv } from "../config/paths.js";
 import { webServerPort } from "../config/server.js";
 import { writeFileAtomicSync } from "../utils/atomic-file.js";
 import { maxClipSeconds, validateClipRange, validateSuggestionRange } from "../utils/clip-validation.js";
+import { playbackDuration, validateHook } from "../utils/clip-hook.js";
 import { advanceProgress, tagSubmittedClip, tagSubmittedClips } from "../utils/clip-results.js";
 import { DEMO_ASSETS_DIR } from "./demo-fixtures.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
-import { sliceTranscript, sliceWords, findContentType, findGroundingText, findSuggestionSegments } from "../utils/transcript.js";
+import {
+  sliceTranscript,
+  sliceWords,
+  findContentType,
+  findGroundingText,
+  findSuggestionForRange,
+  findSuggestionSegments,
+  reconcileSegmentsForRange,
+} from "../utils/transcript.js";
+import { formatSrtTime, formatVttTime } from "../utils/srt-time.js";
+import { computeVideoIdentity, type VideoIdentity } from "../utils/video-identity.js";
+import { computeSelectionHash } from "../utils/selection-hash.js";
 import { errMsg } from "../utils/errors.js";
 import { resolveByteRange } from "../utils/http-range.js";
 import {
@@ -58,6 +70,7 @@ import type {
   AssetType,
   BatchClipsResult,
   ClipHistoryEntry,
+  ClipHook,
   ClipResult,
   Format,
   ProgressEvent,
@@ -151,6 +164,7 @@ interface UIState {
   filePath: string;
   activeExportJobId: string | null;
   transcript: ServerTranscript | null;
+  transcriptVideoIdentity: VideoIdentity | null;
   rawTranscriptText: string;
   silenceOriginal: SilenceOriginal | null;
   silencePlan: SilencePlan | null;
@@ -189,6 +203,10 @@ function loadPersistedState(): UIState {
         saved.videoPath = "";
         saved.filePath = "";
         saved.phase = "idle";
+        saved.transcript = null;
+        saved.transcriptVideoIdentity = null;
+        saved.suggestions = [];
+        saved.deselectedIndices = [];
       }
       if (saved.silenceOriginal?.videoPath && !existsSync(saved.silenceOriginal.videoPath)) {
         saved.silenceOriginal = null;
@@ -198,6 +216,7 @@ function loadPersistedState(): UIState {
         filePath: saved.filePath || "",
         activeExportJobId: null,
         transcript: saved.transcript || null,
+        transcriptVideoIdentity: saved.transcriptVideoIdentity || null,
         rawTranscriptText: saved.rawTranscriptText || "",
         silenceOriginal: saved.silenceOriginal || null,
         silencePlan: saved.silencePlan || null,
@@ -240,6 +259,7 @@ function loadPersistedState(): UIState {
     filePath: "",
     activeExportJobId: null,
     transcript: null,
+    transcriptVideoIdentity: null,
     rawTranscriptText: "",
     silenceOriginal: null,
     silencePlan: null,
@@ -391,12 +411,32 @@ function setExportState(phase: string, activeExportJobId: string | null) {
   persistState();
 }
 
-function enrichClipWithSegments<T extends { start_second: number; end_second: number; keep_segments?: Array<{ start: number; end: number }> }>(
-  clip: T,
-): T {
-  if (clip.keep_segments?.length) return clip;
-  const segments = findSuggestionSegments(uiState.suggestions, clip.start_second, clip.end_second);
-  return segments?.length ? { ...clip, keep_segments: segments } : clip;
+type ExportClip = {
+  start_second: number;
+  end_second: number;
+  keep_segments?: Array<{ start: number; end: number }>;
+  hook?: ClipHook | null;
+};
+
+/** Fill segments and hook the caller left out from the matching suggestion.
+ * An explicit hook: null stays null, so a render can opt out of one. */
+function enrichClipFromSuggestion<T extends ExportClip>(clip: T): T {
+  const match = findSuggestionForRange(uiState.suggestions, clip.start_second, clip.end_second);
+  if (!match) return clip;
+  return {
+    ...clip,
+    ...(!clip.keep_segments?.length && match.segments?.length && { keep_segments: match.segments }),
+    ...(clip.hook === undefined && match.hook && { hook: match.hook }),
+  };
+}
+
+function exportHookError(clips: ExportClip[]): string | null {
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    const err = validateHook(c.hook, c.start_second, c.end_second, c.keep_segments);
+    if (err) return clips.length > 1 ? `Clip ${i + 1}: ${err}` : err;
+  }
+  return null;
 }
 
 function createBatchHistoryRecorder({
@@ -427,6 +467,7 @@ function createBatchHistoryRecorder({
     crop_strategy?: string;
     format?: Format;
     keep_segments?: Array<{ start: number; end: number }>;
+    hook?: ClipHook | null;
   }>;
   logoPath?: string | null;
   outroPath?: string | null;
@@ -461,6 +502,7 @@ function createBatchHistoryRecorder({
           introPath,
           cleanFillers,
           keepSegments: spec?.keep_segments,
+          hook: spec?.hook,
         });
       } catch (err) {
         log.warn(`Failed to save recipe for ${label} clip`, { err: errMsg(err) });
@@ -1192,6 +1234,7 @@ app.post("/api/create-clip", async (req, res) => {
     allow_ass_fallback = false,
     content_type = null,
     keep_segments,
+    hook,
     caption_position = "auto",
     caption_font_scale = 100,
     logo_position = "top-left",
@@ -1270,11 +1313,17 @@ app.post("/api/create-clip", async (req, res) => {
 
   await fileManager.ensureDirectories();
 
-  const enriched = enrichClipWithSegments({
+  const enriched = enrichClipFromSuggestion({
     start_second,
     end_second,
     keep_segments: Array.isArray(keep_segments) ? keep_segments : undefined,
+    hook: hook as ClipHook | null | undefined,
   });
+  const hookError = exportHookError([enriched]);
+  if (hookError) {
+    res.status(400).json({ error: hookError });
+    return;
+  }
 
   const jobId = uuidv4();
   const job: JobState = {
@@ -1311,6 +1360,7 @@ app.post("/api/create-clip", async (req, res) => {
         caption_font_scale: normalizedFontScale,
         logo_position,
         ...(enriched.keep_segments?.length && { keep_segments: enriched.keep_segments }),
+        ...(enriched.hook && { hook: enriched.hook }),
       },
       (event) => {
         job.progress = event.percent;
@@ -1350,6 +1400,7 @@ app.post("/api/create-clip", async (req, res) => {
           introPath: intro_path,
           cleanFillers: clean_fillers,
           keepSegments: enriched.keep_segments,
+          hook: enriched.hook,
         });
         broadcastHistoryUpdated(jobId, [rec]);
       } catch (err) {
@@ -1436,9 +1487,12 @@ app.post("/api/batch-clips", async (req, res) => {
 
   await fileManager.ensureDirectories();
 
-  const enrichedClips = clips.map((c: { start_second: number; end_second: number; keep_segments?: Array<{ start: number; end: number }> }) =>
-    enrichClipWithSegments(c),
-  );
+  const enrichedClips = clips.map((c: ExportClip) => enrichClipFromSuggestion(c));
+  const batchHookError = exportHookError(enrichedClips);
+  if (batchHookError) {
+    res.status(400).json({ error: batchHookError });
+    return;
+  }
 
   const jobId = uuidv4();
   const job: JobState = {
@@ -2187,15 +2241,8 @@ app.get("/api/export-transcript", (_req, res) => {
     });
   }
 
-  const fmtSrt = (s: number) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = Math.floor(s % 60);
-    const ms = Math.round((s % 1) * 1000);
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
-  };
-
-  const fmtVtt = (s: number) => fmtSrt(s).replace(",", ".");
+  const fmtSrt = formatSrtTime;
+  const fmtVtt = formatVttTime;
 
   if (format === "vtt") {
     let vtt = "WEBVTT\n\n";
@@ -3306,6 +3353,12 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
   }
   // If trimmed wider/narrower, keep only words inside the new bounds.
   const words = allWords.filter((w: any) => typeof w?.start !== "number" || (w.start >= startSecond && w.start < endSecond));
+  const recipeSegments = trimOnly ? undefined : (recipe.keep_segments as ExportClip["keep_segments"]);
+  // A trim that no longer holds the hook's passage renders without it.
+  const recipeHook = recipe.hook as ClipHook | undefined;
+  const hook = recipeHook && !validateHook(recipeHook, startSecond, endSecond, recipeSegments)
+    ? recipeHook
+    : undefined;
   const recipeAsset = (key: "logo_path" | "outro_path" | "intro_path") => {
     const value = recipe[key];
     return typeof value === "string" && value.trim() ? value : undefined;
@@ -3325,7 +3378,8 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       clean_fillers: trimOnly ? false : (recipe.clean_fillers !== undefined ? recipe.clean_fillers : true),
       trim_opening: trimOnly ? false : undefined,
       preserve_timing: trimOnly ? true : undefined,
-      ...(trimOnly ? {} : recipe.keep_segments ? { keep_segments: recipe.keep_segments } : {}),
+      ...(recipeSegments ? { keep_segments: recipeSegments } : {}),
+      ...(hook && { hook }),
       title: clip.title,
       output_dir: dirname(clip.output_path),
     });
@@ -4200,9 +4254,35 @@ app.post("/api/ui-state", (req, res) => {
     return;
   }
 
+  // Changing the video without a transcript arriving in the same call means
+  // the old transcript, suggestions and selections describe a recording
+  // that's no longer loaded. Carrying them forward lets create_clip burn
+  // captions and timings from the wrong video. transcribe_podcast and
+  // import_transcript always send videoPath and transcript together, so
+  // this only fires for a bare set_video.
+  const videoChanged =
+    body.videoPath !== undefined &&
+    body.videoPath !== uiState.videoPath &&
+    body.transcript === undefined;
+  if (videoChanged) {
+    uiState.transcript = null;
+    uiState.transcriptVideoIdentity = null;
+    uiState.rawTranscriptText = "";
+    uiState.suggestions = [];
+    uiState.deselectedIndices = [];
+    uiState.energyData = {};
+    uiState.silenceOriginal = null;
+    uiState.silencePlan = null;
+  }
+
   if (body.videoPath !== undefined) uiState.videoPath = body.videoPath;
   if (body.filePath !== undefined) uiState.filePath = body.filePath;
-  if (body.transcript !== undefined) uiState.transcript = body.transcript;
+  if (body.transcript !== undefined) {
+    uiState.transcript = body.transcript;
+    uiState.transcriptVideoIdentity = body.transcript
+      ? computeVideoIdentity(body.videoPath ?? uiState.videoPath ?? "")
+      : null;
+  }
   if (body.rawTranscriptText !== undefined)
     uiState.rawTranscriptText = body.rawTranscriptText;
   if (body.silenceOriginal !== undefined) {
@@ -4346,12 +4426,20 @@ app.post("/api/suggestions/modify", (req, res) => {
       res.status(400).json({ error: "selected must be a boolean for action 'toggle'" });
       return;
     }
+    clip = uiState.suggestions[index];
     if (selected) {
       uiState.deselectedIndices = uiState.deselectedIndices.filter((i) => i !== index);
-    } else if (!uiState.deselectedIndices.includes(index)) {
-      uiState.deselectedIndices = [...uiState.deselectedIndices, index];
+      // Stamp what's being approved so a later edit to the same clip can be
+      // caught instead of silently rendering something else.
+      clip.selectionHash = computeSelectionHash(clip, uiState.transcript?.words);
+      clip.changedSinceSelection = false;
+    } else {
+      if (!uiState.deselectedIndices.includes(index)) {
+        uiState.deselectedIndices = [...uiState.deselectedIndices, index];
+      }
+      delete clip.selectionHash;
+      delete clip.changedSinceSelection;
     }
-    clip = uiState.suggestions[index];
   } else if (action === "update") {
     const upd = updates || {};
     clip = uiState.suggestions[index];
@@ -4362,8 +4450,31 @@ app.post("/api/suggestions/modify", (req, res) => {
       res.status(400).json({ error: rangeError });
       return;
     }
+    const reTimed = nextStart !== clip.start_second || nextEnd !== clip.end_second;
+    // The old segments array is scoped to the old range; if left stale it
+    // overrides the new start/end at render time (create_clip reads
+    // keep_segments ahead of start_second/end_second).
+    const nextSegments = reTimed
+      ? reconcileSegmentsForRange(clip.segments, nextStart, nextEnd)
+      : clip.segments;
+    const nextHook: ClipHook | undefined =
+      upd.hook === null ? undefined : upd.hook !== undefined ? upd.hook : clip.hook;
+    const hookError = validateHook(nextHook, nextStart, nextEnd, nextSegments);
+    if (hookError) {
+      res.status(400).json({
+        error: upd.hook === undefined
+          ? `${hookError} The new range no longer holds this clip's hook. Pass hook: null to clear it, or a new hook.`
+          : hookError,
+      });
+      return;
+    }
     // The energy score was measured over the old range.
-    if (nextStart !== clip.start_second || nextEnd !== clip.end_second) dropEnergy(clip);
+    if (reTimed) {
+      dropEnergy(clip);
+      clip.segments = nextSegments;
+    }
+    if (nextHook) clip.hook = { start: nextHook.start, end: nextHook.end, mode: nextHook.mode };
+    else delete clip.hook;
     if (typeof upd.title === "string") clip.title = upd.title;
     clip.start_second = nextStart;
     clip.end_second = nextEnd;
@@ -4375,10 +4486,21 @@ app.post("/api/suggestions/modify", (req, res) => {
     if (typeof upd.suggested_caption_style === "string") {
       clip.suggested_caption_style = upd.suggested_caption_style;
     }
-    clip.duration = Math.round((clip.end_second - clip.start_second) * 10) / 10;
+    clip.duration =
+      Math.round(playbackDuration(clip.start_second, clip.end_second, clip.segments, clip.hook) * 10) / 10;
     const fmtTime = (s: number) =>
       `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
     clip.timestamp_display = `${fmtTime(clip.start_second)} → ${fmtTime(clip.end_second)}`;
+
+    // Approval was for a specific render; if this edit changed any
+    // render-relevant field on an already-selected clip, flag it instead of
+    // silently exporting something other than what got approved.
+    if (clip.selectionHash && !uiState.deselectedIndices.includes(index)) {
+      const currentHash = computeSelectionHash(clip, uiState.transcript?.words);
+      if (currentHash !== clip.selectionHash) {
+        clip.changedSinceSelection = true;
+      }
+    }
   } else {
     res.status(400).json({ error: `Unknown action: ${action}` });
     return;
@@ -4434,6 +4556,7 @@ app.post("/api/mcp/export", async (req, res) => {
       ? req.body.clean_fillers !== false
       : uiState.settings.cleanFillers !== false;
   const keepCaptionOverlay = req.body.keep_caption_overlay === true;
+  const writeCleanVariant = req.body.write_clean_variant === true;
 
   if (!videoPath || !existsSync(videoPath)) {
     res.status(400).json({ error: "Video file not found" });
@@ -4456,7 +4579,7 @@ app.post("/api/mcp/export", async (req, res) => {
 
   // Apply style settings to clips that don't have their own
   const styledClips = clips.map((c: any) =>
-    enrichClipWithSegments({
+    enrichClipFromSuggestion({
       start_second: c.start_second,
       end_second: c.end_second,
       title: c.title || "clip",
@@ -4469,8 +4592,14 @@ app.post("/api/mcp/export", async (req, res) => {
         (Array.isArray(c.keep_segments) && c.keep_segments.length > 0 && c.keep_segments) ||
         (Array.isArray(c.keep_segment) && c.keep_segment.length > 0 && c.keep_segment) ||
         undefined,
+      hook: c.hook,
     }),
   );
+  const mcpHookError = exportHookError(styledClips);
+  if (mcpHookError) {
+    res.status(400).json({ error: mcpHookError });
+    return;
+  }
 
   const jobId = uuidv4();
   const job: JobState = {
@@ -4517,6 +4646,7 @@ app.post("/api/mcp/export", async (req, res) => {
         intro_path: introPath,
         clean_fillers: cleanFillers,
         keep_caption_overlay: keepCaptionOverlay,
+        write_clean_variant: writeCleanVariant,
         face_map: uiState.transcript?.face_map,
       },
       (event) => {

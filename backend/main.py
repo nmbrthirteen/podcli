@@ -219,11 +219,13 @@ def handle_create_clip(task_id: str, params: dict):
         clean_fillers=params.get("clean_fillers", True),
         face_map=params.get("face_map"),
         keep_segments=params.get("keep_segments"),
+        hook=params.get("hook"),
         trim_opening=params.get("trim_opening"),
         preserve_timing=params.get("preserve_timing", False),
         allow_ass_fallback=params.get("allow_ass_fallback", False),
         use_ass_captions=params.get("use_ass_captions", False),
         keep_caption_overlay=params.get("keep_caption_overlay", False),
+        write_clean_variant=params.get("write_clean_variant", False),
         progress_callback=lambda pct, msg: emit_progress(task_id, "processing", pct, msg),
     )
     emit_result(task_id, "success", data=result)
@@ -285,10 +287,14 @@ def handle_batch_clips(task_id: str, params: dict):
             clean_fillers=params.get("clean_fillers", True),
             face_map=params.get("face_map"),
             keep_segments=clip.get("keep_segments"),
+            hook=clip.get("hook"),
             allow_ass_fallback=clip.get("allow_ass_fallback", params.get("allow_ass_fallback", False)),
             use_ass_captions=clip.get("use_ass_captions", params.get("use_ass_captions", False)),
             keep_caption_overlay=clip.get(
                 "keep_caption_overlay", params.get("keep_caption_overlay", False)
+            ),
+            write_clean_variant=clip.get(
+                "write_clean_variant", params.get("write_clean_variant", False)
             ),
             progress_callback=lambda pct, msg, _i=i: emit_progress(
                 task_id, "batch", int((_i / total) * 100 + pct / total), msg
