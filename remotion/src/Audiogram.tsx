@@ -5,6 +5,7 @@ import { KaraokeCaptions } from "./components/KaraokeCaptions";
 import { SubtleCaptions } from "./components/SubtleCaptions";
 import { BrandedCaptions } from "./components/BrandedCaptions";
 import type { Word, CaptionStyle } from "./types";
+import { safeUpper } from "./text";
 
 /**
  * What an episode that was never filmed looks like.
@@ -94,10 +95,12 @@ export const Audiogram: React.FC<AudiogramProps> = ({
             fontWeight: 700,
             fontSize: Math.round(height * 0.022),
             letterSpacing: "0.08em",
-            textTransform: "uppercase",
+            // Resolved below via safeUpper — CSS text-transform would still
+            // remap caseless scripts like Georgian to a different alphabet.
+            textTransform: "none",
           }}
         >
-          {title}
+          {safeUpper(title)}
         </div>
       )}
 

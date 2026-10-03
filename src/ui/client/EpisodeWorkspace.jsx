@@ -40,7 +40,7 @@ import MomentTrim from './MomentTrim';
 import { useDialog } from './useDialog';
 import { PageHeader } from './Page';
 import { buildPreviewChunks, activePreviewChunk, selectPreviewWords } from './captionChunks';
-import { findClipResult, resultBoundsKey, clipKey, buildEnergyMap, dropEnergy, clampClipIndex, resolveAssetName, formatTranscriptText } from './lib';
+import { findClipResult, resultBoundsKey, clipKey, buildEnergyMap, dropEnergy, clampClipIndex, resolveAssetName, formatTranscriptText, safeUpper } from './lib';
 
 // Mirrors backend/services/formats.py. A horizontal cutdown is minutes long,
 // so a slider capped at 60s could not express one.
@@ -294,7 +294,7 @@ const onKeyActivate = (fn) => (e) => {
 
     function PhoneCaptionBody({ chunk, activeWordInChunk, cfg, singleLine = false }) {
       if (!chunk || !chunk.length) return null;
-      const fmt = (w) => (cfg.uppercase ? w.toUpperCase() : w);
+      const fmt = (w) => (cfg.uppercase ? safeUpper(w) : w);
 
       const renderWord = (w, i, isActive) => {
         if (cfg.activePill && isActive) {

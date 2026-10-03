@@ -3,6 +3,31 @@
 TITLE_MAX = 55
 FILENAME_MAX = 50
 
+# Scripts with no case distinction whose letters Unicode nonetheless assigns
+# an uppercase mapping for display styling (Georgian Mkhedruli -> Mtavruli).
+# str.upper() applies that mapping uncritically, so a caption or thumbnail
+# style that uppercases for emphasis silently switches alphabets for these
+# scripts instead of just emphasizing them.
+_CASELESS_SCRIPT_RANGES = (
+    (0x10A0, 0x10FF),  # Georgian (Mkhedruli, Asomtavruli)
+    (0x1C90, 0x1CBF),  # Georgian Extended (Mtavruli)
+    (0x2D00, 0x2D2F),  # Georgian Supplement
+)
+
+
+def _is_caseless_script_char(ch: str) -> bool:
+    cp = ord(ch)
+    return any(lo <= cp <= hi for lo, hi in _CASELESS_SCRIPT_RANGES)
+
+
+def safe_upper(text: str) -> str:
+    """Uppercase text, except for scripts where Unicode's uppercase mapping
+    would change the alphabet rather than just the case (see above).
+    """
+    if not text or not any(_is_caseless_script_char(c) for c in text):
+        return text.upper() if text else text
+    return "".join(c if _is_caseless_script_char(c) else c.upper() for c in text)
+
 _TRAILING_PUNCT = " ,;:-–—"
 
 # Windows refuses these as a filename stem whatever the extension, so "CON.fcpxml"

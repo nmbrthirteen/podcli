@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"))
 
-from utils.text import clean_title, safe_filename, truncate_title  # noqa: E402
+from utils.text import clean_title, safe_filename, safe_upper, truncate_title  # noqa: E402
 
 
 def test_clean_title_keeps_full_text():
@@ -87,3 +87,23 @@ def test_safe_filename_escapes_windows_reserved_device_names():
 def test_safe_filename_leaves_names_merely_containing_reserved_words():
     assert safe_filename("Conference") == "Conference"
     assert safe_filename("CON artists") == "CON_artists"
+
+
+def test_safe_upper_uppercases_plain_ascii():
+    assert safe_upper("hello world") == "HELLO WORLD"
+
+
+def test_safe_upper_leaves_georgian_mkhedruli_unchanged():
+    georgian = "მიშა"
+    # Sanity check the bug this guards against: str.upper() alone does remap
+    # Mkhedruli to Mtavruli, a different alphabet, not just a different case.
+    assert georgian.upper() != georgian
+    assert safe_upper(georgian) == georgian
+
+
+def test_safe_upper_uppercases_latin_in_mixed_script_text():
+    assert safe_upper("hello მიშა") == "HELLO მიშა"
+
+
+def test_safe_upper_handles_empty_string():
+    assert safe_upper("") == ""

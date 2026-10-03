@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.caption_styles import get_style
 from utils.timing_utils import seconds_to_ass
+from utils.text import safe_upper
 
 
 def _sanitize_ass_text(text: str) -> str:
@@ -227,7 +228,7 @@ def _render_hormozi(words: list[dict], style: dict, offset: float) -> str:
         parts = []
         for w in chunk:
             duration_cs = int((w["end"] - w["start"]) * 100)
-            text = _sanitize_ass_text(w["word"].upper() if uppercase else w["word"])
+            text = _sanitize_ass_text(safe_upper(w["word"]) if uppercase else w["word"])
             parts.append(f"{{\\kf{duration_cs}}}{text}")
 
         # \c = active (filled) color, \2c = inactive (unfilled) color
@@ -566,7 +567,7 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
         for j, w in enumerate(chunk):
             text = _sanitize_ass_text(_normalize_case(w["word"]))
             if j == 0:
-                text = text[0].upper() + text[1:] if len(text) > 1 else text.upper()
+                text = safe_upper(text[0]) + text[1:] if len(text) > 1 else safe_upper(text)
             normalized.append(text)
 
         # Measure word widths for pill positioning.

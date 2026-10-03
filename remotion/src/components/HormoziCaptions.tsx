@@ -8,6 +8,7 @@ import { captionScale } from "../types";
 import { buildChunks, activeChunkAt } from "../chunks";
 import { MOTION, motionAt } from "../motion";
 import type { Motion } from "../motion";
+import { safeUpper } from "../text";
 
 interface Props {
   words: Word[];
@@ -73,7 +74,7 @@ export const HormoziCaptions: React.FC<Props> = ({
         {activeChunk.words.map((word, i) => {
           const isActive = currentTime >= word.start && currentTime < word.end;
           const text = style.uppercase
-            ? word.word.toUpperCase()
+            ? safeUpper(word.word)
             : word.word;
           // The word being spoken still wins: the sweep is what this style is.
           // Emphasis colours it for the rest of the chunk, which is the part

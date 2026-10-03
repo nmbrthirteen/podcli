@@ -9,6 +9,7 @@ import {
   clampClipIndex,
   resolveAssetName,
   formatTranscriptText,
+  safeUpper,
 } from "./lib";
 
 describe("fmt", () => {
@@ -210,5 +211,24 @@ describe("formatTranscriptText", () => {
     expect(formatTranscriptText({ transcript: "First sentence.   Second sentence." })).toBe(
       "First sentence. Second sentence.",
     );
+  });
+});
+
+describe("safeUpper", () => {
+  it("uppercases plain ASCII text", () => {
+    expect(safeUpper("hello world")).toBe("HELLO WORLD");
+  });
+
+  it("leaves Georgian Mkhedruli text unchanged instead of switching to Mtavruli", () => {
+    const georgian = "მიშა";
+    expect(safeUpper(georgian)).toBe(georgian);
+  });
+
+  it("uppercases the Latin parts of a mixed-script string and leaves Georgian alone", () => {
+    expect(safeUpper("hello მიშა")).toBe("HELLO მიშა");
+  });
+
+  it("passes through empty strings", () => {
+    expect(safeUpper("")).toBe("");
   });
 });

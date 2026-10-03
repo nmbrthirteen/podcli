@@ -177,5 +177,23 @@ class LayerTests(unittest.TestCase):
         self.assertEqual(th._layer_html([]), "")
 
 
+class GeorgianCasingTests(unittest.TestCase):
+    """Georgian is caseless; uppercasing for emphasis must not swap it to a
+    different alphabet (Mkhedruli -> Mtavruli), whether that uppercasing
+    happens in Python or in the CSS the HTML carries."""
+
+    def test_build_html_uppercases_latin_but_not_georgian(self):
+        html = th._build_html("hello მიშა", "second line", config={})
+        self.assertIn("HELLO", html)
+        self.assertIn("მიშა", html)
+        self.assertNotIn("Მიშა".upper(), html)
+
+    def test_build_html_css_does_not_redundantly_uppercase(self):
+        # text-transform: uppercase in the CSS would re-break Georgian in the
+        # headless browser even after the Python-side fix above.
+        html = th._build_html("hello world", "second line", config={})
+        self.assertNotIn("text-transform: uppercase", html)
+
+
 if __name__ == "__main__":
     unittest.main()
