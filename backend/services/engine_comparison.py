@@ -203,9 +203,21 @@ def compare_engines(
 
 
 def _json_for_script_tag(data: Any) -> str:
-    """json.dumps, with </script> neutralized so embedded transcript text
-    can't terminate the script tag early."""
-    return json.dumps(data, ensure_ascii=False).replace("</script", "<\\/script").replace("<!--", "<\\!--")
+    """json.dumps, safe to embed inside a <script> tag.
+
+    Replacing only a literal "</script" (case-sensitively) left "</SCRIPT>"
+    or "</ScRiPt>" in ASR text able to close the tag early and inject HTML.
+    Escaping every "<" closes that regardless of case, and also neutralizes
+    "<!--". U+2028/U+2029 are escaped too: valid in a JSON string, but
+    treated as line terminators by some JS engines even inside a string
+    literal, which can truncate the script.
+    """
+    encoded = json.dumps(data, ensure_ascii=False)
+    return (
+        encoded.replace("<", "\\u003c")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
+    )
 
 
 def render_html(report: dict, audio_rel: Optional[str]) -> str:
