@@ -2064,19 +2064,37 @@ def render_session(
             "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
             "-movflags", "+faststart", str(partial),
         ], timeout=3600, check=True)
-        video = out_dir / "episode.mp4"
-        # shutil.move falls back to copy+delete when work and output sit on different volumes.
-        shutil.move(str(partial), str(video))
 
         stem_paths = []
         if stems:
             _emit(progress_callback, 96, "Writing separate mic tracks")
-            stem_paths = _render_stems(session, out_dir, start, end - start, splice)
+            # Built into `work`, not `out_dir`: if this fails, nothing at the
+            # canonical output path changes, and the video built above is
+            # discarded along with it instead of being published alone.
+            stem_paths = _render_stems(session, work, start, end - start, splice)
+
+        # Every piece rendered; publish video, stems and the session record
+        # together. A crash between these renames can only ever leave either
+        # the previous complete render or this one in place, never a mix.
+        video = out_dir / "episode.mp4"
+        tmp_video = video.with_name(video.name + ".publishing")
+        # shutil.move falls back to copy+delete when work and output sit on different volumes.
+        shutil.move(str(partial), str(tmp_video))
+        pending_stems = []
+        for stem in stem_paths:
+            dest = out_dir / Path(stem).name
+            tmp_stem = dest.with_name(dest.name + ".publishing")
+            shutil.move(stem, str(tmp_stem))
+            pending_stems.append((tmp_stem, dest))
+
+        os.replace(str(tmp_video), str(video))
+        for tmp_stem, dest in pending_stems:
+            os.replace(str(tmp_stem), str(dest))
 
         session.outputs = {
             **session.outputs,
             "video": str(video),
-            "stems": stem_paths,
+            "stems": [str(dest) for _, dest in pending_stems],
             "duration": round(duration, 3),
             "render_key": key,
         }

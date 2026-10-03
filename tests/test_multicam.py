@@ -253,6 +253,33 @@ def test_sync_plan_render_and_export_a_three_camera_episode(sandbox):
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_a_stems_failure_does_not_strand_a_video_with_no_outputs_record(episode, monkeypatch):
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    mc.update_mapping(session, {"sources": [
+        {"id": s.id, "role": "camera", "person": "nika" if "one" in os.path.basename(s.path) else "ana"}
+        for s in session.sources if s.kind == "video"
+    ]})
+    session = mc.plan_session(mc.sync_session(session))
+    out_dir = mc._output_dir(session)
+
+    monkeypatch.setattr(mc, "_render_stems", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError, match="boom"):
+        mc.render_session(session)
+
+    # Nothing half-rendered should land at the canonical output path, and the
+    # session must not record a video it never finished publishing.
+    assert not (out_dir / "episode.mp4").exists()
+    assert not any(out_dir.glob("*.publishing"))
+    session = mc.MulticamSession.load(session.session_id)
+    assert not session.outputs.get("video")
+
+    monkeypatch.undo()
+    outputs = mc.render_session(session)
+    assert os.path.exists(outputs["video"]) and len(outputs["stems"]) == 2
+    assert not any(out_dir.glob("*.publishing"))
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 def test_sync_measures_clock_drift(sandbox):
     folder = sandbox / "drift"
     folder.mkdir()
