@@ -117,6 +117,8 @@ export interface UIState {
   filePath?: string;
   activeExportJobId?: string | null;
   transcript?: TranscriptResult | null;
+  /** Identity (path + size + mtime) of the video the transcript was generated from. */
+  transcriptVideoIdentity?: { path: string; size: number; mtimeMs: number } | null;
   rawTranscriptText?: string;
   silenceOriginal?: { videoPath: string; transcript: TranscriptResult } | null;
   silencePlan?: Record<string, unknown> | null;

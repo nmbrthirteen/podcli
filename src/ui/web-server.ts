@@ -52,6 +52,7 @@ import {
   reconcileSegmentsForRange,
 } from "../utils/transcript.js";
 import { formatSrtTime, formatVttTime } from "../utils/srt-time.js";
+import { computeVideoIdentity, type VideoIdentity } from "../utils/video-identity.js";
 import { errMsg } from "../utils/errors.js";
 import { resolveByteRange } from "../utils/http-range.js";
 import {
@@ -157,6 +158,7 @@ interface UIState {
   filePath: string;
   activeExportJobId: string | null;
   transcript: ServerTranscript | null;
+  transcriptVideoIdentity: VideoIdentity | null;
   rawTranscriptText: string;
   silenceOriginal: SilenceOriginal | null;
   silencePlan: SilencePlan | null;
@@ -195,6 +197,10 @@ function loadPersistedState(): UIState {
         saved.videoPath = "";
         saved.filePath = "";
         saved.phase = "idle";
+        saved.transcript = null;
+        saved.transcriptVideoIdentity = null;
+        saved.suggestions = [];
+        saved.deselectedIndices = [];
       }
       if (saved.silenceOriginal?.videoPath && !existsSync(saved.silenceOriginal.videoPath)) {
         saved.silenceOriginal = null;
@@ -204,6 +210,7 @@ function loadPersistedState(): UIState {
         filePath: saved.filePath || "",
         activeExportJobId: null,
         transcript: saved.transcript || null,
+        transcriptVideoIdentity: saved.transcriptVideoIdentity || null,
         rawTranscriptText: saved.rawTranscriptText || "",
         silenceOriginal: saved.silenceOriginal || null,
         silencePlan: saved.silencePlan || null,
@@ -246,6 +253,7 @@ function loadPersistedState(): UIState {
     filePath: "",
     activeExportJobId: null,
     transcript: null,
+    transcriptVideoIdentity: null,
     rawTranscriptText: "",
     silenceOriginal: null,
     silencePlan: null,
@@ -4149,9 +4157,35 @@ app.post("/api/ui-state", (req, res) => {
     return;
   }
 
+  // Changing the video without a transcript arriving in the same call means
+  // the old transcript, suggestions and selections describe a recording
+  // that's no longer loaded. Carrying them forward lets create_clip burn
+  // captions and timings from the wrong video. transcribe_podcast and
+  // import_transcript always send videoPath and transcript together, so
+  // this only fires for a bare set_video.
+  const videoChanged =
+    body.videoPath !== undefined &&
+    body.videoPath !== uiState.videoPath &&
+    body.transcript === undefined;
+  if (videoChanged) {
+    uiState.transcript = null;
+    uiState.transcriptVideoIdentity = null;
+    uiState.rawTranscriptText = "";
+    uiState.suggestions = [];
+    uiState.deselectedIndices = [];
+    uiState.energyData = {};
+    uiState.silenceOriginal = null;
+    uiState.silencePlan = null;
+  }
+
   if (body.videoPath !== undefined) uiState.videoPath = body.videoPath;
   if (body.filePath !== undefined) uiState.filePath = body.filePath;
-  if (body.transcript !== undefined) uiState.transcript = body.transcript;
+  if (body.transcript !== undefined) {
+    uiState.transcript = body.transcript;
+    uiState.transcriptVideoIdentity = body.transcript
+      ? computeVideoIdentity(body.videoPath ?? uiState.videoPath ?? "")
+      : null;
+  }
   if (body.rawTranscriptText !== undefined)
     uiState.rawTranscriptText = body.rawTranscriptText;
   if (body.silenceOriginal !== undefined) {

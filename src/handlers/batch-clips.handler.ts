@@ -5,6 +5,7 @@ import { ClipsHistory } from "../services/clips-history.js";
 import { paths } from "../config/paths.js";
 import { webServerUrl } from "../config/server.js";
 import { validateClipRange } from "../utils/clip-validation.js";
+import { transcriptVideoMismatch } from "../utils/video-identity.js";
 import { childLogger } from "../utils/logger.js";
 import type {
   BatchClipsInput,
@@ -144,6 +145,16 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   const videoPath = input.video_path || state?.videoPath || "";
   if (!videoPath) {
     return JSON.stringify({ error: "video_path is required (no video in session state)" });
+  }
+
+  // When the caller relies on the session transcript (rather than passing
+  // transcript_words explicitly), refuse to render against a video that was
+  // swapped in after that transcript was generated.
+  if (input.transcript_words == null && transcript) {
+    const mismatch = transcriptVideoMismatch(state?.transcriptVideoIdentity, videoPath);
+    if (mismatch) {
+      return JSON.stringify({ error: mismatch });
+    }
   }
 
   // Auto-resolve transcript words

@@ -6,6 +6,7 @@ import type { ClipResult, CreateClipInput, SuggestedClip, UIState } from "../mod
 import { childLogger } from "../utils/logger.js";
 import { sliceTranscript } from "../utils/transcript.js";
 import { validateClipRange } from "../utils/clip-validation.js";
+import { transcriptVideoMismatch } from "../utils/video-identity.js";
 
 const log = childLogger("create-clip");
 const executor = new PythonExecutor();
@@ -179,6 +180,18 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
 
   // Pull multi-cut segments from suggestion (if available)
   const keepSegments = suggestion?.segments ?? null;
+
+  // When the caller relies on the session transcript (rather than passing
+  // transcript_words explicitly), refuse to render against a video that was
+  // swapped in after that transcript was generated — set_video clears the
+  // transcript itself, but older sessions or a stale on-disk state file can
+  // still carry a mismatched one.
+  if (input.transcript_words == null && transcript) {
+    const mismatch = transcriptVideoMismatch(state?.transcriptVideoIdentity, videoPath);
+    if (mismatch) {
+      return JSON.stringify({ error: mismatch });
+    }
+  }
 
   // Validate required fields
   if (!videoPath) {
