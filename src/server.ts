@@ -40,6 +40,7 @@ import { paths } from "./config/paths.js";
 import { webServerUrl } from "./config/server.js";
 import { childLogger } from "./utils/logger.js";
 import { mcpError } from "./utils/errors.js";
+import { transcriptVideoMismatch } from "./utils/video-identity.js";
 import { podcliVersion, studioStartCommand } from "./version.js";
 import type { ClipHook, Format, SuggestedClip, UIState, WordTimestamp } from "./models/index.js";
 
@@ -684,7 +685,20 @@ export function createServer(): McpServer {
           }
           if (!params.transcript_words) {
             const transcript = uiState?.transcript;
-            if (transcript?.words) params.transcript_words = transcript.words;
+            if (transcript?.words) {
+              // handleCreateClip only runs this guard when transcript_words
+              // arrives null, so filling it from state here has to run the
+              // check itself or an offline render against a swapped video
+              // would silently skip it.
+              const mismatch = transcriptVideoMismatch(
+                uiState?.transcriptVideoIdentity,
+                params.video_path as string,
+              );
+              if (mismatch) {
+                return { content: [{ type: "text" as const, text: mismatch }], isError: true };
+              }
+              params.transcript_words = transcript.words;
+            }
           }
           // Pull multi-cut segments from suggestion
           const segs = suggestion.segments as
@@ -945,7 +959,20 @@ export function createServer(): McpServer {
               "") as string;
           if (!resolvedTranscriptWords) {
             const transcript = uiState?.transcript;
-            if (transcript?.words) resolvedTranscriptWords = transcript.words;
+            if (transcript?.words) {
+              // handleBatchClips only runs this guard when transcript_words
+              // arrives null, so filling it from state here has to run the
+              // check itself or an offline render against a swapped video
+              // would silently skip it.
+              const mismatch = transcriptVideoMismatch(
+                uiState?.transcriptVideoIdentity,
+                resolvedVideoPath as string,
+              );
+              if (mismatch) {
+                return { content: [{ type: "text" as const, text: mismatch }], isError: true };
+              }
+              resolvedTranscriptWords = transcript.words;
+            }
           }
 
           if (params.export_selected) {
