@@ -41,7 +41,7 @@ import { playbackDuration, playbackRanges, validateHook } from '../../utils/clip
 import { useDialog } from './useDialog';
 import { PageHeader } from './Page';
 import { buildPreviewChunks, activePreviewChunk, selectPreviewWords } from './captionChunks';
-import { findClipResult, resultBoundsKey, clipKey, buildEnergyMap, dropEnergy, clampClipIndex, resolveAssetName, formatTranscriptText, safeUpper } from './lib';
+import { findClipResult, resultBoundsKey, clipKey, buildEnergyMap, dropEnergy, clampClipIndex, resolveAssetName, formatTranscriptText, safeUpper, buildUiStateSyncPayload } from './lib';
 
 // Mirrors backend/services/formats.py. A horizontal cutdown is minutes long,
 // so a slider capped at 60s could not express one.
@@ -1079,6 +1079,9 @@ const onKeyActivate = (fn) => (e) => {
       // Sync UI state to server on changes (fire-and-forget)
       // Guard: don't sync until initial SSE state has been received to avoid overwriting persisted state with defaults
       const prevSyncRef = useRef('');
+      // See buildUiStateSyncPayload in lib.ts: transcript rides in this same
+      // request whenever it changed, instead of a request of its own.
+      const prevTranscriptRef = useRef(null);
       useEffect(() => {
         if (!stateHydrated) return;
         const syncable = {
@@ -1102,21 +1105,14 @@ const onKeyActivate = (fn) => (e) => {
           hydrationTargetRef.current = null;
           if (signature !== target) return;
         }
-        const state = { _source: 'ui', filePath: file?.file_path || '', ...syncable };
+        const transcriptChanged = transcript !== prevTranscriptRef.current;
+        const state = buildUiStateSyncPayload(syncable, file?.file_path || '', transcript, transcriptChanged);
         const key = JSON.stringify(state);
         if (key === prevSyncRef.current) return;
         prevSyncRef.current = key;
+        if (transcriptChanged) prevTranscriptRef.current = transcript;
         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => { });
-      }, [stateHydrated, videoPath, file, silenceOriginal, silencePlan, suggestions, deselected, captionStyle, captionPosition, captionFontScale, logoPosition, cropStrategy, format, logoPath, outroPath, introPath, cleanFillers, silenceThreshold, silenceMinPause, silencePadding, phase, results, energyData]);
-
-      // Sync transcript separately (large payload)
-      const prevTranscriptRef = useRef(null);
-      useEffect(() => {
-        if (!stateHydrated) return;
-        if (!transcript || transcript === prevTranscriptRef.current) return;
-        prevTranscriptRef.current = transcript;
-        fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', transcript }) }).catch(() => { });
-      }, [stateHydrated, transcript]);
+      }, [stateHydrated, videoPath, file, silenceOriginal, silencePlan, suggestions, deselected, captionStyle, captionPosition, captionFontScale, logoPosition, cropStrategy, format, logoPath, outroPath, introPath, cleanFillers, silenceThreshold, silenceMinPause, silencePadding, phase, results, energyData, transcript]);
 
       // Sync raw transcript text so MCP can read it before pipeline runs
       const prevRawRef = useRef('');
