@@ -114,6 +114,9 @@ export class TranscriptCache {
     if (["assemblyai", "assembly-ai", "aai"].includes(value)) {
       return "-assemblyai";
     }
+    if (["omnilingual", "omni", "omnilingual-asr"].includes(value)) {
+      return "-omnilingual";
+    }
     return "";
   }
 

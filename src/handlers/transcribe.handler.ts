@@ -11,7 +11,7 @@ const cache = new TranscriptCache();
 export interface TranscribeInput {
   file_path: string;
   model_size?: "tiny" | "base" | "small" | "medium" | "large";
-  engine?: "whisper-py" | "whispercpp" | "assemblyai";
+  engine?: "whisper-py" | "whispercpp" | "assemblyai" | "omnilingual";
   language?: string;
   enable_diarization?: boolean;
   num_speakers?: number;
@@ -54,7 +54,7 @@ export const transcribeToolDef = {
       },
       engine: {
         type: "string",
-        enum: ["whisper-py", "whispercpp", "assemblyai"],
+        enum: ["whisper-py", "whispercpp", "assemblyai", "omnilingual"],
         description: "Transcription engine. Default: whisper-py.",
       },
       enable_diarization: {
@@ -214,7 +214,7 @@ export const transcribeStartToolDef = {
       language: { type: "string" },
       engine: {
         type: "string",
-        enum: ["whisper-py", "whispercpp", "assemblyai"],
+        enum: ["whisper-py", "whispercpp", "assemblyai", "omnilingual"],
       },
       enable_diarization: { type: "boolean", default: true },
       num_speakers: { type: "number" },

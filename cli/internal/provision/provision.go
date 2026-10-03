@@ -84,12 +84,54 @@ const whisperVADRevision = "9ffd54a1e1ee413ddf265af9913beaf518d1639b"
 const vadURL = "https://huggingface.co/ggml-org/whisper-vad/resolve/" + whisperVADRevision + "/ggml-silero-v5.1.2.bin"
 const vadSHA = "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
 
+// omnilingualRevision pins the "omnilingual" engine's model download
+// (sherpa-onnx CTC, ~1600 languages, including ones whisper.cpp handles
+// poorly) the same way the ggml downloads are pinned.
+const omnilingualRevision = "6abf1ece20cd2308bdb7d13cd78ec1c44fa4c094"
+
+func omnilingualURL(file string) string {
+	return "https://huggingface.co/csukuangfj/sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-int8-2025-11-12/resolve/" +
+		omnilingualRevision + "/" + file
+}
+
+var omnilingualFiles = map[string]model{
+	"model.int8.onnx": {
+		URL:    omnilingualURL("model.int8.onnx"),
+		SHA256: "e7c4e54ee4c4c47829cc6667d5d00ed8ea7bef1dcfeef0fce766f77752a2726c",
+	},
+	"tokens.txt": {
+		URL:    omnilingualURL("tokens.txt"),
+		SHA256: "a7a044c52cb29cbe8b0dc1953e92cefd4ca16b0ed968177b6beab21f9a7d0b31",
+	},
+	"LICENSE": {
+		URL:    omnilingualURL("LICENSE"),
+		SHA256: "a70a523bafbb595c2844104feb313d204904dac91c3d186c05f22a10a71c7a94",
+	},
+}
+
 func ModelPath(size string) string {
 	return filepath.Join(paths.ModelsDir(), "ggml-"+size+".bin")
 }
 
 func VADModelPath() string {
 	return filepath.Join(paths.ModelsDir(), "ggml-silero-v5.1.2.bin")
+}
+
+func OmnilingualDir() string {
+	return filepath.Join(paths.ModelsDir(), "omnilingual")
+}
+
+// EnsureOmnilingualModel downloads (or verifies) the omnilingual ASR model
+// and its tokens file, returning their paths.
+func EnsureOmnilingualModel() (modelPath, tokensPath string, err error) {
+	dir := OmnilingualDir()
+	for name, m := range omnilingualFiles {
+		dest := filepath.Join(dir, name)
+		if err := download(m.URL, dest, m.SHA256, "omnilingual-"+name); err != nil {
+			return "", "", err
+		}
+	}
+	return filepath.Join(dir, "model.int8.onnx"), filepath.Join(dir, "tokens.txt"), nil
 }
 
 func have(p string) bool {

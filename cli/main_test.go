@@ -37,3 +37,18 @@ func TestTranscribeEngineAssemblyAI(t *testing.T) {
 		t.Fatalf("engine = %q, want assemblyai", got)
 	}
 }
+
+func TestTranscribeEngineOmnilingual(t *testing.T) {
+	old, ok := os.LookupEnv("PODCLI_ENGINE")
+	t.Cleanup(func() {
+		if ok {
+			os.Setenv("PODCLI_ENGINE", old)
+		} else {
+			os.Unsetenv("PODCLI_ENGINE")
+		}
+	})
+	os.Unsetenv("PODCLI_ENGINE")
+	if got := transcribeEngine([]string{"process", "episode.mp4", "--engine", "omnilingual"}); got != "omnilingual" {
+		t.Fatalf("engine = %q, want omnilingual", got)
+	}
+}

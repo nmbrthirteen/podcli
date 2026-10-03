@@ -277,7 +277,7 @@ export function createServer(): McpServer {
         .default("base")
         .describe("Whisper model size"),
       engine: z
-        .enum(["whisper-py", "whispercpp", "assemblyai"])
+        .enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"])
         .optional()
         .describe("Transcription engine"),
       language: z.string().optional().describe("ISO language code"),
@@ -389,7 +389,7 @@ export function createServer(): McpServer {
         .optional()
         .default("base"),
       language: z.string().optional(),
-      engine: z.enum(["whisper-py", "whispercpp", "assemblyai"]).optional(),
+      engine: z.enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"]).optional(),
       enable_diarization: z.boolean().optional().default(true),
       num_speakers: z.number().optional(),
     },
@@ -2638,8 +2638,8 @@ export function createServer(): McpServer {
     compareEnginesToolDef.description,
     {
       file_path: z.string().describe("Absolute path to the podcast file"),
-      engine_a: z.enum(["whisper-py", "whispercpp", "assemblyai"]).describe("First engine to compare"),
-      engine_b: z.enum(["whisper-py", "whispercpp", "assemblyai"]).describe("Second engine to compare"),
+      engine_a: z.enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"]).describe("First engine to compare"),
+      engine_b: z.enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"]).describe("Second engine to compare"),
       start_seconds: z.number().optional().describe("Sample start, seconds into the source. Default: 0."),
       duration_seconds: z.number().optional().describe("Sample length in seconds. Default: 120."),
       window_seconds: z.number().optional().describe("Report window size in seconds. Default: 20."),

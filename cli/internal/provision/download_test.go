@@ -81,6 +81,23 @@ func TestAllModelsPinned(t *testing.T) {
 		if len(m.SHA256) != 64 {
 			t.Errorf("model %s has no pinned sha256", size)
 		}
+		if strings.Contains(m.URL, "/resolve/main/") {
+			t.Errorf("model %s uses a mutable 'main' URL: %s", size, m.URL)
+		}
+	}
+}
+
+func TestOmnilingualFilesPinned(t *testing.T) {
+	for name, m := range omnilingualFiles {
+		if len(m.SHA256) != 64 {
+			t.Errorf("omnilingual file %s has no pinned sha256", name)
+		}
+		if strings.Contains(m.URL, "/resolve/main/") {
+			t.Errorf("omnilingual file %s uses a mutable 'main' URL: %s", name, m.URL)
+		}
+		if !strings.Contains(m.URL, omnilingualRevision) {
+			t.Errorf("omnilingual file %s URL doesn't carry the pinned revision: %s", name, m.URL)
+		}
 	}
 }
 

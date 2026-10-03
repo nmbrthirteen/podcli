@@ -28,12 +28,12 @@ export const compareEnginesToolDef = {
       file_path: { type: "string", description: "Absolute path to the podcast file" },
       engine_a: {
         type: "string",
-        enum: ["whisper-py", "whispercpp", "assemblyai"],
+        enum: ["whisper-py", "whispercpp", "assemblyai", "omnilingual"],
         description: "First engine to compare",
       },
       engine_b: {
         type: "string",
-        enum: ["whisper-py", "whispercpp", "assemblyai"],
+        enum: ["whisper-py", "whispercpp", "assemblyai", "omnilingual"],
         description: "Second engine to compare",
       },
       start_seconds: {

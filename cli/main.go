@@ -182,7 +182,8 @@ func runEngine(args []string) int {
 	if wantsStudio(args) {
 		refreshStudioBundles()
 	}
-	if transcribeEngine(args) == "whispercpp" {
+	switch transcribeEngine(args) {
+	case "whispercpp":
 		model, err := provision.EnsureModel(transcribeModel(args))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "podcli: provisioning model:", err)
@@ -190,6 +191,15 @@ func runEngine(args []string) int {
 		}
 		os.Setenv("PODCLI_ENGINE", "whispercpp")
 		os.Setenv("PODCLI_WHISPERCPP_MODEL", model)
+	case "omnilingual":
+		model, tokens, err := provision.EnsureOmnilingualModel()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "podcli: provisioning omnilingual model:", err)
+			return 1
+		}
+		os.Setenv("PODCLI_ENGINE", "omnilingual")
+		os.Setenv("PODCLI_OMNILINGUAL_MODEL", model)
+		os.Setenv("PODCLI_OMNILINGUAL_TOKENS", tokens)
 	}
 	code, err := engine.Run(args)
 	if err != nil {
@@ -762,8 +772,9 @@ func doctor() {
 		fmt.Printf("  remotion: not provisioned (captions/thumbnails need a published release)\n")
 	}
 	fmt.Println("\nModels")
-	fmt.Printf("  base:     %s\n", presence(provision.ModelPath("base")))
-	fmt.Printf("  vad:      %s\n", presence(provision.VADModelPath()))
+	fmt.Printf("  base:        %s\n", presence(provision.ModelPath("base")))
+	fmt.Printf("  vad:         %s\n", presence(provision.VADModelPath()))
+	fmt.Printf("  omnilingual: %s\n", presence(filepath.Join(provision.OmnilingualDir(), "model.int8.onnx")))
 }
 
 func presence(p string) string {

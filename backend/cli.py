@@ -4890,7 +4890,7 @@ def main():
                       help="Render on podcli.com instead of this machine (needs `podcli login`)")
     proc.add_argument("--template-id",
                       help="Cut in a saved cloud template, by id (with --cloud)")
-    proc.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], help="Transcription engine (default: whisper-py; whispercpp is local; assemblyai uses ASSEMBLYAI_API_KEY)")
+    proc.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai", "omnilingual"], help="Transcription engine (default: whisper-py; whispercpp is local; assemblyai uses ASSEMBLYAI_API_KEY)")
     proc.add_argument("--language", help="Language of the recording (e.g. es, pt-BR, ka). Auto-detect if omitted.")
     proc.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai. Prefer ASSEMBLYAI_API_KEY; command-line secrets can appear in process listings.")
     proc.add_argument("--fast", action="store_true", help="Draft mode: tiny Whisper, heuristic selection, center crop, low quality")
@@ -5045,7 +5045,7 @@ def main():
     mc_p.add_argument("--transcript", action="store_true",
                       help="Transcribe the episode with each word credited to whoever's mic was speaking")
     mc_p.add_argument("--model", default="base", help="Whisper model for --transcript (default base)")
-    mc_p.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"],
+    mc_p.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai", "omnilingual"],
                       help="Transcription engine for --transcript (default: the one podcli is set up with)")
     mc_p.add_argument("--activity", action="store_true", help="Report who speaks when (talk time, or spans with --json)")
     mc_p.add_argument("--cloud", action="store_true",
@@ -5062,7 +5062,7 @@ def main():
     studio.add_argument("--end", type=float, help="Fragment end (seconds)")
     studio.add_argument("--paragraph", help="Find the fragment by matching this text in the transcript")
     studio.add_argument("--language", help="Transcription language (e.g. es). Auto-detect if omitted.")
-    studio.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai"], help="Transcription engine")
+    studio.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai", "omnilingual"], help="Transcription engine")
     studio.add_argument("--transcript", help="Word timings JSON for this video ({words:[...]} or a list); skips transcription")
     studio.add_argument("--assemblyai-api-key", help="AssemblyAI API key for --engine assemblyai. Prefer ASSEMBLYAI_API_KEY; command-line secrets can appear in process listings.")
     studio.add_argument("--caption-style", choices=["hormozi", "karaoke", "subtle", "branded", "outline"], default="hormozi")
