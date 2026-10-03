@@ -22,7 +22,7 @@ type PageProps<K extends Card["kind"]> = {
   k: number;
 };
 
-const planner = (theme: Theme, start = 2) => {
+export const planner = (theme: Theme, start = 2) => {
   let cursor = start;
   return (role: Role, text?: string) => {
     const at = cursor;
@@ -33,7 +33,7 @@ const planner = (theme: Theme, start = 2) => {
 };
 
 const CONTENT_TOP = 190;
-const EXIT_FRAMES = 8;
+export const EXIT_FRAMES = 8;
 const CONTENT_BOTTOM = 1250;
 
 const Page: React.FC<{
@@ -77,7 +77,7 @@ const Page: React.FC<{
   );
 };
 
-const Circle: React.FC<{ theme: Theme; f: number; at: number; s: number; inset: number }> = ({
+export const Circle: React.FC<{ theme: Theme; f: number; at: number; s: number; inset: number }> = ({
   theme, f, at, s, inset,
 }) => {
   const p = progress(theme.motion, f, at, 10);
@@ -102,16 +102,16 @@ const figureSize = (value: string) => {
   return length > 9 ? 150 : length > 6 ? 200 : 280;
 };
 
-const tilt = (theme: Theme, k: number) => ({ transform: `rotate(${theme.tilt * k}deg)` });
+export const tilt = (theme: Theme, k: number) => ({ transform: `rotate(${theme.tilt * k}deg)` });
 
-const titleSize = (text: string, base: number) => {
+export const titleSize = (text: string, base: number) => {
   const length = Array.from(text).length;
   if (length > 22) return base * 0.66;
   if (length > 14) return base * 0.8;
   return base;
 };
 
-const Bar: React.FC<{ theme: Theme; seed: number; s: number; color: string; height: number; children?: React.ReactNode }> = ({
+export const Bar: React.FC<{ theme: Theme; seed: number; s: number; color: string; height: number; children?: React.ReactNode }> = ({
   theme, seed, s, color, height, children,
 }) => (theme.surface === "none"
   ? <div style={{ height: height * s, backgroundColor: color, position: "relative" }}>{children}</div>

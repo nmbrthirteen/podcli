@@ -10,6 +10,7 @@ import type { Theme } from "./theme";
 import { Label, Paper } from "./materials";
 import { progress, Reveal } from "./reveal";
 import { TakeoverPage } from "./pages";
+import { OVERLAY_KINDS, OverlayCard } from "./overlay";
 
 export const StyledCards: React.FC<{ cards: Card[]; theme: Theme; topInset?: number }> = ({ cards, theme, topInset = 0 }) => {
   const frame = useCurrentFrame();
@@ -17,6 +18,12 @@ export const StyledCards: React.FC<{ cards: Card[]; theme: Theme; topInset?: num
   const card = cardAt(cards.filter((c) => theme.layout[c.kind] === "takeover"), frame / fps);
   if (!card) return null;
   const start = Math.round(card.start * fps);
+  if (theme.placement === "overlay" && OVERLAY_KINDS.has(card.kind)) {
+    return (
+      <OverlayCard card={card} theme={theme} s={captionScale(height)} start={start}
+        length={Math.round(card.end * fps) - start} top={(topInset + 12) * captionScale(height)} />
+    );
+  }
   return (
     <TakeoverPage card={card} theme={theme} s={captionScale(height)} start={start}
       length={Math.round(card.end * fps) - start} inset={topInset} />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENTRANCES, FONT_IDS, MOTIONS, PACKS, ROLES, resolveTheme } from "./theme";
+import { ENTRANCES, FONT_IDS, MOTIONS, PACKS, PLACEMENTS, ROLES, resolveTheme } from "./theme";
 
 describe("resolveTheme", () => {
   it("returns null without a style", () => {
@@ -88,5 +88,22 @@ describe("fonts picked to match a reference", () => {
     for (const font of FONT_IDS) {
       expect(resolveTheme({ pack: "riso", fonts: { display: font } })?.type.display.family).toBeTruthy();
     }
+  });
+});
+
+describe("card placement", () => {
+  it("draws cards as full pages unless a style asks otherwise", () => {
+    for (const pack of Object.keys(PACKS) as (keyof typeof PACKS)[]) {
+      expect(resolveTheme({ pack })?.placement).toBe("page");
+    }
+  });
+
+  it("sets cards over the video when the style asks", () => {
+    expect(resolveTheme({ pack: "swiss", placement: "overlay" })?.placement).toBe("overlay");
+  });
+
+  it("ignores a placement the renderer does not know", () => {
+    const theme = resolveTheme({ pack: "poster", placement: "corner" as (typeof PLACEMENTS)[number] });
+    expect(theme?.placement).toBe("page");
   });
 });

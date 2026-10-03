@@ -2,6 +2,8 @@ import type React from "react";
 
 export type EdgeKind = "straight" | "torn";
 export type Layout = "takeover";
+export type Placement = "page" | "overlay";
+export const PLACEMENTS: Placement[] = ["page", "overlay"];
 export type Role = "title" | "figure" | "item" | "media" | "label" | "strip" | "caption" | "name";
 export type Entrance =
   | "type" | "scramble" | "wipe" | "wipe-up" | "pop" | "rise" | "fade" | "spring"
@@ -75,6 +77,7 @@ export interface Theme {
   tilt: number;
   motion: Motion;
   layout: Record<string, Layout>;
+  placement: Placement;
   textures: { paper?: string; kraft?: string; tape?: string[]; halftone?: Record<string, string> };
 }
 
@@ -205,6 +208,7 @@ export interface ThemeInput {
   pack: PackId;
   motion?: MotionId;
   fonts?: { display?: FontId; label?: FontId };
+  placement?: Placement;
   overrides?: DeepPartial<Theme>;
   textures?: Theme["textures"];
 }
@@ -254,6 +258,7 @@ const collage: Theme = {
   tilt: 1.6,
   motion: MOTIONS.pinned,
   layout: TAKEOVER,
+  placement: "page",
   textures: {},
 };
 
@@ -474,7 +479,7 @@ export const resolveTheme = (input?: ThemeInput | null): Theme | null => {
   if (!input) return null;
   const pack: Theme = withFonts(PACKS[input.pack] ?? PACKS.collage, input.fonts);
   const base = input.motion ? { ...pack, motion: MOTIONS[input.motion] ?? pack.motion } : pack;
-  const merged = deepMerge(base, input.overrides ?? {});
+  const merged = { ...deepMerge(base, input.overrides ?? {}), placement: PLACEMENTS.includes(input.placement as Placement) ? input.placement as Placement : base.placement };
   return { ...merged, textures: { ...merged.textures, ...(input.textures ?? {}) } };
 };
 
