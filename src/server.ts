@@ -2529,8 +2529,15 @@ export function createServer(): McpServer {
         .optional()
         .default(0)
         .describe("Offset in seconds to add to all timestamps"),
+      language: z
+        .string()
+        .optional()
+        .describe(
+          "ISO language code of the transcript (e.g. 'ka'). This format has no language " +
+            "info of its own, so omitting it labels the result 'und' rather than guessing.",
+        ),
     },
-    async ({ file_path, raw_text, total_duration, time_adjust }) => {
+    async ({ file_path, raw_text, total_duration, time_adjust, language }) => {
       try {
         const res = await fetch(`${webServerUrl}/api/parse-transcript`, {
           method: "POST",
@@ -2540,6 +2547,7 @@ export function createServer(): McpServer {
             raw_text,
             total_duration,
             time_adjust,
+            language,
           }),
         });
         if (!res.ok) {

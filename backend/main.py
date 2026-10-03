@@ -343,13 +343,16 @@ def handle_parse_transcript(task_id: str, params: dict):
     raw_text = params.get("raw_text", "")
     total_duration = params.get("total_duration")
     time_adjust = params.get("time_adjust", 0.0)
+    language = params.get("language")
 
     if not raw_text:
         emit_result(task_id, "error", error="raw_text is required")
         return
 
     emit_progress(task_id, "parsing", 50, "Parsing transcript...")
-    result = detect_and_parse(raw_text, total_duration=total_duration, time_adjust=time_adjust)
+    result = detect_and_parse(
+        raw_text, total_duration=total_duration, time_adjust=time_adjust, language=language
+    )
 
     if "error" in result:
         emit_result(task_id, "error", error=result["error"])

@@ -992,7 +992,7 @@ app.post("/api/import-transcript", (req, res) => {
  * Uses Python backend to generate word-level timestamps.
  */
 app.post("/api/parse-transcript", async (req, res) => {
-  const { file_path, raw_text, total_duration, time_adjust = 0 } = req.body;
+  const { file_path, raw_text, total_duration, time_adjust = 0, language } = req.body;
 
   if (!file_path) {
     res.status(400).json({ error: "file_path is required" });
@@ -1008,6 +1008,7 @@ app.post("/api/parse-transcript", async (req, res) => {
       raw_text,
       total_duration: total_duration || null,
       time_adjust: time_adjust || 0,
+      language: language || null,
     });
 
     if (result.data) {
