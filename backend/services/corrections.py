@@ -77,6 +77,15 @@ def _strip_for_match(text: str) -> str:
     return text.strip(".,!?;:\"'()-")
 
 
+_TRAILING_PUNCT_RE = re.compile(r"[.,!?;:\"'()\-]+$")
+
+
+def _trailing_punct(text: str) -> str:
+    """Trailing punctuation only (not leading), e.g. 'AI.' -> '.'."""
+    match = _TRAILING_PUNCT_RE.search(text)
+    return match.group(0) if match else ""
+
+
 def _merge_multiword_corrections(words: list[dict], corrections: dict[str, str]) -> list[dict]:
     """
     Merge consecutive words matching a multi-word correction key (e.g.
@@ -125,11 +134,25 @@ def _merge_multiword_corrections(words: list[dict], corrections: dict[str, str])
         span_end = last["end"]
         span_dur = max(0.0, span_end - span_start)
         per = span_dur / len(repl_words)
-        speaker = first.get("speaker")
+
+        # The matched words' punctuation and other fields (speaker,
+        # confidence, ...) would otherwise vanish behind the correction:
+        # "open AI." becomes "OpenAI" with no period and a dropped speaker.
+        # Carry the last word's trailing punctuation onto the final merged
+        # word, and the first word's other fields onto every merged word.
+        trailing_punct = _trailing_punct(last.get("word", ""))
+        confidences = [
+            w["confidence"] for w in candidate if isinstance(w.get("confidence"), (int, float))
+        ]
+        extra_fields = {k: v for k, v in first.items() if k not in ("word", "start", "end")}
+        if confidences:
+            extra_fields["confidence"] = min(confidences)
+
         for idx, rw in enumerate(repl_words):
             w_start = span_start + per * idx
             w_end = span_end if idx == len(repl_words) - 1 else span_start + per * (idx + 1)
-            merged.append({"word": rw, "start": w_start, "end": w_end, "speaker": speaker})
+            word_text = rw + trailing_punct if idx == len(repl_words) - 1 else rw
+            merged.append({**extra_fields, "word": word_text, "start": w_start, "end": w_end})
         i += len(candidate)
 
     return merged
