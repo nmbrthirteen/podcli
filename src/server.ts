@@ -2264,6 +2264,15 @@ export function createServer(): McpServer {
             audio_stream_index: z.number().int().min(0).optional().describe("Which audio stream in the container to use, for cameras (often MXF) that carry one mono stream per mic instead of packing channels into a single stream"),
             offset: z.number().optional().describe("Timeline seconds where this file starts, to override sync"),
             nudge: z.number().optional().describe("Seconds to shift the synced offset by"),
+            anchors: z
+              .array(z.object({ timeline: z.number(), source: z.number() }))
+              .min(1)
+              .optional()
+              .describe(
+                "Manual sync for a file that can't sync by sound (a camera with no audio, or a fit that's off): " +
+                  "pairs of the same moment as {timeline, source} seconds. One pair sets the offset; two or more also fit clock drift by least squares. " +
+                  "Pairs must move forward together, and drift must stay within 1000 ppm. The fit reports its residual and survives later syncs unless force is true",
+              ),
           }),
         )
         .optional()

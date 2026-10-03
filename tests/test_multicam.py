@@ -1431,3 +1431,64 @@ def test_two_pass_mix_hits_the_target_and_the_stems_sum_to_it(episode, monkeypat
     assert v["lufs"] == pytest.approx(mc.LOUDNESS_TARGET, abs=1.0)
     assert v["true_peak"] <= mc.TRUE_PEAK_CEILING + 0.5
     assert v["warnings"] == []
+
+
+# --- manual drift anchors -------------------------------------------------------------
+
+def test_anchors_fit_offset_and_drift_by_least_squares(sandbox):
+    session = _bare(sandbox)
+    cam = session.sources[0]
+    speed = 1.0 + 80e-6
+    pairs = [{"timeline": 12.0 + speed * src + jitter, "source": src}
+             for src, jitter in ((5.0, 0.0), (20.0, 0.002), (40.0, -0.002), (55.0, 0.0))]
+    mc.update_mapping(session, {"sources": [{"id": cam.id, "anchors": pairs}]})
+    assert cam.offset == pytest.approx(12.0, abs=0.003)
+    assert cam.speed == pytest.approx(speed, abs=1e-4)
+    assert cam.sync["status"] == "manual" and cam.sync["method"] == "manual"
+    assert 0 < cam.sync["residual_ms"] < 3
+    assert [p["source"] for p in cam.sync["anchors"]] == [5.0, 20.0, 40.0, 55.0]
+
+    mc.update_mapping(session, {"sources": [{"id": cam.id, "anchors": [{"timeline": 30.0, "source": 10.0}]}]})
+    assert (cam.offset, cam.speed) == (20.0, 1.0)
+    assert cam.sync["residual_ms"] == 0
+
+
+def test_anchors_are_refused_when_they_run_backwards_or_imply_impossible_drift(sandbox):
+    session = _bare(sandbox)
+    cam = session.sources[0]
+    for bad in (
+        [],
+        [{"timeline": 10.0}],
+        [{"timeline": 10.0, "source": 5.0}, {"timeline": 9.0, "source": 15.0}],
+        [{"timeline": 10.0, "source": 5.0}, {"timeline": 11.0, "source": 5.0}],
+        [{"timeline": 10.0, "source": 5.0}, {"timeline": 30.0, "source": 15.0}],
+        [{"timeline": 10.0, "source": 500.0}],
+    ):
+        with pytest.raises(ValueError):
+            mc.update_mapping(session, {"sources": [{"id": cam.id, "anchors": bad}]})
+    assert cam.sync.get("method") != "manual"
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_anchors_sync_a_camera_with_no_audio_and_survive_a_resync(sandbox):
+    folder = sandbox / "mute"
+    folder.mkdir()
+    _write_wav(folder / "rec_Tr1.wav", _speech(40, 12))
+    _ffmpeg("-f", "lavfi", "-i", "color=c=red:s=160x90:r=30:d=30", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            str(folder / "cam_one.mp4"))
+    session = mc.sync_session(mc.new_session(folder=str(folder), people=["Nika"]))
+    cam = next(s for s in session.sources if s.kind == "video")
+    assert not cam.has_audio and not cam.synced
+
+    speed = 1.0 + 50e-6
+    mc.update_mapping(session, {"sources": [{"id": cam.id, "role": "camera", "person": "nika", "anchors": [
+        {"timeline": 4.0 + speed * 2.0, "source": 2.0}, {"timeline": 4.0 + speed * 28.0, "source": 28.0}]}]})
+    assert cam.offset == pytest.approx(4.0, abs=1e-6) and cam.speed == pytest.approx(speed, abs=1e-9)
+
+    session = mc.sync_session(session)
+    cam = session.source(cam.id)
+    assert cam.sync["method"] == "manual" and cam.speed == pytest.approx(speed, abs=1e-9)
+    assert cam.offset == pytest.approx(4.0, abs=1e-6)
+    session = mc.plan_session(session)
+    assert {c["source_id"] for c in session.cuts} == {cam.id}
+    assert mc.render_plan(session, 30.0)

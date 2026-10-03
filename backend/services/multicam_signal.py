@@ -123,12 +123,16 @@ class ClockFit:
     speed_fallback: bool = False  # drift looked implausible, so speed was forced back to 1.0
 
 
+# Real clock drift between recorders stays far under this (|speed - 1|, so 1000 ppm).
+MAX_DRIFT = 1e-3
+
+
 def fit_clock(points: list[tuple[float, float, float]], *, max_residual: float = 0.02) -> Optional[ClockFit]:
     """Fit timeline = offset + speed * source from (source_s, timeline_s, weight) points.
 
     Checkpoints further than max_residual seconds from a Theil-Sen line are
     dropped before the weighted least-squares fit.
-    A single point yields speed 1. Implausible speeds (over 1000 ppm) fall back
+    A single point yields speed 1. Implausible speeds (over MAX_DRIFT) fall back
     to the median offset at speed 1, since real clock drift is far smaller.
     """
     if not points:
@@ -156,7 +160,7 @@ def fit_clock(points: list[tuple[float, float, float]], *, max_residual: float =
     pts = all_pts[keep] if keep.any() else all_pts
     offset, speed = solve(pts)
     residual = np.abs(pts[:, 1] - (offset + speed * pts[:, 0]))
-    speed_fallback = abs(speed - 1.0) > 1e-3
+    speed_fallback = abs(speed - 1.0) > MAX_DRIFT
     if speed_fallback:
         offset, speed = float(np.median(pts[:, 1] - pts[:, 0])), 1.0
         residual = np.abs(pts[:, 1] - (offset + pts[:, 0]))

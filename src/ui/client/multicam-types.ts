@@ -13,6 +13,8 @@ export type McSyncStatus = "reference" | "ok" | "review" | "rough" | "failed" | 
 
 export interface McSourceSync {
   status?: McSyncStatus;
+  method?: "manual";
+  anchors?: { timeline: number; source: number }[];
   score?: number;
   checkpoints?: number;
   residual_ms?: number;

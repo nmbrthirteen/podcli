@@ -976,8 +976,15 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
             if idx < len(s.audio_stream_channels):
                 s.audio_channels = s.audio_stream_channels[idx]
             s.channel_people = []
-        if (("offset" in edit and edit["offset"] is not None) or "nudge" in edit) and s.virtual:
+        if (("offset" in edit and edit["offset"] is not None) or "nudge" in edit or "anchors" in edit) and s.virtual:
             raise ValueError("A tile or split screen moves with the files it comes from. Move those instead.")
+        if "anchors" in edit:
+            pairs, fit = _anchor_fit(s, edit["anchors"])
+            s.offset, s.speed = fit.offset, fit.speed
+            s.sync = {
+                "status": "manual", "method": "manual", "anchors": pairs,
+                "residual_ms": round(fit.residual_ms, 1), "drift_ppm": round((fit.speed - 1.0) * 1e6, 1),
+            }
         if "offset" in edit and edit["offset"] is not None:
             s.offset = _number(edit["offset"], "offset", -MAX_SECONDS, MAX_SECONDS)
             s.sync = {**s.sync, "status": "manual"}
@@ -1030,9 +1037,42 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
     return session
 
 
+MAX_ANCHORS = 100
+
+
+def _anchor_fit(s: Source, anchors) -> tuple[list[dict], sig.ClockFit]:
+    """Offset and speed through hand-picked {timeline, source} second pairs, by least squares.
+
+    One pair sets the offset alone. More fit drift too, within the bound an
+    audio sync accepts. Every pair counts: unlike sync checkpoints, nobody
+    picks an anchor by accident, so none is dropped as an outlier.
+    """
+    name = os.path.basename(s.path)
+    if not isinstance(anchors, list) or not 1 <= len(anchors) <= MAX_ANCHORS:
+        raise ValueError(f"anchors must be a list of 1 to {MAX_ANCHORS} {{timeline, source}} pairs in seconds")
+    pairs = []
+    for a in anchors:
+        if not isinstance(a, dict) or not {"timeline", "source"} <= a.keys():
+            raise ValueError("Each anchor needs timeline and source, in seconds")
+        pairs.append({"timeline": _number(a["timeline"], "anchor timeline", -MAX_SECONDS, MAX_SECONDS),
+                      "source": _number(a["source"], f"anchor source second in {name}", 0, s.duration)})
+    pairs.sort(key=lambda p: p["source"])
+    for a, b in zip(pairs, pairs[1:]):
+        if b["source"] - a["source"] < 1e-3 or b["timeline"] <= a["timeline"]:
+            raise ValueError("Anchors must move forward together: a later second in the file needs a later "
+                             "second on the timeline, and no two anchors may share a file second")
+    fit = sig.fit_clock([(p["source"], p["timeline"], 1.0) for p in pairs], max_residual=math.inf)
+    if fit is None or fit.speed_fallback:
+        first, last = pairs[0], pairs[-1]
+        ppm = ((last["timeline"] - first["timeline"]) / (last["source"] - first["source"]) - 1.0) * 1e6
+        raise ValueError(f"Those anchors put {name}'s clock {ppm:+.0f} ppm off the timeline; real drift stays within "
+                         f"{sig.MAX_DRIFT * 1e6:.0f} ppm. Check each pair.")
+    return pairs, fit
+
+
 def _cut_inputs(session: MulticamSession) -> str:
     return json.dumps([
-        [(s.id, s.role, s.person, s.channel_people, s.audio_stream_index, s.offset) for s in session.sources],
+        [(s.id, s.role, s.person, s.channel_people, s.audio_stream_index, s.offset, s.speed) for s in session.sources],
         [(p.id, p.role) for p in session.people], session.range_start, session.range_end,
         session.cut_settings, session.speaker_map,
     ], default=str)
