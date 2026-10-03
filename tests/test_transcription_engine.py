@@ -100,6 +100,29 @@ class TranscriptionEngineTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=False)
 
+    def test_whispercpp_never_marks_diarization_attempted(self):
+        # whisper.cpp can never diarize — a cache entry from this engine must
+        # say so explicitly, or a reader asking for speaker labels would
+        # re-transcribe it forever (every run looks like a retriable miss).
+        os.environ["PODCLI_ENGINE"] = "whispercpp"
+        result = tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=True)
+        self.assertFalse(result["diarization_attempted"])
+
+    def test_omnilingual_never_marks_diarization_attempted(self):
+        os.environ["PODCLI_ENGINE"] = "omnilingual"
+        result = tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=True)
+        self.assertFalse(result["diarization_attempted"])
+
+    def test_assemblyai_marks_diarization_attempted_from_its_own_request_flag(self):
+        os.environ["PODCLI_ENGINE"] = "assemblyai"
+        result = tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=True)
+        self.assertTrue(result["diarization_attempted"])
+
+    def test_assemblyai_without_diarization_is_not_marked_attempted(self):
+        os.environ["PODCLI_ENGINE"] = "assemblyai"
+        result = tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=False)
+        self.assertFalse(result["diarization_attempted"])
+
 
 class SampleModeTests(unittest.TestCase):
     """start_seconds/duration_seconds should transcribe a trimmed window
@@ -181,6 +204,23 @@ class SampleModeTests(unittest.TestCase):
         )
         self.assertEqual(self.extract_calls[0]["start_seconds"], 0.0)
         self.assertEqual(result["sample_offset_seconds"], 0.0)
+
+    def test_duration_seconds_zero_is_a_full_run_not_a_sample(self):
+        # Matches src/handlers/transcribe.handler.ts and web-server.ts: a
+        # sample is a *positive* window, not merely a present key.
+        result = tr.transcribe_file(
+            self._tmp.name, model_size="base", duration_seconds=0.0, enable_diarization=False,
+        )
+        self.assertEqual(self.extract_calls, [])
+        self.assertNotIn("complete", result)
+        self.assertNotIn("sample_offset_seconds", result)
+
+    def test_start_seconds_zero_alone_is_a_full_run_not_a_sample(self):
+        result = tr.transcribe_file(
+            self._tmp.name, model_size="base", start_seconds=0.0, enable_diarization=False,
+        )
+        self.assertEqual(self.extract_calls, [])
+        self.assertNotIn("complete", result)
 
 
 class ResolveEngineInfoTests(unittest.TestCase):

@@ -608,7 +608,11 @@ def transcribe_file(
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    is_sample = start_seconds is not None or duration_seconds is not None
+    # Matches backend/main.py's handle_transcribe and both TS transcribe
+    # entry points exactly: a sample is a positive window, not merely a
+    # present key, so start_seconds=0/duration_seconds=0 or an explicit
+    # null both mean "no sample" rather than "sample from t=0".
+    is_sample = (duration_seconds or 0) > 0 or (start_seconds or 0) > 0
     if is_sample:
         from services.audio_extract import extract_wav_16k_mono
 
@@ -670,12 +674,21 @@ def _transcribe_file_inner(
         base = _transcribe_with_assemblyai(
             file_path, language, enable_diarization, num_speakers, progress_callback
         )
+        # AssemblyAI does its own diarization (speaker_labels in the request),
+        # not the pyannote path _attach_speakers_and_faces runs below — record
+        # against the flag that actually drove that request, not the False
+        # passed to attach (which only controls the pyannote attempt here).
+        base["diarization_attempted"] = bool(enable_diarization)
         return _attach_speakers_and_faces(file_path, base, False, num_speakers, progress_callback)
 
     if use_omnilingual:
         base = _transcribe_with_omnilingual(file_path, progress_callback, wav_path=wav_path)
         base["engine"] = "omnilingual"
         # Same no-torch constraint as whisper.cpp: skip diarization, keep face analysis.
+        # Diarization is never possible on this engine, so it's never
+        # "attempted" regardless of what the caller asked for — a cache
+        # entry from this engine must never look like a retriable miss.
+        base["diarization_attempted"] = False
         return _attach_speakers_and_faces(
             file_path, base, False, num_speakers, progress_callback, wav_path=wav_path
         )
@@ -706,6 +719,8 @@ def _transcribe_file_inner(
         base["engine"] = "whispercpp"
         # whisper.cpp is the no-torch path: importing torch for diarization can
         # hard-crash native runtimes. Skip diarization, keep face analysis (OpenCV).
+        # Never possible on this engine — see the omnilingual branch above.
+        base["diarization_attempted"] = False
         return _attach_speakers_and_faces(
             file_path, base, False, num_speakers, progress_callback
         )
@@ -792,6 +807,7 @@ def _transcribe_file_inner(
         "duration": duration,
         "language": detected_lang,
         "engine": "whisper-py",
+        "diarization_attempted": bool(enable_diarization),
     }
     return _attach_speakers_and_faces(
         file_path, base, enable_diarization, num_speakers, progress_callback,

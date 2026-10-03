@@ -1,7 +1,7 @@
 import { basename } from "path";
 import { PythonExecutor } from "../services/python-executor.js";
-import { TranscriptCache, hasSpeakerLabels } from "../services/transcript-cache.js";
-import { resolveTranscribeEngine } from "../services/engine-resolve.js";
+import { TranscriptCache, needsDiarizationRetry } from "../services/transcript-cache.js";
+import { resolveTranscribeEngine, engineCanDiarize } from "../services/engine-resolve.js";
 import { webServerUrl } from "../config/server.js";
 import type { TranscriptResult } from "../models/index.js";
 
@@ -97,7 +97,10 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const numSpeakers = input.num_speakers;
   const startSeconds = input.start_seconds;
   const durationSeconds = input.duration_seconds;
-  const isSample = startSeconds !== undefined || durationSeconds !== undefined;
+  // A sample is a positive window, not merely a present key — an explicit
+  // null or a duration_seconds: 0 both mean "no sample", matching
+  // backend/services/transcription.py and backend/main.py's handle_transcribe.
+  const isSample = (durationSeconds ?? 0) > 0 || (startSeconds ?? 0) > 0;
 
   // Resolve before reading the cache: an unset engine is written under
   // whatever transcribe_file actually ran (e.g. "whispercpp" on a native
@@ -109,22 +112,26 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   // serve (or pollute) the main transcript cache, which is keyed by the
   // whole file and assumed complete.
   const cachedRaw = isSample ? null : await cache.get(filePath, cacheKey);
-  const cached =
-    cachedRaw && enableDiarization && !hasSpeakerLabels(cachedRaw) ? null : cachedRaw;
+  const cached = needsDiarizationRetry(cachedRaw, enableDiarization, engineCanDiarize(resolvedEngine))
+    ? null
+    : cachedRaw;
   if (cached) {
-    const packedEngine = cached.engine ?? resolvedEngine;
+    // Same combo cache.get(filePath, cacheKey) just matched — the packed
+    // view has to be keyed identically, or a backfill here would write it
+    // under a key the next read for this same request won't find.
+    const packedKey = { engine: cached.engine ?? resolvedEngine, model: modelSize, language };
     // Backfill packed view if this cache predates auto-packing.
-    let packed = await cache.getPackedMarkdown(filePath, packedEngine);
+    let packed = await cache.getPackedMarkdown(filePath, packedKey);
     if (!packed) {
       try {
-        const cacheHash = await cache.getFileHashForEngine(filePath, packedEngine);
+        const cacheHash = await cache.getFileHashForEngine(filePath, packedKey);
         await executor.execute("pack_transcript", {
           transcript: cached,
           cache_hash: cacheHash,
           source_label: basename(filePath),
           file_path: filePath,
         });
-        packed = await cache.getPackedMarkdown(filePath, packedEngine);
+        packed = await cache.getPackedMarkdown(filePath, packedKey);
       } catch {
         // Non-fatal — caller still gets metadata
       }
@@ -160,7 +167,7 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   // above — resolveTranscribeEngine can't see a model-load failure that only
   // shows up once transcribe_file tries it for real.
   await cache.set(filePath, data, { engine: actualEngine, model: modelSize, language });
-  const packed = await cache.getPackedMarkdown(filePath, actualEngine);
+  const packed = await cache.getPackedMarkdown(filePath, { engine: actualEngine, model: modelSize, language });
 
   return JSON.stringify({ cached: false, packed_ready: !!packed, ...formatResult(data) });
 }

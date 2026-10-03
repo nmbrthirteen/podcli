@@ -31,8 +31,8 @@ import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
 import { PythonExecutor, terminateProcessTree } from "../services/python-executor.js";
-import { hasSpeakerLabels, TranscriptCache } from "../services/transcript-cache.js";
-import { resolveTranscribeEngine } from "../services/engine-resolve.js";
+import { needsDiarizationRetry, TranscriptCache } from "../services/transcript-cache.js";
+import { resolveTranscribeEngine, engineCanDiarize } from "../services/engine-resolve.js";
 import { FileManager } from "../services/file-manager.js";
 import { AssetManager, inferType, safeName } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
@@ -1093,7 +1093,9 @@ app.post("/api/transcribe", async (req, res) => {
     res.status(400).json({ error: "File not found" });
     return;
   }
-  const isSample = start_seconds !== undefined || duration_seconds !== undefined;
+  // A sample is a positive window, not merely a present key — matches
+  // transcribe.handler.ts and backend/services/transcription.py exactly.
+  const isSample = (duration_seconds ?? 0) > 0 || (start_seconds ?? 0) > 0;
 
   // Resolve before reading the cache: an unset engine is written under
   // whatever transcribe_file actually ran (e.g. "whispercpp" on a native
@@ -1105,8 +1107,9 @@ app.post("/api/transcribe", async (req, res) => {
   // populate the session/UI state from the main cache (keyed by, and
   // assumed to describe, the whole file).
   const cachedRaw = isSample ? null : await cache.get(file_path, cacheKey);
-  const cached =
-    cachedRaw && enable_diarization && !hasSpeakerLabels(cachedRaw) ? null : cachedRaw;
+  const cached = needsDiarizationRetry(cachedRaw, enable_diarization, engineCanDiarize(resolvedEngine))
+    ? null
+    : cachedRaw;
   if (cached) {
     const jobId = uuidv4();
     sessionTranscripts.set(file_path, cached as unknown as ServerTranscript);

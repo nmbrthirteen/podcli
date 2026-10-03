@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { PythonExecutor } from "./python-executor.js";
-import { resolveTranscribeEngine } from "./engine-resolve.js";
+import { resolveTranscribeEngine, engineCanDiarize } from "./engine-resolve.js";
 
 function fakeExecutor(response: unknown): PythonExecutor {
   return { execute: vi.fn().mockResolvedValue(response) } as unknown as PythonExecutor;
@@ -33,5 +33,21 @@ describe("resolveTranscribeEngine", () => {
     const executor = { execute: vi.fn().mockRejectedValue(new Error("boom")) } as unknown as PythonExecutor;
     const engine = await resolveTranscribeEngine(executor, undefined, "base");
     expect(engine).toBe("whisper-py");
+  });
+});
+
+describe("engineCanDiarize", () => {
+  it("is false for whisper.cpp and omnilingual, which never diarize", () => {
+    expect(engineCanDiarize("whispercpp")).toBe(false);
+    expect(engineCanDiarize("omnilingual")).toBe(false);
+  });
+
+  it("is true for whisper-py and assemblyai", () => {
+    expect(engineCanDiarize("whisper-py")).toBe(true);
+    expect(engineCanDiarize("assemblyai")).toBe(true);
+  });
+
+  it("is true (the safe default) for an unresolved engine", () => {
+    expect(engineCanDiarize(undefined)).toBe(true);
   });
 });
