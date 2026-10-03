@@ -40,9 +40,15 @@ const SECRET_PATTERNS = [
 const ENV_FILE_RE = /(^|\/)\.env(\..+)?$/;
 const ENV_ALLOWLIST = new Set([".env.example"]);
 
-function trackedFiles() {
-  return execSync("git ls-files", { cwd: root, encoding: "utf8" })
-    .split("\n")
+// cwd is parameterized (default: this repo's root) so the test suite can
+// point it at a throwaway repo instead of git ls-files-ing the real one.
+export function trackedFiles(cwd = root) {
+  // Plain `git ls-files` C-quotes any path with a non-ASCII byte (e.g.
+  // "\346\226\207.mp4") instead of printing it raw, so a filename like that
+  // never matches a real path on disk and every check below silently skips
+  // it. `-z` prints paths NUL-separated with no quoting at all.
+  return execSync("git ls-files -z", { cwd, encoding: "utf8" })
+    .split("\0")
     .filter(Boolean);
 }
 
