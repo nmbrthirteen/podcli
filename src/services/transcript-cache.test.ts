@@ -8,7 +8,9 @@ const tmp = mkdtempSync(join(tmpdir(), "podcli-cache-test-"));
 process.env.PODCLI_HOME = tmp;
 process.env.PODCLI_DATA = tmp;
 
-const { TranscriptCache, hasSpeakerLabels } = await import("./transcript-cache.js");
+const { TranscriptCache, hasSpeakerLabels, needsDiarizationRetry } = await import(
+  "./transcript-cache.js"
+);
 
 function makeFakeVideo(name: string, content: string): string {
   const p = join(tmp, name);
@@ -78,6 +80,44 @@ describe("TranscriptCache", () => {
     expect(await cache.getPackedMarkdown(file)).toBeNull();
   });
 
+  it("keys the packed view by model and language too, not engine alone", async () => {
+    const file = makeFakeVideo("packed-multi-key.mp4", "packed multi key");
+    mkdirSync(join(tmp, "packed"), { recursive: true });
+    const base = await cache.getFileHashForEngine(file, { engine: "whispercpp" });
+    const small = await cache.getFileHashForEngine(file, {
+      engine: "whispercpp",
+      model: "small",
+      language: "ka",
+    });
+    writeFileSync(join(tmp, "packed", `${base}.md`), "# base");
+    writeFileSync(join(tmp, "packed", `${small}.md`), "# small-ka");
+    expect(await cache.getPackedMarkdown(file, { engine: "whispercpp" })).toBe("# base");
+    expect(
+      await cache.getPackedMarkdown(file, { engine: "whispercpp", model: "small", language: "ka" }),
+    ).toBe("# small-ka");
+    // A combo that was never written must miss, not fall back to either.
+    expect(
+      await cache.getPackedMarkdown(file, { engine: "whispercpp", model: "medium", language: "fr" }),
+    ).toBeNull();
+  });
+
+  it("falls back to the most recently modified packed view when the caller doesn't know model/language", async () => {
+    const file = makeFakeVideo("packed-unknown-key.mp4", "packed unknown key");
+    mkdirSync(join(tmp, "packed"), { recursive: true });
+    const first = await cache.getFileHashForEngine(file, { engine: "whispercpp", model: "small" });
+    writeFileSync(join(tmp, "packed", `${first}.md`), "# first");
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await cache.getFileHashForEngine(file, {
+      engine: "whispercpp",
+      model: "medium",
+      language: "ka",
+    });
+    writeFileSync(join(tmp, "packed", `${second}.md`), "# second");
+    // Caller only knows the engine, not which model/language actually ran.
+    // Deterministic rule: most recently written entry for this hash+engine.
+    expect(await cache.getPackedMarkdown(file, { engine: "whispercpp" })).toBe("# second");
+  });
+
   it("get returns null when the cache file is corrupt", async () => {
     const file = makeFakeVideo("corrupt-source.mp4", "any content");
     const hash = await cache.getFileHash(file);
@@ -116,6 +156,26 @@ describe("TranscriptCache", () => {
       (await cache.get(file, { engine: "whispercpp", model: "base", language: "auto" }))
         ?.transcript,
     ).toBe("legacy");
+  });
+
+  it("sanitizes a language tag to [a-z0-9-], rejecting path separators and odd casing", async () => {
+    const file = makeFakeVideo("lang-sanitize.mp4", "language sanitize check");
+    await cache.set(file, { ...fakeTranscript, transcript: "danger" }, {
+      language: "../../etc",
+    });
+    // The sanitized form keys the lookup: "../../etc" strips to "etc".
+    expect(
+      (await cache.get(file, { language: "etc" }))?.transcript,
+    ).toBe("danger");
+    const { readdirSync } = await import("fs");
+    const files = readdirSync(join(tmp, "cache", "transcripts"));
+    expect(files.every((f) => !f.includes("..") && !f.includes("/"))).toBe(true);
+  });
+
+  it("treats mixed-case language tags the same as their lowercase form", async () => {
+    const file = makeFakeVideo("lang-case.mp4", "case check");
+    await cache.set(file, { ...fakeTranscript, transcript: "georgian" }, { language: "KA" });
+    expect((await cache.get(file, { language: "ka" }))?.transcript).toBe("georgian");
   });
 
   it("writes atomically — no temp file left behind, and no partial reads", async () => {
@@ -158,5 +218,32 @@ describe("hasSpeakerLabels", () => {
   it("rejects missing and empty input", () => {
     expect(hasSpeakerLabels(null)).toBe(false);
     expect(hasSpeakerLabels({})).toBe(false);
+  });
+});
+
+describe("needsDiarizationRetry", () => {
+  const unlabelled = { diarization_attempted: false, words: [] };
+  const attemptedButNoneFound = { diarization_attempted: true, words: [] };
+
+  it("is false when diarization wasn't requested", () => {
+    expect(needsDiarizationRetry(unlabelled, false, true)).toBe(false);
+  });
+
+  it("is false when the resolved engine can never diarize, no matter the flag", () => {
+    // whisper.cpp/omnilingual will never gain labels, so retrying forever
+    // would be the bug this flag exists to prevent.
+    expect(needsDiarizationRetry(unlabelled, true, false)).toBe(false);
+  });
+
+  it("is true when requested, possible, and never attempted", () => {
+    expect(needsDiarizationRetry(unlabelled, true, true)).toBe(true);
+  });
+
+  it("is false once diarization was attempted, even with no labels to show for it", () => {
+    expect(needsDiarizationRetry(attemptedButNoneFound, true, true)).toBe(false);
+  });
+
+  it("is false for missing cache input", () => {
+    expect(needsDiarizationRetry(null, true, true)).toBe(false);
   });
 });

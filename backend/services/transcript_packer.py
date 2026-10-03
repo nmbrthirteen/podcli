@@ -68,11 +68,12 @@ def legacy_md5_cache_path(video_path: str) -> str:
     return os.path.join(_legacy_cache_dir(), hashlib.md5(raw.encode()).hexdigest() + ".json")
 
 
-def _engine_cache_suffix() -> str:
-    """Namespace the cache by engine so a whisper.cpp run doesn't reuse a
-    whisper-py transcript (their timings/word splits differ). whisper-py keeps
-    the bare filename, which the TS transcript cache also writes."""
-    return engine_cache_suffix(os.environ.get("PODCLI_ENGINE", "whisper-py"))
+def _effective_engine(engine: str | None) -> str | None:
+    """None means "not told": fall back to the process-wide engine (the
+    same default every pre-existing caller relied on), not to whisper-py,
+    so an unset PODCLI_ENGINE=whispercpp request still lands in its own
+    namespace."""
+    return engine if engine is not None else os.environ.get("PODCLI_ENGINE", "whisper-py")
 
 
 def engine_cache_suffix(engine: str | None) -> str:
@@ -86,35 +87,124 @@ def engine_cache_suffix(engine: str | None) -> str:
     return ""
 
 
-def transcript_json_path(cache_hash: str) -> str:
-    return os.path.join(_transcripts_cache_dir(), f"{cache_hash}{_engine_cache_suffix()}.json")
+_LANGUAGE_RE = re.compile(r"[^a-z0-9-]+")
 
 
-def load_cached_transcript_for_video(video_path: str) -> dict[str, Any] | None:
+def sanitize_language(language: str | None) -> str:
+    """Matches src/services/transcript-cache.ts sanitizeLanguage exactly:
+    lowercase, then strip anything outside [a-z0-9-]. The tag can come from
+    caller-supplied input, so without this a value carrying a path separator
+    would land in the cache filename unescaped."""
+    value = (language or "").strip().lower()
+    return _LANGUAGE_RE.sub("", value)
+
+
+def cache_key_suffix(engine: str | None = None, model: str | None = None, language: str | None = None) -> str:
+    """Port of src/services/transcript-cache.ts keySuffix: engine + model +
+    language. base model and auto/empty language contribute no suffix, so a
+    cache written before model/language were tracked still reads back under
+    the same key. Every Python reader/writer of the transcript cache has to
+    produce this exact suffix for a given (engine, model, language), or a
+    transcript one side writes is invisible to the other."""
+    engine_part = engine_cache_suffix(_effective_engine(engine))
+    model_norm = (model or "").strip().lower()
+    model_part = f"-m{model_norm}" if model_norm and model_norm != "base" else ""
+    language_norm = sanitize_language(language)
+    language_part = f"-l{language_norm}" if language_norm and language_norm != "auto" else ""
+    return f"{engine_part}{model_part}{language_part}"
+
+
+def transcript_json_path(
+    cache_hash: str,
+    engine: str | None = None,
+    model: str | None = None,
+    language: str | None = None,
+) -> str:
+    return os.path.join(
+        _transcripts_cache_dir(), f"{cache_hash}{cache_key_suffix(engine, model, language)}.json"
+    )
+
+
+# A suffix can only continue with "-m<model>" and/or "-l<language>" (see
+# cache_key_suffix). No other engine's suffix starts with "m" or "l", so
+# anchoring on this is enough to never cross into a different engine's files.
+_CACHE_SUFFIX_TAIL_RE = r"(?:-m[a-z0-9]+)?(?:-l[a-z0-9-]+)?\.json$"
+
+
+def find_cached_transcript_path(cache_hash: str, engine: str | None = None) -> str | None:
+    """Locate a cached transcript for this file hash when the caller does not
+    know which model/language produced it, e.g. a reel or face-map lookup
+    that only has a video path, not the transcribe request that created the
+    cache. Deterministic rule: prefer the engine-only key (base model, auto
+    language, what every pre-model/language cache, and most base-model
+    runs, write); otherwise the most recently modified matching file for
+    this hash+engine, i.e. the transcript this file most recently produced.
+    """
+    cache_dir = _transcripts_cache_dir()
+    engine_suffix = engine_cache_suffix(_effective_engine(engine))
+    exact = os.path.join(cache_dir, f"{cache_hash}{engine_suffix}.json")
+    if os.path.exists(exact):
+        return exact
+    if not os.path.isdir(cache_dir):
+        return None
+    pattern = re.compile(rf"^{re.escape(cache_hash)}{re.escape(engine_suffix)}{_CACHE_SUFFIX_TAIL_RE}")
+    candidates = [
+        os.path.join(cache_dir, name) for name in os.listdir(cache_dir) if pattern.match(name)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=os.path.getmtime)
+
+
+def load_cached_transcript_for_video(
+    video_path: str,
+    engine: str | None = None,
+    model: str | None = None,
+    language: str | None = None,
+) -> dict[str, Any] | None:
     cache_hash = compute_cache_hash(video_path)
-    canonical = transcript_json_path(cache_hash)
-    if os.path.exists(canonical):
-        with open(canonical, encoding="utf-8") as f:
+    if model is not None or language is not None:
+        # The caller knows exactly what it's asking for: read that key only,
+        # never silently substitute a different model/language's transcript.
+        canonical = transcript_json_path(cache_hash, engine=engine, model=model, language=language)
+        if os.path.exists(canonical):
+            with open(canonical, encoding="utf-8") as f:
+                return json.load(f)
+        return None
+
+    found = find_cached_transcript_path(cache_hash, engine=engine)
+    if found:
+        with open(found, encoding="utf-8") as f:
             return json.load(f)
     # The legacy md5 cache predates the engine split and only ever held
     # whisper-py output, so don't let a whisper.cpp run adopt it under its own
     # namespace.
-    if _engine_cache_suffix() == "":
+    if engine_cache_suffix(_effective_engine(engine)) == "":
         legacy = legacy_md5_cache_path(video_path)
         if os.path.exists(legacy):
             with open(legacy, encoding="utf-8") as f:
                 data = json.load(f)
-            save_cached_transcript_for_video(video_path, data)
+            save_cached_transcript_for_video(video_path, data, engine=engine)
             return data
     return None
 
 
-def save_cached_transcript_for_video(video_path: str, data: dict[str, Any]) -> str:
+def save_cached_transcript_for_video(
+    video_path: str,
+    data: dict[str, Any],
+    engine: str | None = None,
+    model: str | None = None,
+    language: str | None = None,
+) -> str:
     cache_hash = compute_cache_hash(video_path)
-    path = transcript_json_path(cache_hash)
+    path = transcript_json_path(cache_hash, engine=engine, model=model, language=language)
     os.makedirs(_transcripts_cache_dir(), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    # Write-then-rename: a reader never observes a half-written cache file,
+    # matching src/services/transcript-cache.ts's set().
+    tmp_path = f"{path}.{os.getpid()}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f)
+    os.replace(tmp_path, path)
     return path
 
 

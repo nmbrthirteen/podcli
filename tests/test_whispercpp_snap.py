@@ -19,7 +19,7 @@ if BACKEND_ROOT not in sys.path:
 
 import numpy as np
 
-from services.transcription_whispercpp import _snap_words_to_voiced, _voiced_intervals
+from services.transcription_whispercpp import _frame_rms, _snap_words_to_voiced, _voiced_intervals
 
 
 def _voiced_intervals_quadratic_reference(wav_path, bridge=0.3, thresh_ratio=0.07):
@@ -172,6 +172,53 @@ class VoicedIntervalsMatchesOldImplementationTests(unittest.TestCase):
                 finally:
                     os.remove(path)
                 self.assertEqual(fast, reference)
+
+
+class FrameRmsLongFilePrecisionTests(unittest.TestCase):
+    """On a multi-hour file the running sum of squares climbs into the range
+    where float32 can no longer resolve one frame's contribution. A late
+    frame's RMS comes out wrong, and can cross the voiced/silent threshold
+    the wrong way. float64 has to hold exactly through the same file length."""
+
+    def test_late_frame_rms_matches_direct_computation_on_a_long_constant_signal(self):
+        sr = 16000
+        hop = int(sr * 0.010)
+        frame = int(sr * 0.025)
+        amplitude = 10000.0
+        # ~20.8 minutes at 16kHz: long enough for float32's cumulative sum
+        # of squares to lose more precision than a single frame is worth.
+        n_samples = 20_000_000
+        samples = np.full(n_samples, amplitude, dtype=np.float32)
+        nf = 1 + (n_samples - frame) // hop
+
+        rms = _frame_rms(samples, hop, frame, nf)
+
+        # A constant-amplitude signal has an exact, trivial per-frame RMS:
+        # amplitude itself, independent of position. So this is a direct
+        # computation, not another running sum that could share the bug.
+        late_frame = nf - 1
+        self.assertAlmostEqual(float(rms[late_frame]), amplitude, delta=1e-6)
+        mid_frame = nf // 2
+        self.assertAlmostEqual(float(rms[mid_frame]), amplitude, delta=1e-6)
+
+    def test_float32_cumsum_would_have_failed_the_same_assertion(self):
+        # Pins the regression: confirms the bug this test guards against is
+        # real and large, not a tolerance picked to pass trivially.
+        sr = 16000
+        hop = int(sr * 0.010)
+        frame = int(sr * 0.025)
+        amplitude = 10000.0
+        n_samples = 20_000_000
+        samples = np.full(n_samples, amplitude, dtype=np.float32)
+        nf = 1 + (n_samples - frame) // hop
+
+        sq = samples * samples
+        csum32 = np.concatenate(([0.0], np.cumsum(sq, dtype=np.float32)))
+        starts = np.arange(nf) * hop
+        window_sums = csum32[starts + frame] - csum32[starts]
+        rms32 = np.sqrt(np.maximum(window_sums, 0.0) / frame)
+
+        self.assertGreater(abs(float(rms32[nf // 2]) - amplitude), 100.0)
 
 
 if __name__ == "__main__":

@@ -77,6 +77,11 @@ export interface TranscriptResult {
   // offset from the source by sample_offset_seconds.
   complete?: boolean;
   sample_offset_seconds?: number;
+  // Whether diarization was actually tried for this result (set by every
+  // branch of backend/services/transcription.py). False for engines that
+  // never diarize (whispercpp, omnilingual) regardless of what was
+  // requested, see needsDiarizationRetry in services/transcript-cache.ts.
+  diarization_attempted?: boolean;
 }
 
 // === Clip Models ===

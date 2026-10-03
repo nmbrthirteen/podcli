@@ -83,11 +83,13 @@ def handle_transcribe(task_id: str, params: dict):
     """Transcribe a podcast video/audio file with speaker detection."""
     from services.transcription import transcribe_file
     from services.corrections import apply_corrections
-    from services.transcript_packer import compute_cache_hash, engine_cache_suffix, write_packed
+    from services.transcript_packer import compute_cache_hash, cache_key_suffix, write_packed
 
     emit_progress(task_id, "transcribing", 0, "Starting transcription...")
     file_path = params["file_path"]
     engine = params.get("engine")
+    model_size = params.get("model_size", "base")
+    language = params.get("language")
     previous_engine = os.environ.get("PODCLI_ENGINE")
     previous_assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
     if engine:
@@ -97,7 +99,12 @@ def handle_transcribe(task_id: str, params: dict):
 
     start_seconds = params.get("start_seconds")
     duration_seconds = params.get("duration_seconds")
-    is_sample = start_seconds is not None or duration_seconds is not None
+    # Matches src/handlers/transcribe.handler.ts and web-server.ts exactly:
+    # a sample is a *positive* window, not merely a present key. A caller
+    # that explicitly passes null (dropped by JSON on the TS side, but
+    # still visible here as None) or duration_seconds: 0 must get the full
+    # transcription path, the same as not passing the field at all.
+    is_sample = (duration_seconds or 0) > 0 or (start_seconds or 0) > 0
 
     # One shared 16 kHz mono wav feeds transcription, energy and reactions
     # instead of decoding the source three times. Skipped for a sample run —
@@ -154,7 +161,9 @@ def handle_transcribe(task_id: str, params: dict):
             # Auto-pack: emit compact LLM-readable markdown alongside raw JSON.
             # Pulls energy data so the packed view includes peak moments for clip reasoning.
             try:
-                cache_hash = compute_cache_hash(file_path) + engine_cache_suffix(result.get("engine") or engine)
+                cache_hash = compute_cache_hash(file_path) + cache_key_suffix(
+                    engine=result.get("engine") or engine, model=model_size, language=language
+                )
                 packed_path, packed_md = write_packed(
                     result,
                     cache_hash,
