@@ -4438,12 +4438,17 @@ app.post("/api/ui-state", (req, res) => {
     broadcastSSE("state-sync", {
       ...(body.videoPath !== undefined && { videoPath: uiState.videoPath }),
       ...(body.filePath !== undefined && { filePath: uiState.filePath }),
-      ...(body.suggestions !== undefined && { suggestions: uiState.suggestions }),
-      ...(body.deselectedIndices !== undefined && {
+      // The request body only carried videoPath, but a bare set_video also
+      // cleared the transcript/suggestions/selections server-side; without
+      // forcing these onto the broadcast too, the studio's in-memory state
+      // never learns they were cleared and later syncs the stale ones right
+      // back.
+      ...((body.suggestions !== undefined || videoChanged) && { suggestions: uiState.suggestions }),
+      ...((body.deselectedIndices !== undefined || videoChanged) && {
         deselectedIndices: uiState.deselectedIndices,
       }),
       ...(body.phase !== undefined && { phase: uiState.phase }),
-      ...(body.transcript !== undefined && { transcript: uiState.transcript }),
+      ...((body.transcript !== undefined || videoChanged) && { transcript: uiState.transcript }),
       ...(body.silenceOriginal !== undefined && { silenceOriginal: uiState.silenceOriginal }),
       ...(body.silencePlan !== undefined && { silencePlan: uiState.silencePlan }),
       ...(body.settings && { settings: uiState.settings }),
