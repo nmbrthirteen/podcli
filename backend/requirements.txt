@@ -22,7 +22,7 @@ Pillow>=12.3.0
 questionary>=2.1.1
 
 # Utilities
-python-dotenv>=1.2.2
+python-dotenv>=1.2.3
 yt-dlp>=2026.7.4
 
 # YouTube analytics (optional — only needed for live OAuth sync; CSV import works without these)
