@@ -440,6 +440,31 @@ def test_exports_keep_stereo_sides_apart_and_honor_camera_timecode(sandbox):
     assert all(Fraction(c.get("start").rstrip("s")) >= 3600 for c in cam_clips)
 
 
+def test_exports_point_a_second_audio_stream_at_the_right_track_not_channel_one(sandbox):
+    """A mic file with one mono stream per mic (a camera's second XLR input, say).
+
+    audio_stream_index picks the stream; the editor timelines must land the
+    mic's track/channel at the position that stream actually sits at in the
+    file, not always at channel 1.
+    """
+    cam = _source("cam.mp4", role="camera", person="host", offset=0.0, duration=40.0)
+    mic = _source("mic.mp4", kind="video", role="mic", person="host", offset=0.0, duration=40.0,
+                  audio_stream_count=2, audio_stream_channels=[1, 1], audio_stream_index=1)
+    session = mc.MulticamSession(session_id="abc123abc905", name="ep", people=[mc.Person("host", "Host")],
+                                 sources=[cam, mic], reference_id="mic",
+                                 cuts=[{"start": 0.0, "end": 40.0, "source_id": "cam"}])
+
+    premiere = ET.parse(mc.export_xml(session, "premiere")).getroot()
+    assert premiere.findtext("./sequence/media/audio/track/clipitem/sourcetrack/trackindex") == "2"
+    mic_file = next(f for f in premiere.iter("file") if f.findtext("name") == "mic.mp4")
+    assert mic_file.findtext("media/audio/channelcount") == "2"
+
+    fcp = ET.parse(mc.export_xml(session, "fcpxml")).getroot()
+    assert {c.get("srcCh") for c in fcp.iter("audio-channel-source")} == {"2"}
+    mic_asset = next(a for a in fcp.iter("asset") if a.get("name") == "mic.mp4")
+    assert mic_asset.get("audioChannels") == "2"
+
+
 # --- podcli multicam ------------------------------------------------------------
 
 def run_cli(monkeypatch, *argv):
@@ -1271,6 +1296,28 @@ def test_extract_reads_the_selected_audio_stream_not_always_the_first(sandbox):
     src.audio_stream_index = 1
     tone = mc._read_wav(mc._extract(src, sandbox / "stream1.wav"))
     assert np.abs(tone).mean() > 1000  # stream 1 is a 440 Hz tone
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_mix_and_stems_honor_audio_stream_index_not_always_the_first_stream(sandbox):
+    path = sandbox / "two_streams.mp4"
+    _ffmpeg("-f", "lavfi", "-i", "color=s=160x90:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+            "-f", "lavfi", "-i", "sine=f=440:r=48000:d=2",
+            "-map", "0:v", "-map", "1:a", "-map", "2:a", "-shortest",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path))
+    mic = _source(str(path), kind="video", role="mic", person="host", offset=0.0, duration=2.0,
+                  audio_stream_count=2, audio_stream_channels=[1, 1], audio_stream_index=1)
+
+    mix = sandbox / "mix.wav"
+    mc._write_mix(mc.MulticamSession(session_id="abc123abc903", name="ep", sources=[mic]),
+                  mix, 0.0, 2.0, encode=("-ac", "1", "-c:a", "pcm_s16le"), feeds=[(mic, -1)])
+    assert np.abs(mc._read_wav(mix)).mean() > 1000  # the tone on stream 1, not the silence on stream 0
+
+    session = mc.MulticamSession(session_id="abc123abc904", name="ep", people=[mc.Person("host", "Host")],
+                                 sources=[mic])
+    stems = mc._render_stems(session, sandbox, 0.0, 2.0)
+    assert len(stems) == 1
+    assert np.abs(_read_f32(stems[0])).mean() > 0.05
 
 
 def test_probe_source_warns_on_variable_frame_rate(tmp_path, monkeypatch):

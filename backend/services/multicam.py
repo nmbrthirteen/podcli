@@ -2111,7 +2111,7 @@ def _write_mix(session: MulticamSession, out: Path, start: float, duration: floa
     for i, (s, ch) in enumerate(feeds if feeds is not None else _audio_inputs(session)):
         inp, steps = _aligned_input(s, ch, start, duration)
         args += inp
-        chains.append(f"[{i}:a:0]{','.join([*steps, *per_feed])}[a{i}]")
+        chains.append(f"[{i}:a:{s.audio_stream_index}]{','.join([*steps, *per_feed])}[a{i}]")
     n = len(chains)
     mix = "".join(f"[a{i}]" for i in range(n)) + f"amix=inputs={n}:normalize=0," if n > 1 else "[a0]"
     proc_run([
@@ -2188,7 +2188,7 @@ def _render_stems(
         for i, (s, ch) in enumerate(feeds):
             inp, steps = _aligned_input(s, ch, start, duration)
             args += inp
-            chains.append(f"[{i}:a:0]{','.join([*steps, *VOICE_CHAIN])}[a{i}]")
+            chains.append(f"[{i}:a:{s.audio_stream_index}]{','.join([*steps, *VOICE_CHAIN])}[a{i}]")
         mix = "".join(f"[a{i}]" for i in range(len(feeds)))
         level = f"volume={gain:.3f}dB"
         graph = ";".join(chains) + (f";{mix}amix=inputs={len(feeds)}:normalize=0,{level}[out]" if len(feeds) > 1
