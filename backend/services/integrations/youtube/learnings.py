@@ -8,9 +8,14 @@ actually performed.
 from __future__ import annotations
 
 import os
+import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
+
+# Below this, one viral or one flop clip swings the bucket's number enough
+# that it reads as a trend. Hide it until there's enough data to trust.
+MIN_BUCKET_SIZE = 4
 
 from config.paths import paths
 from services.clips_history import load_clips_history
@@ -34,18 +39,24 @@ def _has_perf(c: dict) -> bool:
 
 
 def _agg(clips: list[dict], key: Callable[[dict], Any]) -> list[dict]:
+    """Group clips by `key` and report the median (not mean) of each metric,
+    since one viral or one flop clip would otherwise swing a small bucket's
+    average far past what's typical. Buckets under MIN_BUCKET_SIZE are
+    dropped — too little data to call it a trend."""
     groups: dict[str, list[dict]] = defaultdict(list)
     for c in clips:
         groups[key(c) or "—"].append(c)
     out = []
     for k, cs in groups.items():
+        if len(cs) < MIN_BUCKET_SIZE:
+            continue
         vals = lambda f: [c["metrics"][f] for c in cs if (c.get("metrics") or {}).get(f) is not None]
         ret, ctr, views = vals("retention"), vals("ctr"), vals("views")
         out.append({
             "key": k, "n": len(cs),
-            "ret": round(sum(ret) / len(ret), 1) if ret else None,
-            "ctr": round(sum(ctr) / len(ctr), 1) if ctr else None,
-            "views": int(sum(views) / len(views)) if views else None,
+            "ret": round(statistics.median(ret), 1) if ret else None,
+            "ctr": round(statistics.median(ctr), 1) if ctr else None,
+            "views": int(statistics.median(views)) if views else None,
         })
     return out
 
