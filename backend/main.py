@@ -1106,7 +1106,10 @@ def handle_manage_multicam(task_id: str, params: dict):
             stems = params.get("stems", True)
             if not isinstance(stems, bool):
                 raise ValueError("stems is true or false")
-            mc.render_session(session, stems=stems, progress_callback=progress("rendering"))
+            validate = params.get("validate", "sample")
+            if validate not in ("sample", "full"):
+                raise ValueError("validate must be 'sample' or 'full'")
+            mc.render_session(session, stems=stems, validate=validate, progress_callback=progress("rendering"))
         elif action == "export":
             data["export_path"] = mc.export_xml(session, params.get("format", "premiere"), review=bool(params.get("review")))
         elif action == "import_timeline":

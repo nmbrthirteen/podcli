@@ -1582,7 +1582,7 @@ def test_render_warns_when_a_camera_runs_out_or_the_mix_is_short(sandbox, monkey
 def test_render_fails_on_decode_errors_or_a_wrong_frame_count(episode, monkeypatch):
     session = _planned(episode)
     out_dir = mc._output_dir(session)
-    monkeypatch.setattr(mc, "_decode_errors", lambda path: "Invalid NAL unit size")
+    monkeypatch.setattr(mc, "_decode_errors", lambda path, **k: "Invalid NAL unit size")
     with pytest.raises(RuntimeError, match="decode"):
         mc.render_session(session)
     assert not (out_dir / "episode.mp4").exists()
@@ -1593,6 +1593,34 @@ def test_render_fails_on_decode_errors_or_a_wrong_frame_count(episode, monkeypat
     with pytest.raises(RuntimeError, match="frames"):
         mc.render_session(session)
     assert not (out_dir / "episode.mp4").exists()
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_decode_check_samples_a_few_short_spans_by_default_not_the_whole_file(episode, monkeypatch):
+    """A full decode of a finished episode costs minutes per hour of 1080p.
+
+    The default check must still pass a clean file, but it must do it by
+    decoding a handful of short, bounded spans, not the whole thing; asking
+    for validate="full" is the only way to get the exhaustive decode.
+    """
+    video = mc.render_session(_planned(episode), stems=False)["video"]
+    calls = []
+    real_run = mc.proc_run
+
+    def recording_run(cmd, **k):
+        calls.append(cmd)
+        return real_run(cmd, **k)
+
+    monkeypatch.setattr(mc, "proc_run", recording_run)
+    assert mc._decode_errors(video) == ""
+    decodes = [c for c in calls if c[0] == "ffmpeg"]
+    assert decodes and all("-t" in c for c in decodes), "every sampled decode must be bounded to a short span"
+    assert len(decodes) <= 5
+
+    calls.clear()
+    assert mc._decode_errors(video, full=True) == ""
+    decodes = [c for c in calls if c[0] == "ffmpeg"]
+    assert len(decodes) == 1 and "-t" not in decodes[0], "a full decode has no time bound"
 
 
 # --- audio chain --------------------------------------------------------------------

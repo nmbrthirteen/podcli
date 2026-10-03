@@ -994,7 +994,7 @@ def _run_multicam(args, mc, target: str):
 
 def _render_multicam(args, mc, session):
     report, done = _multicam_progress("Rendering")
-    outputs = mc.render_session(session, stems=not args.no_stems, progress_callback=report)
+    outputs = mc.render_session(session, stems=not args.no_stems, validate=args.validate, progress_callback=report)
     done()
     for path in [outputs["video"], *(outputs.get("stems") or [])]:
         print(f"  ✓ {path}")
@@ -5045,6 +5045,10 @@ def main():
                            "File > Export > Timeline > FCP 7 XML)")
     mc_p.add_argument("--no-render", action="store_true", dest="no_render", help="Skip the MP4 render (fast, export only)")
     mc_p.add_argument("--no-stems", action="store_true", dest="no_stems", help="Skip the per-person WAV files")
+    mc_p.add_argument("--validate", choices=["sample", "full"], default="sample",
+                      help="How hard to check the rendered episode decodes cleanly: 'sample' (default) checks the "
+                           "first and last 10s plus a few points in between; 'full' decodes the whole thing, which "
+                           "costs minutes per hour of 1080p")
     mc_p.add_argument("--resync", action="store_true",
                       help="Sync every file again, including offsets you set by hand")
     mc_p.add_argument("-y", "--yes", action="store_true", help="Don't stop to review guessed roles")

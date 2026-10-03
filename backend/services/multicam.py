@@ -2071,11 +2071,38 @@ def _loudness(path: Path) -> tuple[Optional[float], Optional[float]]:
     return number(lufs), number(peak)
 
 
-def _decode_errors(path: Path) -> str:
-    """Whatever ffmpeg complains about while decoding every frame and sample, or '' when clean."""
-    res = proc_run(["ffmpeg", "-hide_banner", "-v", "error", "-i", str(path), "-f", "null", "-"],
-                   timeout=7200, check=False)
-    return res.stderr.strip() or (f"ffmpeg exited with {res.returncode}" if res.returncode else "")
+def _decode_errors(path: Path, *, full: bool = False) -> str:
+    """Whatever ffmpeg complains about while decoding the episode, or '' when clean.
+
+    A full decode is exhaustive but costs minutes per hour of 1080p on every
+    single render, almost all of it spent re-confirming frames nothing
+    touched. By default this instead decodes the first and last 10 s plus
+    three points spread through the middle: enough to catch what a render
+    is actually at risk of (a bad concat seam between shots, a broken mux,
+    a codec fault at the point it happened) without paying for the whole
+    file. Pass full=True (render_session(..., validate="full")) for the
+    exhaustive check when that trade-off isn't acceptable.
+    """
+    if full:
+        res = proc_run(["ffmpeg", "-hide_banner", "-v", "error", "-i", str(path), "-f", "null", "-"],
+                       timeout=7200, check=False)
+        return res.stderr.strip() or (f"ffmpeg exited with {res.returncode}" if res.returncode else "")
+    duration = _media_duration(path) or 0.0
+    spans = [0.0]
+    if duration > 10.0:
+        spans.append(max(0.0, duration - 10.0))
+    for frac in (0.25, 0.5, 0.75):
+        t = duration * frac
+        if all(abs(t - s) > 10.0 for s in spans):
+            spans.append(t)
+    errors = []
+    for t in spans:
+        res = proc_run(["ffmpeg", "-hide_banner", "-v", "error", "-ss", f"{t:.3f}", "-i", str(path),
+                        "-t", "10", "-f", "null", "-"], timeout=600, check=False)
+        err = res.stderr.strip() or (f"ffmpeg exited with {res.returncode}" if res.returncode else "")
+        if err:
+            errors.append(err)
+    return "; ".join(errors)
 
 
 def _ran_out(session: MulticamSession, cam: Source, piece: "Piece", fps: float, ends: dict[str, float]) -> list[str]:
@@ -2430,14 +2457,19 @@ def render_session(
     session: MulticamSession,
     *,
     stems: bool = True,
+    validate: str = "sample",
     progress_callback: ProgressCallback = None,
 ) -> dict:
+    if validate not in ("sample", "full"):
+        raise ValueError("validate must be 'sample' or 'full'")
     if not session.cuts:
         raise ValueError("Plan the cuts before rendering")
     _check_luts_exist(session)
     key = _render_key(session, stems)
     video = session.outputs.get("video")
-    if session.outputs.get("render_key") == key and video and os.path.exists(video):
+    # A validate="full" request is for checking an existing render, not for
+    # getting a cached answer back unexamined, so it always re-earns its check.
+    if validate != "full" and session.outputs.get("render_key") == key and video and os.path.exists(video):
         _emit(progress_callback, 100, "Already rendered with these settings")
         return session.outputs
     width, height, fps = _output_format(session)
@@ -2506,7 +2538,7 @@ def render_session(
         ], timeout=3600, check=True)
 
         _emit(progress_callback, 91, "Checking the episode")
-        validation = _validate(partial, total_frames, fps, warnings)
+        validation = _validate(partial, total_frames, fps, warnings, full=validate == "full")
 
         stem_paths = []
         if stems:
@@ -2568,14 +2600,14 @@ def render_session(
         shutil.rmtree(work, ignore_errors=True)
 
 
-def _validate(video: Path, frames_expected: int, fps: float, warnings: list[str]) -> dict:
+def _validate(video: Path, frames_expected: int, fps: float, warnings: list[str], *, full: bool = False) -> dict:
     """Check the muxed episode against its plan; raises on a broken file, warns on everything else.
 
     A decode error or a picture more than a frame off the plan means the file
     can't be trusted at all. Loudness off target or a held frame still makes
     a usable episode, so those are reported, not fatal.
     """
-    errors = _decode_errors(video)
+    errors = _decode_errors(video, full=full)
     if errors:
         raise RuntimeError(f"The rendered episode doesn't decode cleanly: {errors[:400]}")
     frames_actual = _frame_count(video)
