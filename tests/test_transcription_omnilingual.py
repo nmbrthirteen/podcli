@@ -180,7 +180,7 @@ class TranscribeFileWindowingTests(unittest.TestCase):
     def test_shifted_timestamps_for_the_same_word_at_a_seam_are_deduped(self):
         # Same scenario as the exact-timestamp case above, but the two
         # neighboring windows' own (overlapping) decodes timestamp the same
-        # word a little differently, as a real acoustic model can — each
+        # word a little differently, as a real acoustic model can. Each
         # window's own midpoint test alone would let both keep it.
         media = self._touch(".mp4")
         model = self._touch(".onnx")
@@ -196,8 +196,8 @@ class TranscribeFileWindowingTests(unittest.TestCase):
         # Window 0 decodes [0, 21): "ab" lands at absolute 19.6-19.9,
         # inside its own core [0, 20).
         # Window 1 decodes [19, 25): the same "ab" lands at absolute
-        # 20.05-20.3 instead — shifted ~0.4s by the different decode
-        # context — inside its own core [20, 25).
+        # 20.05-20.3 instead, shifted ~0.4s by the different decode
+        # context, inside its own core [20, 25).
         fake = FakeRecognizer([
             (["a", "b"], [19.6, 19.9]),           # decode_start=0 -> absolute 19.6, 19.9
             (["a", "b"], [1.05, 1.3]),            # decode_start=19 -> absolute 20.05, 20.3
@@ -207,7 +207,7 @@ class TranscribeFileWindowingTests(unittest.TestCase):
         result = omni.transcribe_file(media, model, tokens_file, wav_path=wav)
         matching = [w for w in result["words"] if w["word"] == "ab"]
         self.assertEqual(len(matching), 1)
-        # The surviving copy is window 0's — the earlier window wins ties,
+        # The surviving copy is window 0's: the earlier window wins ties,
         # since it's the one whose receipt (if any) was already written.
         self.assertAlmostEqual(matching[0]["start"], 19.6, places=3)
 
@@ -224,7 +224,7 @@ class TranscribeFileWindowingTests(unittest.TestCase):
             np.zeros(int(16000 * duration), dtype=np.float32), 16000, duration,
         )
         # Both repeats of "no" sit well inside window 0's core, nowhere
-        # near the 20s boundary — a real stutter/repeat, not a seam echo.
+        # near the 20s boundary, a real stutter/repeat, not a seam echo.
         fake = FakeRecognizer([
             (["n", "o", " ", "n", "o"], [2.0, 2.1, 2.2, 2.3, 2.4]),
             ([], []),

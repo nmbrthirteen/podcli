@@ -13,7 +13,7 @@ import { PythonExecutor } from "./python-executor.js";
 /**
  * Whether the resolved engine can ever produce speaker labels. whisper.cpp
  * and omnilingual skip diarization unconditionally (see
- * backend/services/transcription.py's whispercpp/omnilingual branches) — a
+ * backend/services/transcription.py's whispercpp/omnilingual branches). A
  * cache entry from either engine will never gain speaker labels no matter
  * how many times it's re-transcribed, so treating a missing-labels cache as
  * a retriable miss for them would re-transcribe on every single call.

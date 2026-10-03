@@ -45,7 +45,7 @@ export function hasSpeakerLabels(transcript: unknown): boolean {
  * request: enable_diarization is true, the resolved engine can diarize at
  * all (see engineCanDiarize), and this cache entry never actually attempted
  * it. Re-transcribing a whisper.cpp/omnilingual cache for missing labels
- * would never succeed — they never diarize — so gate on diarization_attempted
+ * would never succeed, they never diarize, so gate on diarization_attempted
  * (backend/services/transcription.py sets it on every branch) rather than
  * hasSpeakerLabels alone, which can't tell "never tried" from "tried and
  * genuinely found one speaker".
@@ -116,8 +116,8 @@ export class TranscriptCache {
   }
 
   /**
-   * File hash plus the full {engine, model, language} cache key suffix —
-   * the packed markdown view is now keyed the same way the raw JSON cache
+   * File hash plus the full {engine, model, language} cache key suffix.
+   * The packed markdown view is now keyed the same way the raw JSON cache
    * is (see keySuffix), so a caller that knows the exact combo it wants
    * reads the same filename this class' own set()/write_packed wrote it
    * under.
@@ -206,14 +206,14 @@ export class TranscriptCache {
     try {
       const parts = typeof key === "string" ? { engine: key } : key ?? {};
       if (parts.model !== undefined || parts.language !== undefined) {
-        // The caller knows exactly which combo it wants — read that key
+        // The caller knows exactly which combo it wants: read that key
         // only, never silently substitute a different model/language's view.
         const hash = await this.getFileHashForEngine(filePath, parts);
         return await this.readPackedByHash(hash);
       }
       // The caller only knows the engine (e.g. get_ui_state, which has a
       // cached transcript object but not the model/language that produced
-      // it) — fall back to the same deterministic scan the Python side uses
+      // it), fall back to the same deterministic scan the Python side uses
       // in find_cached_transcript_path.
       const hash = await this.getFileHash(filePath);
       const found = await this.findPackedPath(hash, parts.engine);

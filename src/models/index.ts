@@ -78,7 +78,7 @@ export interface TranscriptResult {
   // Whether diarization was actually tried for this result (set by every
   // branch of backend/services/transcription.py). False for engines that
   // never diarize (whispercpp, omnilingual) regardless of what was
-  // requested — see needsDiarizationRetry in services/transcript-cache.ts.
+  // requested, see needsDiarizationRetry in services/transcript-cache.ts.
   diarization_attempted?: boolean;
 }
 

@@ -194,7 +194,7 @@ def _assemblyai_base_url() -> str:
 
 class AssemblyAIHTTPError(RuntimeError):
     """Carries the HTTP status so callers can tell a bad/expired resource
-    (4xx — e.g. the transcript a resumed receipt points at no longer exists)
+    (4xx, e.g. the transcript a resumed receipt points at no longer exists)
     from a transient server error, without re-parsing the message string."""
 
     def __init__(self, message: str, status: int):
@@ -402,7 +402,7 @@ def _transcribe_with_assemblyai(file_path, language, enable_diarization, num_spe
     # a second AssemblyAI job. The receipt is keyed by exactly what affects
     # the AssemblyAI request (language, diarization, speaker count, region,
     # which account) so a different request for the same file never adopts
-    # someone else's job — a region or key mismatch would otherwise poll a
+    # someone else's job: a region or key mismatch would otherwise poll a
     # transcript ID that belongs to a different account/API surface.
     directory = transcribe_runs.run_dir(
         paths["cache"], file_path, "assemblyai",
@@ -412,7 +412,7 @@ def _transcribe_with_assemblyai(file_path, language, enable_diarization, num_spe
 
     # A resumed transcript_id that 4xxs on the resume GET (e.g. AssemblyAI
     # deleted it after its retention window, or it belonged to a key that's
-    # since been rotated) is permanently bad — retrying it forever would
+    # since been rotated) is permanently bad: retrying it forever would
     # never succeed. Clear the receipt and fall through to a fresh upload,
     # once.
     for resume_attempt in (True, False):
@@ -482,7 +482,7 @@ def _transcribe_with_assemblyai(file_path, language, enable_diarization, num_spe
                     )
                 continue
             raise
-    raise RuntimeError("AssemblyAI resume retry exhausted")  # unreachable — loop always returns or raises
+    raise RuntimeError("AssemblyAI resume retry exhausted")  # unreachable: loop always returns or raises
 
 
 def _attach_speakers_and_faces(
@@ -606,11 +606,11 @@ def _attach_speakers_and_faces(
 def _whisper_py_available() -> bool:
     """Cheap availability check for the openai-whisper package.
 
-    `import whisper` doesn't just find the module — it executes it, which
+    `import whisper` doesn't just find the module, it executes it, which
     transitively imports torch and costs hundreds of ms to seconds.
     resolve_engine_info runs this on every single transcribe request (it's
     a cache-key prediction, not an actual transcription), so it uses
-    find_spec — which only locates the module, never runs its code — and
+    find_spec, which only locates the module and never runs its code, and
     memoizes the result, since whether the package is installed can't
     change within a process's lifetime.
     """
@@ -619,7 +619,7 @@ def _whisper_py_available() -> bool:
     except (ImportError, ValueError):
         # find_spec itself can raise if "whisper" is already in sys.modules
         # under a module object missing __spec__ (a malformed stand-in, not
-        # a real install state) — fall back to treating that as available
+        # a real install state). Fall back to treating that as available
         # rather than crashing a cache-key prediction over it.
         return True
 
@@ -630,9 +630,9 @@ def _resolve_whisper_py_fallback(requested: Optional[str], model_size: str, prob
     transcribe_file both have to make the same way, or a cache key built
     from one's answer misses the transcript the other actually wrote.
 
-    probe_model=False (resolve_engine_info — a cache-key prediction made on
+    probe_model=False (resolve_engine_info, a cache-key prediction made on
     every request, so it can't afford to load model weights, or even
-    import whisper for real — see _whisper_py_available) only checks
+    import whisper for real, see _whisper_py_available) only checks
     whether the package is installed. probe_model=True (transcribe_file,
     about to actually transcribe) does the real import and loads the
     model, catching the one case the cheap check can't: the package is
@@ -783,7 +783,7 @@ def _transcribe_file_inner(
             file_path, language, enable_diarization, num_speakers, progress_callback
         )
         # AssemblyAI does its own diarization (speaker_labels in the request),
-        # not the pyannote path _attach_speakers_and_faces runs below — record
+        # not the pyannote path _attach_speakers_and_faces runs below. Record
         # against the flag that actually drove that request, not the False
         # passed to attach (which only controls the pyannote attempt here).
         base["diarization_attempted"] = bool(enable_diarization)
@@ -794,7 +794,7 @@ def _transcribe_file_inner(
         base["engine"] = "omnilingual"
         # Same no-torch constraint as whisper.cpp: skip diarization, keep face analysis.
         # Diarization is never possible on this engine, so it's never
-        # "attempted" regardless of what the caller asked for — a cache
+        # "attempted" regardless of what the caller asked for: a cache
         # entry from this engine must never look like a retriable miss.
         base["diarization_attempted"] = False
         return _attach_speakers_and_faces(
@@ -823,7 +823,7 @@ def _transcribe_file_inner(
         base["engine"] = "whispercpp"
         # whisper.cpp is the no-torch path: importing torch for diarization can
         # hard-crash native runtimes. Skip diarization, keep face analysis (OpenCV).
-        # Never possible on this engine — see the omnilingual branch above.
+        # Never possible on this engine, see the omnilingual branch above.
         base["diarization_attempted"] = False
         return _attach_speakers_and_faces(
             file_path, base, False, num_speakers, progress_callback

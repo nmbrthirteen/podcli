@@ -56,8 +56,8 @@ class CacheKeySuffixTests(unittest.TestCase):
 
 
 class FindCachedTranscriptPathTests(unittest.TestCase):
-    """The scanning fallback for a reader that only has a video path — no
-    model/language — e.g. manage_reel or _cached_face_map."""
+    """The scanning fallback for a reader that only has a video path, not
+    model/language, e.g. manage_reel or _cached_face_map."""
 
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
@@ -120,7 +120,7 @@ class LoadSaveCachedTranscriptModelLanguageTests(unittest.TestCase):
 
     def test_a_non_base_model_write_is_invisible_to_a_bare_read(self):
         # Before this fix, Python's engine-only key meant a whisper-py
-        # "small" model write landed under the same bare filename as "base" —
+        # "small" model write landed under the same bare filename as "base",
         # colliding instead of getting its own key.
         tp.save_cached_transcript_for_video(
             self._video.name, {"words": ["small"]}, engine="whisper-py", model="small"

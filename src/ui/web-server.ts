@@ -1093,7 +1093,7 @@ app.post("/api/transcribe", async (req, res) => {
     res.status(400).json({ error: "File not found" });
     return;
   }
-  // A sample is a positive window, not merely a present key — matches
+  // A sample is a positive window, not merely a present key, matching
   // transcribe.handler.ts and backend/services/transcription.py exactly.
   const isSample = (duration_seconds ?? 0) > 0 || (start_seconds ?? 0) > 0;
 

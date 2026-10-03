@@ -87,7 +87,7 @@ def _tokens_to_words(tokens: list[dict]) -> list[dict]:
 
 
 def _frame_rms(samples, hop: int, frame: int, nf: int):
-    """Per-frame RMS via a running sum of squares — O(n) instead of the
+    """Per-frame RMS via a running sum of squares, O(n) instead of the
     O(nf * frame) index-matrix this replaces (see _voiced_intervals).
 
     The cumulative sum has to be float64. float32 has ~7 decimal digits of
@@ -95,7 +95,7 @@ def _frame_rms(samples, hop: int, frame: int, nf: int):
     range, where a single float32 ULP is already bigger than a whole
     frame's sum of squares, so window_sums (a difference of two large
     nearly-equal floats) comes out wrong for frames late in the file. A
-    short test clip never sums high enough to show this — the regression
+    short test clip never sums high enough to show this: the regression
     only appears on real multi-hour episodes.
     """
     import numpy as np

@@ -1344,10 +1344,10 @@ def cmd_process(args):
             else:
                 print("         No cached face map, crop falls back to per-clip face tracking")
     elif not skip_transcript:
-        # Check cache first — same (engine, model, language) the transcribe
-        # call below would run with, so a hit here is guaranteed to be the
-        # combo this invocation actually asked for, not a different one
-        # that happens to share the file.
+        # Check cache first, with the same (engine, model, language) the
+        # transcribe call below would run with, so a hit here is guaranteed
+        # to be the combo this invocation actually asked for, not a
+        # different one that happens to share the file.
         cached = load_cached_transcript_for_video(
             video_path,
             engine=os.environ.get("PODCLI_ENGINE"),
@@ -1414,7 +1414,7 @@ def cmd_process(args):
             print(f"         Done: {len(segments)} segments, {len(words)} words")
 
             # Save to cache for next run, under the same key the read above
-            # checked — result["engine"] is what actually ran, which can
+            # checked. result["engine"] is what actually ran, which can
             # differ from the env var on a fallback (see transcribe_file).
             save_cached_transcript_for_video(
                 video_path,

@@ -176,7 +176,7 @@ class VoicedIntervalsMatchesOldImplementationTests(unittest.TestCase):
 
 class FrameRmsLongFilePrecisionTests(unittest.TestCase):
     """On a multi-hour file the running sum of squares climbs into the range
-    where float32 can no longer resolve one frame's contribution — a late
+    where float32 can no longer resolve one frame's contribution. A late
     frame's RMS comes out wrong, and can cross the voiced/silent threshold
     the wrong way. float64 has to hold exactly through the same file length."""
 
@@ -193,8 +193,8 @@ class FrameRmsLongFilePrecisionTests(unittest.TestCase):
 
         rms = _frame_rms(samples, hop, frame, nf)
 
-        # A constant-amplitude signal has an exact, trivial per-frame RMS —
-        # amplitude itself, independent of position — so this is a direct
+        # A constant-amplitude signal has an exact, trivial per-frame RMS:
+        # amplitude itself, independent of position. So this is a direct
         # computation, not another running sum that could share the bug.
         late_frame = nf - 1
         self.assertAlmostEqual(float(rms[late_frame]), amplitude, delta=1e-6)

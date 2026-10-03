@@ -113,8 +113,8 @@ describe("TranscriptCache", () => {
       language: "ka",
     });
     writeFileSync(join(tmp, "packed", `${second}.md`), "# second");
-    // Caller only knows the engine, not which model/language actually ran —
-    // deterministic rule: most recently written entry for this hash+engine.
+    // Caller only knows the engine, not which model/language actually ran.
+    // Deterministic rule: most recently written entry for this hash+engine.
     expect(await cache.getPackedMarkdown(file, { engine: "whispercpp" })).toBe("# second");
   });
 
@@ -163,7 +163,7 @@ describe("TranscriptCache", () => {
     await cache.set(file, { ...fakeTranscript, transcript: "danger" }, {
       language: "../../etc",
     });
-    // The sanitized form keys the lookup — "../../etc" strips to "etc".
+    // The sanitized form keys the lookup: "../../etc" strips to "etc".
     expect(
       (await cache.get(file, { language: "etc" }))?.transcript,
     ).toBe("danger");
@@ -230,7 +230,7 @@ describe("needsDiarizationRetry", () => {
   });
 
   it("is false when the resolved engine can never diarize, no matter the flag", () => {
-    // whisper.cpp/omnilingual will never gain labels — retrying forever
+    // whisper.cpp/omnilingual will never gain labels, so retrying forever
     // would be the bug this flag exists to prevent.
     expect(needsDiarizationRetry(unlabelled, true, false)).toBe(false);
   });

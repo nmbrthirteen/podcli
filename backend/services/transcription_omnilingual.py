@@ -113,7 +113,7 @@ def _drop_seam_duplicates(prev_words: list[dict], candidates: list[dict], bounda
     their shared boundary. Each window owns a disjoint [core_start,
     core_end) by its own midpoint estimate (see transcribe_file), but the
     1s of context padding on each side means the same audio gets decoded
-    twice, by two separate recognizer calls — the acoustic model can give
+    twice, by two separate recognizer calls, and the acoustic model can give
     the same word a slightly different timestamp each time, so it can pass
     both windows' own membership test and get counted twice. Only words
     near the boundary are ever compared, so a legitimate stutter/repeat

@@ -97,7 +97,7 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const numSpeakers = input.num_speakers;
   const startSeconds = input.start_seconds;
   const durationSeconds = input.duration_seconds;
-  // A sample is a positive window, not merely a present key — an explicit
+  // A sample is a positive window, not merely a present key. An explicit
   // null or a duration_seconds: 0 both mean "no sample", matching
   // backend/services/transcription.py and backend/main.py's handle_transcribe.
   const isSample = (durationSeconds ?? 0) > 0 || (startSeconds ?? 0) > 0;
@@ -116,7 +116,7 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
     ? null
     : cachedRaw;
   if (cached) {
-    // Same combo cache.get(filePath, cacheKey) just matched — the packed
+    // Same combo cache.get(filePath, cacheKey) just matched: the packed
     // view has to be keyed identically, or a backfill here would write it
     // under a key the next read for this same request won't find.
     const packedKey = { engine: cached.engine ?? resolvedEngine, model: modelSize, language };

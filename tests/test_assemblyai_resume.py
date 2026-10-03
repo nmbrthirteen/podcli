@@ -146,7 +146,7 @@ class AssemblyAIResumeTests(unittest.TestCase):
                 num_speakers=None, progress_callback=None,
             )
         # The stale receipt's GET fails once, then a fresh upload + create +
-        # poll succeeds — never retrying the dead transcript_id forever.
+        # poll succeeds, never retrying the dead transcript_id forever.
         upload.assert_called_once()
         self.assertEqual(result["transcript"], "hello world")
         self.assertEqual(req.call_args_list[0][0][0], "GET")
@@ -177,7 +177,7 @@ class AssemblyAIResumeTests(unittest.TestCase):
 
     def test_region_and_key_are_part_of_the_receipt_key(self):
         # Two different API keys for the same file must never share a run
-        # directory — resuming the wrong account's transcript_id would poll
+        # directory: resuming the wrong account's transcript_id would poll
         # (or worse, successfully return) someone else's job.
         dir_a = transcribe_runs.run_dir(
             "unused", self._tmp_file.name, "assemblyai",

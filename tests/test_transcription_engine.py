@@ -102,7 +102,7 @@ class TranscriptionEngineTests(unittest.TestCase):
             tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=False)
 
     def test_whispercpp_never_marks_diarization_attempted(self):
-        # whisper.cpp can never diarize — a cache entry from this engine must
+        # whisper.cpp can never diarize. A cache entry from this engine must
         # say so explicitly, or a reader asking for speaker labels would
         # re-transcribe it forever (every run looks like a retriable miss).
         os.environ["PODCLI_ENGINE"] = "whispercpp"
@@ -233,7 +233,7 @@ class ResolveEngineInfoTests(unittest.TestCase):
         self._orig_ready = tr._whispercpp_ready
         self._saved_engine = os.environ.pop("PODCLI_ENGINE", None)
         # _whisper_py_available is memoized for the process lifetime (the
-        # package's installed-ness can't change mid-run) — but that means
+        # package's installed-ness can't change mid-run), but that means
         # a value cached by one test would leak into the next, which
         # sabotages sys.modules["whisper"] to simulate availability.
         tr._whisper_py_available.cache_clear()
@@ -322,7 +322,7 @@ class OmnilingualReceiptKeyTests(unittest.TestCase):
         tr._transcribe_with_omnilingual(self._media.name, progress_callback=None)
         first = self.captured[0]
 
-        # Swap in a "different" model — same path, new content/mtime.
+        # Swap in a "different" model: same path, new content/mtime.
         import time as _time
         _time.sleep(0.01)
         with open(self._model.name, "wb") as f:
@@ -357,11 +357,11 @@ class WhisperPyFallbackSharedPathTests(unittest.TestCase):
         self._tmp.close()
 
         # Simulate "import whisper" succeeding but whisper.load_model()
-        # failing — the one gap resolve_engine_info's cheap check can't see.
+        # failing: the one gap resolve_engine_info's cheap check can't see.
         import importlib.machinery
 
         class _BrokenWhisperModule:
-            # find_spec requires a real module to carry __spec__ — a bare
+            # find_spec requires a real module to carry __spec__. A bare
             # object stand-in raises ValueError instead of just finding it.
             __spec__ = importlib.machinery.ModuleSpec("whisper", loader=None)
 
@@ -394,13 +394,13 @@ class WhisperPyFallbackSharedPathTests(unittest.TestCase):
     def test_resolve_engine_info_cannot_see_this_failure_by_design(self):
         # Documents the known, acceptable gap: resolve_engine_info only
         # checks the import, so it still predicts whisper-py here even
-        # though transcribe_file will fall back — a one-time cache miss,
+        # though transcribe_file will fall back, a one-time cache miss,
         # not a wrong cache write (that's keyed by what actually ran).
         self.assertEqual(tr.resolve_engine_info(None, "base")["engine"], "whisper-py")
 
 
 class WhisperPyAvailableMemoizationTests(unittest.TestCase):
-    """resolve_engine_info runs on every transcribe request — the
+    """resolve_engine_info runs on every transcribe request. The
     availability check behind it has to find_spec (not import, which would
     pull in torch) and compute that only once per process."""
 

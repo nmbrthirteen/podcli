@@ -69,7 +69,7 @@ def legacy_md5_cache_path(video_path: str) -> str:
 
 
 def _effective_engine(engine: str | None) -> str | None:
-    """None means "not told" — fall back to the process-wide engine (the
+    """None means "not told": fall back to the process-wide engine (the
     same default every pre-existing caller relied on), not to whisper-py,
     so an unset PODCLI_ENGINE=whispercpp request still lands in its own
     namespace."""
@@ -126,17 +126,17 @@ def transcript_json_path(
 
 
 # A suffix can only continue with "-m<model>" and/or "-l<language>" (see
-# cache_key_suffix) — no other engine's suffix starts with "m" or "l", so
+# cache_key_suffix). No other engine's suffix starts with "m" or "l", so
 # anchoring on this is enough to never cross into a different engine's files.
 _CACHE_SUFFIX_TAIL_RE = r"(?:-m[a-z0-9]+)?(?:-l[a-z0-9-]+)?\.json$"
 
 
 def find_cached_transcript_path(cache_hash: str, engine: str | None = None) -> str | None:
     """Locate a cached transcript for this file hash when the caller does not
-    know which model/language produced it — e.g. a reel or face-map lookup
+    know which model/language produced it, e.g. a reel or face-map lookup
     that only has a video path, not the transcribe request that created the
     cache. Deterministic rule: prefer the engine-only key (base model, auto
-    language — what every pre-model/language cache, and most base-model
+    language, what every pre-model/language cache, and most base-model
     runs, write); otherwise the most recently modified matching file for
     this hash+engine, i.e. the transcript this file most recently produced.
     """
@@ -164,7 +164,7 @@ def load_cached_transcript_for_video(
 ) -> dict[str, Any] | None:
     cache_hash = compute_cache_hash(video_path)
     if model is not None or language is not None:
-        # The caller knows exactly what it's asking for — read that key only,
+        # The caller knows exactly what it's asking for: read that key only,
         # never silently substitute a different model/language's transcript.
         canonical = transcript_json_path(cache_hash, engine=engine, model=model, language=language)
         if os.path.exists(canonical):
