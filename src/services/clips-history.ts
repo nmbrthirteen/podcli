@@ -280,6 +280,19 @@ export class ClipsHistory {
     );
   }
 
+  // mine_channel's yt-dlp download writes "<title> [<video_id>].<ext>" (see
+  // ytdlp-args.ts's output template), so the id survives in source_video even
+  // though nothing else in the schema tracks where a video came from.
+  async minedYouTubeVideoIds(): Promise<Set<string>> {
+    const entries = await this.load();
+    const ids = new Set<string>();
+    for (const e of entries) {
+      const m = basename(e.source_video || "").match(/\[([A-Za-z0-9_-]{6,})\]\.[^.]+$/);
+      if (m) ids.add(m[1]);
+    }
+    return ids;
+  }
+
   async list(limit = 50): Promise<ClipHistoryEntry[]> {
     const entries = await this.load();
     return entries.slice(-limit).reverse();

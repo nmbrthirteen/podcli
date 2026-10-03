@@ -75,6 +75,44 @@ export function buildYtDlpArgs(opts: YtDlpOptions): string[] {
   return args;
 }
 
+export interface YtDlpListOptions {
+  channelUrl: string;
+  limit?: number;
+  cookiesFromBrowser?: string;
+}
+
+// One JSON object per line, tab would collide with titles that contain one.
+// --flat-playlist skips resolving each video's own page, so listing a
+// channel's uploads never pulls anything beyond the playlist metadata —
+// nowhere close to a full-video download.
+export function buildChannelListArgs(opts: YtDlpListOptions): string[] {
+  const args = ["-m", "yt_dlp"];
+  args.push("--ignore-config", "--no-config-locations", "--no-plugin-dirs");
+  args.push("--flat-playlist", "--no-warnings");
+  if (opts.limit) args.push("--playlist-end", String(opts.limit));
+  if (opts.cookiesFromBrowser) args.push("--cookies-from-browser", opts.cookiesFromBrowser);
+  args.push("--print", "%(.{id,title,duration,upload_date,url})j");
+  args.push(opts.channelUrl);
+  return args;
+}
+
+export interface YtDlpVideoInfoOptions {
+  videoUrl: string;
+  cookiesFromBrowser?: string;
+}
+
+// Dumps one video's full metadata (including subtitle/automatic_captions
+// track URLs) as JSON, with --skip-download so this never fetches the
+// video itself — only the page and timed-text track list.
+export function buildVideoInfoArgs(opts: YtDlpVideoInfoOptions): string[] {
+  const args = ["-m", "yt_dlp"];
+  args.push("--ignore-config", "--no-config-locations", "--no-plugin-dirs");
+  args.push("--skip-download", "--no-warnings");
+  if (opts.cookiesFromBrowser) args.push("--cookies-from-browser", opts.cookiesFromBrowser);
+  args.push("--dump-json", opts.videoUrl);
+  return args;
+}
+
 /** Turns a yt-dlp failure into one line naming what to do about it. */
 export function ytDlpHint(stderr: string): string | null {
   const s = stderr.toLowerCase();

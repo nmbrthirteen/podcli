@@ -79,6 +79,36 @@ describe("ClipsHistory", () => {
     expect(dup).toBeNull();
   });
 
+  it("minedYouTubeVideoIds reads the id out of the yt-dlp output template", async () => {
+    await history.record({
+      source_video: "/videos/Some Episode Title [aBc123_XYZ].mp4",
+      output_path: makeFakeOutput("d.mp4"),
+      start_second: 0,
+      end_second: 10,
+      caption_style: "karaoke",
+      crop_strategy: "smart",
+      title: "clip",
+    } as any);
+
+    const ids = await history.minedYouTubeVideoIds();
+    expect(ids.has("aBc123_XYZ")).toBe(true);
+  });
+
+  it("minedYouTubeVideoIds is empty when no source_video carries a bracketed id", async () => {
+    await history.record({
+      source_video: "/videos/local-recording.mp4",
+      output_path: makeFakeOutput("e.mp4"),
+      start_second: 0,
+      end_second: 10,
+      caption_style: "karaoke",
+      crop_strategy: "smart",
+      title: "clip",
+    } as any);
+
+    const ids = await history.minedYouTubeVideoIds();
+    expect(ids.size).toBe(0);
+  });
+
   it("recordBatchResults skips failed/output-less rows and applies defaults", async () => {
     const ok = makeFakeOutput("batch-ok.mp4");
     const recorded = await history.recordBatchResults(

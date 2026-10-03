@@ -31,7 +31,7 @@ Both share the same knowledge base at `.podcli/knowledge/`.
 
 ## MCP tools (podcli engine)
 
-All 28 tools registered by the MCP server.
+All 29 tools registered by the MCP server.
 
 **Transcription and input**
 
@@ -43,6 +43,7 @@ All 28 tools registered by the MCP server.
 | `set_video` | Set the working video without transcribing |
 | `import_transcript` | Import an external transcript with word-level timestamps, skips Whisper |
 | `parse_transcript` | Parse a speaker-labeled plain text transcript into word-level timestamps |
+| `mine_channel` | List a YouTube channel's uploads or mine one video's existing captions, without downloading the video |
 
 **Clip workflow**
 

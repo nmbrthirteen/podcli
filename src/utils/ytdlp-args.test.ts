@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildYtDlpArgs, isCookieBrowser, ytDlpHint } from "./ytdlp-args.js";
+import { buildYtDlpArgs, buildChannelListArgs, buildVideoInfoArgs, isCookieBrowser, ytDlpHint } from "./ytdlp-args.js";
 
 const base = {
   url: "https://example.com/watch?v=abc",
@@ -61,6 +61,43 @@ describe("isCookieBrowser", () => {
     expect(isCookieBrowser("chrome; rm -rf /")).toBe(false);
     expect(isCookieBrowser(undefined)).toBe(false);
     expect(isCookieBrowser(7)).toBe(false);
+  });
+});
+
+describe("buildChannelListArgs", () => {
+  const channelUrl = "https://www.youtube.com/@example/videos";
+
+  it("never resolves each video's own page — flat-playlist only", () => {
+    const args = buildChannelListArgs({ channelUrl });
+    expect(args).toContain("--flat-playlist");
+    expect(args).not.toContain("--format");
+  });
+
+  it("caps the listing with --playlist-end when a limit is given", () => {
+    const args = buildChannelListArgs({ channelUrl, limit: 25 });
+    const i = args.indexOf("--playlist-end");
+    expect(args[i + 1]).toBe("25");
+  });
+
+  it("omits the limit flag entirely when none is given", () => {
+    expect(buildChannelListArgs({ channelUrl })).not.toContain("--playlist-end");
+  });
+
+  it("puts the channel url last", () => {
+    expect(buildChannelListArgs({ channelUrl }).at(-1)).toBe(channelUrl);
+  });
+});
+
+describe("buildVideoInfoArgs", () => {
+  const videoUrl = "https://www.youtube.com/watch?v=abc123";
+
+  it("skips downloading the video itself", () => {
+    expect(buildVideoInfoArgs({ videoUrl })).toContain("--skip-download");
+  });
+
+  it("dumps JSON rather than a human-readable report", () => {
+    const args = buildVideoInfoArgs({ videoUrl });
+    expect(args).toContain("--dump-json");
   });
 });
 
