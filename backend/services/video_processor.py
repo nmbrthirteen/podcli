@@ -3260,7 +3260,7 @@ def concat_outro(
         audio_fade_start = max(0.0, main_duration - audio_fade)
         AFMT = "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo"
         try:
-            return _run_ffmpeg_with_fallback(
+            joined = _run_ffmpeg_with_fallback(
                 cmd_parts_before_enc=[
                     "ffmpeg", "-y",
                     "-i", input_path,
@@ -3282,6 +3282,11 @@ def concat_outro(
                 output_path=output_path,
                 label="outro_hardcut_soft_audio",
             )
+            # The scaled outro sits in the user's output folder; this path
+            # used to return before removing it.
+            if os.path.exists(outro_scaled):
+                os.remove(outro_scaled)
+            return joined
         except Exception:
             pass
 
