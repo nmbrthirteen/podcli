@@ -1848,6 +1848,24 @@ def test_input_lut_colors_renders_stills_and_looks_and_exports_hand_it_off(episo
     assert all(v is None for k, v in luts.items() if k != red.id)
 
 
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_previews_only_renders_looks_for_cameras_actually_used_in_the_cut(episode):
+    """Four look stills per camera is wasted work for a camera that's mapped
+
+    but never actually appears in the cut (an alternate angle left in,
+    say). Once a cut exists, only cameras it actually uses should get them.
+    """
+    session = _planned(episode)
+    cam_one = next(s for s in session.sources if s.path.endswith("cam_one.mp4"))
+    cam_two = next(s for s in session.sources if s.path.endswith("cam_two.mp4"))
+    mc.set_cuts(session, [{"start": session.cuts[0]["start"], "end": session.cuts[-1]["end"],
+                           "source_id": cam_one.id}])
+
+    stills = mc.previews(session, looks=True)
+    assert cam_one.id in stills["looks"]
+    assert cam_two.id not in stills["looks"]
+
+
 def test_a_lut_deleted_after_mapping_fails_fast_and_names_the_camera(episode):
     """A LUT picked at map time can later be moved or deleted on disk.
 

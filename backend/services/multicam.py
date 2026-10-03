@@ -1766,7 +1766,12 @@ def previews(session: MulticamSession, *, looks: bool = False, at: Optional[floa
         frames["cameras"][s.id] = str(out)
     if looks:
         # Cameras rarely match out of the box, so each one shows every look on its own picture.
-        for cam in session.cameras() or [s for s in session.sources if s.kind == "video"]:
+        candidates = session.cameras() or [s for s in session.sources if s.kind == "video"]
+        # Once a cut exists, a camera that never actually appears in it (an
+        # alternate angle left mapped but unused) doesn't need four look
+        # renders; before any cut exists there's nothing to filter by yet.
+        used = {c["source_id"] for c in session.cuts}
+        for cam in [c for c in candidates if not used or c.id in used]:
             t = moment(cam)
             frames["looks"][cam.id] = {}
             for name in LOOKS:
