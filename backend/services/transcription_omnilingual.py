@@ -108,6 +108,30 @@ def _tokens_to_words(tokens: list[str], timestamps: list[float], decode_end: flo
     return words
 
 
+def _drop_seam_duplicates(prev_words: list[dict], candidates: list[dict], boundary: float) -> list[dict]:
+    """Drop a candidate word that the previous window already claimed near
+    their shared boundary. Each window owns a disjoint [core_start,
+    core_end) by its own midpoint estimate (see transcribe_file), but the
+    1s of context padding on each side means the same audio gets decoded
+    twice, by two separate recognizer calls — the acoustic model can give
+    the same word a slightly different timestamp each time, so it can pass
+    both windows' own membership test and get counted twice. Only words
+    near the boundary are ever compared, so a legitimate stutter/repeat
+    elsewhere in the transcript is never touched.
+    """
+    kept = []
+    for w in candidates:
+        near_boundary = abs(w["start"] - boundary) <= CONTEXT_SECONDS or abs(w["end"] - boundary) <= CONTEXT_SECONDS
+        is_duplicate = near_boundary and any(
+            pw["word"] == w["word"] and abs(pw["start"] - w["start"]) <= CONTEXT_SECONDS
+            for pw in prev_words
+            if abs(pw["end"] - boundary) <= CONTEXT_SECONDS or abs(pw["start"] - boundary) <= CONTEXT_SECONDS
+        )
+        if not is_duplicate:
+            kept.append(w)
+    return kept
+
+
 def _group_into_segments(words: list[dict]) -> list[dict]:
     """Group words into segments on a pause >= SEGMENT_PAUSE_SECONDS, the
     same boundary transcript_packer uses to split phrases for the packed
@@ -207,6 +231,15 @@ def transcribe_file(
                 if core_start <= (w["start"] + w["end"]) / 2.0 < core_end
                 or (i == n_windows - 1 and (w["start"] + w["end"]) / 2.0 == core_end)
             ]
+            if i > 0:
+                # Ownership-by-midpoint alone isn't enough at a seam: the
+                # context overlap means the same word gets decoded twice,
+                # once in each neighbor's own context, and the acoustic
+                # model doesn't always timestamp it identically both times.
+                # A word whose own-window estimate lands it just past the
+                # boundary can duplicate one the previous window already
+                # claimed under its own (slightly different) estimate.
+                window_words = _drop_seam_duplicates(all_words, window_words, core_start)
             all_words.extend(window_words)
             if run_dir:
                 transcribe_runs.write_receipt(run_dir, receipt_name, {"words": window_words})
