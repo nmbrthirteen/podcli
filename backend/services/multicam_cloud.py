@@ -80,6 +80,11 @@ def push(session: mc.MulticamSession, *, model_size: str = "base", engine: Optio
     _emit(progress_callback, 35, "Making previews")
     session = mc.build_preview(session)
     activity = mc.activity(session)
+    # Freeze the basis against what's actually being sent, not whatever is on
+    # disk once uploads finish: edits keep landing while proxies encode, and
+    # the cloud editor's cuts must be checked against the placement that
+    # cuts and removals were actually made on, not a later one.
+    basis = mc.sync_basis_signature(session)
     data = mc.payload(session)
     preview = data.pop("preview", None) or {}
     for key in ("outputs", "stats"):
@@ -110,7 +115,7 @@ def push(session: mc.MulticamSession, *, model_size: str = "base", engine: Optio
 
     _request("POST", f"/v1/multicam/{opened['id']}/hybrid-complete", {"files": stored})
     latest = mc.MulticamSession.load(session.session_id)
-    latest.cloud = {"id": opened["id"], "url": editor_url(opened["id"]), "basis": mc.sync_basis_signature(latest)}
+    latest.cloud = {"id": opened["id"], "url": editor_url(opened["id"]), "basis": basis}
     latest.save()
     _emit(progress_callback, 100, "In the cloud editor")
     return latest
