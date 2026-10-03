@@ -15,9 +15,13 @@ from typing import Any, Optional
 from config.paths import paths
 from services.transcript_packer import compute_cache_hash
 
+# Bump when the energy or reaction analyzer's math changes, so old cached
+# profiles (keyed only on video content) don't get served under a new algorithm.
+SIGNAL_CACHE_VERSION = 2
+
 
 def _signals_path(video_path: str) -> str:
-    return os.path.join(paths["cache"], "signals", f"{compute_cache_hash(video_path)}.json")
+    return os.path.join(paths["cache"], "signals", f"{compute_cache_hash(video_path)}-v{SIGNAL_CACHE_VERSION}.json")
 
 
 def load_signals(video_path: str) -> dict[str, Any]:
