@@ -176,7 +176,7 @@ func installCommands(project string) (installReport, error) {
 
 		if !tracked {
 			// Predates the manifest. Only adopt it as the baseline if it's
-			// actually the stock file (hash matches what's embedded) — that's
+			// actually the stock file (hash matches what's embedded). That's
 			// the "installed before tracking existed" case. If it doesn't
 			// match, it's a user edit (or something else entirely); leave it
 			// untracked rather than recording its current hash as a baseline,

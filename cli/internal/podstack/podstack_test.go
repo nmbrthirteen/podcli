@@ -196,7 +196,7 @@ func TestInstallCommandsAdoptsPreManifestFilesWithoutOverwriting(t *testing.T) {
 	}
 
 	// The legacy content here is not the stock embedded file, so it must not
-	// be adopted as a baseline — doing so is what let the second run in
+	// be adopted as a baseline. Doing so is what let the second run in
 	// TestInstallCommandsNeverOverwritesAPreManifestUserEditOnASecondRun
 	// clobber a genuine user edit.
 	manifest := readManifest(dest)

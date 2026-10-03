@@ -27,7 +27,7 @@ export function isCookieBrowser(value: unknown): value is CookieBrowser {
 
 // A bare z.string() lets a value like "--config-locations=/tmp/evil.conf" through
 // as a channel/video url, and yt-dlp reads it as another flag rather than a
-// positional argument — one that can point at a config carrying --exec. Only
+// positional argument, one that can point at a config carrying --exec. Only
 // http(s) URLs are legitimate inputs here.
 export function isHttpUrl(value: unknown): value is string {
   if (typeof value !== "string") return false;

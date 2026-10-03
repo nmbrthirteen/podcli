@@ -111,7 +111,7 @@ export async function listChannelUploads(
     .filter(Boolean)
     .map((line) => JSON.parse(line) as { id?: string; title: string; duration?: number; upload_date?: string; url?: string })
     // A tab or sub-playlist entry (e.g. "Shorts", "Live") has no video id of
-    // its own — only real uploads do.
+    // its own: only real uploads do.
     .filter((u): u is { id: string; title: string; duration?: number; upload_date?: string; url?: string } => Boolean(u.id))
     .map((u) => ({
       video_id: u.id,
@@ -149,7 +149,7 @@ export async function mineVideoCaptions(
 
   // --no-playlist stops a playlist/mix url from resolving to its first entry,
   // but a url that already names one video (e.g. a stale redirect) can still
-  // resolve to a different id than the one asked for — catch that here rather
+  // resolve to a different id than the one asked for. Catch that here rather
   // than silently returning the wrong video's captions.
   const requestedId = extractYouTubeVideoId(input.video_url);
   if (requestedId && requestedId !== info.id) {
