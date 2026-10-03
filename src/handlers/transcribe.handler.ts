@@ -1,6 +1,7 @@
 import { basename } from "path";
 import { PythonExecutor } from "../services/python-executor.js";
 import { TranscriptCache, hasSpeakerLabels } from "../services/transcript-cache.js";
+import { resolveTranscribeEngine } from "../services/engine-resolve.js";
 import { webServerUrl } from "../config/server.js";
 import type { TranscriptResult } from "../models/index.js";
 
@@ -81,13 +82,19 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const enableDiarization = input.enable_diarization !== false;
   const numSpeakers = input.num_speakers;
 
+  // Resolve before reading the cache: an unset engine is written under
+  // whatever transcribe_file actually ran (e.g. "whispercpp" on a native
+  // install), so reading with the raw unset request always misses.
+  const resolvedEngine = await resolveTranscribeEngine(executor, engine, modelSize);
+  const cacheKey = { engine: resolvedEngine, model: modelSize, language };
+
   // Check cache first. A cached transcript without speakers cannot answer a
   // request for them, so serving it makes re-transcribing look like a no-op.
-  const cachedRaw = await cache.get(filePath, engine);
+  const cachedRaw = await cache.get(filePath, cacheKey);
   const cached =
     cachedRaw && enableDiarization && !hasSpeakerLabels(cachedRaw) ? null : cachedRaw;
   if (cached) {
-    const packedEngine = cached.engine ?? engine;
+    const packedEngine = cached.engine ?? resolvedEngine;
     // Backfill packed view if this cache predates auto-packing.
     let packed = await cache.getPackedMarkdown(filePath, packedEngine);
     if (!packed) {
@@ -121,11 +128,13 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
     throw new Error("Transcription returned no data");
   }
   const data = result.data;
-  const resolvedEngine = data.engine;
+  const actualEngine = data.engine ?? resolvedEngine;
 
-  // Cache the raw result
-  await cache.set(filePath, data, resolvedEngine);
-  const packed = await cache.getPackedMarkdown(filePath, resolvedEngine);
+  // Cache the raw result under what it actually ran with, not the prediction
+  // above — resolveTranscribeEngine can't see a model-load failure that only
+  // shows up once transcribe_file tries it for real.
+  await cache.set(filePath, data, { engine: actualEngine, model: modelSize, language });
+  const packed = await cache.getPackedMarkdown(filePath, actualEngine);
 
   return JSON.stringify({ cached: false, packed_ready: !!packed, ...formatResult(data) });
 }
@@ -140,6 +149,9 @@ function formatResult(data: TranscriptResult) {
   return {
     duration: data.duration,
     language: data.language,
+    // Exposed so callers that need to re-read the cache (e.g. the UI state
+    // push in server.ts) key it the same way this handler just wrote it.
+    engine: data.engine,
     word_count: (data.words ?? []).length,
     segment_count: (data.segments ?? []).length,
     speakers: data.speakers ?? { num_speakers: 0, speakers: {} },

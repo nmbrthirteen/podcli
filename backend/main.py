@@ -67,6 +67,18 @@ def handle_ping(task_id: str, params: dict):
     emit_result(task_id, "success", data={"message": "pong", "version": VERSION})
 
 
+def handle_resolve_transcribe_engine(task_id: str, params: dict):
+    """Predict transcribe_file's engine resolution without transcribing, so
+    callers can build the right cache key before deciding whether to run it."""
+    from services.transcription import resolve_engine_info
+
+    emit_result(
+        task_id,
+        "success",
+        data=resolve_engine_info(params.get("engine"), params.get("model_size", "base")),
+    )
+
+
 def handle_transcribe(task_id: str, params: dict):
     """Transcribe a podcast video/audio file with speaker detection."""
     from services.transcription import transcribe_file
@@ -1098,6 +1110,7 @@ def handle_run_integration_tool(task_id: str, params: dict):
 
 TASK_HANDLERS = {
     "ping": handle_ping,
+    "resolve_transcribe_engine": handle_resolve_transcribe_engine,
     "transcribe": handle_transcribe,
     "parse_transcript": handle_parse_transcript,
     "create_clip": handle_create_clip,

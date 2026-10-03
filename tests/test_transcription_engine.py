@@ -80,6 +80,54 @@ class TranscriptionEngineTests(unittest.TestCase):
             tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=False)
 
 
+class ResolveEngineInfoTests(unittest.TestCase):
+    """resolve_engine_info predicts transcribe_file's engine choice so a
+    caller can build a matching cache key before deciding to transcribe."""
+
+    def setUp(self):
+        self._had_whisper = sys.modules.get("whisper", "__absent__")
+        self._orig_ready = tr._whispercpp_ready
+        self._saved_engine = os.environ.pop("PODCLI_ENGINE", None)
+
+    def tearDown(self):
+        if self._had_whisper == "__absent__":
+            sys.modules.pop("whisper", None)
+        else:
+            sys.modules["whisper"] = self._had_whisper
+        tr._whispercpp_ready = self._orig_ready
+        if self._saved_engine is None:
+            os.environ.pop("PODCLI_ENGINE", None)
+        else:
+            os.environ["PODCLI_ENGINE"] = self._saved_engine
+
+    def test_explicit_whispercpp_resolves_as_is(self):
+        self.assertEqual(tr.resolve_engine_info("whispercpp")["engine"], "whispercpp")
+
+    def test_explicit_assemblyai_resolves_as_is(self):
+        self.assertEqual(tr.resolve_engine_info("assemblyai")["engine"], "assemblyai")
+
+    def test_unset_falls_back_to_whispercpp_on_native_install(self):
+        sys.modules["whisper"] = None  # simulate "import whisper" failing
+        tr._whispercpp_ready = lambda size: True
+        self.assertEqual(tr.resolve_engine_info(None)["engine"], "whispercpp")
+
+    def test_unset_stays_whisper_py_when_whisper_importable(self):
+        sys.modules.pop("whisper", None)
+        try:
+            import whisper  # noqa: F401
+        except Exception:
+            self.skipTest("openai-whisper not installed in this environment")
+        self.assertEqual(tr.resolve_engine_info(None)["engine"], "whisper-py")
+
+    def test_explicit_whisper_py_request_never_falls_back(self):
+        # Fallback only applies to an unset request; an explicit whisper-py
+        # ask should resolve as whisper-py even on a native install, matching
+        # transcribe_file which raises instead of silently substituting.
+        sys.modules["whisper"] = None
+        tr._whispercpp_ready = lambda size: True
+        self.assertEqual(tr.resolve_engine_info("whisper-py")["engine"], "whisper-py")
+
+
 class WhisperCppModelAliasTests(unittest.TestCase):
     """"large" alone doesn't name a real ggml file upstream (v1/v2/v3/v3-turbo
     are separate downloads); provisioning always fetches large-v3, so the

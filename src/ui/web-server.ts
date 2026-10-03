@@ -32,6 +32,7 @@ import { v4 as uuidv4 } from "uuid";
 
 import { PythonExecutor, terminateProcessTree } from "../services/python-executor.js";
 import { hasSpeakerLabels, TranscriptCache } from "../services/transcript-cache.js";
+import { resolveTranscribeEngine } from "../services/engine-resolve.js";
 import { FileManager } from "../services/file-manager.js";
 import { AssetManager, inferType, safeName } from "../services/asset-manager.js";
 import { ClipsHistory } from "../services/clips-history.js";
@@ -1046,9 +1047,15 @@ app.post("/api/transcribe", async (req, res) => {
     res.status(400).json({ error: "File not found" });
     return;
   }
+  // Resolve before reading the cache: an unset engine is written under
+  // whatever transcribe_file actually ran (e.g. "whispercpp" on a native
+  // install), so reading with the raw unset request always misses.
+  const resolvedEngine = await resolveTranscribeEngine(executor, engine, model_size);
+  const cacheKey = { engine: resolvedEngine, model: model_size, language };
+
   // Check cache first. A cached transcript without speakers cannot answer a
   // request for them, so serving it makes re-transcribing look like a no-op.
-  const cachedRaw = await cache.get(file_path, engine);
+  const cachedRaw = await cache.get(file_path, cacheKey);
   const cached =
     cachedRaw && enable_diarization && !hasSpeakerLabels(cachedRaw) ? null : cachedRaw;
   if (cached) {
@@ -1113,9 +1120,17 @@ app.post("/api/transcribe", async (req, res) => {
       // forever: the job id lived only in the tab that started it, and nothing
       // else announces that the transcript landed.
       broadcastSSE("state-sync", uiState);
-      // Cache it
+      // Cache it under the engine it actually ran with — a fresh resolution
+      // (or the pre-transcribe request) can differ from what transcribe_file
+      // fell back to once it tried loading the model for real.
       try {
-        await cache.set(file_path, result.data as unknown as TranscriptResult, engine);
+        const actualEngine =
+          (result.data as unknown as TranscriptResult | undefined)?.engine ?? resolvedEngine;
+        await cache.set(file_path, result.data as unknown as TranscriptResult, {
+          engine: actualEngine,
+          model: model_size,
+          language,
+        });
       } catch (err) {
         log.warn("Failed to cache transcript", { file_path, err: errMsg(err) });
       }

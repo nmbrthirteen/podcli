@@ -463,6 +463,31 @@ def _attach_speakers_and_faces(
     return base
 
 
+def resolve_engine_info(requested: Optional[str], model_size: str = "base") -> dict:
+    """Predict which engine transcribe_file will actually use, without doing
+    any transcription work. Callers cache transcripts by engine; the cache
+    key has to match what transcribe_file resolves to, not the raw request,
+    or an unset engine writes under one key and reads under another.
+
+    This mirrors the fallback in transcribe_file but checks only `import
+    whisper` rather than whisper.load_model(), so it can't catch the rarer
+    case where the import succeeds but loading the model weights fails. That
+    case still falls back correctly inside transcribe_file itself; it just
+    means a cache lookup for it can miss once before the result is written
+    under the engine it actually ran with.
+    """
+    requested = requested if requested is not None else os.environ.get("PODCLI_ENGINE", "")
+    engine = normalize_engine(requested)
+    if engine != "whisper-py":
+        return {"engine": engine, "model_size": model_size}
+    try:
+        import whisper  # noqa: F401
+    except Exception:
+        if not requested and _whispercpp_ready(model_size):
+            return {"engine": "whispercpp", "model_size": model_size}
+    return {"engine": "whisper-py", "model_size": model_size}
+
+
 def transcribe_file(
     file_path: str,
     model_size: str = "base",

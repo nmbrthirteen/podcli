@@ -84,6 +84,47 @@ describe("TranscriptCache", () => {
     writeFileSync(join(tmp, "cache", "transcripts", `${hash}.json`), "this is not json");
     expect(await cache.get(file)).toBeNull();
   });
+
+  it("keys the raw cache by engine, model and language, not engine alone", async () => {
+    const file = makeFakeVideo("multi-key.mp4", "same media, different requests");
+    await cache.set(file, { ...fakeTranscript, transcript: "base-auto" }, {
+      engine: "whispercpp",
+    });
+    await cache.set(file, { ...fakeTranscript, transcript: "small-ka" }, {
+      engine: "whispercpp",
+      model: "small",
+      language: "ka",
+    });
+    expect((await cache.get(file, { engine: "whispercpp" }))?.transcript).toBe("base-auto");
+    expect(
+      (await cache.get(file, { engine: "whispercpp", model: "small", language: "ka" }))
+        ?.transcript,
+    ).toBe("small-ka");
+    // A request for a third, never-written combo must miss, not fall back to
+    // either of the above.
+    expect(
+      await cache.get(file, { engine: "whispercpp", model: "medium", language: "fr" }),
+    ).toBeNull();
+  });
+
+  it("treats base model and auto language as no suffix, for backward compatibility", async () => {
+    const file = makeFakeVideo("default-key.mp4", "legacy cache shape");
+    // A plain string engine (the pre-existing call shape) must land on the
+    // same key as the equivalent object form with default model/language.
+    await cache.set(file, { ...fakeTranscript, transcript: "legacy" }, "whispercpp");
+    expect(
+      (await cache.get(file, { engine: "whispercpp", model: "base", language: "auto" }))
+        ?.transcript,
+    ).toBe("legacy");
+  });
+
+  it("writes atomically — no temp file left behind, and no partial reads", async () => {
+    const file = makeFakeVideo("atomic.mp4", "atomic write check");
+    await cache.set(file, fakeTranscript);
+    const { readdirSync } = await import("fs");
+    const files = readdirSync(join(tmp, "cache", "transcripts"));
+    expect(files.some((f) => f.endsWith(".tmp"))).toBe(false);
+  });
 });
 
 

@@ -315,7 +315,16 @@ export function createServer(): McpServer {
         // on-disk cache — NOT the trimmed MCP response. Without words in UI
         // state, downstream batch_create_clips can't burn captions.
         try {
-          const cached = await transcriptCache.get(file_path, engine);
+          // handleTranscribe's result carries the engine it actually resolved
+          // to and cached under; the request-time `engine` can be unset while
+          // the write landed under "whispercpp", so reading with it misses.
+          const resolvedEngine =
+            (JSON.parse(result) as { engine?: string }).engine ?? engine;
+          const cached = await transcriptCache.get(file_path, {
+            engine: resolvedEngine,
+            model: model_size,
+            language,
+          });
           if (cached) {
             await uiPing({
               videoPath: file_path,
