@@ -53,6 +53,7 @@ import {
 } from "../utils/transcript.js";
 import { formatSrtTime, formatVttTime } from "../utils/srt-time.js";
 import { computeVideoIdentity, type VideoIdentity } from "../utils/video-identity.js";
+import { computeSelectionHash } from "../utils/selection-hash.js";
 import { errMsg } from "../utils/errors.js";
 import { resolveByteRange } from "../utils/http-range.js";
 import {
@@ -4329,12 +4330,20 @@ app.post("/api/suggestions/modify", (req, res) => {
       res.status(400).json({ error: "selected must be a boolean for action 'toggle'" });
       return;
     }
+    clip = uiState.suggestions[index];
     if (selected) {
       uiState.deselectedIndices = uiState.deselectedIndices.filter((i) => i !== index);
-    } else if (!uiState.deselectedIndices.includes(index)) {
-      uiState.deselectedIndices = [...uiState.deselectedIndices, index];
+      // Stamp what's being approved so a later edit to the same clip can be
+      // caught instead of silently rendering something else.
+      clip.selectionHash = computeSelectionHash(clip, uiState.transcript?.words);
+      clip.changedSinceSelection = false;
+    } else {
+      if (!uiState.deselectedIndices.includes(index)) {
+        uiState.deselectedIndices = [...uiState.deselectedIndices, index];
+      }
+      delete clip.selectionHash;
+      delete clip.changedSinceSelection;
     }
-    clip = uiState.suggestions[index];
   } else if (action === "update") {
     const upd = updates || {};
     clip = uiState.suggestions[index];
@@ -4368,6 +4377,16 @@ app.post("/api/suggestions/modify", (req, res) => {
     const fmtTime = (s: number) =>
       `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
     clip.timestamp_display = `${fmtTime(clip.start_second)} → ${fmtTime(clip.end_second)}`;
+
+    // Approval was for a specific render; if this edit changed any
+    // render-relevant field on an already-selected clip, flag it instead of
+    // silently exporting something other than what got approved.
+    if (clip.selectionHash && !uiState.deselectedIndices.includes(index)) {
+      const currentHash = computeSelectionHash(clip, uiState.transcript?.words);
+      if (currentHash !== clip.selectionHash) {
+        clip.changedSinceSelection = true;
+      }
+    }
   } else {
     res.status(400).json({ error: `Unknown action: ${action}` });
     return;

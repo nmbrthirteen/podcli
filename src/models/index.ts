@@ -110,6 +110,10 @@ export interface SuggestedClip {
   content_type?: string;
   score?: number;
   rank?: number;
+  /** Fingerprint of render-relevant fields, stamped when the clip is selected for export. */
+  selectionHash?: string;
+  /** True when the clip was edited after selectionHash was stamped — the selection may be stale. */
+  changedSinceSelection?: boolean;
 }
 
 export interface UIState {

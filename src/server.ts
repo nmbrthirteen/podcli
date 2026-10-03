@@ -1393,7 +1393,11 @@ export function createServer(): McpServer {
                 ? `${Math.round(end - start)}s`
                 : "?";
             const style = clip.suggested_caption_style || "hormozi";
-            const tag = deselected.includes(i) ? " [DESELECTED]" : "";
+            const tag = deselected.includes(i)
+              ? " [DESELECTED]"
+              : clip.changedSinceSelection
+                ? " [CHANGED SINCE SELECTION — re-confirm before exporting]"
+                : "";
             lines.push(
               `  #${num}: "${title}" (${start}s–${end}s, ${duration}) [${style}]${tag}`,
             );
