@@ -622,6 +622,41 @@ def test_reopening_a_session_with_an_unchanged_camera_keeps_its_sync(episode):
     assert reopened.source(cam.id).offset == cam.offset
 
 
+def test_source_changed_on_disk_treats_a_zero_zero_identity_as_unknown(tmp_path):
+    path = tmp_path / "f.mp4"
+    path.write_bytes(b"x")
+    s = _source(str(path), file_size=0, file_mtime_ns=0)
+    assert mc._source_changed_on_disk(s) is False
+
+
+def test_reopening_an_old_shape_session_backfills_identity_without_resetting_sync(episode):
+    """A session saved before file_size/file_mtime_ns existed has both at 0.
+
+    That must read as "no fingerprint recorded yet", not "the file shrank to
+    nothing": reopening it should stamp the real identity in and leave sync,
+    cuts and range exactly as they were.
+    """
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    session = mc.sync_session(session)
+    session = mc.plan_session(session)
+    cuts_before = session.cuts
+    cam = next(s for s in session.sources if os.path.basename(s.path) == "cam_one.mp4")
+    offset_before = cam.offset
+    assert cuts_before and cam.synced
+
+    # Simulate the old session shape directly on disk, as if saved before
+    # file identity was tracked.
+    for s in session.sources:
+        s.file_size = s.file_mtime_ns = 0
+    session.save()
+
+    reopened = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    assert reopened.cuts == cuts_before
+    fresh = reopened.source(cam.id)
+    assert fresh.synced and fresh.offset == offset_before
+    assert fresh.file_size != 0 and fresh.file_mtime_ns != 0
+
+
 def test_reopening_a_session_detects_a_camera_replaced_on_disk(episode):
     session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
     session = mc.sync_session(session)

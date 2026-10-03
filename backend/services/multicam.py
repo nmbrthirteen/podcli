@@ -414,12 +414,41 @@ def _file_identity(s: Source) -> str:
 
 
 def _source_changed_on_disk(s: Source) -> bool:
-    """True if the file at `s.path` no longer matches what was probed."""
+    """True if the file at `s.path` no longer matches what was probed.
+
+    A session saved before file identity was tracked has file_size and
+    file_mtime_ns both at their dataclass default of 0. That is not evidence
+    the file shrank to nothing; it means we never recorded an identity for
+    it. Treat that pair as unknown rather than as a mismatch, so an old
+    session doesn't look "changed" on every single source the first time it
+    reopens under the new code.
+    """
+    if s.file_size == 0 and s.file_mtime_ns == 0:
+        return False
     try:
         stat = os.stat(s.path)
     except OSError:
         return False
     return stat.st_size != s.file_size or stat.st_mtime_ns != s.file_mtime_ns
+
+
+def backfill_file_identity(session: "MulticamSession") -> bool:
+    """Stamp file_size/file_mtime_ns on sources saved before identity tracking existed.
+
+    Stat-only, and never resets sync, cuts, or range: an old session without
+    this fingerprint hasn't necessarily changed, it just predates the field.
+    """
+    changed = False
+    for s in session.sources:
+        if s.virtual or not s.path or (s.file_size or s.file_mtime_ns):
+            continue
+        try:
+            stat = os.stat(s.path)
+        except OSError:
+            continue
+        s.file_size, s.file_mtime_ns = stat.st_size, stat.st_mtime_ns
+        changed = True
+    return changed
 
 
 def refresh_stale_sources(session: "MulticamSession") -> bool:
@@ -758,8 +787,11 @@ def new_session(
     # caller makes after, under the same lock as any other.
     existing = find_session(found)
     if existing:
-        if refresh_stale_sources(existing):
+        backfilled = backfill_file_identity(existing)
+        refreshed = refresh_stale_sources(existing)
+        if backfilled or refreshed:
             existing.save()
+        if refreshed:
             _emit(progress_callback, 100, f"Reopened the edit for these {len(found)} files; "
                                            "one or more changed on disk and need syncing again")
         else:
