@@ -400,11 +400,13 @@ def remap_timed_items(
         if mapped is None:
             continue
         mapped_start, mapped_end = mapped
-        # The 10ms floor only makes sense for a real interval that got
-        # clipped down to near-nothing; a genuinely zero-duration source item
-        # (mapped_start == mapped_end by construction, from _map_point) is
-        # meant to be kept as a point marker.
-        if end > start and mapped_end - mapped_start < 0.01:
+        # The 10ms floor only makes sense for an interval a cut clipped down to
+        # near-nothing. Whisper emits many 10ms words (and float subtraction
+        # puts some at 9.99ms), so an item that kept its whole length stays,
+        # as does a zero-duration point from _map_point.
+        mapped_length = mapped_end - mapped_start
+        clipped = (end - start) - mapped_length > 1e-6
+        if clipped and mapped_length < 0.01:
             continue
         remapped.append({**item, "start": round(mapped_start, 3), "end": round(mapped_end, 3)})
     return remapped

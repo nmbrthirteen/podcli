@@ -78,6 +78,24 @@ def test_zero_duration_word_inside_a_kept_range_is_kept_as_a_point():
     assert remapped[0]["start"] == remapped[0]["end"] == 0.7
 
 
+def test_short_whole_word_inside_a_kept_range_survives_float_rounding():
+    # 10.50 - 10.49 is 0.00999... in floating point, under the 10ms floor,
+    # but the word kept its whole length, so no cut clipped it.
+    keep_segments = [{"start": 0.0, "end": 44.66}, {"start": 45.04, "end": 60.0}]
+    words = [{"word": "in", "start": 10.49, "end": 10.5}, {"word": "me", "start": 50.57, "end": 50.58}]
+
+    remapped = remap_timed_items(words, keep_segments, assign_by_midpoint=True)
+
+    assert [w["word"] for w in remapped] == ["in", "me"]
+
+
+def test_word_clipped_to_a_sliver_by_a_cut_is_dropped():
+    keep_segments = [{"start": 0.0, "end": 1.005}, {"start": 3.0, "end": 4.0}]
+    words = [{"word": "gone", "start": 1.0, "end": 1.5}]
+
+    assert remap_timed_items(words, keep_segments) == []
+
+
 def test_zero_duration_word_in_a_removed_range_is_dropped():
     keep_segments = [{"start": 0.5, "end": 2.0}, {"start": 4.5, "end": 6.0}]
     words = [{"word": "", "start": 3.0, "end": 3.0}]
