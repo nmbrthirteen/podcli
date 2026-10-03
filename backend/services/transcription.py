@@ -84,6 +84,17 @@ def _omnilingual_ready() -> bool:
     return os.path.exists(_omnilingual_model()) and os.path.exists(_omnilingual_tokens())
 
 
+def _omnilingual_model_fingerprint(model_path: str) -> str:
+    """Cheap stand-in for hashing the whole model file: size+mtime changes
+    whenever the file is replaced (re-provisioned, a different quantization
+    swapped in), without reading potentially hundreds of MB on every run."""
+    try:
+        st = os.stat(model_path)
+        return f"{st.st_size}-{int(st.st_mtime)}"
+    except OSError:
+        return "unknown"
+
+
 def _whisper_threads() -> int:
     raw = os.environ.get("PODCLI_WHISPER_THREADS", "").strip()
     try:
@@ -142,7 +153,19 @@ def _transcribe_with_omnilingual(file_path, progress_callback, wav_path=None):
     # Resumable: a crash partway through a long file loses at most the
     # window that was decoding, not the whole run — a rerun with the same
     # file/model/language skips every window that already has a receipt.
-    run_dir = transcribe_runs.run_dir(paths["cache"], file_path, "omnilingual", model_size="int8", language="und")
+    #
+    # The key has to change whenever a resumed window's receipt would no
+    # longer match what a fresh decode produces: a different model file (so
+    # fold in its size+mtime, cheap to stat vs. hashing the whole model), or
+    # a change to the window/context constants a receipt's timestamps are
+    # only valid under (resuming under new constants would silently splice
+    # old-geometry windows into a new-geometry transcript).
+    model_fp = _omnilingual_model_fingerprint(model)
+    run_dir = transcribe_runs.run_dir(
+        paths["cache"], file_path, "omnilingual",
+        model_size=f"int8-{model_fp}-w{omni.WINDOW_SECONDS}-c{omni.CONTEXT_SECONDS}",
+        language="und",
+    )
 
     def window_progress(pct, msg):
         if progress_callback:

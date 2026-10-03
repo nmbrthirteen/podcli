@@ -278,6 +278,68 @@ class ResolveEngineInfoTests(unittest.TestCase):
         self.assertEqual(tr.resolve_engine_info("whisper-py")["engine"], "whisper-py")
 
 
+class OmnilingualReceiptKeyTests(unittest.TestCase):
+    """The resumable run directory has to change whenever a resumed
+    window's receipt would no longer be valid: a different model file, or
+    a change to the window/context constants its timestamps assume."""
+
+    def setUp(self):
+        self._model = tempfile.NamedTemporaryFile(suffix=".onnx", delete=False)
+        self._model.write(b"fake model bytes")
+        self._model.close()
+        self._tokens = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
+        self._tokens.write(b"fake tokens")
+        self._tokens.close()
+        self._media = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+        self._media.write(b"fake media")
+        self._media.close()
+
+        self._orig_model = tr._omnilingual_model
+        self._orig_tokens = tr._omnilingual_tokens
+        tr._omnilingual_model = lambda: self._model.name
+        tr._omnilingual_tokens = lambda: self._tokens.name
+
+        self.captured = []
+        import services.transcription_omnilingual as omni
+
+        self._orig_omni_transcribe = omni.transcribe_file
+
+        def fake_transcribe(*a, run_dir=None, **k):
+            self.captured.append(run_dir)
+            return {"transcript": "", "segments": [], "words": [], "duration": 0.0, "language": "und"}
+
+        omni.transcribe_file = fake_transcribe
+        self._omni = omni
+
+    def tearDown(self):
+        tr._omnilingual_model = self._orig_model
+        tr._omnilingual_tokens = self._orig_tokens
+        self._omni.transcribe_file = self._orig_omni_transcribe
+        for f in (self._model, self._tokens, self._media):
+            os.unlink(f.name)
+
+    def test_a_different_model_file_gets_its_own_run_dir(self):
+        tr._transcribe_with_omnilingual(self._media.name, progress_callback=None)
+        first = self.captured[0]
+
+        # Swap in a "different" model — same path, new content/mtime.
+        import time as _time
+        _time.sleep(0.01)
+        with open(self._model.name, "wb") as f:
+            f.write(b"a completely different and larger fake model")
+
+        tr._transcribe_with_omnilingual(self._media.name, progress_callback=None)
+        second = self.captured[1]
+
+        self.assertNotEqual(first, second)
+
+    def test_the_window_and_context_constants_are_baked_into_the_key(self):
+        tr._transcribe_with_omnilingual(self._media.name, progress_callback=None)
+        run_dir = self.captured[0]
+        self.assertIn(f"w{self._omni.WINDOW_SECONDS}", run_dir)
+        self.assertIn(f"c{self._omni.CONTEXT_SECONDS}", run_dir)
+
+
 class WhisperPyFallbackSharedPathTests(unittest.TestCase):
     """resolve_engine_info (a cheap cache-key prediction) and transcribe_file
     (about to actually transcribe) make the same fallback decision through
