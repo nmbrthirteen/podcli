@@ -1784,7 +1784,10 @@ def test_input_lut_colors_renders_stills_and_looks_and_exports_hand_it_off(episo
     session = _planned(episode)
     red = next(s for s in session.sources if s.path.endswith("cam_one.mp4"))
     # Spaces, a colon and brackets in the path exercise the filter graph escaping.
-    lut = _cube(episode.parent / "grade: [v1], final" / "invert.cube")
+    # Windows forbids a colon in a folder name, but its drive letter puts one
+    # in every path there anyway.
+    folder = "grade [v1], final" if os.name == "nt" else "grade: [v1], final"
+    lut = _cube(episode.parent / folder / "invert.cube")
     before = mc.previews(session)["cameras"][red.id]
     mc.update_mapping(session, {"sources": [{"id": red.id, "input_lut": str(lut)}]})
     assert session.cuts, "a LUT is color, so the cut stays"

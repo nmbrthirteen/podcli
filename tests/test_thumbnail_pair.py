@@ -8,6 +8,7 @@ thing a drawn frame cannot give a real detector.
 
 import json
 import os
+from pathlib import Path
 import sys
 import tempfile
 import unittest
@@ -197,8 +198,8 @@ class PairHtmlTests(unittest.TestCase):
         people = [{"side": "left", "path": self.left}, {"side": "right", "path": self.right}]
         html = th._build_html("Line one", "Line two", photo_path=self.left, people=people,
                               config={"pair_box_y": "86%"})
-        self.assertIn(f'<div class="pair pair-left"><img src="file://{self.left}"', html)
-        self.assertIn(f'<div class="pair pair-right"><img src="file://{self.right}"', html)
+        self.assertIn(f'<div class="pair pair-left"><img src="{Path(self.left).as_uri()}"', html)
+        self.assertIn(f'<div class="pair pair-right"><img src="{Path(self.right).as_uri()}"', html)
         self.assertIn('class="pair-divider"', html)
         self.assertNotIn('class="photo"', html)
         self.assertIn("top: 86%", html)

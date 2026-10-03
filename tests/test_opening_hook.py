@@ -311,7 +311,9 @@ class OpeningHookRenderTests(unittest.TestCase):
         plan = [(0.5, 5), (1.5, 6), (2.5, 2), (3.5, 3), (4.5, 4), (5.5, 7)]
         for playback_t, source_second in plan:
             self._assert_plays(path, playback_t, source_second)
-        self.assertAlmostEqual(self._video_duration(path), 6.0, delta=1 / self.FPS)
+        # Each of the three parts can round up to a whole frame on its own,
+        # depending on the ffmpeg build; captions follow the probed lengths.
+        self.assertAlmostEqual(self._video_duration(path), 6.0, delta=3 / self.FPS)
         self.assertAlmostEqual(result["duration"], 6.0, delta=0.1)
         self._assert_words(words, [
             ("w5", 0.2), ("w6", 1.2), ("w2", 2.2), ("w3", 3.2), ("w4", 4.2), ("w7", 5.2),

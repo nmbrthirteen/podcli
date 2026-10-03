@@ -125,20 +125,14 @@ const recordDecisionsInputShape = {
   notes: z.string().optional().describe("Free-form notes that don't fit another field"),
 };
 
-export const recordDecisionsInputSchema = z
-  .object(recordDecisionsInputShape, {
-    errorMap: (issue, ctx) => {
-      if (issue.code === "unrecognized_keys") {
-        return {
-          message:
-            `Unknown field(s): ${issue.keys.join(", ")}. Valid fields: ` +
-            Object.keys(recordDecisionsInputShape).join(", "),
-        };
-      }
-      return { message: ctx.defaultError };
-    },
-  })
-  .strict();
+export const recordDecisionsInputSchema = z.strictObject(recordDecisionsInputShape, {
+  // Returning undefined keeps zod's own message for every other issue.
+  error: (issue) =>
+    issue.code === "unrecognized_keys"
+      ? `Unknown field(s): ${issue.keys.join(", ")}. Valid fields: ` +
+        Object.keys(recordDecisionsInputShape).join(", ")
+      : undefined,
+});
 
 function capTranscriptText(text: string): string {
   if (text.length <= TRANSCRIPT_FALLBACK_CAP) return text;
