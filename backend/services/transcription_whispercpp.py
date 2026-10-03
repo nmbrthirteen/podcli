@@ -86,6 +86,27 @@ def _tokens_to_words(tokens: list[dict]) -> list[dict]:
     return words
 
 
+def _frame_rms(samples, hop: int, frame: int, nf: int):
+    """Per-frame RMS via a running sum of squares — O(n) instead of the
+    O(nf * frame) index-matrix this replaces (see _voiced_intervals).
+
+    The cumulative sum has to be float64. float32 has ~7 decimal digits of
+    precision; on a long file the running total grows into the 1e13-1e15
+    range, where a single float32 ULP is already bigger than a whole
+    frame's sum of squares, so window_sums (a difference of two large
+    nearly-equal floats) comes out wrong for frames late in the file. A
+    short test clip never sums high enough to show this — the regression
+    only appears on real multi-hour episodes.
+    """
+    import numpy as np
+
+    sq = samples.astype(np.float64) ** 2
+    csum = np.concatenate(([0.0], np.cumsum(sq, dtype=np.float64)))
+    starts = np.arange(nf) * hop
+    window_sums = csum[starts + frame] - csum[starts]
+    return np.sqrt(np.maximum(window_sums, 0.0) / frame)
+
+
 def _voiced_intervals(wav_path: str, bridge: float = 0.3, thresh_ratio: float = 0.07):
     import wave
 
@@ -106,15 +127,7 @@ def _voiced_intervals(wav_path: str, bridge: float = 0.3, thresh_ratio: float = 
     if len(samples) < frame:
         return []
     nf = 1 + (len(samples) - frame) // hop
-    # The old (nf, frame) index matrix gathered every window at once —
-    # ~1GB of int64 indices alone for a 1-hour 16kHz file, before even
-    # touching the gathered samples. A running sum of squares gives the same
-    # per-frame RMS in O(n) memory instead of O(nf * frame).
-    sq = samples * samples
-    csum = np.concatenate(([0.0], np.cumsum(sq, dtype=np.float32)))
-    starts = np.arange(nf) * hop
-    window_sums = csum[starts + frame] - csum[starts]
-    rms = np.sqrt(np.maximum(window_sums, 0.0) / frame)
+    rms = _frame_rms(samples, hop, frame, nf)
     peak = float(rms.max())
     if peak <= 0:
         return []
