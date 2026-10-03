@@ -61,6 +61,31 @@ func VADModelPath() string {
 	return filepath.Join(paths.ModelsDir(), "ggml-silero-v5.1.2.bin")
 }
 
+// KnownModelSizes lists the whisper.cpp model sizes podcli knows how to
+// provision, for callers (doctor) that need to check every one that's
+// actually present rather than assuming a single size.
+func KnownModelSizes() []string {
+	sizes := make([]string, 0, len(models))
+	for size := range models {
+		sizes = append(sizes, size)
+	}
+	return sizes
+}
+
+// ModelSHA256 returns the pinned hash for a whisper.cpp model size.
+func ModelSHA256(size string) (string, bool) {
+	m, ok := models[size]
+	if !ok {
+		return "", false
+	}
+	return m.SHA256, true
+}
+
+// VADModelSHA256 returns the pinned hash for the VAD model.
+func VADModelSHA256() string {
+	return vadSHA
+}
+
 func have(p string) bool {
 	if fi, err := os.Stat(p); err == nil && fi.Size() > 0 {
 		return true

@@ -4,11 +4,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"podcli/internal/backend"
@@ -33,7 +35,7 @@ func main() {
 	case "version", "--version", "-v":
 		fmt.Printf("podcli %s\n", Version)
 	case "doctor":
-		doctor()
+		os.Exit(doctor(args[1:]))
 	case "update":
 		os.Exit(update.Run(Version))
 	case "uninstall":
@@ -745,17 +747,183 @@ func backendStamp(root string) string {
 	}
 }
 
-func doctor() {
+// doctorCheck is one pass/fail probe doctor actually runs, as opposed to the
+// path/engine-resolution report above it, which only states what was found.
+type doctorCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+type doctorReport struct {
+	Version string            `json:"version"`
+	Paths   map[string]string `json:"paths"`
+	Checks  []doctorCheck     `json:"checks"`
+	OK      bool              `json:"ok"`
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i != -1 {
+		s = s[:i]
+	}
+	return s
+}
+
+// runCheck resolves a hermetic binary (falling back to PATH), then actually
+// runs it. A binary that resolves but fails to run (missing shared lib, bad
+// install) is exactly the failure mode `podcli doctor` otherwise can't see.
+func runCheck(name, hermetic, pathFallback string, args ...string) doctorCheck {
+	bin := hermetic
+	source := "hermetic"
+	if bin == "" {
+		if p, err := exec.LookPath(pathFallback); err == nil {
+			bin = p
+			source = "PATH"
+		}
+	}
+	if bin == "" {
+		return doctorCheck{Name: name, OK: false, Detail: "not found (hermetic or PATH)"}
+	}
+	out, err := exec.Command(bin, args...).CombinedOutput()
+	if err != nil {
+		return doctorCheck{Name: name, OK: false, Detail: fmt.Sprintf("%s (%s): %v: %s", bin, source, err, firstLine(string(out)))}
+	}
+	return doctorCheck{Name: name, OK: true, Detail: fmt.Sprintf("%s (%s): %s", bin, source, firstLine(string(out)))}
+}
+
+func pythonBackendCheck() doctorCheck {
+	root, ok := engine.BackendRoot()
+	if !ok {
+		return doctorCheck{Name: "python backend", OK: false, Detail: "backend not found (set PODCLI_BACKEND or run inside the repo)"}
+	}
+	// A representative sample, not every module: enough to catch "the
+	// interpreter can't even import the backend's own services" without
+	// reimplementing the whole import graph here.
+	modules := []string{"services.ai_cli", "services.multicam", "services.caption_renderer", "services.transcription"}
+	script := fmt.Sprintf("import sys; sys.path.insert(0, %q); import %s", root, strings.Join(modules, ", "))
+	out, err := exec.Command(engine.Python(), "-c", script).CombinedOutput()
+	if err != nil {
+		return doctorCheck{Name: "python backend", OK: false, Detail: fmt.Sprintf("%s: %v: %s", engine.Python(), err, firstLine(string(out)))}
+	}
+	return doctorCheck{Name: "python backend", OK: true, Detail: fmt.Sprintf("%s imports %s", engine.Python(), strings.Join(modules, ", "))}
+}
+
+func modelChecks() []doctorCheck {
+	var checks []doctorCheck
+	sizes := provision.KnownModelSizes()
+	sort.Strings(sizes)
+	for _, size := range sizes {
+		p := provision.ModelPath(size)
+		if !fileExists(p) {
+			continue // not provisioned; that's a valid state, not a failure
+		}
+		want, _ := provision.ModelSHA256(size)
+		got, err := provision.Sha256File(p)
+		name := "model " + size
+		if err != nil {
+			checks = append(checks, doctorCheck{Name: name, OK: false, Detail: fmt.Sprintf("could not hash %s: %v", p, err)})
+			continue
+		}
+		if got != want {
+			checks = append(checks, doctorCheck{Name: name, OK: false, Detail: fmt.Sprintf("%s hash mismatch: got %s, want %s", p, got, want)})
+			continue
+		}
+		checks = append(checks, doctorCheck{Name: name, OK: true, Detail: p})
+	}
+	if vp := provision.VADModelPath(); fileExists(vp) {
+		got, err := provision.Sha256File(vp)
+		if err != nil {
+			checks = append(checks, doctorCheck{Name: "model vad", OK: false, Detail: fmt.Sprintf("could not hash %s: %v", vp, err)})
+		} else if want := provision.VADModelSHA256(); got != want {
+			checks = append(checks, doctorCheck{Name: "model vad", OK: false, Detail: fmt.Sprintf("%s hash mismatch: got %s, want %s", vp, got, want)})
+		} else {
+			checks = append(checks, doctorCheck{Name: "model vad", OK: true, Detail: vp})
+		}
+	}
+	return checks
+}
+
+func mcpRegistrationChecks() []doctorCheck {
+	var checks []doctorCheck
+	if _, err := exec.LookPath("claude"); err == nil {
+		if mcpRegisteredToSelf() {
+			checks = append(checks, doctorCheck{Name: "mcp registration (Claude)", OK: true, Detail: "registered"})
+		} else {
+			checks = append(checks, doctorCheck{Name: "mcp registration (Claude)", OK: false, Detail: "not registered - run `podcli mcp install`"})
+		}
+	}
+	if _, err := exec.LookPath("codex"); err == nil {
+		if codexMCPRegisteredToSelf() {
+			checks = append(checks, doctorCheck{Name: "mcp registration (Codex)", OK: true, Detail: "registered"})
+		} else {
+			checks = append(checks, doctorCheck{Name: "mcp registration (Codex)", OK: false, Detail: "not registered - run `podcli mcp install`"})
+		}
+	}
+	return checks
+}
+
+func runDoctorChecks() []doctorCheck {
+	var checks []doctorCheck
+	checks = append(checks, runCheck("ffmpeg", engine.FFmpeg(), "ffmpeg", "-version"))
+	checks = append(checks, runCheck("ffprobe", engine.FFprobe(), "ffprobe", "-version"))
+	checks = append(checks, runCheck("whisper-cli", engine.WhisperCLI(), "whisper-cli", "--help"))
+	checks = append(checks, runCheck("node", engine.Node(), "node", "--version"))
+	checks = append(checks, pythonBackendCheck())
+	checks = append(checks, modelChecks()...)
+	checks = append(checks, mcpRegistrationChecks()...)
+	return checks
+}
+
+func doctor(args []string) int {
+	asJSON := false
+	for _, a := range args {
+		if a == "--json" {
+			asJSON = true
+		}
+	}
+
+	pathInfo := map[string]string{
+		"home":    paths.Home(),
+		"runtime": paths.RuntimeDir(),
+		"models":  paths.ModelsDir(),
+	}
+	if out := os.Getenv("PODCLI_OUTPUT"); out != "" {
+		pathInfo["clips"] = out
+	} else if cwd, err := os.Getwd(); err == nil {
+		pathInfo["clips"] = filepath.Join(cwd, "podcli-clips")
+	}
+
+	checks := runDoctorChecks()
+	allOK := true
+	for _, c := range checks {
+		if !c.OK {
+			allOK = false
+		}
+	}
+
+	if asJSON {
+		report := doctorReport{Version: Version, Paths: pathInfo, Checks: checks, OK: allOK}
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "podcli: doctor:", err)
+			return 1
+		}
+		fmt.Println(string(data))
+		if !allOK {
+			return 1
+		}
+		return 0
+	}
+
 	fmt.Printf("podcli %s\n\n", Version)
 	fmt.Println("Paths")
-	fmt.Printf("  home:     %s\n", paths.Home())
-	fmt.Printf("  runtime:  %s\n", paths.RuntimeDir())
-	fmt.Printf("  models:   %s\n", paths.ModelsDir())
+	fmt.Printf("  home:     %s\n", pathInfo["home"])
+	fmt.Printf("  runtime:  %s\n", pathInfo["runtime"])
+	fmt.Printf("  models:   %s\n", pathInfo["models"])
 	fmt.Printf("  presets/knowledge/assets/history/cache: %s  (global - follow you everywhere)\n", paths.Home())
-	if out := os.Getenv("PODCLI_OUTPUT"); out != "" {
-		fmt.Printf("  clips:    %s  (PODCLI_OUTPUT)\n", out)
-	} else if cwd, err := os.Getwd(); err == nil {
-		fmt.Printf("  clips:    %s  (rendered into your working directory)\n", filepath.Join(cwd, "podcli-clips"))
+	if clips, ok := pathInfo["clips"]; ok {
+		fmt.Printf("  clips:    %s\n", clips)
 	}
 	fmt.Println("\nEngine resolution")
 	if root, ok := engine.BackendRoot(); ok {
@@ -771,24 +939,6 @@ func doctor() {
 		fmt.Printf("  backend:  NOT FOUND (set PODCLI_BACKEND or run inside the repo)\n")
 	}
 	fmt.Printf("  python:   %s\n", engine.Python())
-	if ff := engine.FFmpeg(); ff != "" {
-		fmt.Printf("  ffmpeg:   %s (hermetic)\n", ff)
-	} else {
-		fmt.Printf("  ffmpeg:   PATH fallback (not yet hermetic)\n")
-	}
-	if fp := engine.FFprobe(); fp != "" {
-		fmt.Printf("  ffprobe:  %s (hermetic)\n", fp)
-	}
-	if wc := engine.WhisperCLI(); wc != "" {
-		fmt.Printf("  whisper:  %s (hermetic)\n", wc)
-	} else {
-		fmt.Printf("  whisper:  PATH fallback (install whisper-cli, or provisioned once hosted)\n")
-	}
-	if nd := engine.Node(); nd != "" {
-		fmt.Printf("  node:     %s (hermetic)\n", nd)
-	} else {
-		fmt.Printf("  node:     PATH fallback (Web UI uses system Node, or run `podcli setup`)\n")
-	}
 	if ss := engine.StudioServer(); ss != "" {
 		fmt.Printf("  studio:   %s\n", ss)
 	} else {
@@ -804,32 +954,27 @@ func doctor() {
 	} else {
 		fmt.Printf("  remotion: not provisioned (captions/thumbnails need a published release)\n")
 	}
-	fmt.Println("\nModels")
-	fmt.Printf("  base:     %s\n", presence(provision.ModelPath("base")))
-	fmt.Printf("  vad:      %s\n", presence(provision.VADModelPath()))
-}
 
-func presence(p string) string {
-	if fi, err := os.Stat(p); err == nil && fi.Size() > 0 {
-		return fmt.Sprintf("%s (%s)", p, humanBytes(fi.Size()))
+	fmt.Println("\nChecks")
+	for _, c := range checks {
+		mark := "OK  "
+		if !c.OK {
+			mark = "FAIL"
+		}
+		fmt.Printf("  [%s] %-28s %s\n", mark, c.Name, c.Detail)
 	}
-	return "not provisioned - run `podcli setup`"
+
+	if !allOK {
+		fmt.Println("\npodcli doctor found problems above.")
+		return 1
+	}
+	fmt.Println("\nAll checks passed.")
+	return 0
 }
 
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
-}
-
-func humanBytes(n int64) string {
-	switch {
-	case n >= 1<<20:
-		return fmt.Sprintf("%d MB", n>>20)
-	case n >= 1<<10:
-		return fmt.Sprintf("%d KB", n>>10)
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
 }
 
 func printHelp() {
