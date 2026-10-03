@@ -1568,12 +1568,21 @@ def generate_clip(
         if progress_callback:
             progress_callback(100, "Clip complete!")
 
+        # "duration" has always meant the content's own length — what
+        # clip_history and the learnings it feeds record — not however long
+        # the delivered file plays including intro/outro. Derive it from the
+        # probed actual_duration (not the planned `duration` window) so a
+        # source that ran out early still gets caught by the check above and
+        # reported as shorter, instead of silently reporting the plan.
+        content_duration = max(0.0, actual_duration - intro_offset - outro_offset)
+
         out = {
             "output_path": final_path,
-            # The probed duration of the file actually on disk, not the
-            # planned window — they can differ if intro/outro were added, or
-            # (now caught above instead) if the source ran out early.
-            "duration": round(actual_duration, 2),
+            "duration": round(content_duration, 2),
+            # The probed duration of the file actually on disk, including any
+            # intro/outro — for callers that need the delivered file's full
+            # playback length rather than just its content.
+            "output_duration": round(actual_duration, 2),
             "file_size_mb": file_size_mb,
             "title": title,
             "start_second": start_second,

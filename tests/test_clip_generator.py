@@ -644,6 +644,42 @@ class SidecarsAndCleanVariantTests(unittest.TestCase):
         clean_duration = cg._get_media_duration(clean_path)
         self.assertAlmostEqual(main_duration, clean_duration, delta=0.5)
 
+    def test_duration_is_content_length_not_the_file_with_intro_included(self):
+        from services import clip_generator as cg
+
+        intro_path = os.path.join(self.tmpdir, "intro.mp4")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=1",
+                "-f", "lavfi", "-i", "sine=frequency=330:duration=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                intro_path,
+            ],
+            check=True, capture_output=True,
+        )
+
+        out_dir = os.path.join(self.tmpdir, "out_with_intro")
+        result = cg.generate_clip(
+            video_path=self.src,
+            start_second=0,
+            end_second=2.5,
+            caption_style="subtle",
+            crop_strategy="center",
+            title="intro_duration_test",
+            output_dir=out_dir,
+            captions=False,
+            clean_fillers=False,
+            intro_path=intro_path,
+        )
+        # "duration" is what clip_history and its learnings have always
+        # recorded: the content's own length, not however long the delivered
+        # file plays once an intro is prepended.
+        self.assertAlmostEqual(result["duration"], 2.5, delta=0.3)
+        self.assertIn("output_duration", result)
+        self.assertAlmostEqual(result["output_duration"], 3.5, delta=0.3)
+        self.assertGreater(result["output_duration"], result["duration"])
+
     def test_video_only_source_does_not_require_an_audio_stream(self):
         from services import clip_generator as cg
 
