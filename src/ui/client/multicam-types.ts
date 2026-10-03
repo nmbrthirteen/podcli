@@ -9,15 +9,17 @@ export interface McPerson {
 }
 
 export type McRole = "camera" | "mic" | "ignore";
-export type McSyncStatus = "reference" | "ok" | "rough" | "failed" | "manual" | "assumed";
+export type McSyncStatus = "reference" | "ok" | "review" | "rough" | "failed" | "manual" | "assumed";
 
 export interface McSourceSync {
   status?: McSyncStatus;
   score?: number;
   checkpoints?: number;
   residual_ms?: number;
+  residual_all_ms?: number;
   drift_ppm?: number;
   message?: string;
+  reasons?: string[];
 }
 
 export interface McSource {

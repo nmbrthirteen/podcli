@@ -271,6 +271,36 @@ def test_sync_measures_clock_drift(sandbox):
     assert abs(moved.offset - 4.0) < 0.005
 
 
+def test_sync_review_reasons_flag_a_fit_that_looks_clean_but_isnt():
+    import services.multicam_signal as sig
+
+    clean = sig.ClockFit(offset=0.0, speed=1.0, residual_ms=5.0, checkpoints=5, total_checkpoints=5,
+                          residual_all_ms=5.0, speed_fallback=False)
+    good_match = sig.CoarseMatch(lag_seconds=0.0, score=30.0, peak_ratio=0.1)
+    assert mc._sync_review_reasons(clean, good_match, overlap_seconds=1200.0) == []
+
+    # Speed was forced back to 1.0, and the full-checkpoint residual (500 ms)
+    # is nothing like the tidy inlier residual (5 ms) the caller would see if
+    # it only looked at residual_ms.
+    bad_fallback = sig.ClockFit(offset=0.0, speed=1.0, residual_ms=5.0, checkpoints=2, total_checkpoints=2,
+                                 residual_all_ms=500.0, speed_fallback=True)
+    reasons = mc._sync_review_reasons(bad_fallback, good_match, overlap_seconds=60.0)
+    assert any("residual" in r for r in reasons)
+    assert any("implausible" in r for r in reasons)
+
+    # Too few checkpoints over a long overlap, and most checkpoints dropped.
+    sparse = sig.ClockFit(offset=0.0, speed=1.0, residual_ms=1.0, checkpoints=1, total_checkpoints=6,
+                           residual_all_ms=1.0, speed_fallback=False)
+    reasons = mc._sync_review_reasons(sparse, good_match, overlap_seconds=900.0)
+    assert any("checkpoints" in r and "outliers" in r for r in reasons)
+    assert any("10+ minute overlap" in r for r in reasons)
+
+    # A weak correlation peak alone should trigger review even if the fit is tidy.
+    weak_match = sig.CoarseMatch(lag_seconds=0.0, score=30.0, peak_ratio=0.7)
+    reasons = mc._sync_review_reasons(clean, weak_match, overlap_seconds=60.0)
+    assert any("correlation" in r for r in reasons)
+
+
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 def test_shared_audio_falls_back_to_diarization(sandbox, monkeypatch):
     from services import speaker_detection

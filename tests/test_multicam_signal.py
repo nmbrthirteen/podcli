@@ -2,6 +2,7 @@ import os
 import sys
 
 import numpy as np
+import pytest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND_ROOT = os.path.join(ROOT, "backend")
@@ -95,6 +96,27 @@ def test_fit_clock_recovers_drift_and_drops_an_outlier():
 def test_fit_clock_rejects_implausible_speed():
     fit = fit_clock([(0, 5.0, 1.0), (100, 106.0, 1.0)])
     assert fit is not None and fit.speed == 1.0
+    # Falling back to speed 1.0 does not make the fit trustworthy: the 1 s
+    # drift between these two points still shows up as a large residual, and
+    # callers need that signal to flag the sync for review.
+    assert fit.speed_fallback is True
+    assert fit.residual_ms == pytest.approx(500.0, abs=1.0)
+    assert fit.residual_all_ms == pytest.approx(500.0, abs=1.0)
+
+
+def test_fit_clock_reports_total_checkpoints_and_outlier_residual():
+    speed = 1.0 + 80e-6
+    pts = [(s, 12.5 + s * speed, 1.0) for s in (60, 1200, 2400, 3600, 4800)]
+    pts.append((3000, 12.5 + 3000 * speed + 0.4, 1.0))
+    fit = fit_clock(pts)
+    assert fit is not None
+    assert fit.total_checkpoints == 6
+    assert fit.checkpoints == 5
+    # The inlier residual is tiny, but the dropped outlier was 0.4 s off: the
+    # all-checkpoints residual must still surface that.
+    assert fit.residual_ms < 0.01
+    assert fit.residual_all_ms == pytest.approx(400.0, abs=1.0)
+    assert fit.speed_fallback is False
 
 
 def _two_person_levels():

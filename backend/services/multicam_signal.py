@@ -116,8 +116,11 @@ def gcc_phat(ref: np.ndarray, src: np.ndarray, sample_rate: int, max_shift_secon
 class ClockFit:
     offset: float
     speed: float
-    residual_ms: float
-    checkpoints: int
+    residual_ms: float  # worst residual among the surviving (inlier) checkpoints
+    checkpoints: int  # surviving checkpoint count
+    total_checkpoints: int = 0  # checkpoints offered to the fit, before outliers were dropped
+    residual_all_ms: float = 0.0  # worst residual against every checkpoint, outliers included
+    speed_fallback: bool = False  # drift looked implausible, so speed was forced back to 1.0
 
 
 def fit_clock(points: list[tuple[float, float, float]], *, max_residual: float = 0.02) -> Optional[ClockFit]:
@@ -130,7 +133,8 @@ def fit_clock(points: list[tuple[float, float, float]], *, max_residual: float =
     """
     if not points:
         return None
-    pts = np.array(points, dtype=np.float64)
+    all_pts = np.array(points, dtype=np.float64)
+    total = len(all_pts)
 
     def solve(p: np.ndarray) -> tuple[float, float]:
         if len(p) < 2 or np.ptp(p[:, 0]) < 1.0:
@@ -142,25 +146,32 @@ def fit_clock(points: list[tuple[float, float, float]], *, max_residual: float =
     # Theil-Sen seeds the outlier test; least squares alone lets one bad
     # checkpoint drag the line far enough that good points look bad too.
     slopes = [
-        (pts[j, 1] - pts[i, 1]) / (pts[j, 0] - pts[i, 0])
-        for i in range(len(pts)) for j in range(i + 1, len(pts))
-        if pts[j, 0] - pts[i, 0] >= 1.0
+        (all_pts[j, 1] - all_pts[i, 1]) / (all_pts[j, 0] - all_pts[i, 0])
+        for i in range(total) for j in range(i + 1, total)
+        if all_pts[j, 0] - all_pts[i, 0] >= 1.0
     ]
     speed = float(np.median(slopes)) if slopes else 1.0
-    offset = float(np.median(pts[:, 1] - speed * pts[:, 0]))
-    keep = np.abs(pts[:, 1] - (offset + speed * pts[:, 0])) <= max_residual
-    if keep.any():
-        pts = pts[keep]
+    offset = float(np.median(all_pts[:, 1] - speed * all_pts[:, 0]))
+    keep = np.abs(all_pts[:, 1] - (offset + speed * all_pts[:, 0])) <= max_residual
+    pts = all_pts[keep] if keep.any() else all_pts
     offset, speed = solve(pts)
     residual = np.abs(pts[:, 1] - (offset + speed * pts[:, 0]))
-    if abs(speed - 1.0) > 1e-3:
+    speed_fallback = abs(speed - 1.0) > 1e-3
+    if speed_fallback:
         offset, speed = float(np.median(pts[:, 1] - pts[:, 0])), 1.0
         residual = np.abs(pts[:, 1] - (offset + pts[:, 0]))
+    # Residual over every checkpoint offered to the fit, outliers included: a
+    # fit that dropped its way to a clean-looking inlier residual can still be
+    # wrong if most of the checkpoints it threw out disagreed with the line.
+    residual_all = np.abs(all_pts[:, 1] - (offset + speed * all_pts[:, 0]))
     return ClockFit(
         offset=offset,
         speed=speed,
         residual_ms=float(residual.max()) * 1000.0,
         checkpoints=len(pts),
+        total_checkpoints=total,
+        residual_all_ms=float(residual_all.max()) * 1000.0,
+        speed_fallback=speed_fallback,
     )
 
 

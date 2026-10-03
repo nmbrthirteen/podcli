@@ -1015,13 +1015,44 @@ def _match(ref: np.ndarray, ref_env: np.ndarray, src: np.ndarray) -> tuple[Optio
             "status": "rough", "score": round(match.score, 1),
             "message": "Synced to within 10 ms; fine alignment found no clear speech.",
         }
-    return fit, {
-        "status": "ok",
+    overlap_seconds = min(len(ref), len(src)) / SYNC_RATE
+    reasons = _sync_review_reasons(fit, match, overlap_seconds)
+    report = {
+        "status": "review" if reasons else "ok",
         "score": round(match.score, 1),
         "checkpoints": fit.checkpoints,
         "residual_ms": round(fit.residual_ms, 1),
+        "residual_all_ms": round(fit.residual_all_ms, 1),
         "drift_ppm": round((fit.speed - 1.0) * 1e6, 1),
     }
+    if reasons:
+        report["reasons"] = reasons
+        report["message"] = "Sync may be off: " + "; ".join(reasons) + ". Check it before rendering."
+    return fit, report
+
+
+def _sync_review_reasons(fit: sig.ClockFit, match: sig.CoarseMatch, overlap_seconds: float) -> list[str]:
+    """Why a fit that otherwise looks like a clean sync should get a second look.
+
+    A fit can report a tidy inlier residual while still being wrong: outliers
+    get dropped before the residual is measured, drift can be forced back to
+    speed 1 when it looked implausible, or there just weren't enough
+    checkpoints to trust a long overlap's drift estimate.
+    """
+    reasons = []
+    worst_residual_ms = max(fit.residual_ms, fit.residual_all_ms)
+    if worst_residual_ms > 30.0:
+        reasons.append(f"residual {worst_residual_ms:.0f} ms")
+    if fit.speed_fallback:
+        reasons.append("drift fit was implausible, so speed was forced back to 1.0")
+    dropped = fit.total_checkpoints - fit.checkpoints
+    if fit.total_checkpoints and dropped / fit.total_checkpoints > 0.4:
+        reasons.append(f"dropped {dropped} of {fit.total_checkpoints} checkpoints as outliers")
+    if overlap_seconds > 600.0 and fit.checkpoints < 3:
+        reasons.append("fewer than 3 checkpoints over a 10+ minute overlap")
+    if match.peak_ratio > 0.5:
+        reasons.append("weak correlation peak")
+    return reasons
 
 
 def sync_session(
