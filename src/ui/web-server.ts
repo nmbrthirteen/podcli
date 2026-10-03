@@ -168,6 +168,10 @@ interface UIState {
   rawTranscriptText: string;
   silenceOriginal: SilenceOriginal | null;
   silencePlan: SilencePlan | null;
+  // True when the persisted videoPath didn't exist at startup (e.g. an
+  // external drive is unmounted) — the session (transcript, suggestions)
+  // is kept rather than wiped, since the file may well come back.
+  videoMissing: boolean;
   suggestions: SuggestedClip[];
   deselectedIndices: number[];
   settings: {
@@ -198,16 +202,11 @@ function loadPersistedState(): UIState {
     if (existsSync(paths.uiState)) {
       const raw = readFileSync(paths.uiState, "utf-8");
       const saved = JSON.parse(raw);
-      // Validate video still exists
-      if (saved.videoPath && !existsSync(saved.videoPath)) {
-        saved.videoPath = "";
-        saved.filePath = "";
-        saved.phase = "idle";
-        saved.transcript = null;
-        saved.transcriptVideoIdentity = null;
-        saved.suggestions = [];
-        saved.deselectedIndices = [];
-      }
+      // A missing video (e.g. its external drive is unmounted) doesn't mean
+      // the episode is gone — the transcript and suggestions are kept as a
+      // session the file may rejoin; flag it instead so the caller can warn
+      // and skip anything that needs the file on disk right now.
+      const videoMissing = !!saved.videoPath && !existsSync(saved.videoPath);
       if (saved.silenceOriginal?.videoPath && !existsSync(saved.silenceOriginal.videoPath)) {
         saved.silenceOriginal = null;
       }
@@ -220,6 +219,7 @@ function loadPersistedState(): UIState {
         rawTranscriptText: saved.rawTranscriptText || "",
         silenceOriginal: saved.silenceOriginal || null,
         silencePlan: saved.silencePlan || null,
+        videoMissing,
         suggestions: saved.suggestions || [],
         deselectedIndices: saved.deselectedIndices || [],
         settings: {
@@ -263,6 +263,7 @@ function loadPersistedState(): UIState {
     rawTranscriptText: "",
     silenceOriginal: null,
     silencePlan: null,
+    videoMissing: false,
     suggestions: [],
     deselectedIndices: [],
     settings: {
@@ -591,6 +592,7 @@ function clearEpisodeSessionState(): void {
   allowedSourcePaths.clear();
   uiState.videoPath = "";
   uiState.filePath = "";
+  uiState.videoMissing = false;
   uiState.activeExportJobId = null;
   uiState.transcript = null;
   uiState.transcriptVideoIdentity = null;
@@ -844,6 +846,7 @@ app.post("/api/download-video", async (req, res) => {
       registerSourcePath(filePath);
       uiState.videoPath = filePath;
       uiState.filePath = filePath;
+      uiState.videoMissing = false;
       // A fresh download has no transcript yet; a stale identity from
       // whatever video was loaded before would otherwise still read as "the
       // transcript belongs to this video" until the next transcribe call.
@@ -1118,6 +1121,7 @@ app.post("/api/transcribe", async (req, res) => {
     uiState.transcript = cached as unknown as typeof uiState.transcript;
     uiState.videoPath = file_path;
     uiState.filePath = file_path;
+    uiState.videoMissing = false;
     uiState.transcriptVideoIdentity = computeVideoIdentity(file_path);
     registerSourcePath(file_path);
     uiState.lastUpdated = Date.now();
@@ -1183,6 +1187,7 @@ app.post("/api/transcribe", async (req, res) => {
       uiState.transcript = result.data as unknown as typeof uiState.transcript;
       uiState.videoPath = file_path;
       uiState.filePath = file_path;
+      uiState.videoMissing = false;
       uiState.transcriptVideoIdentity = computeVideoIdentity(file_path);
       registerSourcePath(file_path);
       uiState.lastUpdated = Date.now();
@@ -4255,6 +4260,7 @@ app.get("/api/ui-state", (_req, res) => {
     rawTranscriptText: uiState.rawTranscriptText,
     silenceOriginal: uiState.silenceOriginal,
     silencePlan: uiState.silencePlan,
+    videoMissing: uiState.videoMissing,
     lastUpdated: uiState.lastUpdated,
   });
 });
@@ -4301,7 +4307,10 @@ app.post("/api/ui-state", (req, res) => {
     uiState.silencePlan = null;
   }
 
-  if (body.videoPath !== undefined) uiState.videoPath = body.videoPath;
+  if (body.videoPath !== undefined) {
+    uiState.videoPath = body.videoPath;
+    uiState.videoMissing = !!body.videoPath && !existsSync(body.videoPath);
+  }
   if (body.filePath !== undefined) uiState.filePath = body.filePath;
   if (body.transcript !== undefined) {
     uiState.transcript = body.transcript;

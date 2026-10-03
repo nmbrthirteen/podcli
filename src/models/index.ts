@@ -144,6 +144,9 @@ export interface UIState {
   rawTranscriptText?: string;
   silenceOriginal?: { videoPath: string; transcript: TranscriptResult } | null;
   silencePlan?: Record<string, unknown> | null;
+  /** True when videoPath didn't exist at last check (e.g. an external drive
+   * is unmounted) — the session is kept, not wiped, while this is set. */
+  videoMissing?: boolean;
   suggestions?: SuggestedClip[];
   deselectedIndices?: number[];
   settings?: {

@@ -1519,6 +1519,13 @@ export function createServer(): McpServer {
         const lines: string[] = [];
         lines.push(`Phase: ${state.phase}`);
         lines.push(`Video: ${state.videoPath || state.filePath || "(none)"}`);
+        if (state.videoMissing) {
+          lines.push(
+            "WARNING: the video file above was not found on disk at last check (e.g. an external " +
+              "drive may be unmounted). The session (transcript, suggestions) is kept, but create_clip/" +
+              "batch_create_clips will fail until the file is reachable again.",
+          );
+        }
         lines.push(
           `Settings: caption=${state.settings?.captionStyle}, crop=${state.settings?.cropStrategy}, logo=${state.settings?.logoPath || "none"}`,
         );
