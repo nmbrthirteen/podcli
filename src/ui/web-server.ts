@@ -1042,21 +1042,26 @@ app.post("/api/transcribe", async (req, res) => {
     language,
     enable_diarization = true,
     num_speakers,
+    start_seconds,
+    duration_seconds,
   } = req.body;
 
   if (!file_path || !existsSync(file_path)) {
     res.status(400).json({ error: "File not found" });
     return;
   }
+  const isSample = start_seconds !== undefined || duration_seconds !== undefined;
+
   // Resolve before reading the cache: an unset engine is written under
   // whatever transcribe_file actually ran (e.g. "whispercpp" on a native
   // install), so reading with the raw unset request always misses.
   const resolvedEngine = await resolveTranscribeEngine(executor, engine, model_size);
   const cacheKey = { engine: resolvedEngine, model: model_size, language };
 
-  // Check cache first. A cached transcript without speakers cannot answer a
-  // request for them, so serving it makes re-transcribing look like a no-op.
-  const cachedRaw = await cache.get(file_path, cacheKey);
+  // A sample is a throwaway check on a slice of the file — never serve or
+  // populate the session/UI state from the main cache (keyed by, and
+  // assumed to describe, the whole file).
+  const cachedRaw = isSample ? null : await cache.get(file_path, cacheKey);
   const cached =
     cachedRaw && enable_diarization && !hasSpeakerLabels(cachedRaw) ? null : cachedRaw;
   if (cached) {
@@ -1094,7 +1099,17 @@ app.post("/api/transcribe", async (req, res) => {
   executor
     .execute(
       "transcribe",
-      { file_path, model_size, engine, assemblyai_api_key, language, enable_diarization, num_speakers },
+      {
+        file_path,
+        model_size,
+        engine,
+        assemblyai_api_key,
+        language,
+        enable_diarization,
+        num_speakers,
+        start_seconds,
+        duration_seconds,
+      },
       (event) => {
         job.progress = event.percent;
         job.message = event.message;
@@ -1105,6 +1120,11 @@ app.post("/api/transcribe", async (req, res) => {
       job.progress = 100;
       job.message = "Transcription complete";
       job.result = result.data;
+
+      // A sample result is a slice, not the episode — leave the session/UI
+      // state and the main cache alone. The caller reads it via job_status.
+      if (isSample) return;
+
       sessionTranscripts.set(
         file_path,
         result.data as unknown as ServerTranscript,

@@ -17,18 +17,29 @@ def extract_wav_16k_mono(
     media_path: str,
     wav_path: Optional[str] = None,
     timeout: int = 1800,
+    start_seconds: Optional[float] = None,
+    duration_seconds: Optional[float] = None,
 ) -> str:
     """Extract audio as 16 kHz mono 16-bit PCM WAV. Returns the wav path.
 
     When wav_path is None a temp file is created; the caller owns cleanup.
+    start_seconds/duration_seconds trim the output to a window of the source
+    — used for sample-mode transcription (test a language on a short clip
+    instead of the full episode).
     """
     owns_wav = wav_path is None
     if owns_wav:
         fd, wav_path = tempfile.mkstemp(prefix="podcli_audio_", suffix=".wav")
         os.close(fd)
-    cmd = [
-        "ffmpeg", "-y", "-loglevel", "error",
-        "-i", media_path,
+    cmd = ["ffmpeg", "-y", "-loglevel", "error"]
+    if start_seconds:
+        # Before -i: fast (keyframe-seek) trim. Precision to the frame
+        # doesn't matter for a language-check sample.
+        cmd += ["-ss", str(start_seconds)]
+    cmd += ["-i", media_path]
+    if duration_seconds:
+        cmd += ["-t", str(duration_seconds)]
+    cmd += [
         "-vn",
         "-acodec", "pcm_s16le",
         "-ar", "16000",

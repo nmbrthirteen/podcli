@@ -497,12 +497,23 @@ def transcribe_file(
     num_speakers: Optional[int] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
     wav_path: Optional[str] = None,
+    start_seconds: Optional[float] = None,
+    duration_seconds: Optional[float] = None,
 ) -> dict:
     """
     Transcribe a video/audio file with word-level timestamps and speaker detection.
 
     wav_path: optional pre-extracted 16 kHz mono WAV shared across analysis
     stages — used by whisper.cpp and diarization instead of re-decoding.
+
+    start_seconds/duration_seconds: sample mode — transcribe only a window of
+    the source (e.g. to test a language on 40s before committing to a full
+    run) instead of the whole file. The result is marked complete: False and
+    its timestamps are relative to the sample window, not the source;
+    sample_offset_seconds carries where in the source the window started.
+    Diarization and face analysis are skipped — a throwaway sample isn't
+    worth the extra passes, and both would need frame/audio access to the
+    original file that the trimmed clip doesn't carry.
 
     Returns:
         {
@@ -517,6 +528,58 @@ def transcribe_file(
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
+
+    is_sample = start_seconds is not None or duration_seconds is not None
+    if is_sample:
+        from services.audio_extract import extract_wav_16k_mono
+
+        sample_wav = extract_wav_16k_mono(
+            file_path,
+            start_seconds=start_seconds or 0.0,
+            duration_seconds=duration_seconds,
+        )
+        try:
+            result = _transcribe_file_inner(
+                sample_wav,
+                model_size=model_size,
+                engine=engine,
+                language=language,
+                enable_diarization=False,
+                num_speakers=num_speakers,
+                progress_callback=progress_callback,
+                wav_path=sample_wav,
+            )
+        finally:
+            try:
+                os.unlink(sample_wav)
+            except OSError:
+                pass
+        result["complete"] = False
+        result["sample_offset_seconds"] = start_seconds or 0.0
+        return result
+
+    return _transcribe_file_inner(
+        file_path,
+        model_size=model_size,
+        engine=engine,
+        language=language,
+        enable_diarization=enable_diarization,
+        num_speakers=num_speakers,
+        progress_callback=progress_callback,
+        wav_path=wav_path,
+    )
+
+
+def _transcribe_file_inner(
+    file_path: str,
+    model_size: str = "base",
+    engine: Optional[str] = None,
+    language: Optional[str] = None,
+    enable_diarization: bool = True,
+    num_speakers: Optional[int] = None,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    wav_path: Optional[str] = None,
+) -> dict:
 
     requested = engine if engine is not None else os.environ.get("PODCLI_ENGINE", "")
     engine = normalize_engine(requested)

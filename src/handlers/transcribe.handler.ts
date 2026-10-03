@@ -15,6 +15,8 @@ export interface TranscribeInput {
   language?: string;
   enable_diarization?: boolean;
   num_speakers?: number;
+  start_seconds?: number;
+  duration_seconds?: number;
 }
 
 export const transcribeToolDef = {
@@ -69,6 +71,18 @@ export const transcribeToolDef = {
           "Exact number of speakers if known (e.g. 2 for a two-person podcast). " +
           "Leave empty to auto-detect (2-5 speakers).",
       },
+      start_seconds: {
+        type: "number",
+        description:
+          "Sample mode: only transcribe a window starting here (seconds into the source), " +
+          "instead of the whole file — e.g. to test a language on 40s before committing to " +
+          "a full run. Pair with duration_seconds. The result is marked complete: false and " +
+          "is not written to the main transcript cache.",
+      },
+      duration_seconds: {
+        type: "number",
+        description: "Sample mode window length in seconds. Defaults start_seconds to 0 if omitted.",
+      },
     },
     required: ["file_path"],
   },
@@ -81,6 +95,9 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const language = input.language;
   const enableDiarization = input.enable_diarization !== false;
   const numSpeakers = input.num_speakers;
+  const startSeconds = input.start_seconds;
+  const durationSeconds = input.duration_seconds;
+  const isSample = startSeconds !== undefined || durationSeconds !== undefined;
 
   // Resolve before reading the cache: an unset engine is written under
   // whatever transcribe_file actually ran (e.g. "whispercpp" on a native
@@ -88,9 +105,10 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const resolvedEngine = await resolveTranscribeEngine(executor, engine, modelSize);
   const cacheKey = { engine: resolvedEngine, model: modelSize, language };
 
-  // Check cache first. A cached transcript without speakers cannot answer a
-  // request for them, so serving it makes re-transcribing look like a no-op.
-  const cachedRaw = await cache.get(filePath, cacheKey);
+  // A sample is a throwaway check on a slice of the file — it must never
+  // serve (or pollute) the main transcript cache, which is keyed by the
+  // whole file and assumed complete.
+  const cachedRaw = isSample ? null : await cache.get(filePath, cacheKey);
   const cached =
     cachedRaw && enableDiarization && !hasSpeakerLabels(cachedRaw) ? null : cachedRaw;
   if (cached) {
@@ -122,6 +140,8 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
     language,
     enable_diarization: enableDiarization,
     num_speakers: numSpeakers,
+    start_seconds: startSeconds,
+    duration_seconds: durationSeconds,
   });
 
   if (!result.data) {
@@ -129,6 +149,12 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   }
   const data = result.data;
   const actualEngine = data.engine ?? resolvedEngine;
+
+  if (isSample) {
+    // Not cached and not packed — it's a slice of the file, not the whole
+    // transcript the cache/packed-view keys assume.
+    return JSON.stringify({ cached: false, packed_ready: false, ...formatResult(data) });
+  }
 
   // Cache the raw result under what it actually ran with, not the prediction
   // above — resolveTranscribeEngine can't see a model-load failure that only
@@ -155,6 +181,9 @@ function formatResult(data: TranscriptResult) {
     word_count: (data.words ?? []).length,
     segment_count: (data.segments ?? []).length,
     speakers: data.speakers ?? { num_speakers: 0, speakers: {} },
+    ...(data.complete === false
+      ? { complete: false, sample_offset_seconds: data.sample_offset_seconds ?? 0 }
+      : {}),
     next_step: "Read the transcript via get_ui_state(include_transcript: true), then suggest_clips.",
   };
 }
@@ -189,6 +218,16 @@ export const transcribeStartToolDef = {
       },
       enable_diarization: { type: "boolean", default: true },
       num_speakers: { type: "number" },
+      start_seconds: {
+        type: "number",
+        description:
+          "Sample mode: only transcribe a window starting here (seconds into the source). " +
+          "Pair with duration_seconds. Not written to the main transcript cache.",
+      },
+      duration_seconds: {
+        type: "number",
+        description: "Sample mode window length in seconds. Defaults start_seconds to 0 if omitted.",
+      },
     },
     required: ["file_path"],
   },
@@ -206,6 +245,8 @@ export async function handleTranscribeStart(input: TranscribeInput): Promise<str
         language: input.language,
         enable_diarization: input.enable_diarization !== false,
         num_speakers: input.num_speakers,
+        start_seconds: input.start_seconds,
+        duration_seconds: input.duration_seconds,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);

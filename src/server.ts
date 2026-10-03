@@ -292,6 +292,18 @@ export function createServer(): McpServer {
         .describe(
           "Exact number of speakers if known (e.g. 2). Auto-detects if omitted.",
         ),
+      start_seconds: z
+        .number()
+        .optional()
+        .describe(
+          "Sample mode: only transcribe a window starting here (seconds into the source), " +
+            "instead of the whole file — e.g. to test a language on 40s before committing to " +
+            "a full run. Pair with duration_seconds. Not written to the main transcript cache.",
+        ),
+      duration_seconds: z
+        .number()
+        .optional()
+        .describe("Sample mode window length in seconds. Defaults start_seconds to 0 if omitted."),
     },
     async ({
       file_path,
@@ -300,6 +312,8 @@ export function createServer(): McpServer {
       language,
       enable_diarization,
       num_speakers,
+      start_seconds,
+      duration_seconds,
     }) => {
       try {
         const result = await handleTranscribe({
@@ -309,22 +323,29 @@ export function createServer(): McpServer {
           language,
           enable_diarization,
           num_speakers,
+          start_seconds,
+          duration_seconds,
         });
 
         // Push FULL transcript (words[] + segments[]) to Web UI state from the
         // on-disk cache — NOT the trimmed MCP response. Without words in UI
         // state, downstream batch_create_clips can't burn captions.
+        // Skipped for a sample: it's never written to this cache, and it's a
+        // slice of the file, not something that belongs in the UI session.
+        const isSample = start_seconds !== undefined || duration_seconds !== undefined;
         try {
           // handleTranscribe's result carries the engine it actually resolved
           // to and cached under; the request-time `engine` can be unset while
           // the write landed under "whispercpp", so reading with it misses.
           const resolvedEngine =
             (JSON.parse(result) as { engine?: string }).engine ?? engine;
-          const cached = await transcriptCache.get(file_path, {
-            engine: resolvedEngine,
-            model: model_size,
-            language,
-          });
+          const cached = isSample
+            ? null
+            : await transcriptCache.get(file_path, {
+                engine: resolvedEngine,
+                model: model_size,
+                language,
+              });
           if (cached) {
             await uiPing({
               videoPath: file_path,

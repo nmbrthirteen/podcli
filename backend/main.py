@@ -95,14 +95,21 @@ def handle_transcribe(task_id: str, params: dict):
     if params.get("assemblyai_api_key"):
         os.environ["ASSEMBLYAI_API_KEY"] = params["assemblyai_api_key"]
 
+    start_seconds = params.get("start_seconds")
+    duration_seconds = params.get("duration_seconds")
+    is_sample = start_seconds is not None or duration_seconds is not None
+
     # One shared 16 kHz mono wav feeds transcription, energy and reactions
-    # instead of decoding the source three times.
+    # instead of decoding the source three times. Skipped for a sample run —
+    # transcribe_file extracts its own trimmed window, and decoding the full
+    # source here would undo the whole point of a quick sample.
     shared_wav = None
-    try:
-        from services.audio_extract import extract_wav_16k_mono
-        shared_wav = extract_wav_16k_mono(file_path)
-    except Exception:
-        shared_wav = None
+    if not is_sample:
+        try:
+            from services.audio_extract import extract_wav_16k_mono
+            shared_wav = extract_wav_16k_mono(file_path)
+        except Exception:
+            shared_wav = None
 
     try:
         result = transcribe_file(
@@ -112,46 +119,54 @@ def handle_transcribe(task_id: str, params: dict):
             language=params.get("language"),
             enable_diarization=params.get("enable_diarization", True),
             num_speakers=params.get("num_speakers"),
+            start_seconds=start_seconds,
+            duration_seconds=duration_seconds,
             progress_callback=lambda pct, msg: emit_progress(task_id, "transcribing", pct, msg),
             wav_path=shared_wav,
         )
         # Apply word corrections (Whisper misheard proper nouns)
         apply_corrections(result.get("words", []), result.get("segments", []))
 
-        energy_data = None
-        try:
-            from services.audio_analyzer import extract_audio_energy
-            energy_data = extract_audio_energy(file_path, wav_path=shared_wav)
-        except Exception:
-            pass  # energy is a nice-to-have
+        # A sample is a throwaway language/quality check on a slice of the
+        # source — energy/event signals and the packed view are keyed by the
+        # full file and meant to describe the whole episode, so skip them
+        # rather than caching partial (or source-wide-but-wrongly-expensive)
+        # data under those keys.
+        if not is_sample:
+            energy_data = None
+            try:
+                from services.audio_analyzer import extract_audio_energy
+                energy_data = extract_audio_energy(file_path, wav_path=shared_wav)
+            except Exception:
+                pass  # energy is a nice-to-have
 
-        events_data = None
-        try:
-            from services.audio_events import extract_audio_events
-            events_data = extract_audio_events(file_path, wav_path=shared_wav)
-        except Exception:
-            pass  # reactions are a nice-to-have
+            events_data = None
+            try:
+                from services.audio_events import extract_audio_events
+                events_data = extract_audio_events(file_path, wav_path=shared_wav)
+            except Exception:
+                pass  # reactions are a nice-to-have
 
-        # Cached so clip suggestion reuses these instead of decoding the source again.
-        from services.signal_cache import save_signals
-        save_signals(file_path, energy_data=energy_data, events_data=events_data)
+            # Cached so clip suggestion reuses these instead of decoding the source again.
+            from services.signal_cache import save_signals
+            save_signals(file_path, energy_data=energy_data, events_data=events_data)
 
-        # Auto-pack: emit compact LLM-readable markdown alongside raw JSON.
-        # Pulls energy data so the packed view includes peak moments for clip reasoning.
-        try:
-            cache_hash = compute_cache_hash(file_path) + engine_cache_suffix(result.get("engine") or engine)
-            packed_path, packed_md = write_packed(
-                result,
-                cache_hash,
-                source_label=os.path.basename(file_path),
-                energy_data=energy_data,
-                events_data=events_data,
-            )
-            result["packed_path"] = packed_path
-            result["packed_size_bytes"] = len(packed_md.encode("utf-8"))
-        except Exception as e:
-            # Non-fatal — transcription result is still useful without the packed view
-            emit_progress(task_id, "packing", 99, f"Packer skipped: {e}")
+            # Auto-pack: emit compact LLM-readable markdown alongside raw JSON.
+            # Pulls energy data so the packed view includes peak moments for clip reasoning.
+            try:
+                cache_hash = compute_cache_hash(file_path) + engine_cache_suffix(result.get("engine") or engine)
+                packed_path, packed_md = write_packed(
+                    result,
+                    cache_hash,
+                    source_label=os.path.basename(file_path),
+                    energy_data=energy_data,
+                    events_data=events_data,
+                )
+                result["packed_path"] = packed_path
+                result["packed_size_bytes"] = len(packed_md.encode("utf-8"))
+            except Exception as e:
+                # Non-fatal — transcription result is still useful without the packed view
+                emit_progress(task_id, "packing", 99, f"Packer skipped: {e}")
     finally:
         if previous_engine is None:
             os.environ.pop("PODCLI_ENGINE", None)
