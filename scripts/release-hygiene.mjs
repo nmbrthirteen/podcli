@@ -86,9 +86,15 @@ export function matchSecretPatterns(content) {
   return SECRET_PATTERNS.filter(({ re }) => re.test(content)).map(({ name }) => name);
 }
 
+// Known fixture files that intentionally contain fake secrets shaped like
+// the real thing, to test matchSecretPatterns itself. Everything else still
+// gets scanned — a real secret pasted into some other test is still a leak.
+const SECRET_SCAN_ALLOWLIST = new Set(["scripts/release-hygiene.test.mjs"]);
+
 function checkSecretPatterns(files) {
   const errors = [];
   for (const f of files) {
+    if (SECRET_SCAN_ALLOWLIST.has(f)) continue;
     if (!TEXT_EXTENSIONS.has(extname(f).toLowerCase())) continue;
     let content;
     try {
