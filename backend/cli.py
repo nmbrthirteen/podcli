@@ -798,7 +798,7 @@ def _open_multicam_session(target: str, people):
         session = mc.new_session(folder=target, people=people, progress_callback=report)
         done()
     else:
-        session = mc.MulticamSession.load(target)
+        session = mc.open_session(target)
     # Reopening keeps the saved names; --people on a re-run renames them.
     if people and people != [p.name for p in session.people]:
         session = mc.rename_people(session, people)

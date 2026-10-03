@@ -1076,7 +1076,7 @@ def handle_manage_multicam(task_id: str, params: dict):
             emit_result(task_id, "success", data={"deleted": True, "session_id": session_id})
             return
 
-        session = mc.MulticamSession.load(session_id)
+        session = mc.open_session(session_id)
         if action == "render" and any(k in params for k in MULTICAM_MAP_KEYS if k != "look"):
             # A mapping change can drop the cut, and a render needs one: map, then plan, then render.
             raise ValueError("render takes only look and stems. Change the mapping with 'map', then 'plan' again.")

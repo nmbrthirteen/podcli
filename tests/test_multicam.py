@@ -715,6 +715,33 @@ def test_reopening_a_session_detects_a_camera_replaced_on_disk(episode):
     assert reopened.cuts == []
 
 
+def test_loading_by_session_id_also_catches_a_camera_replaced_on_disk(episode, monkeypatch):
+    """The MCP tool and the CLI jump straight to a known session id instead of
+
+    reopening by folder, so they used to skip the stale-file check entirely:
+    a camera swapped out underneath an open session kept its old sync and cut.
+    """
+    import main as backend
+
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    session = mc.sync_session(session)
+    session = mc.plan_session(session)
+    cam_path = episode / "cam_one.mp4"
+    cam = next(s for s in session.sources if os.path.basename(s.path) == "cam_one.mp4")
+    assert cam.synced and session.cuts
+
+    _ffmpeg("-f", "lavfi", "-i", "color=c=yellow:s=160x90:r=30:d=40", "-i", str(episode.parent / "one.wav"),
+            "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-y", str(cam_path))
+
+    sent = []
+    monkeypatch.setattr(backend, "emit_result", lambda task, status, data=None, error=None: sent.append((status, data, error)))
+    backend.handle_manage_multicam("t", {"action": "show", "session_id": session.session_id})
+    assert sent[0][0] == "success", sent
+    fresh = next(s for s in sent[0][1]["sources"] if s["id"] == cam.id)
+    assert fresh["sync"]["status"] == "failed"
+    assert sent[0][1]["cuts"] == []
+
+
 def test_last_person_is_the_guest_and_roles_survive_renames(episode):
     session = mc.new_session(folder=str(episode), people=["Nihal", "Cameron", "Ana"])
     assert [(p.name, p.role) for p in session.people] == [("Nihal", "host"), ("Cameron", "host"), ("Ana", "guest")]

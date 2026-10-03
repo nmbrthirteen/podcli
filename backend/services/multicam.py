@@ -757,6 +757,22 @@ def collect_files(folder: str = "", files: Optional[list] = None) -> list[str]:
     return found
 
 
+def open_session(session_id: str) -> MulticamSession:
+    """Load a session by id, catching up on file-identity bookkeeping once.
+
+    `new_session` already does this for the folder-reopen path. Everything
+    that instead jumps straight to a known session id (the MCP tool, the CLI,
+    the podcli cloud resolver) went through plain `MulticamSession.load` and
+    so never noticed a camera file that changed or was replaced on disk.
+    """
+    session = MulticamSession.load(session_id)
+    backfilled = backfill_file_identity(session)
+    refreshed = refresh_stale_sources(session)
+    if backfilled or refreshed:
+        session.save()
+    return session
+
+
 def find_session(found: list[str]) -> Optional[MulticamSession]:
     """The saved edit for exactly these files, including ones that couldn't be read."""
     wanted = set(found)

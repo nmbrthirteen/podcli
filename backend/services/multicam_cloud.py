@@ -119,11 +119,11 @@ def push(session: mc.MulticamSession, *, model_size: str = "base", engine: Optio
 def resolve(target: str) -> mc.MulticamSession:
     """A local session id, or the cloud edit id a local session was sent as."""
     if re.fullmatch(r"[a-f0-9]{6,32}", target or ""):
-        return mc.MulticamSession.load(target)
+        return mc.open_session(target)
     for item in mc.list_sessions():
         session = mc.MulticamSession.load(item["session_id"])
         if (session.cloud or {}).get("id") == target:
-            return session
+            return mc.open_session(session.session_id)
     raise MulticamCloudError(
         f"No multicam edit on this computer was sent to the cloud as {target}. "
         "Pull it where it was prepared, with the camera files")
