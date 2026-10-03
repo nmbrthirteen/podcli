@@ -33,7 +33,7 @@ import { paths } from "./config/paths.js";
 import { webServerUrl } from "./config/server.js";
 import { childLogger } from "./utils/logger.js";
 import { mcpError } from "./utils/errors.js";
-import { podcliVersion } from "./version.js";
+import { podcliVersion, studioStartCommand } from "./version.js";
 import type { Format, SuggestedClip, UIState, WordTimestamp } from "./models/index.js";
 
 const log = childLogger("server");
@@ -190,7 +190,7 @@ async function getWorkflowGuidance(): Promise<string> {
       "4. Suggest clips: analyze the transcript yourself, then call suggest_clips with your picks.\n" +
       "   Each pick needs a payoff and a standalone check, and an answer needs its question.\n" +
       "5. Export: use batch_create_clips(export_selected: true) or create_clip(clip_number: N)\n\n" +
-      "Note: The Web UI is not running. Start it with: npm run ui"
+      `Note: The Web UI is not running. Start it with: ${studioStartCommand()}`
     );
   }
 
@@ -1458,7 +1458,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: `Web UI is not running. Start with: npm run ui\n\n${guidance}`,
+                text: `Web UI is not running. Start with: ${studioStartCommand()}\n\n${guidance}`,
               },
             ],
           };
@@ -1587,7 +1587,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "Web UI is not running. Start with: npm run ui",
+                text: `Web UI is not running. Start with: ${studioStartCommand()}`,
               },
             ],
           };
@@ -1670,7 +1670,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "Web UI is not running. Start with: npm run ui",
+                text: `Web UI is not running. Start with: ${studioStartCommand()}`,
               },
             ],
           };
@@ -1762,7 +1762,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "Web UI is not running. Start with: npm run ui",
+                text: `Web UI is not running. Start with: ${studioStartCommand()}`,
               },
             ],
           };
@@ -1816,7 +1816,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "Web UI is not running. Start with: npm run ui",
+                text: `Web UI is not running. Start with: ${studioStartCommand()}`,
               },
             ],
           };
@@ -1953,7 +1953,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "Web UI is not running. Start with: npm run ui",
+                text: `Web UI is not running. Start with: ${studioStartCommand()}`,
               },
             ],
           };
@@ -2005,7 +2005,7 @@ export function createServer(): McpServer {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          return { content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }] };
+          return { content: [{ type: "text" as const, text: `Web UI is not running. Start with: ${studioStartCommand()}` }] };
         }
         return mcpError(msg);
       }
@@ -2105,7 +2105,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "Web UI is not running. Start with: npm run ui",
+                text: `Web UI is not running. Start with: ${studioStartCommand()}`,
               },
             ],
           };
@@ -2207,7 +2207,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "Web UI is not running. Start with: npm run ui",
+                text: `Web UI is not running. Start with: ${studioStartCommand()}`,
               },
             ],
           };
@@ -2326,7 +2326,7 @@ export function createServer(): McpServer {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
-            content: [{ type: "text" as const, text: "Web UI is not running. Start with: npm run ui" }],
+            content: [{ type: "text" as const, text: `Web UI is not running. Start with: ${studioStartCommand()}` }],
           };
         }
         return mcpError(err);
@@ -2386,7 +2386,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "Web UI is not running. Start with: npm run ui",
+                text: `Web UI is not running. Start with: ${studioStartCommand()}`,
               },
             ],
           };
@@ -2487,7 +2487,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "Web UI is not running. Start with: npm run ui",
+                text: `Web UI is not running. Start with: ${studioStartCommand()}`,
               },
             ],
           };
@@ -2575,7 +2575,7 @@ export function createServer(): McpServer {
             content: [
               {
                 type: "text" as const,
-                text: "Web UI is not running. Start with: npm run ui",
+                text: `Web UI is not running. Start with: ${studioStartCommand()}`,
               },
             ],
           };

@@ -1,6 +1,6 @@
 ---
 description: Extract, score, and classify the best moments from a raw podcast transcript
-allowed-tools: Read, Write
+allowed-tools: Read, Write, mcp__podcli__knowledge_base
 argument-hint: [transcript-file-or-paste]
 triggers:
   - transcript

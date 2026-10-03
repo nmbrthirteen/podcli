@@ -1,6 +1,6 @@
 ---
 description: Generate 8 verified title options for a clip, moment, or episode
-allowed-tools: Read
+allowed-tools: Read, mcp__podcli__knowledge_base
 argument-hint: [clip-transcript-or-moment-brief]
 triggers:
   - titles for

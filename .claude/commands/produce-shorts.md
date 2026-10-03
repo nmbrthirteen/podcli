@@ -1,6 +1,6 @@
 ---
 description: Full pipeline from transcript to publish-ready content package
-allowed-tools: Read, Write, Edit, Task
+allowed-tools: Read, Write, Edit, Task, mcp__podcli__knowledge_base
 argument-hint: [transcript-file-or-episode-number]
 triggers:
   - process episode

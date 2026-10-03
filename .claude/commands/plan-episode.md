@@ -1,6 +1,6 @@
 ---
 description: Design questions, story arc, and moment map BEFORE recording an episode
-allowed-tools: Read, Write
+allowed-tools: Read, Write, mcp__podcli__knowledge_base
 argument-hint: [guest-name-and-company]
 triggers:
   - plan episode
