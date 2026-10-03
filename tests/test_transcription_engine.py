@@ -1,6 +1,7 @@
 """Engine selection: native installs auto-use whisper.cpp when openai-whisper
 is absent, unless the user explicitly asked for the whisper-py engine."""
 
+import importlib.util
 import os
 import sys
 import tempfile
@@ -231,6 +232,11 @@ class ResolveEngineInfoTests(unittest.TestCase):
         self._had_whisper = sys.modules.get("whisper", "__absent__")
         self._orig_ready = tr._whispercpp_ready
         self._saved_engine = os.environ.pop("PODCLI_ENGINE", None)
+        # _whisper_py_available is memoized for the process lifetime (the
+        # package's installed-ness can't change mid-run) — but that means
+        # a value cached by one test would leak into the next, which
+        # sabotages sys.modules["whisper"] to simulate availability.
+        tr._whisper_py_available.cache_clear()
 
     def tearDown(self):
         if self._had_whisper == "__absent__":
@@ -238,6 +244,7 @@ class ResolveEngineInfoTests(unittest.TestCase):
         else:
             sys.modules["whisper"] = self._had_whisper
         tr._whispercpp_ready = self._orig_ready
+        tr._whisper_py_available.cache_clear()
         if self._saved_engine is None:
             os.environ.pop("PODCLI_ENGINE", None)
         else:
@@ -289,13 +296,20 @@ class WhisperPyFallbackSharedPathTests(unittest.TestCase):
 
         # Simulate "import whisper" succeeding but whisper.load_model()
         # failing — the one gap resolve_engine_info's cheap check can't see.
+        import importlib.machinery
+
         class _BrokenWhisperModule:
+            # find_spec requires a real module to carry __spec__ — a bare
+            # object stand-in raises ValueError instead of just finding it.
+            __spec__ = importlib.machinery.ModuleSpec("whisper", loader=None)
+
             @staticmethod
             def load_model(size):
                 raise RuntimeError("corrupt model weights")
 
         self._had_whisper = sys.modules.get("whisper", "__absent__")
         sys.modules["whisper"] = _BrokenWhisperModule()
+        tr._whisper_py_available.cache_clear()
 
     def tearDown(self):
         tr._transcribe_with_whispercpp = self._orig_wcpp
@@ -304,6 +318,7 @@ class WhisperPyFallbackSharedPathTests(unittest.TestCase):
             sys.modules.pop("whisper", None)
         else:
             sys.modules["whisper"] = self._had_whisper
+        tr._whisper_py_available.cache_clear()
         os.unlink(self._tmp.name)
         if self._saved_engine is None:
             os.environ.pop("PODCLI_ENGINE", None)
@@ -320,6 +335,32 @@ class WhisperPyFallbackSharedPathTests(unittest.TestCase):
         # though transcribe_file will fall back — a one-time cache miss,
         # not a wrong cache write (that's keyed by what actually ran).
         self.assertEqual(tr.resolve_engine_info(None, "base")["engine"], "whisper-py")
+
+
+class WhisperPyAvailableMemoizationTests(unittest.TestCase):
+    """resolve_engine_info runs on every transcribe request — the
+    availability check behind it has to find_spec (not import, which would
+    pull in torch) and compute that only once per process."""
+
+    def setUp(self):
+        tr._whisper_py_available.cache_clear()
+        self._orig_find_spec = importlib.util.find_spec
+        self.calls = 0
+
+        def counting_find_spec(name, *a, **k):
+            self.calls += 1
+            return self._orig_find_spec(name, *a, **k)
+
+        importlib.util.find_spec = counting_find_spec
+
+    def tearDown(self):
+        importlib.util.find_spec = self._orig_find_spec
+        tr._whisper_py_available.cache_clear()
+
+    def test_find_spec_runs_at_most_once_across_repeated_calls(self):
+        for _ in range(5):
+            tr._whisper_py_available()
+        self.assertEqual(self.calls, 1)
 
 
 class WhisperCppModelAliasTests(unittest.TestCase):

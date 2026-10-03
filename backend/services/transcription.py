@@ -8,8 +8,10 @@ Produces word-level timestamps with speaker labels by:
 """
 
 import json
+import functools
 import hashlib
 import http.client
+import importlib.util
 import os
 import shutil
 import sys
@@ -577,6 +579,28 @@ def _attach_speakers_and_faces(
     return base
 
 
+@functools.lru_cache(maxsize=1)
+def _whisper_py_available() -> bool:
+    """Cheap availability check for the openai-whisper package.
+
+    `import whisper` doesn't just find the module — it executes it, which
+    transitively imports torch and costs hundreds of ms to seconds.
+    resolve_engine_info runs this on every single transcribe request (it's
+    a cache-key prediction, not an actual transcription), so it uses
+    find_spec — which only locates the module, never runs its code — and
+    memoizes the result, since whether the package is installed can't
+    change within a process's lifetime.
+    """
+    try:
+        return importlib.util.find_spec("whisper") is not None
+    except (ImportError, ValueError):
+        # find_spec itself can raise if "whisper" is already in sys.modules
+        # under a module object missing __spec__ (a malformed stand-in, not
+        # a real install state) — fall back to treating that as available
+        # rather than crashing a cache-key prediction over it.
+        return True
+
+
 def _resolve_whisper_py_fallback(requested: Optional[str], model_size: str, probe_model: bool):
     """Single source of truth for "should an unset whisper-py request fall
     back to whispercpp instead": the one decision resolve_engine_info and
@@ -584,20 +608,29 @@ def _resolve_whisper_py_fallback(requested: Optional[str], model_size: str, prob
     from one's answer misses the transcript the other actually wrote.
 
     probe_model=False (resolve_engine_info — a cache-key prediction made on
-    every request, so it can't afford to load model weights) only checks
-    `import whisper`. probe_model=True (transcribe_file, about to actually
-    transcribe) also loads the model, catching the one case the cheap check
-    can't: import succeeds but load_model fails. That gap means a cache
-    lookup built from resolve_engine_info's prediction can still miss once
-    in that rarer case, before the result is written under the engine
-    transcribe_file actually ran with.
+    every request, so it can't afford to load model weights, or even
+    import whisper for real — see _whisper_py_available) only checks
+    whether the package is installed. probe_model=True (transcribe_file,
+    about to actually transcribe) does the real import and loads the
+    model, catching the one case the cheap check can't: the package is
+    present but load_model fails. That gap means a cache lookup built from
+    resolve_engine_info's prediction can still miss once in that rarer
+    case, before the result is written under the engine transcribe_file
+    actually ran with.
 
     Returns (fall_back_to_whispercpp, loaded_model_or_None, error_or_None).
     """
+    if not probe_model:
+        if _whisper_py_available():
+            return False, None, None
+        if not requested and _whispercpp_ready(model_size):
+            return True, None, None
+        return False, None, None
+
     try:
         import whisper
 
-        model = whisper.load_model(model_size) if probe_model else None
+        model = whisper.load_model(model_size)
         return False, model, None
     except Exception as e:
         if not requested and _whispercpp_ready(model_size):
