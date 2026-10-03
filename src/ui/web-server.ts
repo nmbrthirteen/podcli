@@ -4442,6 +4442,7 @@ app.post("/api/mcp/export", async (req, res) => {
       ? req.body.clean_fillers !== false
       : uiState.settings.cleanFillers !== false;
   const keepCaptionOverlay = req.body.keep_caption_overlay === true;
+  const writeCleanVariant = req.body.write_clean_variant === true;
 
   if (!videoPath || !existsSync(videoPath)) {
     res.status(400).json({ error: "Video file not found" });
@@ -4525,6 +4526,7 @@ app.post("/api/mcp/export", async (req, res) => {
         intro_path: introPath,
         clean_fillers: cleanFillers,
         keep_caption_overlay: keepCaptionOverlay,
+        write_clean_variant: writeCleanVariant,
         face_map: uiState.transcript?.face_map,
       },
       (event) => {

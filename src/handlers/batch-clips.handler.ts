@@ -106,6 +106,12 @@ export const batchClipsToolDef = {
           "Keep ProRes 4444 alpha caption overlays for DaVinci Resolve export. Default: false.",
         default: false,
       },
+      write_clean_variant: {
+        type: "boolean",
+        description:
+          "Also render a clean (no burned captions) variant per clip, with the same audio, loudness, and intro/outro. Returns clean_output_path per clip. Default: false.",
+        default: false,
+      },
       transcript_words: {
         type: "array",
         description:
@@ -176,6 +182,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     format: batchFormat,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
+    write_clean_variant: input.write_clean_variant === true,
     logo_path: settings.logoPath || null,
     ...(s.segments && s.segments.length > 0 && { keep_segments: s.segments }),
   });
@@ -222,6 +229,9 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   if (input.keep_caption_overlay === true) {
     clips = clips.map((c) => ({ ...c, keep_caption_overlay: c.keep_caption_overlay ?? true }));
   }
+  if (input.write_clean_variant === true) {
+    clips = clips.map((c) => ({ ...c, write_clean_variant: c.write_clean_variant ?? true }));
+  }
 
   for (let i = 0; i < clips.length; i++) {
     const rangeError = validateClipRange(
@@ -252,6 +262,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
           outro_path: settings.outroPath || null,
           intro_path: settings.introPath || null,
           keep_caption_overlay: input.keep_caption_overlay === true,
+          write_clean_variant: input.write_clean_variant === true,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
@@ -281,6 +292,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     clean_fillers: cleanFillers,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
+    write_clean_variant: input.write_clean_variant === true,
     output_dir: paths.output,
     logo_path: settings.logoPath || null,
     outro_path: settings.outroPath || null,

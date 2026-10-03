@@ -530,6 +530,13 @@ export function createServer(): McpServer {
         .describe(
           "Keep ProRes 4444 alpha caption overlay beside the render (for DaVinci Resolve export). Returns caption_overlay_path and cropped_source_path.",
         ),
+      write_clean_variant: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Also render a second file with the same audio, loudness, and intro/outro but no burned captions. Returns clean_output_path.",
+        ),
     },
     async (params) => {
       try {
@@ -628,6 +635,7 @@ export function createServer(): McpServer {
                   format: params.format || "vertical",
                   allow_ass_fallback: params.allow_ass_fallback === true,
                   keep_caption_overlay: params.keep_caption_overlay === true,
+                  write_clean_variant: params.write_clean_variant === true,
                   ...(keepSegments && { segments: keepSegments }),
                 },
               ],
@@ -638,6 +646,7 @@ export function createServer(): McpServer {
                 clean_fillers: params.clean_fillers,
               }),
               keep_caption_overlay: params.keep_caption_overlay === true,
+              write_clean_variant: params.write_clean_variant === true,
             }),
           });
           if (webRes.ok) {
@@ -756,11 +765,18 @@ export function createServer(): McpServer {
             format: z.enum(["vertical", "horizontal", "square"]).optional(),
             allow_ass_fallback: z.boolean().optional(),
             keep_caption_overlay: z.boolean().optional(),
+            write_clean_variant: z.boolean().optional(),
           }),
         )
         .optional()
         .describe(
           "Array of clips to create. Auto-loaded from suggestions if omitted.",
+        ),
+      write_clean_variant: z
+        .boolean()
+        .optional()
+        .describe(
+          "Also render a clean (no burned captions) variant per clip, batch-level default; per-clip overrides. Returns clean_output_path.",
         ),
       keep_caption_overlay: z
         .boolean()
@@ -882,6 +898,7 @@ export function createServer(): McpServer {
                 clean_fillers: params.clean_fillers,
               }),
               keep_caption_overlay: params.keep_caption_overlay === true,
+              write_clean_variant: params.write_clean_variant === true,
             }),
           });
           if (webRes.ok) {

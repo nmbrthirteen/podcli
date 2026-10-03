@@ -136,6 +136,12 @@ export const createClipToolDef = {
           "Keep ProRes 4444 alpha caption overlay for DaVinci Resolve. Returns caption_overlay_path and cropped_source_path.",
         default: false,
       },
+      write_clean_variant: {
+        type: "boolean",
+        description:
+          "Also render a second file with the same audio, loudness, and intro/outro but no burned captions. Returns clean_output_path.",
+        default: false,
+      },
     },
     required: [],
   },
@@ -220,6 +226,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     clean_fillers: input.clean_fillers ?? settings.cleanFillers ?? true,
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
+    write_clean_variant: input.write_clean_variant === true,
     logo_path: logoPath,
     outro_path: outroPath,
     intro_path: introPath,
@@ -240,6 +247,9 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     file_size_mb: data.file_size_mb,
     content_type: suggestion?.content_type,
     transcript_slice: sliceTranscript(transcriptWords, startSecond, endSecond),
+    ...(data.srt_path && { srt_path: data.srt_path }),
+    ...(data.vtt_path && { vtt_path: data.vtt_path }),
+    ...(data.clean_output_path && { clean_output_path: data.clean_output_path }),
     message: `Clip created successfully! ${data.duration}s, ${data.file_size_mb}MB`,
   });
 }

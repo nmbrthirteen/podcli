@@ -34,6 +34,7 @@ from services.video_processor import (
 )
 from services.video_cut import probe_has_audio_stream, verify_full_decode
 from services.glyph_coverage import check_caption_font_coverage
+from services.subtitle_export import write_sidecars
 from config.caption_styles import get_style
 from services.formats import get_format
 
@@ -895,6 +896,7 @@ def generate_clip(
     allow_ass_fallback: bool = False,
     use_ass_captions: bool = False,
     keep_caption_overlay: bool = False,
+    write_clean_variant: bool = False,
     topic: Optional[dict] = None,
     progress: Optional[dict] = None,
     cards: Optional[list] = None,
@@ -1194,6 +1196,9 @@ def generate_clip(
             logo_path or topic or progress or cards or theme
             or (name_card and name_card.get("title"))
         )
+        # Default so the sidecar/clean-variant step below has something to
+        # check even when neither branch below runs (no transcript, no overlay).
+        clip_words = []
         if not captions and wants_overlay:
             print("  drawing the overlay without captions", flush=True)
 
@@ -1447,6 +1452,45 @@ def generate_clip(
             os.remove(final_path)
             raise RuntimeError(f"Render produced an undecodable output: {decode_error}")
 
+        # Sidecar subtitles: the same words already burned into the video,
+        # on the same playback clock as the delivered file (clip-local time,
+        # shifted past whatever intro got prepended).
+        output_base, _ = os.path.splitext(final_path)
+        retimed_words = [
+            {
+                "word": w.get("word", ""),
+                "start": round(max(0.0, w["start"] - caption_time_offset + intro_offset), 3),
+                "end": round(max(0.0, w["end"] - caption_time_offset + intro_offset), 3),
+            }
+            for w in clip_words
+        ]
+        sidecar_paths = write_sidecars(retimed_words, output_base)
+
+        # Optional clean variant: the same audio, loudness, and intro/outro,
+        # minus burned captions — built from the cropped (pre-caption)
+        # source with the identical normalize_audio/concat_outro calls the
+        # main render used, so the two files only differ in the overlay.
+        clean_output_path = None
+        if write_clean_variant and os.path.exists(cropped_path):
+            clean_normalized_path = os.path.join(work_dir, "clean_normalized.mp4")
+            normalize_audio(cropped_path, clean_normalized_path)
+            clean_video_path = clean_normalized_path
+
+            if intro_path and os.path.exists(intro_path):
+                clean_with_intro_path = os.path.join(work_dir, "clean_with_intro.mp4")
+                concat_outro(intro_scaled, clean_video_path, clean_with_intro_path,
+                             crossfade_duration=bookend_fade)
+                clean_video_path = clean_with_intro_path
+
+            if outro_path and os.path.exists(outro_path):
+                clean_with_outro_path = os.path.join(work_dir, "clean_with_outro.mp4")
+                concat_outro(clean_video_path, outro_path, clean_with_outro_path,
+                             crossfade_duration=bookend_fade)
+                clean_video_path = clean_with_outro_path
+
+            clean_output_path = f"{output_base}_clean.mp4"
+            shutil.copy2(clean_video_path, clean_output_path)
+
         # Get file size
         file_size = os.path.getsize(final_path)
         file_size_mb = round(file_size / (1024 * 1024), 2)
@@ -1467,7 +1511,10 @@ def generate_clip(
             "caption_style": caption_style,
             "crop_strategy": crop_strategy,
             "format": spec.name,
+            **sidecar_paths,
         }
+        if clean_output_path:
+            out["clean_output_path"] = clean_output_path
         warnings = [w for w in (caption_warning, length_warning, glyph_warning) if w]
         if warnings:
             out["warning"] = "; ".join(warnings)

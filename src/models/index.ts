@@ -91,6 +91,11 @@ export interface ClipResult {
   format?: Format;
   caption_overlay_path?: string;
   cropped_source_path?: string;
+  /** Sidecar subtitles, retimed to the exported file's own playback clock. */
+  srt_path?: string;
+  vtt_path?: string;
+  /** Same audio/loudness/intro/outro, without burned captions. */
+  clean_output_path?: string;
 }
 
 export interface SuggestedClip {
@@ -192,6 +197,7 @@ export interface CreateClipInput {
   clean_fillers?: boolean;
   allow_ass_fallback?: boolean;
   keep_caption_overlay?: boolean;
+  write_clean_variant?: boolean;
 }
 
 export interface BatchClipSpec {
@@ -205,6 +211,7 @@ export interface BatchClipSpec {
   intro_path?: string | null;
   allow_ass_fallback?: boolean;
   keep_caption_overlay?: boolean;
+  write_clean_variant?: boolean;
   keep_segments?: Array<{ start: number; end: number }>;
 }
 
@@ -218,6 +225,7 @@ export interface BatchClipsInput {
   clean_fillers?: boolean;
   allow_ass_fallback?: boolean;
   keep_caption_overlay?: boolean;
+  write_clean_variant?: boolean;
   /**
    * When true, POST to the Web UI's /api/batch-clips and return a job_id
    * immediately so the caller can poll job_status and emit live progress.
@@ -244,6 +252,9 @@ export interface BatchClipsResult {
     title?: string;
     file_size_mb?: number;
     duration?: number;
+    srt_path?: string;
+    vtt_path?: string;
+    clean_output_path?: string;
     error?: string;
   }>;
 }
