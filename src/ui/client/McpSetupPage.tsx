@@ -5,6 +5,13 @@ import CopyButton from "./CopyButton";
 
 type StatusKind = "warn" | "ok" | "err";
 
+// macOS installs live under "~/Library/Application Support/...", so the
+// server path reliably contains a space. Wrapped in single quotes (with any
+// embedded single quote escaped) it pastes safely into sh/bash/zsh.
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 const STATUS_STYLE: Record<StatusKind, React.CSSProperties> = {
   ok: { background: "var(--green-subtle)", color: "var(--green)", border: "1px solid var(--green-border)" },
   err: { background: "var(--red-subtle)", color: "var(--red)", border: "1px solid var(--red-border)" },
@@ -91,7 +98,7 @@ export default function McpSetupPage() {
             <span>terminal</span>
             <CopyButton className="btn btn-ghost btn-sm" style={{ padding: "3px 10px" }} getText={() => codexRef.current?.innerText ?? ""} />
           </div>
-          <pre ref={codexRef}>{`codex mcp add podcli -- node ${serverPath}`}</pre>
+          <pre ref={codexRef}>{`codex mcp add podcli -- node ${shellQuote(serverPath)}`}</pre>
         </div>
       </div>
     </div>
