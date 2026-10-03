@@ -48,6 +48,32 @@ function depsReturning(opts: {
 }
 
 describe("listChannelUploads", () => {
+  it("normalizes a bare channel root to the /videos tab before calling yt-dlp", async () => {
+    const seenArgs: string[][] = [];
+    const deps: MineChannelDeps = {
+      runYtDlp: async (args) => {
+        seenArgs.push(args);
+        return { stdout: FLAT_PLAYLIST_STDOUT, stderr: "", code: 0 };
+      },
+      fetchText: async () => "",
+      minedVideoIds: async () => new Set(),
+    };
+    await listChannelUploads(deps, { channel_url: "https://www.youtube.com/@deeptechdecodedai" });
+    expect(seenArgs[0].at(-1)).toBe("https://www.youtube.com/@deeptechdecodedai/videos");
+  });
+
+  it("drops tab/sub-playlist entries that carry no video id of their own", async () => {
+    const stdout = [
+      JSON.stringify({ title: "Shorts", _type: "playlist" }),
+      JSON.stringify({ id: "vid1", title: "Episode 1", duration: 3600 }),
+    ].join("\n");
+    const uploads = await listChannelUploads(depsReturning({ stdout }), {
+      channel_url: "https://www.youtube.com/@example/videos",
+    });
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0].video_id).toBe("vid1");
+  });
+
   it("parses one JSON object per line into channel uploads", async () => {
     const uploads = await listChannelUploads(depsReturning({ stdout: FLAT_PLAYLIST_STDOUT }), {
       channel_url: "https://www.youtube.com/@example/videos",
@@ -123,5 +149,15 @@ describe("mineVideoCaptions", () => {
         video_url: "https://youtu.be/gone",
       }),
     ).rejects.toThrow("video unavailable");
+  });
+
+  it("throws when yt-dlp resolves the url to a different video than requested", async () => {
+    // VIDEO_INFO_WITH_ORIGINAL_TRACK is for vid1; asking with a url naming vid2
+    // (e.g. a playlist/mix redirect) must not be returned as if it were vid2's captions.
+    await expect(
+      mineVideoCaptions(depsReturning({ stdout: VIDEO_INFO_WITH_ORIGINAL_TRACK, captionText: FIXTURE_VTT }), {
+        video_url: "https://www.youtube.com/watch?v=vid2",
+      }),
+    ).rejects.toThrow(/resolved .* to video vid1, not the requested vid2/);
   });
 });

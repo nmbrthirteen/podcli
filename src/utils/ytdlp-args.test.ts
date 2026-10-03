@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildYtDlpArgs, buildChannelListArgs, buildVideoInfoArgs, isCookieBrowser, ytDlpHint } from "./ytdlp-args.js";
+import {
+  buildYtDlpArgs,
+  buildChannelListArgs,
+  buildVideoInfoArgs,
+  extractYouTubeVideoId,
+  isCookieBrowser,
+  isHttpUrl,
+  normalizeChannelUrl,
+  ytDlpHint,
+} from "./ytdlp-args.js";
 
 const base = {
   url: "https://example.com/watch?v=abc",
@@ -24,6 +33,12 @@ describe("buildYtDlpArgs", () => {
 
   it("puts the url last so it cannot be read as a flag value", () => {
     expect(buildYtDlpArgs(base).at(-1)).toBe(base.url);
+  });
+
+  it("puts -- right before the url so a dash-prefixed value can't be read as a flag", () => {
+    const args = buildYtDlpArgs(base);
+    expect(args.at(-2)).toBe("--");
+    expect(args.at(-1)).toBe(base.url);
   });
 
   it("omits cookies and extractor args when unset", () => {
@@ -86,6 +101,12 @@ describe("buildChannelListArgs", () => {
   it("puts the channel url last", () => {
     expect(buildChannelListArgs({ channelUrl }).at(-1)).toBe(channelUrl);
   });
+
+  it("puts -- right before the channel url", () => {
+    const args = buildChannelListArgs({ channelUrl });
+    expect(args.at(-2)).toBe("--");
+    expect(args.at(-1)).toBe(channelUrl);
+  });
 });
 
 describe("buildVideoInfoArgs", () => {
@@ -98,6 +119,92 @@ describe("buildVideoInfoArgs", () => {
   it("dumps JSON rather than a human-readable report", () => {
     const args = buildVideoInfoArgs({ videoUrl });
     expect(args).toContain("--dump-json");
+  });
+
+  it("puts -- right before the video url", () => {
+    const args = buildVideoInfoArgs({ videoUrl });
+    expect(args.at(-2)).toBe("--");
+    expect(args.at(-1)).toBe(videoUrl);
+  });
+
+  it("refuses to follow a playlist/mix to its first entry", () => {
+    expect(buildVideoInfoArgs({ videoUrl })).toContain("--no-playlist");
+  });
+});
+
+describe("extractYouTubeVideoId", () => {
+  it("reads the v= query param off a watch url", () => {
+    expect(extractYouTubeVideoId("https://www.youtube.com/watch?v=abc123")).toBe("abc123");
+  });
+
+  it("reads the id off a youtu.be short url", () => {
+    expect(extractYouTubeVideoId("https://youtu.be/abc123")).toBe("abc123");
+  });
+
+  it("reads the id off shorts/embed/live path shapes", () => {
+    expect(extractYouTubeVideoId("https://www.youtube.com/shorts/abc123")).toBe("abc123");
+    expect(extractYouTubeVideoId("https://www.youtube.com/embed/abc123")).toBe("abc123");
+    expect(extractYouTubeVideoId("https://www.youtube.com/live/abc123")).toBe("abc123");
+  });
+
+  it("returns null when no video id is present, e.g. a channel url", () => {
+    expect(extractYouTubeVideoId("https://www.youtube.com/@example/videos")).toBeNull();
+  });
+});
+
+describe("normalizeChannelUrl", () => {
+  it("pins a handle channel root to the videos tab", () => {
+    expect(normalizeChannelUrl("https://www.youtube.com/@deeptechdecodedai")).toBe(
+      "https://www.youtube.com/@deeptechdecodedai/videos",
+    );
+  });
+
+  it("pins a trailing-slash handle channel root to the videos tab", () => {
+    expect(normalizeChannelUrl("https://www.youtube.com/@deeptechdecodedai/")).toBe(
+      "https://www.youtube.com/@deeptechdecodedai/videos",
+    );
+  });
+
+  it("pins a /channel/<id> root to the videos tab", () => {
+    expect(normalizeChannelUrl("https://www.youtube.com/channel/UC12345")).toBe(
+      "https://www.youtube.com/channel/UC12345/videos",
+    );
+  });
+
+  it("leaves an already-specific tab url unchanged", () => {
+    expect(normalizeChannelUrl("https://www.youtube.com/@example/shorts")).toBe(
+      "https://www.youtube.com/@example/shorts",
+    );
+    expect(normalizeChannelUrl("https://www.youtube.com/@example/videos")).toBe(
+      "https://www.youtube.com/@example/videos",
+    );
+  });
+
+  it("leaves a non-channel url (playlist, watch) unchanged", () => {
+    const playlistUrl = "https://www.youtube.com/playlist?list=PL123";
+    expect(normalizeChannelUrl(playlistUrl)).toBe(playlistUrl);
+  });
+
+  it("returns the input unchanged when it isn't a valid url", () => {
+    expect(normalizeChannelUrl("not a url")).toBe("not a url");
+  });
+});
+
+describe("isHttpUrl", () => {
+  it("accepts http and https urls", () => {
+    expect(isHttpUrl("https://www.youtube.com/watch?v=abc123")).toBe(true);
+    expect(isHttpUrl("http://example.com")).toBe(true);
+  });
+
+  it("rejects a dash-prefixed value that would be read as a yt-dlp flag", () => {
+    expect(isHttpUrl("--config-locations=/tmp/evil.conf")).toBe(false);
+  });
+
+  it("rejects non-http schemes and non-strings", () => {
+    expect(isHttpUrl("file:///etc/passwd")).toBe(false);
+    expect(isHttpUrl("not a url")).toBe(false);
+    expect(isHttpUrl(undefined)).toBe(false);
+    expect(isHttpUrl(7)).toBe(false);
   });
 });
 

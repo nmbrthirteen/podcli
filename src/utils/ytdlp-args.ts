@@ -25,6 +25,20 @@ export function isCookieBrowser(value: unknown): value is CookieBrowser {
   return typeof value === "string" && (COOKIE_BROWSERS as readonly string[]).includes(value);
 }
 
+// A bare z.string() lets a value like "--config-locations=/tmp/evil.conf" through
+// as a channel/video url, and yt-dlp reads it as another flag rather than a
+// positional argument, one that can point at a config carrying --exec. Only
+// http(s) URLs are legitimate inputs here.
+export function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export interface YtDlpOptions {
   url: string;
   outputDir: string;
@@ -71,7 +85,9 @@ export function buildYtDlpArgs(opts: YtDlpOptions): string[] {
     args.push("--newline", "--progress", "--progress-template", opts.progressTemplate);
   }
   args.push("--print", "after_move:podcli-filepath:%(filepath)s");
-  args.push(opts.url);
+  // "--" forces everything after it to be read positionally, so a url that
+  // starts with a dash can never be parsed as another flag.
+  args.push("--", opts.url);
   return args;
 }
 
@@ -79,6 +95,32 @@ export interface YtDlpListOptions {
   channelUrl: string;
   limit?: number;
   cookiesFromBrowser?: string;
+}
+
+const CHANNEL_TABS = ["videos", "shorts", "streams", "playlists", "live", "podcasts", "releases"];
+
+// A bare channel root (youtube.com/@handle, /channel/ID, /c/name, /user/name)
+// lists the channel's main feed, which YouTube mixes long-form uploads and
+// Shorts into. Pinning to the /videos tab keeps the listing to uploads only,
+// matching what the tool description promises. Already-specific urls
+// (a tab, a playlist, a single video) pass through unchanged.
+export function normalizeChannelUrl(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  const isChannelRoot = segments.length === 1 && segments[0].startsWith("@");
+  const isChannelIdRoot = segments.length === 2 && ["channel", "c", "user"].includes(segments[0]);
+  if (!isChannelRoot && !isChannelIdRoot) return url;
+
+  const lastSegment = segments.at(-1) ?? "";
+  if (CHANNEL_TABS.includes(lastSegment)) return url;
+
+  parsed.pathname = `${parsed.pathname.replace(/\/+$/, "")}/videos`;
+  return parsed.toString();
 }
 
 // One JSON object per line, tab would collide with titles that contain one.
@@ -92,7 +134,7 @@ export function buildChannelListArgs(opts: YtDlpListOptions): string[] {
   if (opts.limit) args.push("--playlist-end", String(opts.limit));
   if (opts.cookiesFromBrowser) args.push("--cookies-from-browser", opts.cookiesFromBrowser);
   args.push("--print", "%(.{id,title,duration,upload_date,url})j");
-  args.push(opts.channelUrl);
+  args.push("--", opts.channelUrl);
   return args;
 }
 
@@ -108,9 +150,32 @@ export function buildVideoInfoArgs(opts: YtDlpVideoInfoOptions): string[] {
   const args = ["-m", "yt_dlp"];
   args.push("--ignore-config", "--no-config-locations", "--no-plugin-dirs");
   args.push("--skip-download", "--no-warnings");
+  // A url pointing at a playlist or a channel's "radio" mix would otherwise
+  // dump the first entry's info instead of erroring, silently mining the
+  // wrong video's captions.
+  args.push("--no-playlist");
   if (opts.cookiesFromBrowser) args.push("--cookies-from-browser", opts.cookiesFromBrowser);
-  args.push("--dump-json", opts.videoUrl);
+  args.push("--dump-json", "--", opts.videoUrl);
   return args;
+}
+
+// Pulls the video id out of the handful of URL shapes yt-dlp/YouTube use, so
+// the id yt-dlp actually resolved can be checked against what was asked for.
+export function extractYouTubeVideoId(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const vParam = parsed.searchParams.get("v");
+    if (vParam) return vParam;
+    const pathMatch = parsed.pathname.match(/\/(?:shorts|embed|live)\/([^/?]+)/);
+    if (pathMatch) return pathMatch[1];
+    if (parsed.hostname === "youtu.be") {
+      const id = parsed.pathname.slice(1).split("/")[0];
+      return id || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** Turns a yt-dlp failure into one line naming what to do about it. */

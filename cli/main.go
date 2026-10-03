@@ -782,11 +782,22 @@ func backendStamp(root string) string {
 	}
 }
 
+// Check severity. "warn" surfaces a problem without counting toward
+// doctor's exit code. Used for MCP registration, which is a per-folder
+// (Claude) or optional (Codex-only users) setting, not evidence anything is
+// broken.
+const (
+	levelOK   = "ok"
+	levelWarn = "warn"
+	levelFail = "fail"
+)
+
 // doctorCheck is one pass/fail probe doctor actually runs, as opposed to the
 // path/engine-resolution report above it, which only states what was found.
 type doctorCheck struct {
 	Name   string `json:"name"`
 	OK     bool   `json:"ok"`
+	Level  string `json:"level"` // "ok", "warn", or "fail" - only "fail" counts toward doctor's exit code
 	Detail string `json:"detail"`
 }
 
@@ -818,19 +829,19 @@ func runCheck(name, hermetic, pathFallback string, args ...string) doctorCheck {
 		}
 	}
 	if bin == "" {
-		return doctorCheck{Name: name, OK: false, Detail: "not found (hermetic or PATH)"}
+		return doctorCheck{Name: name, OK: false, Level: levelFail, Detail: "not found (hermetic or PATH)"}
 	}
 	out, err := exec.Command(bin, args...).CombinedOutput()
 	if err != nil {
-		return doctorCheck{Name: name, OK: false, Detail: fmt.Sprintf("%s (%s): %v: %s", bin, source, err, firstLine(string(out)))}
+		return doctorCheck{Name: name, OK: false, Level: levelFail, Detail: fmt.Sprintf("%s (%s): %v: %s", bin, source, err, firstLine(string(out)))}
 	}
-	return doctorCheck{Name: name, OK: true, Detail: fmt.Sprintf("%s (%s): %s", bin, source, firstLine(string(out)))}
+	return doctorCheck{Name: name, OK: true, Level: levelOK, Detail: fmt.Sprintf("%s (%s): %s", bin, source, firstLine(string(out)))}
 }
 
 func pythonBackendCheck() doctorCheck {
 	root, ok := engine.BackendRoot()
 	if !ok {
-		return doctorCheck{Name: "python backend", OK: false, Detail: "backend not found (set PODCLI_BACKEND or run inside the repo)"}
+		return doctorCheck{Name: "python backend", OK: false, Level: levelFail, Detail: "backend not found (set PODCLI_BACKEND or run inside the repo)"}
 	}
 	// A representative sample, not every module: enough to catch "the
 	// interpreter can't even import the backend's own services" without
@@ -839,9 +850,9 @@ func pythonBackendCheck() doctorCheck {
 	script := fmt.Sprintf("import sys; sys.path.insert(0, %q); import %s", root, strings.Join(modules, ", "))
 	out, err := exec.Command(engine.Python(), "-c", script).CombinedOutput()
 	if err != nil {
-		return doctorCheck{Name: "python backend", OK: false, Detail: fmt.Sprintf("%s: %v: %s", engine.Python(), err, firstLine(string(out)))}
+		return doctorCheck{Name: "python backend", OK: false, Level: levelFail, Detail: fmt.Sprintf("%s: %v: %s", engine.Python(), err, firstLine(string(out)))}
 	}
-	return doctorCheck{Name: "python backend", OK: true, Detail: fmt.Sprintf("%s imports %s", engine.Python(), strings.Join(modules, ", "))}
+	return doctorCheck{Name: "python backend", OK: true, Level: levelOK, Detail: fmt.Sprintf("%s imports %s", engine.Python(), strings.Join(modules, ", "))}
 }
 
 // modelHashCheck reports ok=false when the file is absent: an unprovisioned
@@ -852,12 +863,12 @@ func modelHashCheck(name, p, want string) (doctorCheck, bool) {
 	}
 	got, err := provision.Sha256File(p)
 	if err != nil {
-		return doctorCheck{Name: name, OK: false, Detail: fmt.Sprintf("could not hash %s: %v", p, err)}, true
+		return doctorCheck{Name: name, OK: false, Level: levelFail, Detail: fmt.Sprintf("could not hash %s: %v", p, err)}, true
 	}
 	if got != want {
-		return doctorCheck{Name: name, OK: false, Detail: fmt.Sprintf("%s hash mismatch: got %s, want %s", p, got, want)}, true
+		return doctorCheck{Name: name, OK: false, Level: levelFail, Detail: fmt.Sprintf("%s hash mismatch: got %s, want %s", p, got, want)}, true
 	}
-	return doctorCheck{Name: name, OK: true, Detail: p}, true
+	return doctorCheck{Name: name, OK: true, Level: levelOK, Detail: p}, true
 }
 
 func modelChecks() []doctorCheck {
@@ -888,20 +899,62 @@ func modelChecks() []doctorCheck {
 	return checks
 }
 
+// mcpRegistrationChecks reports registration status for whichever agent
+// CLIs are on PATH. Registration is per-folder for Claude and optional for
+// Codex-only users, so an unregistered folder is normal, not broken: these
+// checks are warnings and don't count toward doctor's exit code, unless
+// none of the detected agents are registered anywhere this can see, in
+// which case nothing would actually work and that's a real failure.
 func mcpRegistrationChecks() []doctorCheck {
 	var checks []doctorCheck
 	if _, err := exec.LookPath("claude"); err == nil {
-		if mcpRegisteredToSelf() {
-			checks = append(checks, doctorCheck{Name: "mcp registration (Claude)", OK: true, Detail: "registered"})
-		} else {
-			checks = append(checks, doctorCheck{Name: "mcp registration (Claude)", OK: false, Detail: "not registered for this folder - run `podcli mcp install` here"})
-		}
+		ok := mcpRegisteredToSelf()
+		checks = append(checks, doctorCheck{
+			Name:   "mcp registration (Claude)",
+			OK:     ok,
+			Detail: pick(ok, "registered", "not registered for this folder - run `podcli mcp install` here"),
+		})
 	}
 	if _, err := exec.LookPath("codex"); err == nil {
-		if codexMCPRegisteredToSelf() {
-			checks = append(checks, doctorCheck{Name: "mcp registration (Codex)", OK: true, Detail: "registered"})
-		} else {
-			checks = append(checks, doctorCheck{Name: "mcp registration (Codex)", OK: false, Detail: "not registered - run `podcli mcp install`"})
+		ok := codexMCPRegisteredToSelf()
+		checks = append(checks, doctorCheck{
+			Name:   "mcp registration (Codex)",
+			OK:     ok,
+			Detail: pick(ok, "registered", "not registered - run `podcli mcp install`"),
+		})
+	}
+	return levelRegistrationChecks(checks)
+}
+
+func pick(cond bool, ifTrue, ifFalse string) string {
+	if cond {
+		return ifTrue
+	}
+	return ifFalse
+}
+
+// levelRegistrationChecks turns the OK/not-OK result of each detected
+// agent's registration check into a severity: registered is "ok"; an
+// unregistered agent is just "warn" as long as at least one detected agent
+// is registered somewhere, since the MCP tools work through that one. If
+// none of the detected agents are registered anywhere, nothing would
+// actually work, which escalates every one of them to "fail".
+func levelRegistrationChecks(checks []doctorCheck) []doctorCheck {
+	anyRegistered := false
+	for _, c := range checks {
+		if c.OK {
+			anyRegistered = true
+			break
+		}
+	}
+	for i := range checks {
+		switch {
+		case checks[i].OK:
+			checks[i].Level = levelOK
+		case anyRegistered:
+			checks[i].Level = levelWarn
+		default:
+			checks[i].Level = levelFail
 		}
 	}
 	return checks
@@ -917,6 +970,18 @@ func runDoctorChecks() []doctorCheck {
 	checks = append(checks, modelChecks()...)
 	checks = append(checks, mcpRegistrationChecks()...)
 	return checks
+}
+
+// checksAllOK is doctor's exit-code rule: only a "fail" level counts.
+// "warn" (currently just MCP registration) surfaces in the output without
+// turning an otherwise-healthy install into a reported failure.
+func checksAllOK(checks []doctorCheck) bool {
+	for _, c := range checks {
+		if c.Level == levelFail {
+			return false
+		}
+	}
+	return true
 }
 
 func doctor(args []string) int {
@@ -939,12 +1004,7 @@ func doctor(args []string) int {
 	}
 
 	checks := runDoctorChecks()
-	allOK := true
-	for _, c := range checks {
-		if !c.OK {
-			allOK = false
-		}
-	}
+	allOK := checksAllOK(checks)
 
 	if asJSON {
 		report := doctorReport{Version: Version, Paths: pathInfo, Checks: checks, OK: allOK}
@@ -1002,7 +1062,10 @@ func doctor(args []string) int {
 	fmt.Println("\nChecks")
 	for _, c := range checks {
 		mark := "OK  "
-		if !c.OK {
+		switch c.Level {
+		case levelWarn:
+			mark = "WARN"
+		case levelFail:
 			mark = "FAIL"
 		}
 		fmt.Printf("  [%s] %-28s %s\n", mark, c.Name, c.Detail)

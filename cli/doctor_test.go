@@ -105,3 +105,57 @@ func TestModelChecksFlagsAHashMismatch(t *testing.T) {
 		t.Fatalf("expected a check for the present-but-wrong base model, got %+v", checks)
 	}
 }
+
+func TestLevelRegistrationChecksWarnsWhenAtLeastOneAgentIsRegistered(t *testing.T) {
+	// Claude registered, Codex not: Codex's unregistered folder is only a
+	// warning, since the MCP tools already work through Claude.
+	checks := levelRegistrationChecks([]doctorCheck{
+		{Name: "mcp registration (Claude)", OK: true},
+		{Name: "mcp registration (Codex)", OK: false},
+	})
+	if checks[0].Level != levelOK {
+		t.Fatalf("expected the registered agent to be level ok, got %+v", checks[0])
+	}
+	if checks[1].Level != levelWarn {
+		t.Fatalf("expected the unregistered agent to be a warning, not a failure, got %+v", checks[1])
+	}
+}
+
+func TestLevelRegistrationChecksFailsWhenNoAgentIsRegisteredAnywhere(t *testing.T) {
+	// Both agents detected, neither registered: nothing would actually work,
+	// so this escalates to a real failure instead of a quiet warning.
+	checks := levelRegistrationChecks([]doctorCheck{
+		{Name: "mcp registration (Claude)", OK: false},
+		{Name: "mcp registration (Codex)", OK: false},
+	})
+	for _, c := range checks {
+		if c.Level != levelFail {
+			t.Fatalf("expected every check to fail when none are registered, got %+v", c)
+		}
+	}
+}
+
+func TestLevelRegistrationChecksIsANoOpOnNoDetectedAgents(t *testing.T) {
+	if checks := levelRegistrationChecks(nil); len(checks) != 0 {
+		t.Fatalf("expected no checks when no agent CLI was detected, got %+v", checks)
+	}
+}
+
+func TestChecksAllOKIgnoresWarnLevelChecks(t *testing.T) {
+	checks := []doctorCheck{
+		{Name: "ffmpeg", OK: true, Level: levelOK},
+		{Name: "mcp registration (Codex)", OK: false, Level: levelWarn},
+	}
+	if !checksAllOK(checks) {
+		t.Fatal("a warn-level check must not flip doctor's overall result to failing")
+	}
+}
+
+func TestChecksAllOKCountsFailLevelChecks(t *testing.T) {
+	checks := []doctorCheck{
+		{Name: "ffmpeg", OK: false, Level: levelFail},
+	}
+	if checksAllOK(checks) {
+		t.Fatal("a fail-level check must flip doctor's overall result to failing")
+	}
+}

@@ -155,7 +155,17 @@ class RenderHtmlEscapingTests(unittest.TestCase):
         self.assertNotIn("</script><script>alert(1)</script>", html_out)
         # The data must still round-trip through JS correctly — check the
         # escaped marker is present instead of a raw closing tag.
-        self.assertIn("<\\/script", html_out)
+        self.assertIn("\\u003c/script", html_out)
+
+    def test_script_closing_tag_with_mixed_case_is_also_neutralized(self):
+        # A case-sensitive "</script" replacement lets "</SCRIPT>" (or any
+        # other casing) through, since HTML tag matching is case-insensitive
+        # but a literal string replace is not.
+        html_out = ec.render_html(
+            self._report("</SCRIPT><img onerror=alert(1)>", "normal"), None
+        )
+        self.assertNotIn("</SCRIPT><img onerror=alert(1)>", html_out)
+        self.assertIn("\\u003c/SCRIPT>\\u003cimg onerror=alert(1)>", html_out)
 
     def test_html_tags_in_engine_names_are_escaped(self):
         report = self._report("hello", "world")
@@ -172,6 +182,18 @@ class RenderHtmlEscapingTests(unittest.TestCase):
     def test_audio_path_is_wired_into_audio_tag(self):
         html_out = ec.render_html(self._report("a", "b"), "sample.wav")
         self.assertIn('src="sample.wav"', html_out)
+
+
+class JsonForScriptTagTests(unittest.TestCase):
+    def test_escapes_line_separator_and_paragraph_separator(self):
+        # U+2028/U+2029 are valid JSON string characters but some JS engines
+        # treat them as line terminators even inside a string literal, which
+        # can truncate the embedded JSON mid-statement.
+        out = ec._json_for_script_tag({"text": "line one line two line three"})
+        self.assertNotIn(" ", out)
+        self.assertNotIn(" ", out)
+        self.assertIn("\\u2028", out)
+        self.assertIn("\\u2029", out)
 
 
 if __name__ == "__main__":

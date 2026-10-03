@@ -1,7 +1,13 @@
 import { spawn } from "child_process";
 import { paths, pythonEnv } from "../config/paths.js";
 import { ClipsHistory } from "../services/clips-history.js";
-import { buildChannelListArgs, buildVideoInfoArgs, isCookieBrowser } from "../utils/ytdlp-args.js";
+import {
+  buildChannelListArgs,
+  buildVideoInfoArgs,
+  extractYouTubeVideoId,
+  isCookieBrowser,
+  normalizeChannelUrl,
+} from "../utils/ytdlp-args.js";
 import { selectBestCaptionTrack, parseVtt, parseJson3, cuesToWords, type CaptionTrackRef } from "../utils/captions.js";
 import type { WordTimestamp } from "../models/index.js";
 
@@ -90,7 +96,7 @@ export async function listChannelUploads(
   input: { channel_url: string; limit?: number; cookies_from_browser?: string },
 ): Promise<ChannelUpload[]> {
   const args = buildChannelListArgs({
-    channelUrl: input.channel_url,
+    channelUrl: normalizeChannelUrl(input.channel_url),
     limit: input.limit,
     cookiesFromBrowser: isCookieBrowser(input.cookies_from_browser) ? input.cookies_from_browser : undefined,
   });
@@ -103,7 +109,10 @@ export async function listChannelUploads(
     .trim()
     .split("\n")
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as { id: string; title: string; duration?: number; upload_date?: string; url?: string })
+    .map((line) => JSON.parse(line) as { id?: string; title: string; duration?: number; upload_date?: string; url?: string })
+    // A tab or sub-playlist entry (e.g. "Shorts", "Live") has no video id of
+    // its own: only real uploads do.
+    .filter((u): u is { id: string; title: string; duration?: number; upload_date?: string; url?: string } => Boolean(u.id))
     .map((u) => ({
       video_id: u.id,
       title: u.title,
@@ -137,6 +146,17 @@ export async function mineVideoCaptions(
     subtitles?: Record<string, CaptionTrackRef[]>;
     automatic_captions?: Record<string, CaptionTrackRef[]>;
   };
+
+  // --no-playlist stops a playlist/mix url from resolving to its first entry,
+  // but a url that already names one video (e.g. a stale redirect) can still
+  // resolve to a different id than the one asked for. Catch that here rather
+  // than silently returning the wrong video's captions.
+  const requestedId = extractYouTubeVideoId(input.video_url);
+  if (requestedId && requestedId !== info.id) {
+    throw new Error(
+      `yt-dlp resolved ${input.video_url} to video ${info.id}, not the requested ${requestedId}`,
+    );
+  }
 
   const minedIds = await deps.minedVideoIds();
   const alreadyMined = minedIds.has(info.id);

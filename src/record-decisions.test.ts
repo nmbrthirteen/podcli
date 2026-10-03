@@ -14,13 +14,14 @@ const savedHome = process.env.PODCLI_HOME;
 const savedData = process.env.PODCLI_DATA;
 
 let createServer: typeof import("./server.js").createServer;
+let recordDecisionsInputSchema: typeof import("./server.js").recordDecisionsInputSchema;
 let videoPath: string;
 
 beforeAll(async () => {
   process.env.PODCLI_HOME = join(tmp, "home");
   process.env.PODCLI_DATA = join(tmp, "data");
   mkdirSync(process.env.PODCLI_HOME, { recursive: true });
-  ({ createServer } = await import("./server.js"));
+  ({ createServer, recordDecisionsInputSchema } = await import("./server.js"));
   videoPath = join(tmp, "episode.mp4");
   writeFileSync(videoPath, "fake video bytes");
 });
@@ -73,5 +74,26 @@ describe("record_decisions", () => {
     const handler = getHandler("record_decisions");
     const result = await handler({ video_path: videoPath }, {});
     expect(result.content[0].text).toContain("No decisions provided");
+  });
+});
+
+describe("recordDecisionsInputSchema", () => {
+  // An unrecognized key like captions (instead of captions_enabled) must be
+  // a schema error naming the valid fields, not silently stripped and
+  // recorded as nothing, which is what z.object's default behavior does.
+  it("rejects an unknown field and names the valid fields in the error", () => {
+    const result = recordDecisionsInputSchema.safeParse({ video_path: videoPath, captions: true });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const message = result.error.issues[0].message;
+      expect(message).toContain("captions");
+      expect(message).toContain("captions_enabled");
+      expect(message).toContain("clip_count");
+    }
+  });
+
+  it("accepts a call with only recognized fields", () => {
+    const result = recordDecisionsInputSchema.safeParse({ video_path: videoPath, clip_count: 5 });
+    expect(result.success).toBe(true);
   });
 });

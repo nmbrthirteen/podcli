@@ -25,14 +25,17 @@ function collectToolNames(sources) {
     }
   }
   for (const src of sources) {
-    for (const m of src.matchAll(/server\.tool\(\s*(?:"([^"]+)"|(\w+)\.name)/g)) {
+    // server.registerTool (the non-deprecated API, needed for a strict
+    // input schema that server.tool's raw-shape shorthand can't express)
+    // takes its name the same way: as the first positional argument.
+    for (const m of src.matchAll(/server\.(?:registerTool|tool)\(\s*(?:"([^"]+)"|(\w+)\.name)/g)) {
       registrations += 1;
       if (m[1]) names.push(m[1]);
       else if (defs.has(m[2])) names.push(defs.get(m[2]));
     }
   }
   if (names.length !== registrations) {
-    console.error(`resolved ${names.length} tool names for ${registrations} server.tool( registrations`);
+    console.error(`resolved ${names.length} tool names for ${registrations} server.tool(/server.registerTool( registrations`);
     process.exit(1);
   }
   return names.sort();
