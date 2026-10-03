@@ -41,6 +41,7 @@ export interface McSource {
   role: McRole;
   person: string;
   channel_people: string[];
+  input_lut?: string;
   guessed: boolean;
   offset: number | null;
   speed: number;
@@ -95,6 +96,7 @@ export interface McOutputs {
   validation?: McValidation;
   premiere?: string;
   fcpxml?: string;
+  color_handoff?: string;
 }
 
 export interface McSession {
@@ -134,7 +136,8 @@ export interface McSessionSummary {
 
 export interface McPreviews {
   cameras: Record<string, string>;
-  looks: Record<string, string>;
+  /** Camera id to look name to still path. */
+  looks: Record<string, Record<string, string>>;
 }
 
 export interface McPreviewsResp extends McSession {

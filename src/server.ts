@@ -2234,7 +2234,7 @@ export function createServer(): McpServer {
       "Changing who is in a file or where it sits clears the cut, so run 'plan' again. 'render' skips work when nothing changed and reuses shots it already encoded. " +
       "Every render checks the finished file (frame count, a full decode, loudness and true peak) and reports outputs.validation; only a broken decode or a picture more than a frame off the cut fails it, the rest are warnings. " +
       "Other actions: 'list', 'cut' (index, source_id: swap one shot's camera), 'set_cuts' (cuts: replace the whole cut with back-to-back shots), " +
-      "'activity' (who speaks when, as spans per person), 'previews' (still frames per camera, looks: true adds color-look stills), " +
+      "'activity' (who speaks when, as spans per person), 'previews' (still frames per camera, looks: true adds every color look on every camera), " +
       "'preview' (background job: playback proxies, a mic mix and stills, for a browser editor such as podcli cloud), 'delete'. " +
       "'cloud' (background job, needs podcli login and Pro: sends previews and the edit to the podcli cloud editor; camera files stay here) and " +
       "'pull' (background job: renders the cut made in that editor from the files here). " +
@@ -2261,6 +2261,7 @@ export function createServer(): McpServer {
             role: z.enum(["camera", "mic", "ignore"]).optional(),
             person: z.string().optional().describe("Camera: a person id or 'wide'. Mic: a person id, or '' for a shared room mic"),
             channel_people: z.array(z.string()).optional().describe("Mic: one person id per channel when a recorder puts two people on L/R"),
+            input_lut: z.string().optional().describe("Camera: absolute path to a 3D .cube LUT (log to Rec.709, say) applied before the look in renders and stills; '' clears it. Exports list it in color_handoff.json beside the timeline"),
             audio_stream_index: z.number().int().min(0).optional().describe("Which audio stream in the container to use, for cameras (often MXF) that carry one mono stream per mic instead of packing channels into a single stream"),
             offset: z.number().optional().describe("Timeline seconds where this file starts, to override sync"),
             nudge: z.number().optional().describe("Seconds to shift the synced offset by"),

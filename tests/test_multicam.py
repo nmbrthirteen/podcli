@@ -1492,3 +1492,70 @@ def test_anchors_sync_a_camera_with_no_audio_and_survive_a_resync(sandbox):
     session = mc.plan_session(session)
     assert {c["source_id"] for c in session.cuts} == {cam.id}
     assert mc.render_plan(session, 30.0)
+
+
+# --- per-camera input LUTs ------------------------------------------------------------
+
+def _cube(path, size=2, entries=None, header=None):
+    lines = header if header is not None else ['TITLE "invert"', f"LUT_3D_SIZE {size}"]
+    grid = [f"{1 - r / (size - 1):.4f} {1 - g / (size - 1):.4f} {1 - b / (size - 1):.4f}"
+            for b in range(size) for g in range(size) for r in range(size)]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines + grid[:entries]) + "\n", encoding="utf-8")
+    return path
+
+
+def test_input_lut_must_be_a_complete_3d_cube(sandbox):
+    session = _bare(sandbox)
+    cam = session.sources[0]
+    good = _cube(sandbox / "luts" / "invert.cube")
+    mc.update_mapping(session, {"sources": [{"id": cam.id, "input_lut": str(good)}]})
+    assert cam.input_lut == str(good)
+    for bad, match in (
+        (str(_cube(sandbox / "luts" / "short.cube", entries=7)), "holds 7"),
+        (str(_cube(sandbox / "luts" / "flat.cube", header=["LUT_1D_SIZE 2"])), "1D"),
+        (str(_cube(sandbox / "luts" / "nosize.cube", header=[])), "LUT_3D_SIZE"),
+        ("luts/invert.cube", "absolute"),
+        (str(sandbox / "luts" / "missing.cube"), "isn't a .cube"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            mc.update_mapping(session, {"sources": [{"id": cam.id, "input_lut": bad}]})
+    mc.update_mapping(session, {"sources": [{"id": cam.id, "input_lut": ""}]})
+    assert cam.input_lut == ""
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_input_lut_colors_renders_stills_and_looks_and_exports_hand_it_off(episode):
+    session = _planned(episode)
+    red = next(s for s in session.sources if s.path.endswith("cam_one.mp4"))
+    # Spaces, a colon and brackets in the path exercise the filter graph escaping.
+    lut = _cube(episode.parent / "grade: [v1], final" / "invert.cube")
+    before = mc.previews(session)["cameras"][red.id]
+    mc.update_mapping(session, {"sources": [{"id": red.id, "input_lut": str(lut)}]})
+    assert session.cuts, "a LUT is color, so the cut stays"
+
+    stills = mc.previews(session, looks=True)
+    assert stills["cameras"][red.id] != before
+    inverted = _mean_rgb(stills["cameras"][red.id], 0)
+    assert inverted[0] < 80 and inverted[1] > 150 and inverted[2] > 150
+    assert set(stills["looks"]) == {c.id for c in session.cameras()}
+    assert all(set(per) == set(mc.LOOKS) for per in stills["looks"].values())
+
+    video = mc.render_session(session, stems=False)["video"]
+    on_red = next(c for c in session.cuts if c["source_id"] == red.id)
+    pixel = _mean_rgb(video, (on_red["start"] + on_red["end"]) / 2 - session.cuts[0]["start"])
+    assert pixel[0] < 80 and pixel[2] > 150
+
+    mc.export_xml(session, "fcpxml")
+    handoff = json.loads(open(session.outputs["color_handoff"], encoding="utf-8").read())
+    assert os.path.dirname(session.outputs["color_handoff"]) == os.path.dirname(session.outputs["fcpxml"])
+    luts = {c["source_id"]: c["input_lut"] for c in handoff["cameras"]}
+    assert luts[red.id] == str(lut)
+    assert all(v is None for k, v in luts.items() if k != red.id)
+
+
+def test_lut_is_refused_on_a_mic(sandbox):
+    session = _bare(sandbox)
+    session.sources.append(_source("/x/room.wav", kind="audio", role="mic", id="room"))
+    with pytest.raises(ValueError, match="camera"):
+        mc.update_mapping(session, {"sources": [{"id": "room", "input_lut": str(_cube(sandbox / "l" / "a.cube"))}]})

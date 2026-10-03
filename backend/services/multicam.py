@@ -123,6 +123,7 @@ class Source:
     person: str = ""
     # mic only: one person id per channel when a recorder puts two people on L/R
     channel_people: list[str] = field(default_factory=list)
+    input_lut: str = ""  # camera only: absolute path to a 3D .cube LUT applied before the look
     guessed: bool = True
     offset: Optional[float] = None  # timeline seconds where source time 0 sits
     speed: float = 1.0  # timeline seconds per source second (clock drift)
@@ -976,6 +977,10 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
             if idx < len(s.audio_stream_channels):
                 s.audio_channels = s.audio_stream_channels[idx]
             s.channel_people = []
+        if "input_lut" in edit:
+            if s.kind != "video" or s.virtual:
+                raise ValueError("Only a camera file takes an input LUT; tiles and split screens use their files' LUTs")
+            s.input_lut = _check_cube(edit["input_lut"]) if edit["input_lut"] else ""
         if (("offset" in edit and edit["offset"] is not None) or "nudge" in edit or "anchors" in edit) and s.virtual:
             raise ValueError("A tile or split screen moves with the files it comes from. Move those instead.")
         if "anchors" in edit:
@@ -1035,6 +1040,41 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
         session.cuts = []
     session.save()
     return session
+
+
+MAX_LUT_BYTES = 64 * 1024 * 1024
+
+
+def _check_cube(path) -> str:
+    """The path of a well-formed 3D .cube LUT, or a ValueError saying what's wrong with it."""
+    if not isinstance(path, str) or not os.path.isabs(os.path.expanduser(path)):
+        raise ValueError("input_lut must be an absolute path to a .cube file")
+    p = Path(path).expanduser()
+    if p.suffix.lower() != ".cube" or not p.is_file():
+        raise ValueError(f"{path} isn't a .cube file")
+    if p.stat().st_size > MAX_LUT_BYTES:
+        raise ValueError(f"{p.name} is too big to be a LUT")
+    size, entries = 0, 0
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        words = line.split()
+        if not words or words[0].startswith("#"):
+            continue
+        key = words[0].upper()
+        if key == "LUT_1D_SIZE":
+            raise ValueError(f"{p.name} is a 1D LUT. A camera needs a 3D LUT (LUT_3D_SIZE).")
+        if key == "LUT_3D_SIZE":
+            size = int(_number(words[1] if len(words) > 1 else "", "LUT_3D_SIZE", 2, 256))
+        elif key[0].isdigit() or key[0] in "+-.":
+            if len(words) != 3:
+                raise ValueError(f"{p.name} has a LUT entry without exactly three values: {line.strip()[:40]}")
+            for w in words:
+                _number(w, f"a value in {p.name}", -1e6, 1e6)
+            entries += 1
+    if not size:
+        raise ValueError(f"{p.name} has no LUT_3D_SIZE, so it isn't a 3D LUT")
+    if entries != size ** 3:
+        raise ValueError(f"{p.name} declares a {size}-point cube ({size ** 3} entries) but holds {entries}")
+    return str(p)
 
 
 MAX_ANCHORS = 100
@@ -1555,7 +1595,9 @@ def _picture(session: MulticamSession, cam: Source, tl: float, width: int, heigh
                 args += ["-ss", f"{max(0.0, rolling.source_in(tl, span)):.4f}", "-i", rolling.path]
             else:
                 args += ["-f", "lavfi", "-i", f"color=c=black:s={pane}x{height}"]
-            chains.append(f"[{i}:v:0]scale={pane}:{height}:force_original_aspect_ratio=increase,crop={pane}:{height},setsar=1[p{i}]")
+            lut = _lut_step(rolling) if rolling else ""
+            chains.append(f"[{i}:v:0]{lut}scale={pane}:{height}:force_original_aspect_ratio=increase,"
+                          f"crop={pane}:{height},setsar=1[p{i}]")
         joined = "".join(f"[p{i}]" for i in range(n))
         return args, ";".join(chains) + f";{joined}hstack=inputs={n},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2[pic]"
     src = session.source(cam.parent) if cam.parent else cam
@@ -1563,7 +1605,25 @@ def _picture(session: MulticamSession, cam: Source, tl: float, width: int, heigh
     if cam.crop:
         x, y, w, h = cam.crop
         crop = f"crop=iw*{w:.4f}:ih*{h:.4f}:iw*{x:.4f}:ih*{y:.4f},"
-    return ["-ss", f"{max(0.0, src.source_in(tl, span)):.4f}", "-i", src.path], f"[0:v:0]{crop}{fit}[pic]"
+    return ["-ss", f"{max(0.0, src.source_in(tl, span)):.4f}", "-i", src.path], f"[0:v:0]{crop}{_lut_step(src)}{fit}[pic]"
+
+
+def _filter_path(path: str) -> str:
+    """A file path escaped for an option value inside an ffmpeg filter graph.
+
+    Two parsers read it: the graph splits on , ; [ ] and the filter splits its
+    options on :, and each strips one level of backslashes.
+    """
+    option = path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    return "".join(f"\\{ch}" if ch in "\\'[],;" else ch for ch in option)
+
+
+def _lut_step(s: Source) -> str:
+    """The file's input LUT as a filter step ending in a comma, or ''.
+
+    It runs before scaling and padding, so it maps the camera's own pixels and never tints the bars.
+    """
+    return f"lut3d=file={_filter_path(s.input_lut)}," if s.input_lut else ""
 
 
 def _still(session: MulticamSession, cam: Source, tl: float, out: Path, look: str = "none", width: int = 480) -> Path:
@@ -1576,21 +1636,22 @@ def _still(session: MulticamSession, cam: Source, tl: float, out: Path, look: st
     return out
 
 
-def _sync_basis(s: Source) -> str:
-    """Short fingerprint of a source's offset and speed.
+def _still_basis(session: MulticamSession, s: Source) -> str:
+    """Short fingerprint of the offset, speed and input LUT of every file a still reads.
 
     Stills are cached to disk by filename. The source's mapping from timeline
     time to source time (`source_time`) depends on offset and speed, so a
     cache key that only captures the timeline moment `at` goes stale the
     instant a nudge or re-sync changes that mapping: the filename looks the
-    same but would now decode a different source frame.
+    same but would now decode a different source frame. A new LUT recolors it.
     """
-    raw = f"{s.offset}:{s.speed}"
+    files = _picture_files(session, s)
+    raw = json.dumps([(f.offset, f.speed, _fingerprint(f.input_lut) if f.input_lut else None) for f in files])
     return hashlib.sha1(raw.encode()).hexdigest()[:8]
 
 
 def previews(session: MulticamSession, *, looks: bool = False, at: Optional[float] = None) -> dict:
-    """One still per camera, and optionally one still per look from the wide camera."""
+    """One still per camera, and optionally one still per look per camera, each through its input LUT."""
     work = _work_dir(session.session_id)
     frames: dict = {"cameras": {}, "looks": {}}
 
@@ -1603,20 +1664,20 @@ def previews(session: MulticamSession, *, looks: bool = False, at: Optional[floa
         if s.kind != "video":
             continue
         t = moment(s)
-        out = work / f"frame-{s.id}-{int(t * 10)}-{_sync_basis(s)}.jpg"
+        out = work / f"frame-{s.id}-{int(t * 10)}-{_still_basis(session, s)}.jpg"
         if not out.exists():
             _still(session, s, t, out)
         frames["cameras"][s.id] = str(out)
     if looks:
-        cams = session.cameras() or [s for s in session.sources if s.kind == "video"]
-        if cams:
-            cam = next((c for c in cams if c.person == "wide"), cams[0])
+        # Cameras rarely match out of the box, so each one shows every look on its own picture.
+        for cam in session.cameras() or [s for s in session.sources if s.kind == "video"]:
             t = moment(cam)
+            frames["looks"][cam.id] = {}
             for name in LOOKS:
-                out = work / f"look-{cam.id}-{name}-{int(t * 10)}-{_sync_basis(cam)}.jpg"
+                out = work / f"look-{cam.id}-{name}-{int(t * 10)}-{_still_basis(session, cam)}.jpg"
                 if not out.exists():
                     _still(session, cam, t, out, look=name, width=640)
-                frames["looks"][name] = str(out)
+                frames["looks"][cam.id][name] = str(out)
     return frames
 
 
@@ -1864,15 +1925,19 @@ def _shot_key(session: MulticamSession, cam: Optional[Source], command: list[str
     settings; the files it reads are fingerprinted live so a re-export under
     the same name can't serve an old shot.
     """
-    files = []
-    for f in _picture_files(session, cam) if cam else []:
-        try:
-            st = os.stat(f.path)
-            files.append((f.path, st.st_size, st.st_mtime_ns, f.offset, f.speed))
-        except OSError:
-            files.append((f.path, None, None, f.offset, f.speed))
+    files = [(_fingerprint(f.path), f.offset, f.speed, _fingerprint(f.input_lut) if f.input_lut else None)
+             for f in (_picture_files(session, cam) if cam else [])]
     blob = json.dumps([RENDER_VERSION, command, files], default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:20]
+
+
+def _fingerprint(path: str) -> tuple:
+    """A file's path, size and mtime as they are on disk right now."""
+    try:
+        st = os.stat(path)
+        return path, st.st_size, st.st_mtime_ns
+    except OSError:
+        return path, None, None
 
 
 def _probe_value(path: Path, *args: str) -> str:
@@ -2247,8 +2312,12 @@ def set_removals(session: MulticamSession, removals: list) -> MulticamSession:
 def _render_key(session: MulticamSession, stems: bool) -> str:
     """Everything the MP4 depends on, so an unchanged edit isn't rendered twice."""
     used = {c["source_id"] for c in session.cuts} | {s.id for s, _ in _audio_inputs(session)}
-    files = [(s.id, s.offset, s.speed, s.channel_people, s.audio_stream_index, s.person, os.path.getmtime(s.path))
+    files = [(s.id, s.offset, s.speed, s.channel_people, s.audio_stream_index, s.person, os.path.getmtime(s.path),
+              _fingerprint(s.input_lut) if s.input_lut else None)
              for s in session.sources if s.id in used and os.path.exists(s.path)]
+    # A tile or split screen takes its picture, and its LUT, from other files.
+    files += [(f.id, _fingerprint(f.input_lut)) for c in session.cameras() if c.id in used and c.virtual
+              for f in _picture_files(session, c) if f.input_lut]
     audio = [VOICE_CHAIN, LOUDNESS_TARGET, TRUE_PEAK_CEILING]
     blob = json.dumps([session.cuts, session.removals, session.look, stems, files, audio], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:16]
@@ -2440,9 +2509,31 @@ def export_xml(session: MulticamSession, fmt: str, *, review: bool = False) -> s
     else:
         out = out_dir / f"episode{tag}.fcpxml"
         multicam_xml.write_fcpxml(session, out, width=width, height=height, fps=fps, review=review)
-    session.outputs = {**session.outputs, f"{fmt}_review" if review else fmt: str(out)}
+    handoff = _write_color_handoff(session, out_dir)
+    session.outputs = {**session.outputs, f"{fmt}_review" if review else fmt: str(out), "color_handoff": str(handoff)}
     session.save()
     return str(out)
+
+
+def _write_color_handoff(session: MulticamSession, out_dir: Path) -> Path:
+    """Which LUT each camera file needs, beside the exported timeline.
+
+    Neither xmeml nor FCPXML carries a LUT an editor applies reliably, so the
+    colorist gets this list instead of a half-applied grade.
+    """
+    out = out_dir / "color_handoff.json"
+    names = {p.id: p.name for p in session.people}
+    cameras = [{
+        "source_id": c.id,
+        "file": c.path,
+        "person": names.get(c.person, c.person),
+        "input_lut": c.input_lut or None,
+    } for c in session.cameras() if c.synced and not c.virtual]
+    tmp = out.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"session": session.name, "look": session.look, "cameras": cameras}, indent=2),
+                   encoding="utf-8")
+    os.replace(tmp, out)
+    return out
 
 
 MAX_TIMELINE_BYTES = 200 * 1024 * 1024
