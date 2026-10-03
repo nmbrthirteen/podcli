@@ -4333,20 +4333,51 @@ app.post("/api/ui-state", (req, res) => {
   }
   if (body.suggestions !== undefined) {
     if (body._source === "ui" && Array.isArray(body.suggestions)) {
+      const previousSuggestions = uiState.suggestions;
       uiState.suggestions = body.suggestions.map((incoming: SuggestedClip) => {
-        if (incoming.segments?.length) return incoming;
-        const segments = findSuggestionSegments(
-          uiState.suggestions,
-          incoming.start_second,
-          incoming.end_second,
-        );
-        if (!segments?.length) return incoming;
-        const existing = uiState.suggestions.find(
+        const existingIndex = previousSuggestions.findIndex(
           (s) =>
             Math.abs(s.start_second - incoming.start_second) < 0.5 &&
             Math.abs(s.end_second - incoming.end_second) < 0.5,
         );
-        return { ...incoming, segments, duration: existing?.duration ?? incoming.duration };
+        const existing = existingIndex >= 0 ? previousSuggestions[existingIndex] : undefined;
+
+        let merged = incoming;
+        if (!incoming.segments?.length) {
+          const segments = findSuggestionSegments(
+            previousSuggestions,
+            incoming.start_second,
+            incoming.end_second,
+          );
+          if (segments?.length) {
+            // The restored segments (and any hook) change what actually
+            // plays, so the duration has to be recomputed rather than
+            // carried over from before the edit — otherwise a clip with an
+            // opening hook reports a duration that excludes it.
+            merged = {
+              ...incoming,
+              segments,
+              duration:
+                Math.round(
+                  playbackDuration(incoming.start_second, incoming.end_second, segments, incoming.hook) * 10,
+                ) / 10,
+            };
+          }
+        }
+
+        // A studio edit (retiming, segment trim, hook change, ...) lands here
+        // the same way MCP's modify_clip lands on /api/suggestions/modify;
+        // an already-approved clip needs the same "no longer matches what
+        // was selected" flag, or a studio edit after selection silently
+        // exports something other than what was approved.
+        if (existing?.selectionHash && !uiState.deselectedIndices.includes(existingIndex)) {
+          const currentHash = computeSelectionHash(merged, uiState.transcript?.words);
+          if (currentHash !== existing.selectionHash) {
+            merged = { ...merged, selectionHash: existing.selectionHash, changedSinceSelection: true };
+          }
+        }
+
+        return merged;
       });
     } else {
       uiState.suggestions = body.suggestions;
