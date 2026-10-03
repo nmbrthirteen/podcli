@@ -44,7 +44,7 @@ import { advanceProgress, tagSubmittedClip, tagSubmittedClips } from "../utils/c
 import { DEMO_ASSETS_DIR } from "./demo-fixtures.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
-import { sliceTranscript, sliceWords, findContentType, findSuggestionSegments } from "../utils/transcript.js";
+import { sliceTranscript, sliceWords, findContentType, findGroundingText, findSuggestionSegments } from "../utils/transcript.js";
 import { errMsg } from "../utils/errors.js";
 import { resolveByteRange } from "../utils/http-range.js";
 import {
@@ -443,6 +443,7 @@ function createBatchHistoryRecorder({
       defaultCropStrategy,
       defaultFormat,
       contentTypeFor: (s, e) => findContentType(uiState.suggestions, s, e),
+      suggestions: uiState.suggestions,
     });
     let recordedIdx = 0;
     for (const row of rows) {
@@ -1304,6 +1305,7 @@ app.post("/api/create-clip", async (req, res) => {
           duration: d?.duration || 0,
           content_type: content_type || undefined,
           transcript_slice: sliceTranscript(transcript_words, start_second, end_second),
+          ...findGroundingText(uiState.suggestions, start_second, end_second),
         });
         await clipsHistory.persistClipRecipe(rec, {
           transcriptWords: transcript_words,
@@ -2778,6 +2780,17 @@ app.post("/api/clips/:id/thumbnail/select", async (req, res) => {
   res.json({ ok: true, preview_path: pick });
 });
 
+// CLI flags grounding thumbnail headline copy in the clip's own content
+// (payoff, the question it answers, its verbatim opening line) instead of
+// just the title. Empty for clips rendered before these fields existed.
+function thumbnailGroundingArgs(clip: { payoff?: string; context_line?: string; preview_text?: string }): string[] {
+  const args: string[] = [];
+  if (clip.payoff) args.push("--payoff", clip.payoff);
+  if (clip.context_line) args.push("--context-line", clip.context_line);
+  if (clip.preview_text) args.push("--preview-text", clip.preview_text);
+  return args;
+}
+
 // Candidate headline texts + face frames for the two-step thumbnail picker.
 app.get("/api/clips/:id/thumbnail/options", async (req, res) => {
   const clip = await clipsHistory.findById(req.params.id);
@@ -2793,6 +2806,7 @@ app.get("/api/clips/:id/thumbnail/options", async (req, res) => {
     "--end", String(clip.end_second),
     "--texts", String(clamp(req.query.texts, 6)),
     "--frames", String(clamp(req.query.frames, 6)),
+    ...thumbnailGroundingArgs(clip),
     "--", tc.text || clip.title,
   ]);
   if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "options failed" }); return; }
@@ -2824,6 +2838,7 @@ app.post("/api/clips/:id/thumbnail/render", async (req, res) => {
   if (line1) args.push(`--line1=${line1}`);
   if (line2) args.push(`--line2=${line2}`);
   if (frame_info) args.push("--frame-info", JSON.stringify(frame_info));
+  args.push(...thumbnailGroundingArgs(clip));
   args.push("--", tc.text || clip.title);
   const r = await runCli(args);
   if (r.code !== 0) { res.status(400).json({ error: stripAnsi(r.stderr || r.stdout) || "render failed" }); return; }

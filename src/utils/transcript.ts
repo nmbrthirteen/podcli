@@ -43,6 +43,34 @@ export function findContentType(
   return match?.content_type;
 }
 
+/**
+ * The suggestion's grounding text for the clip whose range best matches
+ * [start, end] — the payoff, the question it answers, and its verbatim
+ * opening line. Thumbnail copy is written from this, not from the title
+ * alone, so it matches what the clip actually says.
+ */
+export function findGroundingText(
+  suggestions:
+    | Array<{
+        start_second: number;
+        end_second: number;
+        payoff?: string;
+        context_line?: string;
+        preview_text?: string;
+      }>
+    | undefined
+    | null,
+  start: number,
+  end: number,
+): { payoff?: string; context_line?: string; preview_text?: string } | undefined {
+  if (!suggestions || suggestions.length === 0) return undefined;
+  const match = suggestions.find(
+    (s) => Math.abs(s.start_second - start) <= 2 && Math.abs(s.end_second - end) <= 2,
+  );
+  if (!match) return undefined;
+  return { payoff: match.payoff, context_line: match.context_line, preview_text: match.preview_text };
+}
+
 export function findSuggestionSegments(
   suggestions: Array<{
     start_second: number;

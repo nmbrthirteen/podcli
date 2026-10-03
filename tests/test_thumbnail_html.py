@@ -14,6 +14,11 @@ from services import thumbnail_html as th
 
 
 class ThumbnailHtmlTests(unittest.TestCase):
+    def test_default_font_stack_covers_georgian(self):
+        cfg = th._load_config()
+        self.assertIn("Noto Sans Georgian", cfg["font_family"])
+        self.assertIn("Noto+Sans+Georgian", cfg["font_import_url"])
+
     def test_prepare_thumbnail_lines_compacts_long_sentence_title(self):
         line1, line2 = th._prepare_thumbnail_lines(
             "We build 10 megawatt data centers in 200 days — everyone is shocked",

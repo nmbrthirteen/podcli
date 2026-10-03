@@ -3130,12 +3130,24 @@ def cmd_thumbnail_config(args):
     raise ValueError(f"unknown thumbnail-config action: {action}")
 
 
+def _grounding_from_args(args) -> dict | None:
+    """Collect the clip's payoff/question/opening-line CLI flags into the dict
+    thumbnail_ai expects, or None if the caller passed none of them (e.g. a
+    bare title with no clip behind it, as in the standalone thumbnail studio)."""
+    grounding = {
+        "payoff": getattr(args, "payoff", None),
+        "context_line": getattr(args, "context_line", None),
+        "preview_text": getattr(args, "preview_text", None),
+    }
+    return grounding if any(grounding.values()) else None
+
+
 def cmd_thumbnail_options(args):
     """Emit candidate headline text pairs and face frames for the thumbnail picker."""
     from services.thumbnail_ai import generate_headline_variations, extract_candidate_frames
 
     os.makedirs(args.output, exist_ok=True)
-    texts = generate_headline_variations(args.title, args.texts) or []
+    texts = generate_headline_variations(args.title, args.texts, grounding=_grounding_from_args(args)) or []
     frames = []
     if args.video:
         frames = extract_candidate_frames(
@@ -3198,6 +3210,7 @@ def cmd_thumbnail_render(args):
         frame_info=frame_info,
         line1_override=args.line1 or None,
         line2_override=args.line2 or None,
+        grounding=_grounding_from_args(args),
     )
     if not out:
         print("thumbnail render failed", file=sys.stderr)
@@ -5196,6 +5209,9 @@ def main():
     topt.add_argument("--end", type=float, help="Frame window end (seconds)")
     topt.add_argument("--texts", type=int, default=6, help="Number of headline options")
     topt.add_argument("--frames", type=int, default=6, help="Number of frame options")
+    topt.add_argument("--payoff", help="Clip's payoff line, so headline copy is grounded in it rather than the title alone")
+    topt.add_argument("--context-line", dest="context_line", help="The question this clip answers, if any")
+    topt.add_argument("--preview-text", dest="preview_text", help="Clip's verbatim opening line")
 
     # ── thumbnail-render (one final thumbnail from a chosen frame + headline) ──
     trnd = sub.add_parser("thumbnail-render", help="Render one thumbnail PNG from a chosen frame + headline")
@@ -5206,6 +5222,9 @@ def main():
     trnd.add_argument("--line2", help="Headline line 2 (empty = AI writes it)")
     trnd.add_argument("--frame-info", dest="frame_info", help="JSON face metadata for the frame")
     trnd.add_argument("--logo", help="Logo (asset name or path)")
+    trnd.add_argument("--payoff", help="Clip's payoff line, so headline copy is grounded in it rather than the title alone")
+    trnd.add_argument("--context-line", dest="context_line", help="The question this clip answers, if any")
+    trnd.add_argument("--preview-text", dest="preview_text", help="Clip's verbatim opening line")
 
     # ── swap-thumbnail ──
     st = sub.add_parser("swap-thumbnail", help="Regenerate thumbnail on an existing clip")

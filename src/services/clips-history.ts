@@ -4,7 +4,7 @@ import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
 import { paths } from "../config/paths.js";
 import { writeFileAtomic } from "../utils/atomic-file.js";
-import { sliceTranscript, sliceWords } from "../utils/transcript.js";
+import { sliceTranscript, sliceWords, findGroundingText } from "../utils/transcript.js";
 import { isDemoMode, demoClips } from "../ui/demo-fixtures.js";
 import type { BatchClipsResult, ClipHistoryEntry, Format, WordTimestamp } from "../models/index.js";
 
@@ -17,6 +17,13 @@ interface BatchRecordContext {
   defaultCropStrategy?: string;
   defaultFormat?: Format;
   contentTypeFor?: (start: number, end: number) => string | undefined;
+  suggestions?: Array<{
+    start_second: number;
+    end_second: number;
+    payoff?: string;
+    context_line?: string;
+    preview_text?: string;
+  }> | null;
 }
 
 export interface BatchClipSpec {
@@ -184,6 +191,7 @@ export class ClipsHistory {
           duration: r.duration || 0,
           content_type: ctx.contentTypeFor?.(start, end),
           transcript_slice: sliceTranscript(ctx.transcriptWords, start, end),
+          ...findGroundingText(ctx.suggestions, start, end),
         }),
       );
     }

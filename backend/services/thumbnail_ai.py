@@ -29,7 +29,9 @@ def _load_brand_config() -> dict:
         "height": 1920,
         "accent_color": "#00CED1",
         "bg_color": "#0D0D0D",
-        "font_family": "'Inter', 'Helvetica Neue', 'Arial', sans-serif",
+        # Keep this fallback stack in sync with thumbnail_html.py's defaults and
+        # remotion/src/types.ts FONT — 'Inter' alone has no Georgian glyphs.
+        "font_family": "'Inter', 'Helvetica Neue', 'Arial', 'Noto Sans Georgian', sans-serif",
         "enabled": True,
         "variations": 3,
     }
@@ -512,6 +514,27 @@ def _thumbnail_kb_context() -> str:
     return f"\nBRAND KNOWLEDGE BASE (follow its thumbnail text rules, voice, and banned words):\n{kb}\n"
 
 
+def _grounding_context(grounding: Optional[dict]) -> str:
+    """Format the clip's payoff/question/opening line for the headline prompt.
+
+    Without this, headline copy is rewritten from the title alone — a short
+    label that drifts from what the clip actually says. The clip's own
+    payoff and verbatim opening line keep the copy honest to the content.
+    """
+    if not grounding:
+        return ""
+    lines = []
+    if grounding.get("payoff"):
+        lines.append(f"Payoff (what the clip delivers): {grounding['payoff']}")
+    if grounding.get("context_line"):
+        lines.append(f"Question this clip answers: {grounding['context_line']}")
+    if grounding.get("preview_text"):
+        lines.append(f"Clip's verbatim opening line: {grounding['preview_text']}")
+    if not lines:
+        return ""
+    return "\nCLIP CONTENT (ground the headline in this, not just the title):\n" + "\n".join(lines) + "\n"
+
+
 def ask_claude_for_layout(
     title: str,
     frame_path: str,
@@ -519,6 +542,7 @@ def ask_claude_for_layout(
     logo_path: Optional[str] = None,
     config: Optional[dict] = None,
     variation: int = 0,
+    grounding: Optional[dict] = None,
 ) -> Optional[dict]:
     """
     Ask an available AI CLI to generate layout values for the thumbnail.
@@ -539,7 +563,7 @@ def ask_claude_for_layout(
     prompt = f"""You are a thumbnail layout engine. Given a title and face position, return CSS values for a YouTube Shorts thumbnail (1080x1920).
 
 TITLE: "{title}"
-{_thumbnail_kb_context()}
+{_grounding_context(grounding)}{_thumbnail_kb_context()}
 PHOTO INFO:
 {face_ctx}
 
@@ -554,7 +578,7 @@ Return ONLY valid JSON with these fields:
 }}
 
 RULES:
-- Rewrite the title into thumbnail copy, not a literal transcript sentence.
+- Rewrite the title into thumbnail copy, not a literal transcript sentence. If clip content is given above, the copy must match what the clip actually delivers.
 - Split it into 2 impactful lines. Line 1 = setup, Line 2 = payoff.
 - Keep the combined copy to 4-8 words total whenever possible.
 - Keep each line short enough to fit comfortably on a Shorts thumbnail. Hard max: 24 characters per line.
@@ -569,7 +593,9 @@ RULES:
     return layout if isinstance(layout, dict) else None
 
 
-def generate_headline_variations(title: str, n: int, config: Optional[dict] = None) -> list[tuple[str, str]]:
+def generate_headline_variations(
+    title: str, n: int, config: Optional[dict] = None, grounding: Optional[dict] = None
+) -> list[tuple[str, str]]:
     """Write n DISTINCT 2-line thumbnail headlines in a single AI call.
 
     One call (rather than n independent layout calls) is both cheaper and the
@@ -580,12 +606,12 @@ def generate_headline_variations(title: str, n: int, config: Optional[dict] = No
     prompt = f"""You are a thumbnail copywriter. Write {n} DISTINCT headline options for a YouTube Shorts thumbnail.
 
 TITLE: "{title}"
-{_thumbnail_kb_context()}
+{_grounding_context(grounding)}{_thumbnail_kb_context()}
 Return ONLY a JSON array of exactly {n} objects, each with "line1" and "line2":
 [{{"line1": "FIRST LINE", "line2": "SECOND LINE"}}, ...]
 
 RULES:
-- Rewrite the title into punchy thumbnail copy, not a literal transcript sentence.
+- Rewrite the title into punchy thumbnail copy, not a literal transcript sentence. If clip content is given above, the copy must match what the clip actually delivers.
 - Line 1 = setup, Line 2 = payoff. 4-8 words total. Hard max 24 characters per line.
 - Drop filler words; keep numbers, nouns, and the strongest claim. No slashes.
 - Every option must read DIFFERENTLY — vary the hook, the emphasis, or which idea leads. Do not repeat the same phrasing across options."""
@@ -610,6 +636,7 @@ def generate_thumbnail_with_template(
     variation: int = 0,
     line1_override: Optional[str] = None,
     line2_override: Optional[str] = None,
+    grounding: Optional[dict] = None,
 ) -> Optional[str]:
     """
     Template + AI layout. Claude decides all dynamic values per frame.
@@ -624,7 +651,9 @@ def generate_thumbnail_with_template(
     if config:
         cfg.update(config)
 
-    layout = None if line1_override is not None else ask_claude_for_layout(title, frame_path, frame_info, logo_path, cfg, variation=variation)
+    layout = None if line1_override is not None else ask_claude_for_layout(
+        title, frame_path, frame_info, logo_path, cfg, variation=variation, grounding=grounding
+    )
 
     if line1_override is not None:
         line1, line2 = _prepare_thumbnail_lines(

@@ -5,6 +5,7 @@ import { ClipsHistory } from "../services/clips-history.js";
 import { paths } from "../config/paths.js";
 import { webServerUrl } from "../config/server.js";
 import { validateClipRange } from "../utils/clip-validation.js";
+import { findContentType } from "../utils/transcript.js";
 import { childLogger } from "../utils/logger.js";
 import type {
   BatchClipsInput,
@@ -287,6 +288,8 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     defaultCaptionStyle: settings.captionStyle || "hormozi",
     defaultCropStrategy: settings.cropStrategy || "speaker",
     defaultFormat: batchFormat,
+    contentTypeFor: (s, e) => findContentType(suggestions, s, e),
+    suggestions,
   });
   await history.persistBatchRecipes(data.results, recorded, {
     transcriptWords: transcriptWords,

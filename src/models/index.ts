@@ -308,6 +308,12 @@ export interface ClipHistoryEntry {
   created_at: string;
   content_type?: string;
   transcript_slice?: string;
+  // Carried from the suggestion at render time: the payoff, the question it
+  // answers, and its verbatim opening line. Thumbnail generation grounds
+  // headline copy in these instead of the title alone.
+  payoff?: string;
+  context_line?: string;
+  preview_text?: string;
   logo_backup_path?: string;
   logo_position?: string;
   keep_segments?: Array<{ start: number; end: number }>;

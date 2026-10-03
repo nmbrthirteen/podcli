@@ -26,6 +26,9 @@ The TS type is `ClipHistoryEntry` in `src/models/index.ts`. Keep both languages 
 | `created_at` | string (ISO) | TS render | |
 | `content_type` | string? | TS render | Carried from the suggestion (`guest_story`, `hot_take`, …). Undefined when no suggestion was used. |
 | `transcript_slice` | string? | TS render | Plain text the clip says. The session transcript is overwritten, so this is the **only durable** copy — never reconstruct it later. |
+| `payoff` | string? | TS render | Carried from the suggestion. The clip's payoff line; grounds thumbnail headline copy. |
+| `context_line` | string? | TS render | Carried from the suggestion. The question the clip answers, if any. |
+| `preview_text` | string? | TS render | Carried from the suggestion. The clip's verbatim opening line. |
 | `thumbnail_config` | object? | TS render / edit | Per-clip thumbnail settings (`line1`, `line2`, `image_path`, `timestamp`, `preview_path`, `variations`). |
 | `youtube_video_id` | string? | Phase 2 | Set when a published video is linked. |
 | `metrics` | object? | Phase 2 | `{ views?, retention?, ctr?, impressions?, fetched_at? }`. retention/ctr are 0–100. |

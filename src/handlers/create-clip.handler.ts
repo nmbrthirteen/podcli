@@ -226,6 +226,9 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     duration: data.duration,
     file_size_mb: data.file_size_mb,
     content_type: suggestion?.content_type,
+    payoff: suggestion?.payoff,
+    context_line: suggestion?.context_line,
+    preview_text: suggestion?.preview_text,
     transcript_slice: sliceTranscript(transcriptWords, startSecond, endSecond),
     message: `Clip created successfully! ${data.duration}s, ${data.file_size_mb}MB`,
   });
