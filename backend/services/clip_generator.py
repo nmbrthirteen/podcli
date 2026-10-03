@@ -911,6 +911,7 @@ def generate_clip(
     font_family: Optional[str] = None,
     theme: Optional[dict] = None,
     captions: bool = True,
+    write_subtitles: Optional[bool] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """
@@ -930,6 +931,10 @@ def generate_clip(
         hook: Optional {"start", "end", "mode"} on the source clock: a passage
             from inside the body played first. "repeat" plays it again in
             place, "move" removes it from the body.
+        captions: Whether to burn captions into the video.
+        write_subtitles: Whether to write .srt/.vtt sidecars. Defaults to
+            following `captions` (no burned captions, no sidecars either);
+            pass True to request them for a clean (caption-free) export.
         progress_callback: Optional (percent, message) callback
 
     Returns:
@@ -954,6 +959,12 @@ def generate_clip(
 
     if end_second <= start_second:
         raise ValueError("end_second must be greater than start_second")
+
+    # A video-only source (e.g. a silent screen recording) never gets an
+    # audio stream from any of the steps below, so requiring one would
+    # reject every render of it as "broken" instead of a legitimately
+    # silent clip.
+    source_has_audio = probe_has_audio_stream(video_path)
 
     # ffmpeg's -ss/-t cut silently stops at EOF when end_second runs past the
     # source, so without this the render "succeeds" with a shorter clip than
@@ -1481,7 +1492,7 @@ def generate_clip(
                 f"The source video likely ended before the requested range, or "
                 f"the render failed partway through."
             )
-        if not probe_has_audio_stream(final_path):
+        if source_has_audio and not probe_has_audio_stream(final_path):
             os.remove(final_path)
             raise RuntimeError(
                 "Render completed but the output has no audio stream. "
@@ -1494,23 +1505,42 @@ def generate_clip(
 
         # Sidecar subtitles: the same words already burned into the video,
         # on the same playback clock as the delivered file (clip-local time,
-        # shifted past whatever intro got prepended).
+        # shifted past whatever intro got prepended). clip_words is populated
+        # for overlay-only renders too (logo/cards with captions off), so
+        # gate on whether captions were actually requested rather than just
+        # "were there words" — otherwise a captions-off render still gets an
+        # .srt/.vtt describing dialogue nothing on screen shows.
+        want_subtitles = write_subtitles if write_subtitles is not None else captions
         output_base, _ = os.path.splitext(final_path)
-        retimed_words = [
-            {
-                "word": w.get("word", ""),
-                "start": round(max(0.0, w["start"] - caption_time_offset + intro_offset), 3),
-                "end": round(max(0.0, w["end"] - caption_time_offset + intro_offset), 3),
-            }
-            for w in clip_words
-        ]
-        sidecar_paths = write_sidecars(retimed_words, output_base)
+        sidecar_paths: dict = {}
+        # A re-render claims the same output path as last time
+        # (_reserve_output_path), so a sidecar this pass doesn't produce can
+        # be a leftover from a previous render of this clip, now describing
+        # dialogue or a style that no longer matches. Clear it before
+        # (maybe) writing a fresh one.
+        for stale_ext in (".srt", ".vtt"):
+            stale_sidecar = f"{output_base}{stale_ext}"
+            if os.path.exists(stale_sidecar):
+                os.remove(stale_sidecar)
+        if want_subtitles:
+            retimed_words = [
+                {
+                    "word": w.get("word", ""),
+                    "start": round(max(0.0, w["start"] - caption_time_offset + intro_offset), 3),
+                    "end": round(max(0.0, w["end"] - caption_time_offset + intro_offset), 3),
+                }
+                for w in clip_words
+            ]
+            sidecar_paths = write_sidecars(retimed_words, output_base)
 
         # Optional clean variant: the same audio, loudness, and intro/outro,
         # minus burned captions — built from the cropped (pre-caption)
         # source with the identical normalize_audio/concat_outro calls the
         # main render used, so the two files only differ in the overlay.
         clean_output_path = None
+        stale_clean_path = f"{output_base}_clean.mp4"
+        if os.path.exists(stale_clean_path):
+            os.remove(stale_clean_path)
         if write_clean_variant and os.path.exists(cropped_path):
             clean_normalized_path = os.path.join(work_dir, "clean_normalized.mp4")
             normalize_audio(cropped_path, clean_normalized_path)
@@ -1538,12 +1568,21 @@ def generate_clip(
         if progress_callback:
             progress_callback(100, "Clip complete!")
 
+        # "duration" has always meant the content's own length — what
+        # clip_history and the learnings it feeds record — not however long
+        # the delivered file plays including intro/outro. Derive it from the
+        # probed actual_duration (not the planned `duration` window) so a
+        # source that ran out early still gets caught by the check above and
+        # reported as shorter, instead of silently reporting the plan.
+        content_duration = max(0.0, actual_duration - intro_offset - outro_offset)
+
         out = {
             "output_path": final_path,
-            # The probed duration of the file actually on disk, not the
-            # planned window — they can differ if intro/outro were added, or
-            # (now caught above instead) if the source ran out early.
-            "duration": round(actual_duration, 2),
+            "duration": round(content_duration, 2),
+            # The probed duration of the file actually on disk, including any
+            # intro/outro — for callers that need the delivered file's full
+            # playback length rather than just its content.
+            "output_duration": round(actual_duration, 2),
             "file_size_mb": file_size_mb,
             "title": title,
             "start_second": start_second,

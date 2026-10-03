@@ -127,7 +127,35 @@ class CorrectionsTests(unittest.TestCase):
             {"word": "AI.", "start": 0.5, "end": 1.0},
         ]
         w, _ = corrections.apply_corrections(words, [])
-        self.assertEqual([x["word"] for x in w], ["OpenAI"])
+        # Punctuation is ignored for matching, but the last word's trailing
+        # punctuation still belongs on the merged word: "open AI." should
+        # read as "OpenAI.", not drop the sentence end.
+        self.assertEqual([x["word"] for x in w], ["OpenAI."])
+
+    def test_apply_corrections_multiword_merge_carries_last_words_trailing_punctuation(self):
+        self._set({"open AI": "OpenAI"})
+        words = [
+            {"word": "open", "start": 1.0, "end": 1.4, "speaker": "SPEAKER_00", "confidence": 0.9},
+            {"word": "AI.", "start": 1.4, "end": 1.8, "speaker": "SPEAKER_01", "confidence": 0.4},
+        ]
+        w, _ = corrections.apply_corrections(words, [])
+        self.assertEqual([x["word"] for x in w], ["OpenAI."])
+        # First word's other fields carry onto the merged word...
+        self.assertEqual(w[0]["speaker"], "SPEAKER_00")
+        # ...except confidence, which takes the minimum across the run
+        # rather than silently reporting the first word's (possibly higher)
+        # confidence for a merge that includes a less-confident word.
+        self.assertAlmostEqual(w[0]["confidence"], 0.4)
+
+    def test_apply_corrections_multiword_merge_multi_word_replacement_keeps_trailing_punctuation(self):
+        self._set({"open ai": "Open AI"})
+        words = [
+            {"word": "open", "start": 0.0, "end": 1.0},
+            {"word": "ai.", "start": 1.0, "end": 2.0},
+        ]
+        w, _ = corrections.apply_corrections(words, [])
+        # The trailing punctuation lands on the final replacement word only.
+        self.assertEqual([x["word"] for x in w], ["Open", "AI."])
 
     def test_apply_corrections_multiword_replacement_splits_time_across_words(self):
         # A multi-word replacement distributes the merged span evenly across

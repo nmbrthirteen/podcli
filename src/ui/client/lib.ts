@@ -345,3 +345,27 @@ export function findClipResult<T extends ClipResultRow>(
   const row = results[positionalIdx];
   return row && !resultBoundsKey(row) ? row : undefined;
 }
+
+/**
+ * Body for the combined POST /api/ui-state sync. Transcript rides in this
+ * same request whenever it changed, rather than a request of its own:
+ * after silence removal, videoPath and transcript update together in one
+ * render, and splitting them into separate fetches raced on the server — a
+ * videoPath-only request landing after the transcript-only one looked
+ * exactly like a bare set_video (videoPath with no transcript), which
+ * clears the transcript server-side as if it were stale. One request can't
+ * race with itself.
+ */
+export function buildUiStateSyncPayload(
+  syncable: Record<string, unknown>,
+  filePath: string,
+  transcript: unknown,
+  transcriptChanged: boolean,
+): Record<string, unknown> {
+  return {
+    _source: "ui",
+    filePath,
+    ...syncable,
+    ...(transcriptChanged && { transcript }),
+  };
+}

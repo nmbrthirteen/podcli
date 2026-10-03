@@ -1,10 +1,14 @@
 import { createHash } from "crypto";
-import { readFile, stat, mkdir } from "fs/promises";
+import { readFile, rename, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { paths } from "../config/paths.js";
 import { writeFileAtomic } from "../utils/atomic-file.js";
+import { computeVideoIdentity, type VideoIdentity } from "../utils/video-identity.js";
+import { childLogger } from "../utils/logger.js";
 import type { EpisodeDecisions, OpenQuestion } from "../models/index.js";
+
+const log = childLogger("episode-state");
 
 type DecisionsFile = Record<string, EpisodeDecisions>;
 
@@ -22,9 +26,15 @@ const QUESTIONS: Array<{ field: keyof EpisodeDecisions; question: string }> = [
 ];
 
 /**
- * Per-episode decisions, keyed by the source video's identity (path + size)
+ * Per-episode decisions, keyed by the source video's identity (path + size +
+ * mtime, the same VideoIdentity transcriptVideoMismatch checks against)
  * rather than a content hash: cheap to compute, and good enough to tell
  * "the same file" from "a different recording" without reading the file.
+ *
+ * Callers resolve to the original video's path before calling in when the
+ * current working video is a silence-removed derivative (a new path, size
+ * and mtime), so decisions follow the episode across that rewrite instead of
+ * keying on a file that only exists for one session.
  *
  * Stored independently of ui-state.json (which is global and gets overwritten
  * by the next episode opened) so these answers outlive the session that
@@ -33,18 +43,28 @@ const QUESTIONS: Array<{ field: keyof EpisodeDecisions; question: string }> = [
 export class EpisodeState {
   private filePath: string;
 
+  // Chains every read-modify-write onto the previous one so concurrent
+  // record() calls (e.g. two record_decisions calls firing close together)
+  // never both read the same snapshot and clobber each other's write.
+  private queue: Promise<unknown> = Promise.resolve();
+
   constructor() {
     this.filePath = paths.episodeDecisions;
   }
 
+  private keyForIdentity(identity: VideoIdentity): string {
+    // Same identity helper transcriptVideoMismatch uses, so "the same video"
+    // means the same thing everywhere instead of two notions quietly drifting.
+    return createHash("sha256")
+      .update(`${identity.path}:${identity.size}:${identity.mtimeMs}`)
+      .digest("hex")
+      .slice(0, 16);
+  }
+
   async keyFor(videoPath: string): Promise<string | null> {
-    const abs = resolve(videoPath);
-    try {
-      const info = await stat(abs);
-      return createHash("sha256").update(`${abs}:${info.size}`).digest("hex").slice(0, 16);
-    } catch {
-      return null; // video not found on disk — nothing to key against
-    }
+    const identity = computeVideoIdentity(resolve(videoPath));
+    if (!identity) return null; // video not found on disk — nothing to key against
+    return this.keyForIdentity(identity);
   }
 
   private async readAll(): Promise<DecisionsFile> {
@@ -52,7 +72,16 @@ export class EpisodeState {
     try {
       const raw = await readFile(this.filePath, "utf-8");
       return JSON.parse(raw) as DecisionsFile;
-    } catch {
+    } catch (err) {
+      // A corrupt file must never silently wipe every episode's decisions.
+      // Move it aside so the data isn't lost and start fresh; the next write
+      // produces a clean file without touching the renamed original.
+      const quarantined = `${this.filePath}.corrupt-${Date.now()}`;
+      await rename(this.filePath, quarantined).catch(() => {});
+      log.warn("episode-decisions.json was corrupt; quarantined and starting fresh", {
+        err: err instanceof Error ? err.message : String(err),
+        quarantined,
+      });
       return {};
     }
   }
@@ -60,6 +89,13 @@ export class EpisodeState {
   private async writeAll(data: DecisionsFile): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
     await writeFileAtomic(this.filePath, JSON.stringify(data, null, 2));
+  }
+
+  /** Serializes a read-modify-write step behind whatever is already queued. */
+  private enqueue<T>(step: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(step, step);
+    this.queue = result.catch(() => {});
+    return result;
   }
 
   async get(videoPath: string): Promise<EpisodeDecisions | null> {
@@ -75,21 +111,24 @@ export class EpisodeState {
     decisions: Partial<Omit<EpisodeDecisions, "videoPath" | "fileSize" | "updatedAt">>,
   ): Promise<EpisodeDecisions> {
     const abs = resolve(videoPath);
-    const info = await stat(abs); // throws if the video doesn't exist — nothing to key against
-    const key = createHash("sha256").update(`${abs}:${info.size}`).digest("hex").slice(0, 16);
+    return this.enqueue(async () => {
+      const identity = computeVideoIdentity(abs);
+      if (!identity) throw new Error(`Video not found: ${abs}`); // nothing to key against
+      const key = this.keyForIdentity(identity);
 
-    const all = await this.readAll();
-    const existing = all[key];
-    const merged: EpisodeDecisions = {
-      ...existing,
-      ...decisions,
-      videoPath: abs,
-      fileSize: info.size,
-      updatedAt: Date.now(),
-    };
-    all[key] = merged;
-    await this.writeAll(all);
-    return merged;
+      const all = await this.readAll();
+      const existing = all[key];
+      const merged: EpisodeDecisions = {
+        ...existing,
+        ...decisions,
+        videoPath: abs,
+        fileSize: identity.size,
+        updatedAt: Date.now(),
+      };
+      all[key] = merged;
+      await this.writeAll(all);
+      return merged;
+    });
   }
 
   /** Decisions relevant to the next step that have no answer recorded yet. */

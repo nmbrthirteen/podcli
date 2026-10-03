@@ -12,6 +12,7 @@ import { join } from "path";
 const tmp = mkdtempSync(join(tmpdir(), "podcli-record-decisions-"));
 const savedHome = process.env.PODCLI_HOME;
 const savedData = process.env.PODCLI_DATA;
+const savedPort = process.env.PODCLI_PORT;
 
 let createServer: typeof import("./server.js").createServer;
 let recordDecisionsInputSchema: typeof import("./server.js").recordDecisionsInputSchema;
@@ -20,6 +21,10 @@ let videoPath: string;
 beforeAll(async () => {
   process.env.PODCLI_HOME = join(tmp, "home");
   process.env.PODCLI_DATA = join(tmp, "data");
+  // Force readUIState to fall back to the on-disk ui-state.json instead of
+  // reaching a real studio server that happens to be running on the default
+  // port during local development.
+  process.env.PODCLI_PORT = "18423";
   mkdirSync(process.env.PODCLI_HOME, { recursive: true });
   ({ createServer, recordDecisionsInputSchema } = await import("./server.js"));
   videoPath = join(tmp, "episode.mp4");
@@ -29,6 +34,8 @@ beforeAll(async () => {
 afterAll(() => {
   if (savedHome === undefined) delete process.env.PODCLI_HOME;
   else process.env.PODCLI_HOME = savedHome;
+  if (savedPort === undefined) delete process.env.PODCLI_PORT;
+  else process.env.PODCLI_PORT = savedPort;
   if (savedData === undefined) delete process.env.PODCLI_DATA;
   else process.env.PODCLI_DATA = savedData;
   rmSync(tmp, { recursive: true, force: true });
@@ -74,6 +81,32 @@ describe("record_decisions", () => {
     const handler = getHandler("record_decisions");
     const result = await handler({ video_path: videoPath }, {});
     expect(result.content[0].text).toContain("No decisions provided");
+  });
+
+  it("keys decisions on the pre-silence-removal video, not its derivative", async () => {
+    // A silence-removal pass rewrites the working video to a new path with a
+    // different size, which would otherwise orphan decisions already recorded
+    // against the original (path+size+mtime no longer matches).
+    const originalPath = join(tmp, "original.mp4");
+    const derivativePath = join(tmp, "original.silence-removed.mp4");
+    writeFileSync(originalPath, "original bytes");
+    writeFileSync(derivativePath, "a shorter derivative");
+
+    writeFileSync(
+      join(process.env.PODCLI_HOME!, "ui-state.json"),
+      JSON.stringify({
+        videoPath: derivativePath,
+        silenceOriginal: { videoPath: originalPath, transcript: null },
+      }),
+    );
+
+    const handler = getHandler("record_decisions");
+    await handler({ video_path: derivativePath, clip_count: 7 }, {});
+
+    const { EpisodeState } = await import("./services/episode-state.js");
+    const state = new EpisodeState();
+    expect((await state.get(originalPath))?.clipCount).toBe(7);
+    expect(await state.get(derivativePath)).toBeNull();
   });
 });
 

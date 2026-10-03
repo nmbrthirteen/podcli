@@ -613,7 +613,10 @@ class SidecarsAndCleanVariantTests(unittest.TestCase):
             # by caption_renderer's own tests) — turning them off here keeps
             # this test to the render pipeline's font/compositor dependencies
             # out of the way of the sidecar/clean-variant wiring under test.
+            # Sidecars otherwise follow `captions`, so request them
+            # explicitly for this clean (caption-free) export.
             captions=False,
+            write_subtitles=True,
             clean_fillers=False,
             write_clean_variant=True,
         )
@@ -640,6 +643,148 @@ class SidecarsAndCleanVariantTests(unittest.TestCase):
         main_duration = cg._get_media_duration(result["output_path"])
         clean_duration = cg._get_media_duration(clean_path)
         self.assertAlmostEqual(main_duration, clean_duration, delta=0.5)
+
+    def test_duration_is_content_length_not_the_file_with_intro_included(self):
+        from services import clip_generator as cg
+
+        intro_path = os.path.join(self.tmpdir, "intro.mp4")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=1",
+                "-f", "lavfi", "-i", "sine=frequency=330:duration=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                intro_path,
+            ],
+            check=True, capture_output=True,
+        )
+
+        out_dir = os.path.join(self.tmpdir, "out_with_intro")
+        result = cg.generate_clip(
+            video_path=self.src,
+            start_second=0,
+            end_second=2.5,
+            caption_style="subtle",
+            crop_strategy="center",
+            title="intro_duration_test",
+            output_dir=out_dir,
+            captions=False,
+            clean_fillers=False,
+            intro_path=intro_path,
+        )
+        # "duration" is what clip_history and its learnings have always
+        # recorded: the content's own length, not however long the delivered
+        # file plays once an intro is prepended.
+        self.assertAlmostEqual(result["duration"], 2.5, delta=0.3)
+        self.assertIn("output_duration", result)
+        self.assertAlmostEqual(result["output_duration"], 3.5, delta=0.3)
+        self.assertGreater(result["output_duration"], result["duration"])
+
+    def test_video_only_source_does_not_require_an_audio_stream(self):
+        from services import clip_generator as cg
+
+        silent_src = os.path.join(self.tmpdir, "silent_src.mp4")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=3",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                silent_src,
+            ],
+            check=True, capture_output=True,
+        )
+        self.assertFalse(cg.probe_has_audio_stream(silent_src))
+
+        out_dir = os.path.join(self.tmpdir, "out_silent")
+        result = cg.generate_clip(
+            video_path=silent_src,
+            start_second=0,
+            end_second=2.5,
+            caption_style="subtle",
+            crop_strategy="center",
+            title="silent_source_test",
+            output_dir=out_dir,
+            captions=False,
+            clean_fillers=False,
+        )
+        self.assertTrue(os.path.exists(result["output_path"]))
+
+    def test_no_sidecars_when_captions_off_and_not_explicitly_requested(self):
+        from services import clip_generator as cg
+
+        words = [{"word": "hello", "start": 0.2, "end": 0.6, "speaker": None}]
+        out_dir = os.path.join(self.tmpdir, "out_no_sidecars")
+        result = cg.generate_clip(
+            video_path=self.src,
+            start_second=0,
+            end_second=2.5,
+            caption_style="subtle",
+            crop_strategy="center",
+            transcript_words=words,
+            title="no_sidecar_test",
+            output_dir=out_dir,
+            captions=False,
+            clean_fillers=False,
+        )
+        self.assertTrue(os.path.exists(result["output_path"]))
+        self.assertNotIn("srt_path", result)
+        self.assertNotIn("vtt_path", result)
+        output_base, _ = os.path.splitext(result["output_path"])
+        self.assertFalse(os.path.exists(f"{output_base}.srt"))
+        self.assertFalse(os.path.exists(f"{output_base}.vtt"))
+
+    def test_rerender_clears_stale_sidecars_and_clean_variant(self):
+        from services import clip_generator as cg
+
+        words = [
+            {"word": "hello", "start": 0.2, "end": 0.6, "speaker": None},
+            {"word": "world", "start": 0.7, "end": 1.1, "speaker": None},
+        ]
+        out_dir = os.path.join(self.tmpdir, "out_rerender")
+        first = cg.generate_clip(
+            video_path=self.src,
+            start_second=0,
+            end_second=2.5,
+            caption_style="subtle",
+            crop_strategy="center",
+            transcript_words=words,
+            title="rerender_test",
+            output_dir=out_dir,
+            captions=False,
+            write_subtitles=True,
+            clean_fillers=False,
+            write_clean_variant=True,
+        )
+        output_base, _ = os.path.splitext(first["output_path"])
+        srt_path = f"{output_base}.srt"
+        vtt_path = f"{output_base}.vtt"
+        clean_path = f"{output_base}_clean.mp4"
+        self.assertTrue(os.path.exists(srt_path))
+        self.assertTrue(os.path.exists(vtt_path))
+        self.assertTrue(os.path.exists(clean_path))
+
+        # Re-render the same clip (same title/output_dir, so the same
+        # output path) without subtitles or a clean variant this time.
+        # Without cleanup, the previous render's .srt/.vtt/_clean.mp4
+        # would sit next to the new clip describing stale content.
+        cg._reserved_output_paths.discard(first["output_path"])
+        second = cg.generate_clip(
+            video_path=self.src,
+            start_second=0,
+            end_second=2.5,
+            caption_style="subtle",
+            crop_strategy="center",
+            transcript_words=words,
+            title="rerender_test",
+            output_dir=out_dir,
+            captions=False,
+            clean_fillers=False,
+            write_clean_variant=False,
+        )
+        self.assertEqual(second["output_path"], first["output_path"])
+        self.assertFalse(os.path.exists(srt_path))
+        self.assertFalse(os.path.exists(vtt_path))
+        self.assertFalse(os.path.exists(clean_path))
 
 
 if __name__ == "__main__":

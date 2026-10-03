@@ -11,6 +11,7 @@ import {
   formatTranscriptText,
   safeUpper,
   describePeople,
+  buildUiStateSyncPayload,
 } from "./lib";
 
 describe("fmt", () => {
@@ -247,5 +248,31 @@ describe("describePeople", () => {
       { side: "left", role: null, from: "image", source_time: null },
       { side: "right", role: null, from: "seats", source_time: 3 },
     ])).toBe("left person, right person at 0:03");
+  });
+});
+
+describe("buildUiStateSyncPayload", () => {
+  // The studio used to sync the transcript in a request of its own, separate
+  // from videoPath and the rest of the syncable state. After silence
+  // removal, videoPath and transcript update together in one render, but
+  // the two separate fetches could still arrive at the server in either
+  // order — a videoPath-only request landing after the transcript-only one
+  // looked exactly like a bare set_video (videoPath with no transcript in
+  // the request) and cleared the transcript that had just arrived.
+
+  it("omits transcript when it hasn't changed, matching the old split-request shape", () => {
+    const payload = buildUiStateSyncPayload({ videoPath: "a.mp4" }, "a.mp4", { words: [] }, false);
+    expect(payload).not.toHaveProperty("transcript");
+  });
+
+  it("carries videoPath and a just-changed transcript in one payload, not two", () => {
+    const transcript = { words: [{ word: "hi", start: 0, end: 1 }] };
+    const payload = buildUiStateSyncPayload({ videoPath: "b.mp4" }, "b.mp4", transcript, true);
+    expect(payload).toMatchObject({ _source: "ui", videoPath: "b.mp4", transcript });
+  });
+
+  it("sends an explicit transcript: null when it changed to null, not a silent omission", () => {
+    const payload = buildUiStateSyncPayload({ videoPath: "a.mp4" }, "a.mp4", null, true);
+    expect(payload).toHaveProperty("transcript", null);
   });
 });

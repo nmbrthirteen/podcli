@@ -142,18 +142,30 @@ def probe_has_audio_stream(path: str) -> bool:
     return "audio" in (result.stdout or "")
 
 
-def verify_full_decode(path: str) -> str | None:
+def verify_full_decode(path: str, max_error_lines: int = 3) -> str | None:
     """Decode the whole file and return ffmpeg's error output, or None if clean.
 
     An ffmpeg render that exits 0 can still have written a truncated or
     corrupt file — a moov atom cut short, a partial frame at the tail, a
     stream copy/concat mismatch. Those only surface on a full decode, which
     is what this runs: the same check as `ffmpeg -v error -i x -f null -`
-    from the command line.
+    from the command line. -threads auto keeps that decode from running
+    single-threaded on a multi-core box.
+
+    A nonzero exit always fails. Otherwise, `-v error` also logs a handful
+    of lines ffmpeg can emit on an otherwise-fine file (e.g. a non-monotonic
+    DTS warning from a concat/re-encode) — a single clip used to get deleted
+    for one such line even though it decoded and played fine. Only treat it
+    as a real decode failure once more than a few such lines show up.
     """
-    cmd = ["ffmpeg", "-v", "error", "-i", path, "-f", "null", "-"]
+    cmd = ["ffmpeg", "-v", "error", "-threads", "auto", "-i", path, "-f", "null", "-"]
     result = proc_run(cmd, timeout=FFMPEG_TIMEOUT, check=False)
     stderr = (result.stderr or "").strip()
-    if result.returncode != 0 or stderr:
+    if result.returncode != 0:
         return stderr[-1000:] if stderr else f"ffmpeg exited {result.returncode} decoding the output"
+    if not stderr:
+        return None
+    error_lines = [line for line in stderr.splitlines() if line.strip()]
+    if len(error_lines) > max_error_lines:
+        return stderr[-1000:]
     return None

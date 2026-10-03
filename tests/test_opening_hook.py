@@ -230,6 +230,9 @@ class OpeningHookRenderTests(unittest.TestCase):
                 title=f"hook_{mode}",
                 output_dir=os.path.join(self.tmpdir, mode),
                 captions=False,
+                # Sidecars otherwise follow `captions`; this test inspects
+                # the sidecar words directly, so request them explicitly.
+                write_subtitles=True,
                 clean_fillers=False,
                 trim_opening=False,
                 hook={"start": 5.0, "end": 7.0, "mode": mode},

@@ -169,6 +169,10 @@ interface UIState {
   rawTranscriptText: string;
   silenceOriginal: SilenceOriginal | null;
   silencePlan: SilencePlan | null;
+  // True when the persisted videoPath didn't exist at startup (e.g. an
+  // external drive is unmounted) — the session (transcript, suggestions)
+  // is kept rather than wiped, since the file may well come back.
+  videoMissing: boolean;
   suggestions: SuggestedClip[];
   deselectedIndices: number[];
   settings: {
@@ -199,16 +203,11 @@ function loadPersistedState(): UIState {
     if (existsSync(paths.uiState)) {
       const raw = readFileSync(paths.uiState, "utf-8");
       const saved = JSON.parse(raw);
-      // Validate video still exists
-      if (saved.videoPath && !existsSync(saved.videoPath)) {
-        saved.videoPath = "";
-        saved.filePath = "";
-        saved.phase = "idle";
-        saved.transcript = null;
-        saved.transcriptVideoIdentity = null;
-        saved.suggestions = [];
-        saved.deselectedIndices = [];
-      }
+      // A missing video (e.g. its external drive is unmounted) doesn't mean
+      // the episode is gone — the transcript and suggestions are kept as a
+      // session the file may rejoin; flag it instead so the caller can warn
+      // and skip anything that needs the file on disk right now.
+      const videoMissing = !!saved.videoPath && !existsSync(saved.videoPath);
       if (saved.silenceOriginal?.videoPath && !existsSync(saved.silenceOriginal.videoPath)) {
         saved.silenceOriginal = null;
       }
@@ -221,6 +220,7 @@ function loadPersistedState(): UIState {
         rawTranscriptText: saved.rawTranscriptText || "",
         silenceOriginal: saved.silenceOriginal || null,
         silencePlan: saved.silencePlan || null,
+        videoMissing,
         suggestions: saved.suggestions || [],
         deselectedIndices: saved.deselectedIndices || [],
         settings: {
@@ -264,6 +264,7 @@ function loadPersistedState(): UIState {
     rawTranscriptText: "",
     silenceOriginal: null,
     silencePlan: null,
+    videoMissing: false,
     suggestions: [],
     deselectedIndices: [],
     settings: {
@@ -592,8 +593,10 @@ function clearEpisodeSessionState(): void {
   allowedSourcePaths.clear();
   uiState.videoPath = "";
   uiState.filePath = "";
+  uiState.videoMissing = false;
   uiState.activeExportJobId = null;
   uiState.transcript = null;
+  uiState.transcriptVideoIdentity = null;
   uiState.rawTranscriptText = "";
   uiState.silenceOriginal = null;
   uiState.silencePlan = null;
@@ -844,6 +847,11 @@ app.post("/api/download-video", async (req, res) => {
       registerSourcePath(filePath);
       uiState.videoPath = filePath;
       uiState.filePath = filePath;
+      uiState.videoMissing = false;
+      // A fresh download has no transcript yet; a stale identity from
+      // whatever video was loaded before would otherwise still read as "the
+      // transcript belongs to this video" until the next transcribe call.
+      uiState.transcriptVideoIdentity = null;
       uiState.lastUpdated = Date.now();
       persistState();
       broadcastSSE("state-sync", uiState);
@@ -1117,6 +1125,8 @@ app.post("/api/transcribe", async (req, res) => {
     uiState.transcript = cached as unknown as typeof uiState.transcript;
     uiState.videoPath = file_path;
     uiState.filePath = file_path;
+    uiState.videoMissing = false;
+    uiState.transcriptVideoIdentity = computeVideoIdentity(file_path);
     registerSourcePath(file_path);
     uiState.lastUpdated = Date.now();
     persistState();
@@ -1181,6 +1191,8 @@ app.post("/api/transcribe", async (req, res) => {
       uiState.transcript = result.data as unknown as typeof uiState.transcript;
       uiState.videoPath = file_path;
       uiState.filePath = file_path;
+      uiState.videoMissing = false;
+      uiState.transcriptVideoIdentity = computeVideoIdentity(file_path);
       registerSourcePath(file_path);
       uiState.lastUpdated = Date.now();
       persistState();
@@ -1990,16 +2002,29 @@ app.get("/api/outputs", async (_req, res) => {
   try {
     await mkdir(paths.output, { recursive: true });
     const files = await readdir(paths.output);
-    const clips = files
-      .filter((f) => f.endsWith(".mp4"))
+    const mp4Files = files.filter((f) => f.endsWith(".mp4"));
+    // A clean (caption-free) variant renders to "<stem>_clean.mp4" next to
+    // its main clip — fold it into that clip's entry instead of listing it
+    // as a second, unrelated-looking clip.
+    const cleanByStem = new Map<string, string>();
+    for (const f of mp4Files) {
+      if (f.endsWith("_clean.mp4")) {
+        cleanByStem.set(f.slice(0, -"_clean.mp4".length), f);
+      }
+    }
+    const clips = mp4Files
+      .filter((f) => !f.endsWith("_clean.mp4"))
       .map((f) => {
         const fullPath = join(paths.output, f);
         const stat = statSync(fullPath);
+        const stem = f.slice(0, -".mp4".length);
+        const cleanFilename = cleanByStem.get(stem);
         return {
           filename: f,
           path: fullPath,
           size_mb: Math.round((stat.size / (1024 * 1024)) * 100) / 100,
           created: stat.mtime.toISOString(),
+          ...(cleanFilename && { clean_output_path: join(paths.output, cleanFilename) }),
         };
       })
       .sort(
@@ -4244,6 +4269,7 @@ app.get("/api/ui-state", (_req, res) => {
     rawTranscriptText: uiState.rawTranscriptText,
     silenceOriginal: uiState.silenceOriginal,
     silencePlan: uiState.silencePlan,
+    videoMissing: uiState.videoMissing,
     lastUpdated: uiState.lastUpdated,
   });
 });
@@ -4290,7 +4316,10 @@ app.post("/api/ui-state", (req, res) => {
     uiState.silencePlan = null;
   }
 
-  if (body.videoPath !== undefined) uiState.videoPath = body.videoPath;
+  if (body.videoPath !== undefined) {
+    uiState.videoPath = body.videoPath;
+    uiState.videoMissing = !!body.videoPath && !existsSync(body.videoPath);
+  }
   if (body.filePath !== undefined) uiState.filePath = body.filePath;
   if (body.transcript !== undefined) {
     uiState.transcript = body.transcript;
@@ -4322,20 +4351,51 @@ app.post("/api/ui-state", (req, res) => {
   }
   if (body.suggestions !== undefined) {
     if (body._source === "ui" && Array.isArray(body.suggestions)) {
+      const previousSuggestions = uiState.suggestions;
       uiState.suggestions = body.suggestions.map((incoming: SuggestedClip) => {
-        if (incoming.segments?.length) return incoming;
-        const segments = findSuggestionSegments(
-          uiState.suggestions,
-          incoming.start_second,
-          incoming.end_second,
-        );
-        if (!segments?.length) return incoming;
-        const existing = uiState.suggestions.find(
+        const existingIndex = previousSuggestions.findIndex(
           (s) =>
             Math.abs(s.start_second - incoming.start_second) < 0.5 &&
             Math.abs(s.end_second - incoming.end_second) < 0.5,
         );
-        return { ...incoming, segments, duration: existing?.duration ?? incoming.duration };
+        const existing = existingIndex >= 0 ? previousSuggestions[existingIndex] : undefined;
+
+        let merged = incoming;
+        if (!incoming.segments?.length) {
+          const segments = findSuggestionSegments(
+            previousSuggestions,
+            incoming.start_second,
+            incoming.end_second,
+          );
+          if (segments?.length) {
+            // The restored segments (and any hook) change what actually
+            // plays, so the duration has to be recomputed rather than
+            // carried over from before the edit — otherwise a clip with an
+            // opening hook reports a duration that excludes it.
+            merged = {
+              ...incoming,
+              segments,
+              duration:
+                Math.round(
+                  playbackDuration(incoming.start_second, incoming.end_second, segments, incoming.hook) * 10,
+                ) / 10,
+            };
+          }
+        }
+
+        // A studio edit (retiming, segment trim, hook change, ...) lands here
+        // the same way MCP's modify_clip lands on /api/suggestions/modify;
+        // an already-approved clip needs the same "no longer matches what
+        // was selected" flag, or a studio edit after selection silently
+        // exports something other than what was approved.
+        if (existing?.selectionHash && !uiState.deselectedIndices.includes(existingIndex)) {
+          const currentHash = computeSelectionHash(merged, uiState.transcript?.words);
+          if (currentHash !== existing.selectionHash) {
+            merged = { ...merged, selectionHash: existing.selectionHash, changedSinceSelection: true };
+          }
+        }
+
+        return merged;
       });
     } else {
       uiState.suggestions = body.suggestions;
@@ -4387,12 +4447,17 @@ app.post("/api/ui-state", (req, res) => {
     broadcastSSE("state-sync", {
       ...(body.videoPath !== undefined && { videoPath: uiState.videoPath }),
       ...(body.filePath !== undefined && { filePath: uiState.filePath }),
-      ...(body.suggestions !== undefined && { suggestions: uiState.suggestions }),
-      ...(body.deselectedIndices !== undefined && {
+      // The request body only carried videoPath, but a bare set_video also
+      // cleared the transcript/suggestions/selections server-side; without
+      // forcing these onto the broadcast too, the studio's in-memory state
+      // never learns they were cleared and later syncs the stale ones right
+      // back.
+      ...((body.suggestions !== undefined || videoChanged) && { suggestions: uiState.suggestions }),
+      ...((body.deselectedIndices !== undefined || videoChanged) && {
         deselectedIndices: uiState.deselectedIndices,
       }),
       ...(body.phase !== undefined && { phase: uiState.phase }),
-      ...(body.transcript !== undefined && { transcript: uiState.transcript }),
+      ...((body.transcript !== undefined || videoChanged) && { transcript: uiState.transcript }),
       ...(body.silenceOriginal !== undefined && { silenceOriginal: uiState.silenceOriginal }),
       ...(body.silencePlan !== undefined && { silencePlan: uiState.silencePlan }),
       ...(body.settings && { settings: uiState.settings }),
@@ -4470,7 +4535,7 @@ app.post("/api/suggestions/modify", (req, res) => {
     // overrides the new start/end at render time (create_clip reads
     // keep_segments ahead of start_second/end_second).
     const nextSegments = reTimed
-      ? reconcileSegmentsForRange(clip.segments, nextStart, nextEnd)
+      ? reconcileSegmentsForRange(clip.segments, clip.start_second, clip.end_second, nextStart, nextEnd)
       : clip.segments;
     const nextHook: ClipHook | undefined =
       upd.hook === null ? undefined : upd.hook !== undefined ? upd.hook : clip.hook;
