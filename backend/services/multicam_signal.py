@@ -311,7 +311,8 @@ def plan_cuts(
     longer one opens wide for guest_delay seconds before going to the guest,
     as a call recording cuts between the split screen and the guest. Split
     camera files (part 1, part 2) are handled because every decision checks
-    which camera actually covers the moment.
+    which camera actually covers the moment. Once the shots are settled, a
+    cut made where someone starts to speak moves LEAD_IN seconds earlier.
     """
     if not cameras or range_end <= range_start:
         return []
@@ -404,11 +405,41 @@ def plan_cuts(
             broken.append({**shot, "start": cursor, "end": shot["end"]})
         shots = broken
 
+    _lead_in(shots, labels, by_id, range_start, min_shot)
     return [
         {"start": round(s["start"], 3), "end": round(s["end"], 3), "source_id": s["source_id"]}
         for s in shots
         if s["end"] - s["start"] > 1e-3
     ]
+
+
+# A cut made where someone starts to speak lands this much before their first
+# word, so the picture is already on them when the sound arrives.
+LEAD_IN = 0.12
+
+
+def _lead_in(shots: list[dict], labels: np.ndarray, by_id: dict[str, Camera], range_start: float,
+             min_shot: float) -> None:
+    """Move each cut that a speech onset caused up to LEAD_IN seconds earlier, in place.
+
+    The cut only moves back through silence (or the incoming speaker's own
+    sound), never across anyone else's words. It never leaves the outgoing
+    shot shorter than min_shot, and never reaches before the incoming camera
+    started rolling.
+    """
+    first = int(range_start / FRAME_SECONDS)
+    steps = int(round(LEAD_IN / FRAME_SECONDS))
+    for prev, shot in zip(shots, shots[1:]):
+        f = first + int(round((shot["start"] - range_start) / FRAME_SECONDS))
+        if not 0 < f < len(labels) or labels[f] == SILENT or labels[f] == labels[f - 1]:
+            continue
+        earliest = max(prev["start"] + min_shot, by_id[shot["source_id"]].start)
+        k = f
+        while (f - k < steps and k > 0 and labels[k - 1] in (SILENT, labels[f])
+               and range_start + (k - 1 - first) * FRAME_SECONDS >= earliest - 1e-9):
+            k -= 1
+        if k < f:
+            prev["end"] = shot["start"] = range_start + (k - first) * FRAME_SECONDS
 
 
 # A guest's full-frame shot runs this far past their last word, then the
