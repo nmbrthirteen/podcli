@@ -1559,3 +1559,45 @@ def test_lut_is_refused_on_a_mic(sandbox):
     session.sources.append(_source("/x/room.wav", kind="audio", role="mic", id="room"))
     with pytest.raises(ValueError, match="camera"):
         mc.update_mapping(session, {"sources": [{"id": "room", "input_lut": str(_cube(sandbox / "l" / "a.cube"))}]})
+
+
+# --- fitting cameras of another size into the sequence --------------------------------
+
+def test_exports_fit_cameras_of_another_size_inside_the_sequence(sandbox):
+    wide = _source(str(sandbox / "wide.mp4"), role="camera", person="wide", offset=0.0, id="wide")
+    uhd = _source(str(sandbox / "uhd.mp4"), role="camera", person="host", offset=0.0, id="uhd", width=3840, height=2160)
+    phone = _source(str(sandbox / "phone.mp4"), role="camera", person="guest", offset=0.0, id="phone",
+                    width=1080, height=1440)
+    room = _source(str(sandbox / "room.wav"), kind="audio", role="mic", offset=0.0, id="room")
+    session = mc.MulticamSession(
+        session_id="abc123abc903", name="ep", people=[mc.Person("host", "Host"), mc.Person("guest", "Guest")],
+        sources=[wide, uhd, phone, room], reference_id="room",
+        cuts=[{"start": 0.0, "end": 5.0, "source_id": "wide"}, {"start": 5.0, "end": 10.0, "source_id": "uhd"},
+              {"start": 10.0, "end": 15.0, "source_id": "phone"}])
+    session.save()
+
+    premiere = ET.parse(mc.export_xml(session, "premiere", review=True)).getroot()
+    assert premiere.findtext("./sequence/media/video/format/samplecharacteristics/width") == "1920"
+    scales: dict = {}
+    for item in premiere.iter("clipitem"):
+        effect = item.find("filter/effect")
+        if item.find("sourcetrack") is not None:
+            assert effect is None
+            continue
+        name = item.findtext("name")
+        if effect is None:
+            scales.setdefault(name, set()).add(None)
+            continue
+        assert [effect.findtext(k) for k in ("name", "effectid", "effectcategory", "effecttype", "mediatype")] == [
+            "Basic Motion", "basic", "motion", "motion", "video"]
+        param = effect.find("parameter")
+        assert param.get("authoringApp") == "PremierePro"
+        assert [param.findtext(k) for k in ("parameterid", "name", "valuemin", "valuemax")] == ["scale", "Scale", "0", "1000"]
+        scales.setdefault(name, set()).add(float(param.findtext("value")))
+    assert scales == {"wide.mp4": {None}, "uhd.mp4": {50.0}, "phone.mp4": {75.0}}
+
+    fcp = ET.parse(mc.export_xml(session, "fcpxml", review=True)).getroot()
+    for clip in fcp.iter("asset-clip"):
+        fitted = [c.get("type") for c in clip.findall("adjust-conform")]
+        expected = ["fit"] if clip.get("name") in ("uhd.mp4", "phone.mp4") else []
+        assert fitted == expected, clip.get("name")

@@ -84,6 +84,32 @@ def _pieces(source, plan, fps: float) -> list[tuple[int, int, float, dict | None
     return [tuple(x) for x in pieces]
 
 
+def _fit_scale(source, width: int, height: int) -> float | None:
+    """Percent scale that fits a camera inside the sequence frame, or None when it already matches.
+
+    Premiere places a clip at 100% of its own pixels, so a 4K camera on an HD
+    sequence would show only its middle quarter.
+    """
+    if source.kind != "video" or not source.width or not source.height or (source.width, source.height) == (width, height):
+        return None
+    return min(width / source.width, height / source.height) * 100
+
+
+def _basic_motion(item: ET.Element, scale: float) -> None:
+    effect = ET.SubElement(ET.SubElement(item, "filter"), "effect")
+    _text(effect, "name", "Basic Motion")
+    _text(effect, "effectid", "basic")
+    _text(effect, "effectcategory", "motion")
+    _text(effect, "effecttype", "motion")
+    _text(effect, "mediatype", "video")
+    param = ET.SubElement(effect, "parameter", {"authoringApp": "PremierePro"})
+    _text(param, "parameterid", "scale")
+    _text(param, "name", "Scale")
+    _text(param, "valuemin", 0)
+    _text(param, "valuemax", 1000)
+    _text(param, "value", f"{scale:.2f}")
+
+
 def _label(session, source, channel: int, person: str) -> str:
     names = {p.id: p.name for p in session.people}
     base = names.get(person, "Room")
@@ -195,6 +221,8 @@ def write_xmeml(session, out_path: Path, *, width: int, height: int, fps: float,
             st = ET.SubElement(item, "sourcetrack")
             _text(st, "mediatype", "audio")
             _text(st, "trackindex", max(1, audio_channel + 1))
+        elif (scale := _fit_scale(source, width, height)) is not None:
+            _basic_motion(item, scale)
         if removal is not None:
             labels = ET.SubElement(item, "labels")
             _text(labels, "label2", "Mango")
@@ -306,9 +334,14 @@ def write_fcpxml(session, out_path: Path, *, width: int, height: int, fps: float
     # lanes, so every clip is positioned against the same zero.
     gap = ET.SubElement(spine, "gap", {"name": "Episode", "offset": "0s", "start": "0s", "duration": t(total)})
 
+    def conform(clip: ET.Element, source) -> None:
+        # FCPXML's own fit conform does what Premiere's Basic Motion scale does there.
+        if _fit_scale(source, width, height) is not None:
+            ET.SubElement(clip, "adjust-conform", {"type": "fit"})
+
     for lane, cam in enumerate(angles, start=1):
         for f0, f1, src_seconds, removal in _pieces(cam, plan, fps):
-            ET.SubElement(gap, "asset-clip", {
+            angle = ET.SubElement(gap, "asset-clip", {
                 "ref": asset_ids[cam.id],
                 "lane": str(lane),
                 "offset": t(f0),
@@ -317,6 +350,7 @@ def write_fcpxml(session, out_path: Path, *, width: int, height: int, fps: float
                 "name": _removed_name(os.path.basename(cam.path), removal),
                 "srcEnable": "video",
             })
+            conform(angle, cam)
     for p in plan:
         if not p.source_id:
             continue
@@ -331,6 +365,7 @@ def write_fcpxml(session, out_path: Path, *, width: int, height: int, fps: float
             "name": _removed_name(os.path.basename(cam.path), p.removal),
             "srcEnable": "video",
         })
+        conform(clip, cam)
         if p.removal is not None:
             ET.SubElement(clip, "marker", {
                 "start": start, "duration": t(p.frames), "value": p.removal.get("reason") or "Remove",
