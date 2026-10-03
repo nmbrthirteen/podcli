@@ -146,7 +146,7 @@ def verify_full_decode(path: str, max_error_lines: int = 3) -> str | None:
     """Decode the whole file and return ffmpeg's error output, or None if clean.
 
     An ffmpeg render that exits 0 can still have written a truncated or
-    corrupt file — a moov atom cut short, a partial frame at the tail, a
+    corrupt file: a moov atom cut short, a partial frame at the tail, a
     stream copy/concat mismatch. Those only surface on a full decode, which
     is what this runs: the same check as `ffmpeg -v error -i x -f null -`
     from the command line. -threads auto keeps that decode from running
@@ -154,7 +154,7 @@ def verify_full_decode(path: str, max_error_lines: int = 3) -> str | None:
 
     A nonzero exit always fails. Otherwise, `-v error` also logs a handful
     of lines ffmpeg can emit on an otherwise-fine file (e.g. a non-monotonic
-    DTS warning from a concat/re-encode) — a single clip used to get deleted
+    DTS warning from a concat/re-encode), a single clip used to get deleted
     for one such line even though it decoded and played fine. Only treat it
     as a real decode failure once more than a few such lines show up.
     """

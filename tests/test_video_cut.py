@@ -281,7 +281,7 @@ class OutputVerificationTests(unittest.TestCase):
 
 class VerifyFullDecodeThresholdTests(unittest.TestCase):
     """verify_full_decode used to delete the output on any `-v error` line at
-    all, even with a 0 exit code — a single benign warning (e.g. a
+    all, even with a 0 exit code. A single benign warning (e.g. a
     non-monotonic DTS line from a concat/re-encode) was enough to flag a
     clip that decoded and played fine. These exercise the counting logic
     against a mocked proc_run so they don't depend on finding a real file
@@ -318,7 +318,7 @@ class VerifyFullDecodeThresholdTests(unittest.TestCase):
 class MultiSegmentPartDurationTests(unittest.TestCase):
     """Captions for a multi-cut clip are timed by summing part durations
     (clip_generator.py). Each part's actual encoded length can be a few ms
-    off the requested end - start, and that drift compounds across cuts —
+    off the requested end - start, and that drift compounds across cuts,
     so the probed durations cut_multi_segment now returns must track the
     real concatenated output, not the planned request."""
 

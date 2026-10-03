@@ -25,7 +25,7 @@ from services.transcription_whispercpp import _frame_rms, _snap_words_to_voiced,
 def _voiced_intervals_quadratic_reference(wav_path, bridge=0.3, thresh_ratio=0.07):
     """The pre-fix implementation: gathers every window into an (nf, frame)
     matrix before taking the RMS. Kept here only as a correctness oracle for
-    the O(n) rewrite in transcription_whispercpp._voiced_intervals — it must
+    the O(n) rewrite in transcription_whispercpp._voiced_intervals. It must
     never run on real audio, only the short synthetic clips in this test."""
     import wave as wave_mod
 

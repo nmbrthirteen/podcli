@@ -1,4 +1,4 @@
-"""Tests for backend.services.engine_comparison — disagreement scoring and report output."""
+"""Tests for backend.services.engine_comparison: disagreement scoring and report output."""
 
 import json
 import os
@@ -153,7 +153,7 @@ class RenderHtmlEscapingTests(unittest.TestCase):
     def test_script_closing_tag_in_transcript_text_is_neutralized(self):
         html_out = ec.render_html(self._report("</script><script>alert(1)</script>", "normal"), None)
         self.assertNotIn("</script><script>alert(1)</script>", html_out)
-        # The data must still round-trip through JS correctly — check the
+        # The data must still round-trip through JS correctly. Check the
         # escaped marker is present instead of a raw closing tag.
         self.assertIn("\\u003c/script", html_out)
 

@@ -1,4 +1,4 @@
-"""Tests for backend.services.transcribe_runs — per-run receipts keyed by
+"""Tests for backend.services.transcribe_runs: per-run receipts keyed by
 {file fingerprint, engine, model, language} so a restarted job can resume."""
 
 import os

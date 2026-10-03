@@ -210,7 +210,7 @@ interface ImportTranscriptResult extends ApiError {
 
 /**
  * Read session state straight off disk (paths.uiState) instead of the Web
- * UI's HTTP API. Used when the Web UI isn't running — the state file is the
+ * UI's HTTP API. Used when the Web UI isn't running. The state file is the
  * same JSON the UI persists on every change, so the agent isn't blind just
  * because nothing is listening on webServerUrl.
  */
@@ -341,7 +341,7 @@ async function getWorkflowGuidance(): Promise<string> {
     const openQuestions = await episodeState.openQuestions(episodeKeyPath).catch(() => []);
     if (openQuestions.length > 0) {
       lines.push(
-        "\nOPEN QUESTIONS for this episode — ask once, then call record_decisions so these never come up again:\n" +
+        "\nOPEN QUESTIONS for this episode. Ask once, then call record_decisions so these never come up again:\n" +
           openQuestions.map((q) => `  → ${q.question}`).join("\n"),
       );
     }
@@ -394,7 +394,7 @@ export function createServer(): McpServer {
         .optional()
         .describe(
           "Sample mode: only transcribe a window starting here (seconds into the source), " +
-            "instead of the whole file — e.g. to test a language on 40s before committing to " +
+            "instead of the whole file, e.g. to test a language on 40s before committing to " +
             "a full run. Pair with duration_seconds. Not written to the main transcript cache.",
         ),
       duration_seconds: z
@@ -1591,7 +1591,7 @@ export function createServer(): McpServer {
             const tag = deselected.includes(i)
               ? " [DESELECTED]"
               : clip.changedSinceSelection
-                ? " [CHANGED SINCE SELECTION — re-confirm before exporting]"
+                ? " [CHANGED SINCE SELECTION, re-confirm before exporting]"
                 : "";
             lines.push(
               `  #${num}: "${title}" (${start}s–${end}s, ${duration}) [${style}]${tag}`,

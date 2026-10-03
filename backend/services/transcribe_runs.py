@@ -1,6 +1,6 @@
 """Per-run receipts for long transcriptions, keyed by {file fingerprint,
 engine, model, language}, so a restarted job can resume instead of starting
-over — re-uploading a file to AssemblyAI or re-decoding chunks already done.
+over: re-uploading a file to AssemblyAI or re-decoding chunks already done.
 
 A receipt is just a JSON file written atomically (temp + rename) under a
 directory named for the run's key. Nothing here assumes what's inside a

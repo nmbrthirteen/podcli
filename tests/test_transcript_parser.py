@@ -157,7 +157,7 @@ class SpeakerTranscriptTests(unittest.TestCase):
     def test_speaker_segments_apply_time_adjust_like_words_and_segments(self):
         # Regression: speaker_segments previously used the raw block
         # start/end, ignoring time_adjust, while words and segments applied
-        # it — the three arrays drifted out of sync for any non-zero adjust.
+        # it, so the three arrays drifted out of sync for any non-zero adjust.
         raw = "Alice (00:10)\nHello there\n"
         result = tp.parse_speaker_transcript(raw, total_duration=30.0, time_adjust=-2.0)
         seg = result["speaker_segments"][0]

@@ -1,4 +1,4 @@
-"""Tests for backend.services.glyph_coverage — pre-render font coverage check."""
+"""Tests for backend.services.glyph_coverage: pre-render font coverage check."""
 
 import os
 import shutil
@@ -15,7 +15,7 @@ from services import glyph_coverage as gc
 
 
 class RemotionCoverageTests(unittest.TestCase):
-    """No real fontconfig/Remotion needed — this is a static subset table."""
+    """No real fontconfig/Remotion needed: this is a static subset table."""
 
     def test_latin_text_is_covered(self):
         self.assertIsNone(gc.check_remotion_font_coverage("Hello world"))

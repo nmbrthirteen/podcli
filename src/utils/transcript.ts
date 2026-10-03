@@ -45,7 +45,7 @@ export function findContentType(
 
 /**
  * The suggestion's grounding text for the clip whose range best matches
- * [start, end] — the payoff, the question it answers, and its verbatim
+ * [start, end]: the payoff, the question it answers, and its verbatim
  * opening line. Thumbnail copy is written from this, not from the title
  * alone, so it matches what the clip actually says.
  */
@@ -78,7 +78,7 @@ export function findGroundingText(
  * derives the actual cut points from keep_segments when present.
  *
  * A single segment that already spans the entire old range is just a
- * stand-in for "no custom cuts" — it's dropped outright so the new
+ * stand-in for "no custom cuts". It's dropped outright so the new
  * start/end govern directly, instead of clamping it (which only ever
  * shrinks, so widening or shifting the clip left it pinned to the old
  * bounds: editing 10-60 to 5-70 kept [10, 60], and to 20-80 rendered

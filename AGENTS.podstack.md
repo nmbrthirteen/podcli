@@ -118,9 +118,9 @@ PodStack ships one source-of-truth (`commands/`) and installs to the right locat
 |------|-----------------|--------------|-------------|
 | Claude Code | `.claude/commands/*.md` (per project) | `podcli auto` / any PodStack command | `CLAUDE.md` |
 | OpenAI Codex | `~/.codex/skills/<name>/SKILL.md` (global) | `podcli auto` / any PodStack command, when the `codex` CLI is on PATH | `AGENTS.podstack.md` (this file) |
-| Cursor | `.cursor/rules/*.mdc` | not automated yet — copy by hand | `AGENTS.podstack.md` |
-| opencode | `.opencode/commands/*.md` | not automated yet — copy by hand | `AGENTS.podstack.md` |
-| Generic | `commands/*.md` | not automated yet — copy by hand | `AGENTS.podstack.md` |
+| Cursor | `.cursor/rules/*.mdc` | not automated yet, copy by hand | `AGENTS.podstack.md` |
+| opencode | `.opencode/commands/*.md` | not automated yet, copy by hand | `AGENTS.podstack.md` |
+| Generic | `commands/*.md` | not automated yet, copy by hand | `AGENTS.podstack.md` |
 
 Claude and Codex installs are automatic and kept in sync on upgrade; see `README.md`
 for per-host usage examples and manual steps for the other hosts.

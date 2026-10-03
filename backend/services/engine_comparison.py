@@ -2,8 +2,8 @@
 
 Transcribes a sample range twice, once per engine, and reports where the two
 transcripts disagree, windowed every 20s by default. This measures
-disagreement between the two outputs, not accuracy against a ground truth —
-neither engine is assumed correct.
+disagreement between the two outputs, not accuracy against a ground truth.
+Neither engine is assumed correct.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def word_levenshtein(a: list[str], b: list[str]) -> int:
 def disagreement_ratio(text_a: str, text_b: str) -> float:
     """Levenshtein over normalized words, divided by the longer word count.
     0.0 = identical (after normalization), 1.0 = completely different.
-    Two empty texts disagree 0.0 (nothing to disagree about) — callers should
+    Two empty texts disagree 0.0 (nothing to disagree about), so callers should
     flag that case separately rather than reading it as agreement."""
     words_a = normalize_words(text_a.split())
     words_b = normalize_words(text_b.split())
@@ -67,7 +67,7 @@ def disagreement_ratio(text_a: str, text_b: str) -> float:
 
 
 def _words_in_window(words: list[dict], window_start: float, window_end: float) -> str:
-    """Join words whose midpoint falls in [window_start, window_end) — matches
+    """Join words whose midpoint falls in [window_start, window_end). Matches
     the midpoint-ownership rule used elsewhere so a word isn't double-counted
     in two adjacent windows."""
     picked = []
@@ -173,7 +173,7 @@ def compare_engines(
         report["json_path"] = json_path
 
         # A fresh extraction of the same window, purely for the report's
-        # <audio> player — independent of whatever transcribe_fn did
+        # <audio> player, independent of whatever transcribe_fn did
         # internally (its own sample wav is already cleaned up by the time
         # we get a result back).
         audio_rel = None
@@ -235,7 +235,7 @@ def render_html(report: dict, audio_rel: Optional[str]) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Engine comparison: {engine_a} vs {engine_b} — {file_label}</title>
+<title>Engine comparison: {engine_a} vs {engine_b} ({file_label})</title>
 <style>
   body {{ font-family: -apple-system, system-ui, sans-serif; margin: 2rem; color: #1a1a1a; background: #fafafa; }}
   h1 {{ font-size: 1.25rem; }}
@@ -281,7 +281,7 @@ for (const w of windows) {{
   const level = w.disagreement >= 0.5 ? "high" : w.disagreement <= 0.1 ? "low" : "";
   tr.innerHTML =
     '<td><button class="seek" data-t="' + w.start + '">' + fmtTime(w.start) + '</button>' +
-    ' – ' + fmtTime(w.end) + (w.both_empty ? ' <em>(both empty)</em>' : '') + '</td>' +
+    ' - ' + fmtTime(w.end) + (w.both_empty ? ' <em>(both empty)</em>' : '') + '</td>' +
     '<td>' + esc(w.text_a) + '</td>' +
     '<td>' + esc(w.text_b) + '</td>' +
     '<td class="disagreement ' + level + '">' + w.disagreement.toFixed(2) + '</td>';

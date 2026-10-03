@@ -1,4 +1,4 @@
-"""Tests for backend.services.transcription_omnilingual — the sherpa-onnx
+"""Tests for backend.services.transcription_omnilingual: the sherpa-onnx
 Omnilingual ASR CTC adapter. Mocks the recognizer; never loads the real
 model (large download) or decodes real audio."""
 
@@ -93,8 +93,8 @@ class FakeStream:
 
 
 class FakeRecognizer:
-    """Returns a fixed token stream per call, regardless of audio content —
-    the tests only check the windowing/assignment logic in transcribe_file,
+    """Returns a fixed token stream per call, regardless of audio content.
+    The tests only check the windowing/assignment logic in transcribe_file,
     not real decoding."""
 
     def __init__(self, per_call_tokens):
@@ -237,7 +237,7 @@ class TranscribeFileWindowingTests(unittest.TestCase):
 
     def test_resumes_from_receipts_without_touching_the_recognizer(self):
         # A rerun with the same run_dir must skip every window that already
-        # has a receipt — simulated here by pre-seeding window-0's receipt
+        # has a receipt. Simulated here by pre-seeding window-0's receipt
         # and giving the fake recognizer only enough calls for window 1.
         media = self._touch(".mp4")
         model = self._touch(".onnx")

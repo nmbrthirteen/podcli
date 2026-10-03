@@ -6,7 +6,7 @@ import { join } from "path";
 // A bare set_video from MCP (videoPath with no transcript in the same
 // request) clears the server's transcript/suggestions/selections, since
 // they describe a recording that's no longer loaded. But the SSE broadcast
-// only echoed back whatever fields the request body itself carried — a
+// only echoed back whatever fields the request body itself carried. A
 // request that only sent videoPath never told the studio that transcript
 // and suggestions were cleared too, so the studio's in-memory copies stayed
 // stale and a later sync from the studio wrote them right back onto the

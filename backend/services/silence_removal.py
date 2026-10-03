@@ -347,15 +347,15 @@ def _map_range(
     assign_by_midpoint: bool = False,
 ) -> Optional[tuple[float, float]]:
     # A zero (or inverted) duration item has no overlap for the interval test
-    # below to find — overlap_end > overlap_start never holds when they're
-    # equal — so it always mapped to None and got dropped. Map it as a point
+    # below to find. overlap_end > overlap_start never holds when they're
+    # equal, so it always mapped to None and got dropped. Map it as a point
     # instead: keep it if it falls inside a kept range, drop it if not.
     if end <= start:
         return _map_point(start, keep_segments)
     if assign_by_midpoint:
         # A word that straddles a cut (part of it sits in the removed gap
         # between two kept ranges) belongs wholly to whichever side holds its
-        # midpoint, not to a stitched span across the cut — stitching would
+        # midpoint, not to a stitched span across the cut. Stitching would
         # silently absorb the cut into the word's own duration.
         midpoint = (start + end) / 2.0
         cursor = 0.0

@@ -122,7 +122,7 @@ func sha256Hex(data []byte) string {
 type installReport struct {
 	Installed    []string // written for the first time
 	Updated      []string // podcli-owned, unmodified by the user, refreshed to the new version
-	UserModified []string // changed since podcli last wrote them — left alone
+	UserModified []string // changed since podcli last wrote them, left alone
 }
 
 func (r installReport) hasUpdates() bool {
@@ -135,8 +135,8 @@ func (r installReport) hasUpdates() bool {
 // after `podcli update`), a file whose on-disk hash still matches that
 // record gets refreshed to the new embedded version; a file the user edited
 // is left untouched and reported instead of silently overwritten. A file
-// that predates the manifest (no record at all) is treated the same way —
-// left alone — and its current content becomes the new baseline, so podcli
+// that predates the manifest (no record at all) is treated the same way:
+// left alone. Its current content becomes the new baseline, so podcli
 // never clobbers an install from before this tracking existed.
 func installCommands(project string) (installReport, error) {
 	var report installReport
@@ -233,7 +233,7 @@ func codexSkillsDir() (string, error) {
 }
 
 // frontmatterDescription pulls the `description:` field out of a command
-// file's YAML frontmatter without a YAML dependency — the format here is a
+// file's YAML frontmatter without a YAML dependency. The format here is a
 // fixed, simple `key: value` list.
 func frontmatterDescription(raw string) string {
 	lines := strings.Split(raw, "\n")
@@ -419,7 +419,7 @@ func Run(cmd string, args []string) int {
 	// Fall back to Codex only when Claude isn't installed at all. Claude
 	// exiting nonzero (the user cancelled, a tool failed mid-run, etc.) is
 	// not a reason to silently relaunch the whole workflow under a
-	// different agent — it previously was, which could run the same
+	// different agent. It previously was, which could run the same
 	// destructive command twice under two different engines.
 	if engine != "codex" && claudeBin != "" {
 		fmt.Fprintf(os.Stderr, "\n  %s▶%s Launching Claude Code with: %s%s%s\n  %scwd: %s%s\n\n", colGreen, colReset, colAccent, prompt, colReset, colDim, project, colReset)

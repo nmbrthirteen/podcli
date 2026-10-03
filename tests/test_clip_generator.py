@@ -610,7 +610,7 @@ class SidecarsAndCleanVariantTests(unittest.TestCase):
             title="sidecar_test",
             output_dir=out_dir,
             # Burned captions aren't the point of this test (that's covered
-            # by caption_renderer's own tests) — turning them off here keeps
+            # by caption_renderer's own tests), turning them off here keeps
             # this test to the render pipeline's font/compositor dependencies
             # out of the way of the sidecar/clean-variant wiring under test.
             # Sidecars otherwise follow `captions`, so request them

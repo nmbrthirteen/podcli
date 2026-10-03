@@ -115,8 +115,8 @@ jobs:
           python-version: "3.12"
           cache: "pip"
       - name: Install ffmpeg
-        # Without this, every test that shells out to ffmpeg/ffprobe skips —
-        # about 22 tests were silently not running on any OS.
+        # Without this, every test that shells out to ffmpeg/ffprobe skips.
+        # About 22 tests were silently not running on any OS.
         shell: bash
         run: |
           case "${{ runner.os }}" in

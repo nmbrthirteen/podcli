@@ -178,7 +178,7 @@ describe("TranscriptCache", () => {
     expect((await cache.get(file, { language: "ka" }))?.transcript).toBe("georgian");
   });
 
-  it("writes atomically — no temp file left behind, and no partial reads", async () => {
+  it("writes atomically: no temp file left behind, and no partial reads", async () => {
     const file = makeFakeVideo("atomic.mp4", "atomic write check");
     await cache.set(file, fakeTranscript);
     const { readdirSync } = await import("fs");

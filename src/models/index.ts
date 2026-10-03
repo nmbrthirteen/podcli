@@ -137,7 +137,7 @@ export interface SuggestedClip {
   rank?: number;
   /** Fingerprint of render-relevant fields, stamped when the clip is selected for export. */
   selectionHash?: string;
-  /** True when the clip was edited after selectionHash was stamped — the selection may be stale. */
+  /** True when the clip was edited after selectionHash was stamped, the selection may be stale. */
   changedSinceSelection?: boolean;
 }
 
@@ -152,7 +152,7 @@ export interface UIState {
   silenceOriginal?: { videoPath: string; transcript: TranscriptResult } | null;
   silencePlan?: Record<string, unknown> | null;
   /** True when videoPath didn't exist at last check (e.g. an external drive
-   * is unmounted) — the session is kept, not wiped, while this is set. */
+   * is unmounted). The session is kept, not wiped, while this is set. */
   videoMissing?: boolean;
   suggestions?: SuggestedClip[];
   deselectedIndices?: number[];
@@ -179,7 +179,7 @@ export interface UIState {
 /**
  * Decisions the user has already answered for one episode, so /auto and
  * /produce-shorts ask each question once and reuse the answer on every later
- * run against the same video — including after a Web UI restart, since this
+ * run against the same video, including after a Web UI restart, since this
  * is keyed by video identity and stored independently of ui-state.json.
  */
 export interface EpisodeDecisions {

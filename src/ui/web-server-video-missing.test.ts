@@ -5,7 +5,7 @@ import { join } from "path";
 
 // Loading persisted state at startup used to wipe the transcript and
 // suggestions whenever the saved videoPath didn't exist on disk (e.g. an
-// external drive is unmounted) — losing a whole session for something that
+// external drive is unmounted), losing a whole session for something that
 // might just be temporarily unreachable. It should keep them and flag the
 // video as missing instead.
 

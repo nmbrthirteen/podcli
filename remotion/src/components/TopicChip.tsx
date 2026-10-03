@@ -63,7 +63,7 @@ export const TopicChip: React.FC<TopicChipProps> = ({
         fontSize: 30 * s,
         fontWeight: 700,
         letterSpacing: 3 * s,
-        // Resolved below via safeUpper, not here — CSS text-transform would
+        // Resolved below via safeUpper, not here. CSS text-transform would
         // still remap caseless scripts like Georgian to a different alphabet.
         textTransform: "none",
         color,

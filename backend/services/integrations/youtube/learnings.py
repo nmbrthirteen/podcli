@@ -42,7 +42,7 @@ def _agg(clips: list[dict], key: Callable[[dict], Any]) -> list[dict]:
     """Group clips by `key` and report the median (not mean) of each metric,
     since one viral or one flop clip would otherwise swing a small bucket's
     average far past what's typical. Buckets under MIN_BUCKET_SIZE are
-    dropped — too little data to call it a trend."""
+    dropped: too little data to call it a trend."""
     groups: dict[str, list[dict]] = defaultdict(list)
     for c in clips:
         groups[key(c) or "—"].append(c)

@@ -30,7 +30,7 @@ def _load_brand_config() -> dict:
         "accent_color": "#00CED1",
         "bg_color": "#0D0D0D",
         # Keep this fallback stack in sync with thumbnail_html.py's defaults and
-        # remotion/src/types.ts FONT — 'Inter' alone has no Georgian glyphs.
+        # remotion/src/types.ts FONT. 'Inter' alone has no Georgian glyphs.
         "font_family": "'Inter', 'Helvetica Neue', 'Arial', 'Noto Sans Georgian', sans-serif",
         "enabled": True,
         "variations": 3,
@@ -535,7 +535,7 @@ def _thumbnail_kb_context() -> str:
 def _grounding_context(grounding: Optional[dict]) -> str:
     """Format the clip's payoff/question/opening line for the headline prompt.
 
-    Without this, headline copy is rewritten from the title alone — a short
+    Without this, headline copy is rewritten from the title alone, a short
     label that drifts from what the clip actually says. The clip's own
     payoff and verbatim opening line keep the copy honest to the content.
     """

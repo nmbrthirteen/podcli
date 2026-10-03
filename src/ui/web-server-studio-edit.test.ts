@@ -83,7 +83,7 @@ describe("POST /api/ui-state studio suggestions merge", () => {
       body: JSON.stringify({ suggestions: [baseClip] }),
     });
 
-    // Approve it — stamps a selectionHash, same as the studio's "select" action.
+    // Approve it: stamps a selectionHash, same as the studio's "select" action.
     await fetch(`http://127.0.0.1:${PORT}/api/suggestions/modify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

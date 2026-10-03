@@ -82,7 +82,7 @@ describe("isCookieBrowser", () => {
 describe("buildChannelListArgs", () => {
   const channelUrl = "https://www.youtube.com/@example/videos";
 
-  it("never resolves each video's own page — flat-playlist only", () => {
+  it("never resolves each video's own page: flat-playlist only", () => {
     const args = buildChannelListArgs({ channelUrl });
     expect(args).toContain("--flat-playlist");
     expect(args).not.toContain("--format");
