@@ -150,6 +150,15 @@ class Source:
     def source_time(self, timeline_seconds: float) -> float:
         return (timeline_seconds - self.timeline_start()) / self.speed
 
+    def source_in(self, timeline_seconds: float, span: float) -> float:
+        """Source second to start reading a `span`-second piece at, played at real speed.
+
+        A drifting clock slips |speed - 1| * span across a piece; pinning the
+        piece's middle instead of its start halves the worst slip.
+        """
+        middle = timeline_seconds + span / 2
+        return self.source_time(middle) - span / 2
+
 
 @dataclass
 class MulticamSession:
@@ -1485,11 +1494,13 @@ def activity(session: MulticamSession) -> dict:
 # Previews
 # ---------------------------------------------------------------------------
 
-def _picture(session: MulticamSession, cam: Source, tl: float, width: int, height: int) -> tuple[list[str], str]:
-    """ffmpeg inputs and a filter graph drawing `cam` at timeline second tl into [pic], width x height.
+def _picture(session: MulticamSession, cam: Source, tl: float, width: int, height: int,
+             span: float = 0.0) -> tuple[list[str], str]:
+    """ffmpeg inputs and a filter graph drawing `cam` from timeline second tl into [pic], width x height.
 
     A real camera is fitted to the frame; a pane is cropped out of its call
-    recording first; a split screen fills one equal column per person.
+    recording first; a split screen fills one equal column per person. `span`
+    is how long the piece plays, so its middle lands in sync on a drifting file.
     """
     fit = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
     if cam.members:
@@ -1501,7 +1512,7 @@ def _picture(session: MulticamSession, cam: Source, tl: float, width: int, heigh
             rolling = next((c for c in session.cameras() if not c.virtual and c.synced and c.person == person
                             and c.timeline_start() <= tl < c.timeline_end()), None)
             if rolling:
-                args += ["-ss", f"{max(0.0, rolling.source_time(tl)):.4f}", "-i", rolling.path]
+                args += ["-ss", f"{max(0.0, rolling.source_in(tl, span)):.4f}", "-i", rolling.path]
             else:
                 args += ["-f", "lavfi", "-i", f"color=c=black:s={pane}x{height}"]
             chains.append(f"[{i}:v:0]scale={pane}:{height}:force_original_aspect_ratio=increase,crop={pane}:{height},setsar=1[p{i}]")
@@ -1512,7 +1523,7 @@ def _picture(session: MulticamSession, cam: Source, tl: float, width: int, heigh
     if cam.crop:
         x, y, w, h = cam.crop
         crop = f"crop=iw*{w:.4f}:ih*{h:.4f}:iw*{x:.4f}:ih*{y:.4f},"
-    return ["-ss", f"{max(0.0, src.source_time(tl)):.4f}", "-i", src.path], f"[0:v:0]{crop}{fit}[pic]"
+    return ["-ss", f"{max(0.0, src.source_in(tl, span)):.4f}", "-i", src.path], f"[0:v:0]{crop}{fit}[pic]"
 
 
 def _still(session: MulticamSession, cam: Source, tl: float, out: Path, look: str = "none", width: int = 480) -> Path:
@@ -1789,7 +1800,7 @@ def _render_shot(session: MulticamSession, cam: Optional[Source], out: Path, tl_
             "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r={fps:.6f}", *common,
         ], timeout=600, check=True)
         return
-    args, graph = _picture(session, cam, tl_start, width, height)
+    args, graph = _picture(session, cam, tl_start, width, height, frames / fps)
     # A camera that stops a few frames early would shorten the shot and slip
     # every later shot against the audio; holding its last frame prevents that.
     tail = [f"fps={fps:.6f}", "tpad=stop_mode=clone:stop=-1", *([LOOKS[look]] if LOOKS.get(look) else [])]
@@ -1923,6 +1934,29 @@ def kept_segments(session: MulticamSession) -> list[tuple[float, float]]:
     return [(a, b) for a, b, r in _segments(session) if r is None]
 
 
+def drift_parts(seconds: float, drift: float, fps: float) -> int:
+    """How many pieces a stretch splits into so a clock off by `drift` (|speed - 1|) slips at most half a frame in each.
+
+    One frame of slack covers pieces landing a frame longer on the output grid.
+    """
+    return max(1, math.ceil(drift * (seconds + 1 / fps) * 2 * fps - 1e-9))
+
+
+def _camera_drift(session: MulticamSession, source_id: str) -> float:
+    """|speed - 1| of the worst-drifting file a camera draws its picture from."""
+    by_id = {s.id: s for s in session.sources}
+    cam = by_id.get(source_id)
+    if cam is None:
+        return 0.0
+    if cam.parent:
+        files = [by_id.get(cam.parent)]
+    elif cam.members:
+        files = [c for c in session.cameras() if not c.virtual and c.person in cam.members]
+    else:
+        files = [cam]
+    return max((abs(f.speed - 1.0) for f in files if f), default=0.0)
+
+
 def render_plan(session: MulticamSession, fps: float, *, review: bool = False) -> list[Piece]:
     """Every shot, split at removals, laid end to end on one output frame grid.
 
@@ -1930,9 +1964,13 @@ def render_plan(session: MulticamSession, fps: float, *, review: bool = False) -
     rounding drift against the audio; the MP4, the stems, and both editor
     timelines are all built from this list so they agree frame for frame.
     A review plan keeps the removed stretches in place, tagged with their removal.
+    A shot on a drifting camera is split into back-to-back pieces on that
+    camera, each short enough that the clock slips at most half a frame across
+    it; the cut list itself is unchanged.
     """
     pieces: list[Piece] = []
     out_t, out_f = 0.0, 0
+    drift = {c["source_id"]: _camera_drift(session, c["source_id"]) for c in session.cuts}
 
     def emit(source_id: Optional[str], a: float, b: float, removal: Optional[dict]) -> None:
         nonlocal out_t, out_f
@@ -1956,7 +1994,9 @@ def render_plan(session: MulticamSession, fps: float, *, review: bool = False) -
                 emit(None, t, c["start"], removal)
                 t = c["start"]
             e = min(c["end"], b)
-            emit(c["source_id"], t, e, removal)
+            parts = drift_parts(e - t, drift[c["source_id"]], fps)
+            for k in range(parts):
+                emit(c["source_id"], t + (e - t) * k / parts, t + (e - t) * (k + 1) / parts, removal)
             t = e
         if t < b:
             emit(None, t, b, removal)

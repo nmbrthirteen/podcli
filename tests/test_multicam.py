@@ -1192,3 +1192,67 @@ def test_probe_source_warns_when_falling_back_to_the_default_frame_rate(tmp_path
     src = _fake_probe(tmp_path, monkeypatch, {"avg_frame_rate": "0/0", "r_frame_rate": "0/0"})
     assert src.fps == 30.0
     assert "assuming 30 fps" in src.fps_warning.lower()
+
+
+# --- drift inside a shot ----------------------------------------------------------
+
+def _drifting_session(sandbox, speed=1.0001):
+    cam = _source(str(sandbox / "cam.mp4"), role="camera", person="host", offset=0.0, speed=speed, duration=700.0)
+    mic = _source(str(sandbox / "mic.wav"), kind="audio", role="mic", person="host", offset=0.0, speed=speed,
+                  duration=700.0)
+    session = mc.MulticamSession(session_id="abc123abc888", name="ep", people=[mc.Person("host", "Host")],
+                                 sources=[cam, mic], reference_id="mic",
+                                 cuts=[{"start": 10.0, "end": 610.0, "source_id": "cam"}])
+    session.save()
+    return session
+
+
+def test_a_long_shot_on_a_drifting_camera_stays_within_half_a_frame(sandbox):
+    session = _drifting_session(sandbox)
+    cam = session.source("cam")
+    fps = 30.0
+    plan = mc.render_plan(session, fps)
+    assert len(plan) > 1
+    assert session.cuts == [{"start": 10.0, "end": 610.0, "source_id": "cam"}]
+    visible = mc._merged([{"start": p.tl_start, "end": p.tl_start + p.frames / fps, "source_id": p.source_id}
+                          for p in plan])
+    assert [(round(c["start"], 3), round(c["end"], 3), c["source_id"]) for c in visible] == [(10.0, 610.0, "cam")]
+    assert sum(p.frames for p in plan) == 600 * 30
+
+    worst = 0.0
+    for p in plan:
+        start = cam.source_in(p.tl_start, p.frames / fps)
+        # Played at real speed, the slip is linear across a piece, so its ends are the worst frames.
+        for k in (0, p.frames):
+            worst = max(worst, abs(start + k / fps - cam.source_time(p.tl_start + k / fps)))
+    assert worst < 0.5 / fps
+    # Mapping the whole shot at its start would have slipped 60 ms by the end.
+    assert abs(cam.source_time(10.0) + 600.0 - cam.source_time(610.0)) > 0.05
+
+
+def test_drift_split_reaches_the_render_seek_and_both_editor_timelines(sandbox, monkeypatch):
+    session = _drifting_session(sandbox)
+    cam = session.source("cam")
+    fps = 30.0
+    plan = mc.render_plan(session, fps)
+
+    seen = []
+    monkeypatch.setattr(mc, "proc_run", lambda cmd, **k: seen.append(cmd))
+    piece = plan[1]
+    mc._render_shot(session, cam, sandbox / "shot.mp4", piece.tl_start, piece.frames, 320, 180, fps, "none")
+    seek = float(seen[0][seen[0].index("-ss") + 1])
+    assert seek == pytest.approx(cam.source_in(piece.tl_start, piece.frames / fps), abs=1e-4)
+    monkeypatch.undo()
+
+    premiere = ET.parse(mc.export_xml(session, "premiere")).getroot()
+    assert len(premiere.findall("./sequence/media/video/track/clipitem")) == len(plan)
+    assert len(premiere.findall("./sequence/media/audio/track/clipitem")) >= len(plan)
+
+    fcp = ET.parse(mc.export_xml(session, "fcpxml")).getroot()
+    mics = [c for c in fcp.iter("asset-clip") if c.get("lane") == "-1"]
+    assert len(mics) >= len(plan)
+    for clip in mics:
+        offset, start, duration = (float(Fraction(clip.get(k).rstrip("s"))) for k in ("offset", "start", "duration"))
+        middle = 10.0 + offset + duration / 2
+        # Each mic piece is pinned at its middle; a sample of rounding is all that's left there.
+        assert abs(start + duration / 2 - session.source("mic").source_time(middle)) < 1e-3

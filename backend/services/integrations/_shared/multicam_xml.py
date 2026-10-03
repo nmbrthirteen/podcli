@@ -8,8 +8,11 @@ audio track.
 
 Both follow the same render plan as the MP4, so removed stretches drop out of
 picture and mics at the same frames. Clock drift can't be expressed as a clip
-property in either format, so a drifting mic is split at every shot and each
-piece gets its own in-point, which keeps it within a millisecond of picture.
+property in either format, so a drifting file is split into pieces short
+enough that its clock slips at most half a frame across each, and each piece's
+in-point is mapped at its middle: drift adds at most a quarter of a frame at a
+piece's ends. xmeml addresses source media in whole frames, so its in-points
+also round to the nearest frame; FCPXML keeps mics sample-accurate.
 
 A review timeline keeps the whole episode instead: every camera on its own
 track under the cut, and each removed stretch left in place, split out on
@@ -48,11 +51,14 @@ def _pieces(source, plan, fps: float) -> list[tuple[int, int, float, dict | None
     Follows the render plan, so removed stretches drop out of the mics exactly
     where they drop out of the picture. Pieces that continue each other on the
     timeline are joined unless one of them is a removal; a drifting file is left
-    split at every shot, so each piece gets its own in-point and stays within a
-    millisecond of picture.
+    split at every shot and again wherever its clock would slip past half a
+    frame, and each piece's in-point is mapped at its middle.
     """
+    from services.multicam import drift_parts
+
     pieces: list[list] = []
-    joinable = abs(source.speed - 1.0) <= 1e-6
+    drift = abs(source.speed - 1.0)
+    joinable = drift <= 1e-6
     last_end = None
     for p in plan:
         a = p.tl_start
@@ -68,7 +74,12 @@ def _pieces(source, plan, fps: float) -> list[tuple[int, int, float, dict | None
                 and last_end is not None and abs(last_end - lo) < 1e-3):
             pieces[-1][1] = f1
         else:
-            pieces.append([f0, f1, source.source_time(p.tl_start + (f0 - p.out_frame) / fps), p.removal])
+            parts = drift_parts((f1 - f0) / fps, drift, fps)
+            edges = [f0 + round((f1 - f0) * k / parts) for k in range(parts + 1)]
+            for g0, g1 in zip(edges, edges[1:]):
+                if g1 > g0:
+                    tl = p.tl_start + (g0 - p.out_frame) / fps
+                    pieces.append([g0, g1, source.source_in(tl, (g1 - g0) / fps), p.removal])
         last_end = hi
     return [tuple(x) for x in pieces]
 
@@ -197,7 +208,7 @@ def write_xmeml(session, out_path: Path, *, width: int, height: int, fps: float,
         if not p.source_id:
             continue
         cam = session.source(p.source_id)
-        clipitem(vtrack, cam, p.out_frame, p.out_frame + p.frames, cam.source_time(p.tl_start),
+        clipitem(vtrack, cam, p.out_frame, p.out_frame + p.frames, cam.source_in(p.tl_start, p.frames / fps),
                  name=os.path.basename(cam.path), removal=p.removal)
 
     audio = ET.SubElement(media, "audio")
@@ -310,7 +321,7 @@ def write_fcpxml(session, out_path: Path, *, width: int, height: int, fps: float
         if not p.source_id:
             continue
         cam = session.source(p.source_id)
-        start = src_t(cam, cam.source_time(p.tl_start))
+        start = src_t(cam, cam.source_in(p.tl_start, p.frames / fps))
         clip = ET.SubElement(gap, "asset-clip", {
             "ref": asset_ids[p.source_id],
             "lane": str(len(angles) + 1),
