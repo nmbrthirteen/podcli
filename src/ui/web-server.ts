@@ -44,7 +44,13 @@ import { advanceProgress, tagSubmittedClip, tagSubmittedClips } from "../utils/c
 import { DEMO_ASSETS_DIR } from "./demo-fixtures.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
-import { sliceTranscript, sliceWords, findContentType, findSuggestionSegments } from "../utils/transcript.js";
+import {
+  sliceTranscript,
+  sliceWords,
+  findContentType,
+  findSuggestionSegments,
+  reconcileSegmentsForRange,
+} from "../utils/transcript.js";
 import { errMsg } from "../utils/errors.js";
 import { resolveByteRange } from "../utils/http-range.js";
 import {
@@ -4312,7 +4318,13 @@ app.post("/api/suggestions/modify", (req, res) => {
       return;
     }
     // The energy score was measured over the old range.
-    if (nextStart !== clip.start_second || nextEnd !== clip.end_second) dropEnergy(clip);
+    if (nextStart !== clip.start_second || nextEnd !== clip.end_second) {
+      dropEnergy(clip);
+      // The old segments array is scoped to the old range; if left stale it
+      // overrides the new start/end at render time (create_clip reads
+      // keep_segments ahead of start_second/end_second).
+      clip.segments = reconcileSegmentsForRange(clip.segments, nextStart, nextEnd);
+    }
     if (typeof upd.title === "string") clip.title = upd.title;
     clip.start_second = nextStart;
     clip.end_second = nextEnd;

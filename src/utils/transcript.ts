@@ -43,6 +43,37 @@ export function findContentType(
   return match?.content_type;
 }
 
+/**
+ * Keep a clip's keep_segments consistent after its start/end range is edited.
+ * Without this, a stale segments array (scoped to the old range) overrides
+ * the new start_second/end_second at render time, since the generator
+ * derives the actual cut points from keep_segments when present.
+ *
+ * Segments outside the new range are dropped, segments straddling a new
+ * boundary are clamped to it, and a single segment that ends up spanning
+ * the whole new range is cleared so the generator is free to auto-tighten
+ * it instead of carrying forward an edit that no longer means anything.
+ */
+export function reconcileSegmentsForRange(
+  segments: Array<{ start: number; end: number }> | undefined,
+  nextStart: number,
+  nextEnd: number,
+): Array<{ start: number; end: number }> | undefined {
+  if (!segments?.length) return segments;
+  const clamped = segments
+    .map((s) => ({ start: Math.max(s.start, nextStart), end: Math.min(s.end, nextEnd) }))
+    .filter((s) => s.end > s.start);
+  if (clamped.length === 0) return undefined;
+  if (
+    clamped.length === 1 &&
+    clamped[0].start <= nextStart + 0.01 &&
+    clamped[0].end >= nextEnd - 0.01
+  ) {
+    return undefined;
+  }
+  return clamped;
+}
+
 export function findSuggestionSegments(
   suggestions: Array<{
     start_second: number;
