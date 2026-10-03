@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildYtDlpArgs, buildChannelListArgs, buildVideoInfoArgs, isCookieBrowser, ytDlpHint } from "./ytdlp-args.js";
+import {
+  buildYtDlpArgs,
+  buildChannelListArgs,
+  buildVideoInfoArgs,
+  isCookieBrowser,
+  isHttpUrl,
+  ytDlpHint,
+} from "./ytdlp-args.js";
 
 const base = {
   url: "https://example.com/watch?v=abc",
@@ -24,6 +31,12 @@ describe("buildYtDlpArgs", () => {
 
   it("puts the url last so it cannot be read as a flag value", () => {
     expect(buildYtDlpArgs(base).at(-1)).toBe(base.url);
+  });
+
+  it("puts -- right before the url so a dash-prefixed value can't be read as a flag", () => {
+    const args = buildYtDlpArgs(base);
+    expect(args.at(-2)).toBe("--");
+    expect(args.at(-1)).toBe(base.url);
   });
 
   it("omits cookies and extractor args when unset", () => {
@@ -86,6 +99,12 @@ describe("buildChannelListArgs", () => {
   it("puts the channel url last", () => {
     expect(buildChannelListArgs({ channelUrl }).at(-1)).toBe(channelUrl);
   });
+
+  it("puts -- right before the channel url", () => {
+    const args = buildChannelListArgs({ channelUrl });
+    expect(args.at(-2)).toBe("--");
+    expect(args.at(-1)).toBe(channelUrl);
+  });
 });
 
 describe("buildVideoInfoArgs", () => {
@@ -98,6 +117,30 @@ describe("buildVideoInfoArgs", () => {
   it("dumps JSON rather than a human-readable report", () => {
     const args = buildVideoInfoArgs({ videoUrl });
     expect(args).toContain("--dump-json");
+  });
+
+  it("puts -- right before the video url", () => {
+    const args = buildVideoInfoArgs({ videoUrl });
+    expect(args.at(-2)).toBe("--");
+    expect(args.at(-1)).toBe(videoUrl);
+  });
+});
+
+describe("isHttpUrl", () => {
+  it("accepts http and https urls", () => {
+    expect(isHttpUrl("https://www.youtube.com/watch?v=abc123")).toBe(true);
+    expect(isHttpUrl("http://example.com")).toBe(true);
+  });
+
+  it("rejects a dash-prefixed value that would be read as a yt-dlp flag", () => {
+    expect(isHttpUrl("--config-locations=/tmp/evil.conf")).toBe(false);
+  });
+
+  it("rejects non-http schemes and non-strings", () => {
+    expect(isHttpUrl("file:///etc/passwd")).toBe(false);
+    expect(isHttpUrl("not a url")).toBe(false);
+    expect(isHttpUrl(undefined)).toBe(false);
+    expect(isHttpUrl(7)).toBe(false);
   });
 });
 

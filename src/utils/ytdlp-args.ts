@@ -25,6 +25,20 @@ export function isCookieBrowser(value: unknown): value is CookieBrowser {
   return typeof value === "string" && (COOKIE_BROWSERS as readonly string[]).includes(value);
 }
 
+// A bare z.string() lets a value like "--config-locations=/tmp/evil.conf" through
+// as a channel/video url, and yt-dlp reads it as another flag rather than a
+// positional argument — one that can point at a config carrying --exec. Only
+// http(s) URLs are legitimate inputs here.
+export function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export interface YtDlpOptions {
   url: string;
   outputDir: string;
@@ -71,7 +85,9 @@ export function buildYtDlpArgs(opts: YtDlpOptions): string[] {
     args.push("--newline", "--progress", "--progress-template", opts.progressTemplate);
   }
   args.push("--print", "after_move:podcli-filepath:%(filepath)s");
-  args.push(opts.url);
+  // "--" forces everything after it to be read positionally, so a url that
+  // starts with a dash can never be parsed as another flag.
+  args.push("--", opts.url);
   return args;
 }
 
@@ -92,7 +108,7 @@ export function buildChannelListArgs(opts: YtDlpListOptions): string[] {
   if (opts.limit) args.push("--playlist-end", String(opts.limit));
   if (opts.cookiesFromBrowser) args.push("--cookies-from-browser", opts.cookiesFromBrowser);
   args.push("--print", "%(.{id,title,duration,upload_date,url})j");
-  args.push(opts.channelUrl);
+  args.push("--", opts.channelUrl);
   return args;
 }
 
@@ -109,7 +125,7 @@ export function buildVideoInfoArgs(opts: YtDlpVideoInfoOptions): string[] {
   args.push("--ignore-config", "--no-config-locations", "--no-plugin-dirs");
   args.push("--skip-download", "--no-warnings");
   if (opts.cookiesFromBrowser) args.push("--cookies-from-browser", opts.cookiesFromBrowser);
-  args.push("--dump-json", opts.videoUrl);
+  args.push("--dump-json", "--", opts.videoUrl);
   return args;
 }
 

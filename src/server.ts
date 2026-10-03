@@ -30,6 +30,7 @@ import {
 } from "./handlers/batch-clips.handler.js";
 import { registerIntegrationMcpTools } from "./handlers/integrations.handler.js";
 import { mineChannelToolDef, handleMineChannel } from "./handlers/mine-channel.handler.js";
+import { isHttpUrl } from "./utils/ytdlp-args.js";
 import { FileManager } from "./services/file-manager.js";
 import { KnowledgeBase } from "./services/knowledge-base.js";
 import { AssetManager, inferType } from "./services/asset-manager.js";
@@ -2794,8 +2795,16 @@ export function createServer(): McpServer {
     mineChannelToolDef.description,
     {
       action: z.enum(["list", "mine"]).describe("'list' = a channel's uploads, 'mine' = one video's captions"),
-      channel_url: z.string().optional().describe("Channel or uploads URL (required for action=list)"),
-      video_url: z.string().optional().describe("Video URL (required for action=mine)"),
+      channel_url: z
+        .string()
+        .optional()
+        .refine((v) => v === undefined || isHttpUrl(v), { message: "channel_url must be an http(s) URL" })
+        .describe("Channel or uploads URL (required for action=list)"),
+      video_url: z
+        .string()
+        .optional()
+        .refine((v) => v === undefined || isHttpUrl(v), { message: "video_url must be an http(s) URL" })
+        .describe("Video URL (required for action=mine)"),
       limit: z.number().optional().describe("Max uploads to list (action=list)"),
       cookies_from_browser: z
         .string()
