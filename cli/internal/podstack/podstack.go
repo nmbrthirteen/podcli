@@ -211,6 +211,127 @@ func installCommands(project string) (installReport, error) {
 	return report, nil
 }
 
+// codexSkillsDir is where the installed Codex CLI reads skills from
+// (confirmed against a local `codex` install: ~/.codex/skills/<name>/SKILL.md,
+// one directory per skill). It is global, not per-project, unlike
+// .claude/commands.
+func codexSkillsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".codex", "skills"), nil
+}
+
+// frontmatterDescription pulls the `description:` field out of a command
+// file's YAML frontmatter without a YAML dependency — the format here is a
+// fixed, simple `key: value` list.
+func frontmatterDescription(raw string) string {
+	lines := strings.Split(raw, "\n")
+	inFrontmatter := false
+	for i, line := range lines {
+		if i == 0 && strings.TrimSpace(line) == "---" {
+			inFrontmatter = true
+			continue
+		}
+		if !inFrontmatter {
+			return ""
+		}
+		if strings.TrimSpace(line) == "---" {
+			return ""
+		}
+		if rest, ok := strings.CutPrefix(line, "description:"); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
+// codexSkillContent rewraps a PodStack command file as a Codex SKILL.md:
+// same body, frontmatter translated from this project's `description:` /
+// `argument-hint:` shape to the `name:` / `description:` shape codex reads.
+func codexSkillContent(name, raw string) string {
+	desc := frontmatterDescription(raw)
+	if desc == "" {
+		desc = "PodStack command: " + name
+	}
+	body := raw
+	if end := strings.Index(raw, "\n---\n"); strings.HasPrefix(raw, "---\n") && end != -1 {
+		body = strings.TrimPrefix(raw[end+len("\n---\n"):], "\n")
+	}
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s", name, desc, body)
+}
+
+// installCodexSkills writes every PodStack command as a Codex skill under
+// ~/.codex/skills/<name>/SKILL.md. Skills are global (not per-project like
+// .claude/commands), so this always targets the user's home directory
+// regardless of which project podcli was run from. Like installCommands, a
+// manifest tracks what podcli last wrote so an upgrade can refresh
+// unmodified skills and leave user edits alone.
+func installCodexSkills() error {
+	skillsDir, err := codexSkillsDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		return err
+	}
+	manifest := readManifest(skillsDir)
+	changed := false
+
+	err = fs.WalkDir(commands, "commands", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		name := strings.TrimSuffix(filepath.Base(p), ".md")
+		raw, err := commands.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		content := []byte(codexSkillContent(name, string(raw)))
+		contentHash := sha256Hex(content)
+
+		skillDir := filepath.Join(skillsDir, name)
+		target := filepath.Join(skillDir, "SKILL.md")
+		current, statErr := os.ReadFile(target)
+		if statErr != nil {
+			if err := os.MkdirAll(skillDir, 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(target, content, 0o644); err != nil {
+				return err
+			}
+			manifest.Files[name] = contentHash
+			changed = true
+			return nil
+		}
+
+		lastInstalledHash, tracked := manifest.Files[name]
+		currentHash := sha256Hex(current)
+		if !tracked {
+			manifest.Files[name] = currentHash
+			changed = true
+			return nil
+		}
+		if currentHash != lastInstalledHash || currentHash == contentHash {
+			return nil // user-modified, or already current
+		}
+		if err := os.WriteFile(target, content, 0o644); err != nil {
+			return err
+		}
+		manifest.Files[name] = contentHash
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if changed {
+		return writeManifest(skillsDir, manifest)
+	}
+	return nil
+}
+
 // Run launches the agent for cmd with the remaining args as the slash-command
 // arguments. Engine selection: --claude / --codex / --ai <engine>, else
 // PODCLI_AI, else auto (Claude preferred, Codex fallback).
@@ -267,6 +388,12 @@ func Run(cmd string, args []string) int {
 	claudeBin, _ := exec.LookPath("claude")
 	codexBin, _ := exec.LookPath("codex")
 
+	if codexBin != "" {
+		if err := installCodexSkills(); err != nil {
+			fmt.Fprintf(os.Stderr, "  %swarning:%s could not install Codex skills: %v\n", colYellow, colReset, err)
+		}
+	}
+
 	if engine == "codex" && codexBin == "" {
 		fmt.Fprintf(os.Stderr, "\n  %sCodex not found in PATH.%s\n  Install it, then run:\n    %scodex --cd %q %q%s\n\n", colBold, colReset, colAccent, project, codexPrompt, colReset)
 		return 1
@@ -276,12 +403,14 @@ func Run(cmd string, args []string) int {
 		return 1
 	}
 
+	// Fall back to Codex only when Claude isn't installed at all. Claude
+	// exiting nonzero (the user cancelled, a tool failed mid-run, etc.) is
+	// not a reason to silently relaunch the whole workflow under a
+	// different agent — it previously was, which could run the same
+	// destructive command twice under two different engines.
 	if engine != "codex" && claudeBin != "" {
 		fmt.Fprintf(os.Stderr, "\n  %s▶%s Launching Claude Code with: %s%s%s\n  %scwd: %s%s\n\n", colGreen, colReset, colAccent, prompt, colReset, colDim, project, colReset)
-		if code := runIn(project, claudeBin, prompt); code == 0 || engine == "claude" || codexBin == "" {
-			return code
-		}
-		fmt.Fprintf(os.Stderr, "\n  %s⚠%s Claude exited nonzero; trying Codex...\n", colYellow, colReset)
+		return runIn(project, claudeBin, prompt)
 	}
 
 	if codexBin == "" {

@@ -8,7 +8,7 @@ PodStack turns your AI tool into a podcast content team: Episode Architect, Cont
 
 ## How to use
 
-Each skill below is a self-contained instruction file in `commands/` (or `.claude/commands/`, `.codex/prompts/`, `.cursor/rules/`, `.opencode/commands/`, depending on which host installed it).
+Each skill below is a self-contained instruction file in `commands/` (or `.claude/commands/`, `~/.codex/skills/<name>/SKILL.md`, `.cursor/rules/`, `.opencode/commands/`, depending on which host installed it).
 
 **To run a skill:** ask your agent to "run the [skill-name] skill" or invoke its slash command (`/[skill-name]`) where supported. The agent opens the corresponding file and follows it step by step.
 
@@ -114,16 +114,16 @@ Skill files read the 14 knowledge files at `.podcli/knowledge/`; the full file t
 
 PodStack ships one source-of-truth (`commands/`) and installs to the right location for each tool:
 
-| Host | Install location | Primary doc |
-|------|-----------------|-------------|
-| Claude Code | `.claude/commands/*.md` | `CLAUDE.md` |
-| OpenAI Codex | `.codex/prompts/*.md` | `AGENTS.podstack.md` (this file) |
-| Cursor | `.cursor/rules/*.mdc` | `AGENTS.podstack.md` |
-| opencode | `.opencode/commands/*.md` | `AGENTS.podstack.md` |
-| Generic | `commands/*.md` | `AGENTS.podstack.md` |
+| Host | Install location | Installed by | Primary doc |
+|------|-----------------|--------------|-------------|
+| Claude Code | `.claude/commands/*.md` (per project) | `podcli auto` / any PodStack command | `CLAUDE.md` |
+| OpenAI Codex | `~/.codex/skills/<name>/SKILL.md` (global) | `podcli auto` / any PodStack command, when the `codex` CLI is on PATH | `AGENTS.podstack.md` (this file) |
+| Cursor | `.cursor/rules/*.mdc` | not automated yet — copy by hand | `AGENTS.podstack.md` |
+| opencode | `.opencode/commands/*.md` | not automated yet — copy by hand | `AGENTS.podstack.md` |
+| Generic | `commands/*.md` | not automated yet — copy by hand | `AGENTS.podstack.md` |
 
-These command files ship with podcli; place the set for your tool (left column) in
-its command dir. See `README.md` for per-host usage examples.
+Claude and Codex installs are automatic and kept in sync on upgrade; see `README.md`
+for per-host usage examples and manual steps for the other hosts.
 
 ---
 

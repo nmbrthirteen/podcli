@@ -3,8 +3,34 @@ package podstack
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
+
+// withHome points os.UserHomeDir() (and HOME/USERPROFILE) at a temp dir for
+// the duration of the test, so installCodexSkills never touches the real
+// ~/.codex/skills.
+func withHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	envVar := "HOME"
+	if runtime.GOOS == "windows" {
+		envVar = "USERPROFILE"
+	}
+	old, hadOld := os.LookupEnv(envVar)
+	if err := os.Setenv(envVar, home); err != nil {
+		t.Fatalf("setenv: %v", err)
+	}
+	t.Cleanup(func() {
+		if hadOld {
+			os.Setenv(envVar, old)
+		} else {
+			os.Unsetenv(envVar)
+		}
+	})
+	return home
+}
 
 func TestInstallCommandsWritesEveryFileOnFirstRun(t *testing.T) {
 	project := t.TempDir()
@@ -172,5 +198,83 @@ func TestInstallCommandsAdoptsPreManifestFilesWithoutOverwriting(t *testing.T) {
 	manifest := readManifest(dest)
 	if manifest.Files["auto.md"] == "" {
 		t.Fatal("expected a baseline hash to be recorded for the adopted file")
+	}
+}
+
+func TestFrontmatterDescriptionExtractsTheDescriptionField(t *testing.T) {
+	raw := "---\ndescription: Full pipeline from transcript to publish-ready package\nallowed-tools: Read\n---\n\n# body\n"
+	if got := frontmatterDescription(raw); got != "Full pipeline from transcript to publish-ready package" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFrontmatterDescriptionIsEmptyWithoutFrontmatter(t *testing.T) {
+	if got := frontmatterDescription("# just a body\n"); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+}
+
+func TestCodexSkillContentTranslatesFrontmatterAndKeepsBody(t *testing.T) {
+	raw := "---\ndescription: does a thing\nallowed-tools: Read\n---\n\n# /auto\n\nbody text\n"
+	got := codexSkillContent("auto", raw)
+	if !strings.HasPrefix(got, "---\nname: auto\ndescription: does a thing\n---\n\n") {
+		t.Fatalf("unexpected frontmatter translation: %q", got)
+	}
+	if !strings.Contains(got, "# /auto\n\nbody text\n") {
+		t.Fatal("body was dropped or altered")
+	}
+}
+
+func TestInstallCodexSkillsWritesOneSkillDirPerCommand(t *testing.T) {
+	withHome(t)
+
+	if err := installCodexSkills(); err != nil {
+		t.Fatalf("installCodexSkills: %v", err)
+	}
+
+	skillsDir, err := codexSkillsDir()
+	if err != nil {
+		t.Fatalf("codexSkillsDir: %v", err)
+	}
+	for _, name := range Names() {
+		skillFile := filepath.Join(skillsDir, name, "SKILL.md")
+		data, err := os.ReadFile(skillFile)
+		if err != nil {
+			t.Fatalf("%s: %v", skillFile, err)
+		}
+		if !strings.HasPrefix(string(data), "---\nname: "+name+"\n") {
+			t.Fatalf("%s: missing expected frontmatter, got: %q", skillFile, string(data)[:min(60, len(data))])
+		}
+	}
+}
+
+func TestInstallCodexSkillsLeavesUserEditsAlone(t *testing.T) {
+	withHome(t)
+	if err := installCodexSkills(); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	skillsDir, err := codexSkillsDir()
+	if err != nil {
+		t.Fatalf("codexSkillsDir: %v", err)
+	}
+	target := filepath.Join(skillsDir, "auto", "SKILL.md")
+	installed, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read installed skill: %v", err)
+	}
+	edited := append(append([]byte{}, installed...), []byte("\n<!-- edited -->\n")...)
+	if err := os.WriteFile(target, edited, 0o644); err != nil {
+		t.Fatalf("simulate user edit: %v", err)
+	}
+
+	if err := installCodexSkills(); err != nil {
+		t.Fatalf("second install: %v", err)
+	}
+	after, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read after reinstall: %v", err)
+	}
+	if string(after) != string(edited) {
+		t.Fatal("user-edited skill file was overwritten")
 	}
 }

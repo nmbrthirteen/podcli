@@ -375,13 +375,23 @@ func setup(args []string) int {
 	}
 	if engine.MCPServer() != "" {
 		if mcpRegisteredToSelf() {
-			fmt.Printf("  mcp:     already registered\n")
+			fmt.Printf("  mcp:     already registered with Claude Code\n")
 		} else if _, err := exec.LookPath("claude"); err != nil {
 			// Claude MCP registration is optional; Codex users do not need this.
 		} else if err := registerMCPServer(); err != nil {
-			fmt.Fprintf(os.Stderr, "  mcp:     not registered (%v) - run `podcli mcp install`\n", err)
+			fmt.Fprintf(os.Stderr, "  mcp:     not registered with Claude Code (%v) - run `podcli mcp install`\n", err)
 		} else {
 			fmt.Printf("  mcp:     registered with Claude Code\n")
+		}
+
+		if codexMCPRegisteredToSelf() {
+			fmt.Printf("  mcp:     already registered with Codex\n")
+		} else if _, err := exec.LookPath("codex"); err != nil {
+			// Codex MCP registration is optional; Claude users do not need this.
+		} else if err := registerCodexMCPServer(); err != nil {
+			fmt.Fprintf(os.Stderr, "  mcp:     not registered with Codex (%v)\n", err)
+		} else {
+			fmt.Printf("  mcp:     registered with Codex\n")
 		}
 	}
 	fmt.Println("Done.")
@@ -419,14 +429,72 @@ func mcpRegisteredToSelf() bool {
 	return err == nil && strings.Contains(string(out), self)
 }
 
+// registerCodexMCPServer points Codex at this binary's `mcp` command. Unlike
+// Claude's `mcp add`, `codex mcp add` overwrites an existing entry by name,
+// so no remove-first step is needed to stay idempotent.
+func registerCodexMCPServer() error {
+	codex, err := exec.LookPath("codex")
+	if err != nil {
+		return fmt.Errorf("Codex CLI not found on PATH")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if out, err := exec.Command(codex, "mcp", "add", "podcli", "--", self, "mcp").CombinedOutput(); err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func codexMCPRegisteredToSelf() bool {
+	codex, err := exec.LookPath("codex")
+	if err != nil {
+		return false
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	out, err := exec.Command(codex, "mcp", "get", "podcli").CombinedOutput()
+	return err == nil && strings.Contains(string(out), self)
+}
+
 func mcpInstall() int {
-	if err := registerMCPServer(); err != nil {
-		self, _ := os.Executable()
-		fmt.Fprintf(os.Stderr, "podcli: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Register manually:  claude mcp add podcli -- %s mcp\n", self)
+	self, _ := os.Executable()
+	_, claudeErr := exec.LookPath("claude")
+	_, codexErr := exec.LookPath("codex")
+	registeredAny := false
+	failedAny := false
+
+	if claudeErr == nil {
+		if err := registerMCPServer(); err != nil {
+			fmt.Fprintf(os.Stderr, "podcli: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Register manually:  claude mcp add podcli -- %s mcp\n", self)
+			failedAny = true
+		} else {
+			fmt.Println("Registered podcli MCP server with Claude Code.")
+			registeredAny = true
+		}
+	}
+	if codexErr == nil {
+		if err := registerCodexMCPServer(); err != nil {
+			fmt.Fprintf(os.Stderr, "podcli: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Register manually:  codex mcp add podcli -- %s mcp\n", self)
+			failedAny = true
+		} else {
+			fmt.Println("Registered podcli MCP server with Codex.")
+			registeredAny = true
+		}
+	}
+
+	if !registeredAny && !failedAny {
+		fmt.Fprintln(os.Stderr, "podcli: neither Claude Code nor Codex CLI found on PATH")
 		return 1
 	}
-	fmt.Println("Registered podcli MCP server with Claude Code.")
+	if failedAny {
+		return 1
+	}
 	return 0
 }
 
