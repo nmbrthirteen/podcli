@@ -1701,6 +1701,20 @@ def _lut_step(s: Source) -> str:
     return f"lut3d=file={_filter_path(s.input_lut)}," if s.input_lut else ""
 
 
+def _check_luts_exist(session: MulticamSession) -> None:
+    """Fail now, naming the camera, rather than deep inside an ffmpeg worker later.
+
+    A LUT set at map time can get moved or deleted on disk by the time a
+    render or a preview actually reads it; without this, ffmpeg's own error
+    surfaces from inside a shot or a still with no indication of which
+    camera (or which of several in a split) it was for.
+    """
+    missing = [s for s in session.sources if s.input_lut and not os.path.isfile(s.input_lut)]
+    if missing:
+        names = ", ".join(f"{source_label(session, s)} ({s.input_lut})" for s in missing)
+        raise ValueError(f"The LUT set for {names} is missing. Pick it again or clear it.")
+
+
 def _still(session: MulticamSession, cam: Source, tl: float, out: Path, look: str = "none", width: int = 480) -> Path:
     args, graph = _picture(session, cam, tl, width, (width * 9 // 16) & ~1)
     tail = f";[pic]{LOOKS[look]}[still]" if LOOKS.get(look) else ";[pic]null[still]"
@@ -1727,6 +1741,7 @@ def _still_basis(session: MulticamSession, s: Source) -> str:
 
 def previews(session: MulticamSession, *, looks: bool = False, at: Optional[float] = None) -> dict:
     """One still per camera, and optionally one still per look per camera, each through its input LUT."""
+    _check_luts_exist(session)
     work = _work_dir(session.session_id)
     frames: dict = {"cameras": {}, "looks": {}}
 
@@ -2419,6 +2434,7 @@ def render_session(
 ) -> dict:
     if not session.cuts:
         raise ValueError("Plan the cuts before rendering")
+    _check_luts_exist(session)
     key = _render_key(session, stems)
     video = session.outputs.get("video")
     if session.outputs.get("render_key") == key and video and os.path.exists(video):

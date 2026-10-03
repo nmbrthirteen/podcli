@@ -1816,6 +1816,29 @@ def test_input_lut_colors_renders_stills_and_looks_and_exports_hand_it_off(episo
     assert all(v is None for k, v in luts.items() if k != red.id)
 
 
+def test_a_lut_deleted_after_mapping_fails_fast_and_names_the_camera(episode):
+    """A LUT picked at map time can later be moved or deleted on disk.
+
+    Without an upfront check, ffmpeg's own error about the missing file
+    surfaces from deep inside a shot or a still render, with nothing saying
+    which camera's LUT broke.
+    """
+    session = _planned(episode)
+    red = next(s for s in session.sources if s.path.endswith("cam_one.mp4"))
+    lut = _cube(episode.parent / "luts" / "invert.cube")
+    mc.update_mapping(session, {"sources": [{"id": red.id, "input_lut": str(lut)}]})
+
+    os.remove(lut)
+
+    with pytest.raises(ValueError, match="cam_one.mp4") as render_exc:
+        mc.render_session(session, stems=False)
+    assert "missing" in str(render_exc.value).lower()
+
+    with pytest.raises(ValueError, match="cam_one.mp4") as preview_exc:
+        mc.previews(session)
+    assert "missing" in str(preview_exc.value).lower()
+
+
 def test_lut_is_refused_on_a_mic(sandbox):
     session = _bare(sandbox)
     session.sources.append(_source("/x/room.wav", kind="audio", role="mic", id="room"))
