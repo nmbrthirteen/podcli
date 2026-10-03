@@ -2340,9 +2340,15 @@ const multicamRunning = new Map<string, { id: string; action: string }>();
 
 type MulticamPayload = {
   session_id?: string;
-  outputs?: { video?: string };
+  outputs?: { video?: string; validation?: { warnings?: string[] } };
   active_job?: { id: string; action: string };
 };
+
+// A render that finished with warnings says so in the job's status line, which is what job_status shows first.
+function multicamDoneMessage(data: MulticamPayload | undefined): string {
+  const warnings = data?.outputs?.validation?.warnings || [];
+  return warnings.length ? `Done with ${warnings.length} warning(s): ${warnings.join(" ")}` : "Done";
+}
 
 // Only the finished episode becomes streamable: paths in a request body are the
 // caller's say-so, and registering them would let a request read any media file.
@@ -2396,7 +2402,7 @@ app.post("/api/multicam", async (req, res) => {
     allowMulticamPaths(result.data);
     job.status = "done";
     job.progress = 100;
-    job.message = "Done";
+    job.message = action === "render" || action === "pull" ? multicamDoneMessage(result.data) : "Done";
     job.result = result.data;
   }).catch((err) => {
     job.status = "error";

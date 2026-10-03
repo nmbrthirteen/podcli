@@ -112,11 +112,18 @@ class Source:
     height: int = 0
     fps: float = 0.0
     timecode: float = 0.0  # embedded start timecode in seconds; editors address media from here
+    file_size: int = 0  # size at probe time; a mismatch on reopen means the file changed underneath us
+    file_mtime_ns: int = 0  # mtime at probe time, nanosecond resolution
+    fps_warning: str = ""  # set when the container's frame rate looks variable or had to be guessed
+    audio_stream_count: int = 1  # separate audio streams in the container (not channels within one stream)
+    audio_stream_index: int = 0  # which audio stream to use, for MXF-style cameras with one mono stream per mic
+    audio_stream_channels: list[int] = field(default_factory=list)  # channel count per audio stream, by index
     role: str = "ignore"  # "camera" | "mic" | "ignore"
     # camera: a person id or "wide"; mic: a person id, or "" for a shared room mic
     person: str = ""
     # mic only: one person id per channel when a recorder puts two people on L/R
     channel_people: list[str] = field(default_factory=list)
+    input_lut: str = ""  # camera only: absolute path to a 3D .cube LUT applied before the look
     guessed: bool = True
     offset: Optional[float] = None  # timeline seconds where source time 0 sits
     speed: float = 1.0  # timeline seconds per source second (clock drift)
@@ -143,6 +150,15 @@ class Source:
 
     def source_time(self, timeline_seconds: float) -> float:
         return (timeline_seconds - self.timeline_start()) / self.speed
+
+    def source_in(self, timeline_seconds: float, span: float) -> float:
+        """Source second to start reading a `span`-second piece at, played at real speed.
+
+        A drifting clock slips |speed - 1| * span across a piece; pinning the
+        piece's middle instead of its start halves the worst slip.
+        """
+        middle = timeline_seconds + span / 2
+        return self.source_time(middle) - span / 2
 
 
 @dataclass
@@ -275,16 +291,50 @@ def scan_folder(folder: str) -> list[str]:
     return found
 
 
+_TIMECODE_RE = re.compile(r"^(\d{2})([:;])(\d{2})([:;])(\d{2})([:;])(\d{2})$")
+
+
+def _ntsc_frame_duration(fps: float) -> tuple[float, int]:
+    """Exact frame duration and the nominal (rounded) frame rate for an NTSC-pulldown fps.
+
+    29.97 is really 30000/1001 fps, so each frame lasts 1001/30000 s, not 1/30 s. The
+    same pulldown ratio applies to 59.94 and 23.976. Integer rates (25, 24, 30 exactly)
+    have no pulldown and use a plain 1/fps duration.
+    """
+    rounded = round(fps)
+    if rounded <= 0:
+        return 0.0, 0
+    if abs(fps - rounded) > 1e-3:
+        return 1001.0 / (rounded * 1000.0), rounded
+    return 1.0 / rounded, rounded
+
+
 def _timecode_seconds(info: dict, fps: float, sample_rate: int) -> float:
-    """Embedded start timecode (pro cameras) or BWF time reference (field recorders), in seconds."""
+    """Embedded start timecode (pro cameras) or BWF time reference (field recorders), in seconds.
+
+    Honors drop-frame timecode (separator ';' before the frame field): drop-frame
+    counters skip frame numbers :00 and :01 at the start of every minute except every
+    tenth, so the raw H:M:S:F reading overstates elapsed time unless those skipped
+    counts are added back before converting to seconds.
+    """
     tags = [info.get("format", {}).get("tags") or {}] + [s.get("tags") or {} for s in info.get("streams", [])]
     for t in tags:
         tc = t.get("timecode") or t.get("TIMECODE")
         if tc and fps > 0:
-            parts = re.split(r"[:;.]", tc)
-            if len(parts) == 4 and all(p.isdigit() for p in parts):
-                h, m, sec, frames = (int(p) for p in parts)
-                return h * 3600 + m * 60 + sec + frames / round(fps)
+            m = _TIMECODE_RE.match(str(tc).strip())
+            if m:
+                h, m1, mi, m2, sec, m3, frames = m.groups()
+                h, mi, sec, frames = int(h), int(mi), int(sec), int(frames)
+                drop_frame = m3 == ";"
+                frame_duration, fps_round = _ntsc_frame_duration(fps)
+                if fps_round <= 0:
+                    continue
+                total_frames = fps_round * 3600 * h + fps_round * 60 * mi + fps_round * sec + frames
+                if drop_frame:
+                    drop_per_min = 2 if fps_round == 30 else (4 if fps_round == 60 else 0)
+                    total_minutes = 60 * h + mi
+                    total_frames -= drop_per_min * (total_minutes - total_minutes // 10)
+                return total_frames * frame_duration
     for t in tags:
         ref = t.get("time_reference")
         if ref and str(ref).isdigit() and sample_rate > 0:
@@ -300,22 +350,37 @@ def probe_source(path: str) -> Source:
          and not (s.get("disposition") or {}).get("attached_pic")),
         None,
     )
-    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+    audio = audio_streams[0] if audio_streams else None
     durations = [float(info.get("format", {}).get("duration") or 0)]
     durations += [float(s.get("duration") or 0) for s in streams]
     duration = max(durations)
     if duration <= 0:
         raise RuntimeError(f"Could not read the duration of {os.path.basename(path)}")
     fps = 0.0
+    fps_warning = ""
     if video:
-        num, _, den = str(video.get("avg_frame_rate") or video.get("r_frame_rate") or "0/1").partition("/")
-        try:
-            fps = float(num) / float(den or 1) if float(den or 1) else 0.0
-        except ValueError:
-            fps = 0.0
+        def rate(field: str) -> float:
+            num, _, den = str(video.get(field) or "0/1").partition("/")
+            try:
+                return float(num) / float(den or 1) if float(den or 1) else 0.0
+            except ValueError:
+                return 0.0
+
+        avg_fps, r_fps = rate("avg_frame_rate"), rate("r_frame_rate")
+        fps = avg_fps or r_fps
+        # r_frame_rate is the stream's time base, a ceiling on how fast frames
+        # could appear; avg_frame_rate is what actually played out. A material
+        # gap between them means some frames held longer than others, so a shot
+        # cut can't assume a fixed grid: the frame at a given timestamp drifts.
+        if avg_fps and r_fps and abs(avg_fps - r_fps) / r_fps > 0.01:
+            fps_warning = (f"Variable frame rate detected ({avg_fps:.3g} fps average, "
+                            f"{r_fps:.3g} fps max): cuts may drift by a frame or more.")
         if not 1 <= fps <= 240:
+            fps_warning = f"Could not read a usable frame rate ({fps or 'none'}); assuming 30 fps."
             fps = 30.0
     sample_rate = int(audio.get("sample_rate") or 0) if audio else 0
+    stat = os.stat(path)
     return Source(
         # Built from name and size so the same recording gets the same id
         # on another machine and a saved edit or cut list still points at it.
@@ -329,7 +394,64 @@ def probe_source(path: str) -> Source:
         height=int(video.get("height") or 0) if video else 0,
         fps=round(fps, 3),
         timecode=round(_timecode_seconds(info, fps, sample_rate), 6),
+        file_size=stat.st_size,
+        file_mtime_ns=stat.st_mtime_ns,
+        fps_warning=fps_warning,
+        audio_stream_count=len(audio_streams),
+        audio_stream_channels=[int(a.get("channels") or 0) for a in audio_streams],
     )
+
+
+def _file_identity(s: Source) -> str:
+    """Short fingerprint of the file state a source was last probed against.
+
+    Used to key derived caches (extracted sync audio, activity) so that a
+    file silently changing underneath its source (replaced, re-exported,
+    re-encoded) can't serve stale cached work keyed only on the source id,
+    which is built from basename and size and so does not change.
+    """
+    return hashlib.sha1(f"{s.file_size}:{s.file_mtime_ns}".encode()).hexdigest()[:8]
+
+
+def _source_changed_on_disk(s: Source) -> bool:
+    """True if the file at `s.path` no longer matches what was probed."""
+    try:
+        stat = os.stat(s.path)
+    except OSError:
+        return False
+    return stat.st_size != s.file_size or stat.st_mtime_ns != s.file_mtime_ns
+
+
+def refresh_stale_sources(session: "MulticamSession") -> bool:
+    """Re-probe any source whose file changed since it was last probed.
+
+    A saved session reopens by matching the set of file paths alone, so a
+    camera file swapped out for a re-export with the same name silently kept
+    its old sync, offset and caches. Re-probe it, reset everything derived
+    from its old bytes, and let the normal flows (sync, activity, previews)
+    regenerate against the new file.
+    """
+    affected_in_use = False
+    for s in session.sources:
+        if s.virtual or not s.path or not _source_changed_on_disk(s):
+            continue
+        try:
+            fresh = probe_source(s.path)
+        except Exception:
+            continue
+        s.duration, s.has_audio, s.audio_channels = fresh.duration, fresh.has_audio, fresh.audio_channels
+        s.width, s.height, s.fps, s.timecode = fresh.width, fresh.height, fresh.fps, fresh.timecode
+        s.file_size, s.file_mtime_ns = fresh.file_size, fresh.file_mtime_ns
+        s.offset, s.speed, s.sync = None, 1.0, {
+            "status": "failed",
+            "message": "This file changed on disk since it was last synced. Sync again.",
+        }
+        affected_in_use = affected_in_use or _in_use(session, s)
+    if affected_in_use:
+        session.activity_key = ""
+        session.cuts = []
+        session.range_start = session.range_end = None
+    return affected_in_use
 
 
 _WIDE = re.compile(r"(^|[^a-z])(wide|master|main|both|all|group|ws|two.?shot|2.?shot|overview)([^a-z]|$)")
@@ -636,7 +758,12 @@ def new_session(
     # caller makes after, under the same lock as any other.
     existing = find_session(found)
     if existing:
-        _emit(progress_callback, 100, f"Reopened the edit for these {len(found)} files")
+        if refresh_stale_sources(existing):
+            existing.save()
+            _emit(progress_callback, 100, f"Reopened the edit for these {len(found)} files; "
+                                           "one or more changed on disk and need syncing again")
+        else:
+            _emit(progress_callback, 100, f"Reopened the edit for these {len(found)} files")
         return existing
     named = [(str(p.get("name", "")).strip(), p.get("role")) if isinstance(p, dict) else (str(p or "").strip(), None)
              for p in (people or [])]
@@ -754,6 +881,19 @@ def needs_sync(session: MulticamSession) -> bool:
     return any(_in_use(session, s) and not s.virtual and not s.synced for s in session.sources)
 
 
+def sync_basis_signature(session: MulticamSession) -> str:
+    """Fingerprint of where every in-use source currently sits on the timeline.
+
+    A cut or removal made in an external editor (the podcli cloud editor)
+    references timeline seconds measured against this placement. If sync,
+    a nudge, or a re-map moves anything after the edit was sent out, applying
+    that cut back silently lands on the wrong footage: this lets callers
+    detect that before it happens.
+    """
+    feeds = sorted((s.id, s.offset, s.speed) for s in session.sources if _in_use(session, s) and not s.virtual)
+    return hashlib.sha1(json.dumps(feeds, default=str).encode()).hexdigest()[:16]
+
+
 def _in_use(session: MulticamSession, s: Source) -> bool:
     """Mapped to something, or the recording a tile in use is cut from (even when the whole frame is ignored)."""
     return s.role != "ignore" or any(v.parent == s.id and v.role != "ignore" for v in session.sources)
@@ -828,8 +968,28 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
         if "channel_people" in edit:
             chans = [c if c in valid else "" for c in (edit["channel_people"] or [])]
             s.channel_people = chans[: max(0, s.audio_channels)] if any(chans) else []
-        if (("offset" in edit and edit["offset"] is not None) or "nudge" in edit) and s.virtual:
+        if "audio_stream_index" in edit:
+            idx = edit["audio_stream_index"]
+            if not isinstance(idx, int) or not 0 <= idx < max(1, s.audio_stream_count):
+                raise ValueError(f"{os.path.basename(s.path)} has {s.audio_stream_count} audio "
+                                 f"stream(s); audio_stream_index must be between 0 and {s.audio_stream_count - 1}")
+            s.audio_stream_index = idx
+            if idx < len(s.audio_stream_channels):
+                s.audio_channels = s.audio_stream_channels[idx]
+            s.channel_people = []
+        if "input_lut" in edit:
+            if s.kind != "video" or s.virtual:
+                raise ValueError("Only a camera file takes an input LUT; tiles and split screens use their files' LUTs")
+            s.input_lut = _check_cube(edit["input_lut"]) if edit["input_lut"] else ""
+        if (("offset" in edit and edit["offset"] is not None) or "nudge" in edit or "anchors" in edit) and s.virtual:
             raise ValueError("A tile or split screen moves with the files it comes from. Move those instead.")
+        if "anchors" in edit:
+            pairs, fit = _anchor_fit(s, edit["anchors"])
+            s.offset, s.speed = fit.offset, fit.speed
+            s.sync = {
+                "status": "manual", "method": "manual", "anchors": pairs,
+                "residual_ms": round(fit.residual_ms, 1), "drift_ppm": round((fit.speed - 1.0) * 1e6, 1),
+            }
         if "offset" in edit and edit["offset"] is not None:
             s.offset = _number(edit["offset"], "offset", -MAX_SECONDS, MAX_SECONDS)
             s.sync = {**s.sync, "status": "manual"}
@@ -882,9 +1042,77 @@ def update_mapping(session: MulticamSession, params: dict) -> MulticamSession:
     return session
 
 
+MAX_LUT_BYTES = 64 * 1024 * 1024
+
+
+def _check_cube(path) -> str:
+    """The path of a well-formed 3D .cube LUT, or a ValueError saying what's wrong with it."""
+    if not isinstance(path, str) or not os.path.isabs(os.path.expanduser(path)):
+        raise ValueError("input_lut must be an absolute path to a .cube file")
+    p = Path(path).expanduser()
+    if p.suffix.lower() != ".cube" or not p.is_file():
+        raise ValueError(f"{path} isn't a .cube file")
+    if p.stat().st_size > MAX_LUT_BYTES:
+        raise ValueError(f"{p.name} is too big to be a LUT")
+    size, entries = 0, 0
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        words = line.split()
+        if not words or words[0].startswith("#"):
+            continue
+        key = words[0].upper()
+        if key == "LUT_1D_SIZE":
+            raise ValueError(f"{p.name} is a 1D LUT. A camera needs a 3D LUT (LUT_3D_SIZE).")
+        if key == "LUT_3D_SIZE":
+            size = int(_number(words[1] if len(words) > 1 else "", "LUT_3D_SIZE", 2, 256))
+        elif key[0].isdigit() or key[0] in "+-.":
+            if len(words) != 3:
+                raise ValueError(f"{p.name} has a LUT entry without exactly three values: {line.strip()[:40]}")
+            for w in words:
+                _number(w, f"a value in {p.name}", -1e6, 1e6)
+            entries += 1
+    if not size:
+        raise ValueError(f"{p.name} has no LUT_3D_SIZE, so it isn't a 3D LUT")
+    if entries != size ** 3:
+        raise ValueError(f"{p.name} declares a {size}-point cube ({size ** 3} entries) but holds {entries}")
+    return str(p)
+
+
+MAX_ANCHORS = 100
+
+
+def _anchor_fit(s: Source, anchors) -> tuple[list[dict], sig.ClockFit]:
+    """Offset and speed through hand-picked {timeline, source} second pairs, by least squares.
+
+    One pair sets the offset alone. More fit drift too, within the bound an
+    audio sync accepts. Every pair counts: unlike sync checkpoints, nobody
+    picks an anchor by accident, so none is dropped as an outlier.
+    """
+    name = os.path.basename(s.path)
+    if not isinstance(anchors, list) or not 1 <= len(anchors) <= MAX_ANCHORS:
+        raise ValueError(f"anchors must be a list of 1 to {MAX_ANCHORS} {{timeline, source}} pairs in seconds")
+    pairs = []
+    for a in anchors:
+        if not isinstance(a, dict) or not {"timeline", "source"} <= a.keys():
+            raise ValueError("Each anchor needs timeline and source, in seconds")
+        pairs.append({"timeline": _number(a["timeline"], "anchor timeline", -MAX_SECONDS, MAX_SECONDS),
+                      "source": _number(a["source"], f"anchor source second in {name}", 0, s.duration)})
+    pairs.sort(key=lambda p: p["source"])
+    for a, b in zip(pairs, pairs[1:]):
+        if b["source"] - a["source"] < 1e-3 or b["timeline"] <= a["timeline"]:
+            raise ValueError("Anchors must move forward together: a later second in the file needs a later "
+                             "second on the timeline, and no two anchors may share a file second")
+    fit = sig.fit_clock([(p["source"], p["timeline"], 1.0) for p in pairs], max_residual=math.inf)
+    if fit is None or fit.speed_fallback:
+        first, last = pairs[0], pairs[-1]
+        ppm = ((last["timeline"] - first["timeline"]) / (last["source"] - first["source"]) - 1.0) * 1e6
+        raise ValueError(f"Those anchors put {name}'s clock {ppm:+.0f} ppm off the timeline; real drift stays within "
+                         f"{sig.MAX_DRIFT * 1e6:.0f} ppm. Check each pair.")
+    return pairs, fit
+
+
 def _cut_inputs(session: MulticamSession) -> str:
     return json.dumps([
-        [(s.id, s.role, s.person, s.channel_people, s.offset) for s in session.sources],
+        [(s.id, s.role, s.person, s.channel_people, s.audio_stream_index, s.offset, s.speed) for s in session.sources],
         [(p.id, p.role) for p in session.people], session.range_start, session.range_end,
         session.cut_settings, session.speaker_map,
     ], default=str)
@@ -895,7 +1123,11 @@ def _cut_inputs(session: MulticamSession) -> str:
 # ---------------------------------------------------------------------------
 
 def _extract(source: Source, out: Path, channel: int = -1, rate: int = SYNC_RATE) -> Path:
-    if out.exists() and out.stat().st_mtime >= os.path.getmtime(source.path):
+    # Keyed on the probed file identity, not a live mtime check: a replaced
+    # file can land within the same mtime second, and the id in `out`'s name
+    # (basename:size) doesn't change either, so neither alone is reliable.
+    out = out.with_name(f"{out.stem}-{_file_identity(source)}{out.suffix}")
+    if out.exists():
         return out
     tmp = out.with_suffix(".tmp.wav")
     pick = "pan=mono|c0=c0" if source.audio_channels < 2 else "pan=mono|c0=0.5*c0+0.5*c1"
@@ -905,7 +1137,7 @@ def _extract(source: Source, out: Path, channel: int = -1, rate: int = SYNC_RATE
     # clock the render and editors use; audio often starts 20-100 ms after video.
     proc_run([
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-i", source.path, "-vn", "-map", "0:a:0",
+        "-i", source.path, "-vn", "-map", f"0:a:{source.audio_stream_index}",
         "-af", f"aresample=async=1:first_pts=0,{pick}",
         "-ar", str(rate), "-acodec", "pcm_s16le", str(tmp),
     ], timeout=3600, check=True)
@@ -981,13 +1213,44 @@ def _match(ref: np.ndarray, ref_env: np.ndarray, src: np.ndarray) -> tuple[Optio
             "status": "rough", "score": round(match.score, 1),
             "message": "Synced to within 10 ms; fine alignment found no clear speech.",
         }
-    return fit, {
-        "status": "ok",
+    overlap_seconds = min(len(ref), len(src)) / SYNC_RATE
+    reasons = _sync_review_reasons(fit, match, overlap_seconds)
+    report = {
+        "status": "review" if reasons else "ok",
         "score": round(match.score, 1),
         "checkpoints": fit.checkpoints,
         "residual_ms": round(fit.residual_ms, 1),
+        "residual_all_ms": round(fit.residual_all_ms, 1),
         "drift_ppm": round((fit.speed - 1.0) * 1e6, 1),
     }
+    if reasons:
+        report["reasons"] = reasons
+        report["message"] = "Sync may be off: " + "; ".join(reasons) + ". Check it before rendering."
+    return fit, report
+
+
+def _sync_review_reasons(fit: sig.ClockFit, match: sig.CoarseMatch, overlap_seconds: float) -> list[str]:
+    """Why a fit that otherwise looks like a clean sync should get a second look.
+
+    A fit can report a tidy inlier residual while still being wrong: outliers
+    get dropped before the residual is measured, drift can be forced back to
+    speed 1 when it looked implausible, or there just weren't enough
+    checkpoints to trust a long overlap's drift estimate.
+    """
+    reasons = []
+    worst_residual_ms = max(fit.residual_ms, fit.residual_all_ms)
+    if worst_residual_ms > 30.0:
+        reasons.append(f"residual {worst_residual_ms:.0f} ms")
+    if fit.speed_fallback:
+        reasons.append("drift fit was implausible, so speed was forced back to 1.0")
+    dropped = fit.total_checkpoints - fit.checkpoints
+    if fit.total_checkpoints and dropped / fit.total_checkpoints > 0.4:
+        reasons.append(f"dropped {dropped} of {fit.total_checkpoints} checkpoints as outliers")
+    if overlap_seconds > 600.0 and fit.checkpoints < 3:
+        reasons.append("fewer than 3 checkpoints over a 10+ minute overlap")
+    if match.peak_ratio > 0.5:
+        reasons.append("weak correlation peak")
+    return reasons
 
 
 def sync_session(
@@ -1100,7 +1363,8 @@ def sync_session(
 # ---------------------------------------------------------------------------
 
 def _activity_key(session: MulticamSession) -> str:
-    feeds = [(s.id, ch, pid, s.offset, s.speed) for s, ch, pid in session.person_mics()]
+    feeds = [(s.id, _file_identity(s), s.audio_stream_index, ch, pid, s.offset, s.speed)
+             for s, ch, pid in session.person_mics()]
     blob = json.dumps([feeds, session.speaker_map, session.person_ids()], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
@@ -1310,11 +1574,13 @@ def activity(session: MulticamSession) -> dict:
 # Previews
 # ---------------------------------------------------------------------------
 
-def _picture(session: MulticamSession, cam: Source, tl: float, width: int, height: int) -> tuple[list[str], str]:
-    """ffmpeg inputs and a filter graph drawing `cam` at timeline second tl into [pic], width x height.
+def _picture(session: MulticamSession, cam: Source, tl: float, width: int, height: int,
+             span: float = 0.0) -> tuple[list[str], str]:
+    """ffmpeg inputs and a filter graph drawing `cam` from timeline second tl into [pic], width x height.
 
     A real camera is fitted to the frame; a pane is cropped out of its call
-    recording first; a split screen fills one equal column per person.
+    recording first; a split screen fills one equal column per person. `span`
+    is how long the piece plays, so its middle lands in sync on a drifting file.
     """
     fit = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
     if cam.members:
@@ -1326,10 +1592,12 @@ def _picture(session: MulticamSession, cam: Source, tl: float, width: int, heigh
             rolling = next((c for c in session.cameras() if not c.virtual and c.synced and c.person == person
                             and c.timeline_start() <= tl < c.timeline_end()), None)
             if rolling:
-                args += ["-ss", f"{max(0.0, rolling.source_time(tl)):.4f}", "-i", rolling.path]
+                args += ["-ss", f"{max(0.0, rolling.source_in(tl, span)):.4f}", "-i", rolling.path]
             else:
                 args += ["-f", "lavfi", "-i", f"color=c=black:s={pane}x{height}"]
-            chains.append(f"[{i}:v:0]scale={pane}:{height}:force_original_aspect_ratio=increase,crop={pane}:{height},setsar=1[p{i}]")
+            lut = _lut_step(rolling) if rolling else ""
+            chains.append(f"[{i}:v:0]{lut}scale={pane}:{height}:force_original_aspect_ratio=increase,"
+                          f"crop={pane}:{height},setsar=1[p{i}]")
         joined = "".join(f"[p{i}]" for i in range(n))
         return args, ";".join(chains) + f";{joined}hstack=inputs={n},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2[pic]"
     src = session.source(cam.parent) if cam.parent else cam
@@ -1337,7 +1605,25 @@ def _picture(session: MulticamSession, cam: Source, tl: float, width: int, heigh
     if cam.crop:
         x, y, w, h = cam.crop
         crop = f"crop=iw*{w:.4f}:ih*{h:.4f}:iw*{x:.4f}:ih*{y:.4f},"
-    return ["-ss", f"{max(0.0, src.source_time(tl)):.4f}", "-i", src.path], f"[0:v:0]{crop}{fit}[pic]"
+    return ["-ss", f"{max(0.0, src.source_in(tl, span)):.4f}", "-i", src.path], f"[0:v:0]{crop}{_lut_step(src)}{fit}[pic]"
+
+
+def _filter_path(path: str) -> str:
+    """A file path escaped for an option value inside an ffmpeg filter graph.
+
+    Two parsers read it: the graph splits on , ; [ ] and the filter splits its
+    options on :, and each strips one level of backslashes.
+    """
+    option = path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    return "".join(f"\\{ch}" if ch in "\\'[],;" else ch for ch in option)
+
+
+def _lut_step(s: Source) -> str:
+    """The file's input LUT as a filter step ending in a comma, or ''.
+
+    It runs before scaling and padding, so it maps the camera's own pixels and never tints the bars.
+    """
+    return f"lut3d=file={_filter_path(s.input_lut)}," if s.input_lut else ""
 
 
 def _still(session: MulticamSession, cam: Source, tl: float, out: Path, look: str = "none", width: int = 480) -> Path:
@@ -1350,8 +1636,22 @@ def _still(session: MulticamSession, cam: Source, tl: float, out: Path, look: st
     return out
 
 
+def _still_basis(session: MulticamSession, s: Source) -> str:
+    """Short fingerprint of the offset, speed and input LUT of every file a still reads.
+
+    Stills are cached to disk by filename. The source's mapping from timeline
+    time to source time (`source_time`) depends on offset and speed, so a
+    cache key that only captures the timeline moment `at` goes stale the
+    instant a nudge or re-sync changes that mapping: the filename looks the
+    same but would now decode a different source frame. A new LUT recolors it.
+    """
+    files = _picture_files(session, s)
+    raw = json.dumps([(f.offset, f.speed, _fingerprint(f.input_lut) if f.input_lut else None) for f in files])
+    return hashlib.sha1(raw.encode()).hexdigest()[:8]
+
+
 def previews(session: MulticamSession, *, looks: bool = False, at: Optional[float] = None) -> dict:
-    """One still per camera, and optionally one still per look from the wide camera."""
+    """One still per camera, and optionally one still per look per camera, each through its input LUT."""
     work = _work_dir(session.session_id)
     frames: dict = {"cameras": {}, "looks": {}}
 
@@ -1364,19 +1664,20 @@ def previews(session: MulticamSession, *, looks: bool = False, at: Optional[floa
         if s.kind != "video":
             continue
         t = moment(s)
-        out = work / f"frame-{s.id}-{int(t * 10)}.jpg"
+        out = work / f"frame-{s.id}-{int(t * 10)}-{_still_basis(session, s)}.jpg"
         if not out.exists():
             _still(session, s, t, out)
         frames["cameras"][s.id] = str(out)
     if looks:
-        cams = session.cameras() or [s for s in session.sources if s.kind == "video"]
-        if cams:
-            cam = next((c for c in cams if c.person == "wide"), cams[0])
+        # Cameras rarely match out of the box, so each one shows every look on its own picture.
+        for cam in session.cameras() or [s for s in session.sources if s.kind == "video"]:
+            t = moment(cam)
+            frames["looks"][cam.id] = {}
             for name in LOOKS:
-                out = work / f"look-{cam.id}-{name}.jpg"
+                out = work / f"look-{cam.id}-{name}-{int(t * 10)}-{_still_basis(session, cam)}.jpg"
                 if not out.exists():
-                    _still(session, cam, moment(cam), out, look=name, width=640)
-                frames["looks"][name] = str(out)
+                    _still(session, cam, t, out, look=name, width=640)
+                frames["looks"][cam.id][name] = str(out)
     return frames
 
 
@@ -1488,6 +1789,29 @@ def transcript(session: MulticamSession, *, model_size: str = "base", engine: Op
 _SENTENCE_END = (".", "?", "!")
 
 
+_GEORGIAN_RANGES = ((0x10A0, 0x10FF), (0x1C90, 0x1CBF))
+
+
+def _looks_like_sentence_opener(text: str) -> bool:
+    """True if `text` could start a new sentence, by case or by having none.
+
+    `str.isupper()` alone misses caseless scripts: CJK, Arabic, Thai, and
+    Hebrew letters are never upper or lower (`ch.upper() == ch.lower()`
+    catches those). Georgian is a special case: Unicode still carries a
+    Mtavruli uppercase mapping for it, so `str.isupper()`/`islower()` report
+    it as cased, but real Georgian text is written only in the lowercase
+    Mkhedruli form and never uses that case distinction, so every opener was
+    silently dropped. Treat Georgian letters as potential openers too.
+    """
+    ch = text[:1]
+    if not ch.isalpha():
+        return False
+    if ch.isupper() or ch.upper() == ch.lower():
+        return True
+    cp = ord(ch)
+    return any(lo <= cp <= hi for lo, hi in _GEORGIAN_RANGES)
+
+
 def _settle_turn_edges(words: list[dict], margins: list[float], clear: float = 6.0) -> None:
     """Fix credits that loose word timestamps get wrong around a turn change.
 
@@ -1508,7 +1832,7 @@ def _settle_turn_edges(words: list[dict], margins: list[float], clear: float = 6
     for i in range(1, len(words) - 1):
         prev, word, nxt = words[i - 1], words[i], words[i + 1]
         if (margins[i] < clear and word["person"] == prev["person"] != nxt["person"]
-                and prev["text"].endswith(_SENTENCE_END) and word["text"][:1].isupper()):
+                and prev["text"].endswith(_SENTENCE_END) and _looks_like_sentence_opener(word["text"])):
             word["person"] = nxt["person"]
     # Moving a sentence opener can leave the word after it stranded; rejoin it too.
     rejoin_strays()
@@ -1559,32 +1883,126 @@ def _output_dir(session: MulticamSession) -> Path:
     return d
 
 
-def _render_shot(session: MulticamSession, cam: Optional[Source], out: Path, tl_start: float, frames: int,
-                 width: int, height: int, fps: float, look: str) -> None:
-    """Encode exactly `frames` frames starting at timeline second tl_start.
+# Bump when the shot pipeline changes in a way its cached files can't show,
+# so a rerun re-encodes instead of reusing shots built the old way.
+RENDER_VERSION = 1
+SHOT_ENCODE = ("-c:v", "libx264", "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p",
+               "-video_track_timescale", "90000")
+
+
+def _shot_command(session: MulticamSession, cam: Optional[Source], tl_start: float, frames: int,
+                  width: int, height: int, fps: float, look: str) -> list[str]:
+    """The ffmpeg command, minus its output path, that encodes exactly `frames` frames from timeline second tl_start.
 
     cam None renders black, which keeps picture and sound aligned across a
     stretch no camera covered.
     """
-    common = [
-        "-frames:v", str(frames), "-an",
-        "-c:v", "libx264", "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p",
-        "-video_track_timescale", "90000", str(out),
-    ]
+    common = ["-frames:v", str(frames), "-an", *SHOT_ENCODE]
     if cam is None:
-        proc_run([
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r={fps:.6f}", *common,
-        ], timeout=600, check=True)
-        return
-    args, graph = _picture(session, cam, tl_start, width, height)
+        return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r={fps:.6f}", *common]
+    args, graph = _picture(session, cam, tl_start, width, height, frames / fps)
     # A camera that stops a few frames early would shorten the shot and slip
     # every later shot against the audio; holding its last frame prevents that.
     tail = [f"fps={fps:.6f}", "tpad=stop_mode=clone:stop=-1", *([LOOKS[look]] if LOOKS.get(look) else [])]
-    proc_run([
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args,
-        "-filter_complex", f"{graph};[pic]{','.join(tail)}[v]", "-map", "[v]", *common,
-    ], timeout=3600, check=True)
+    return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args,
+            "-filter_complex", f"{graph};[pic]{','.join(tail)}[v]", "-map", "[v]", *common]
+
+
+def _picture_files(session: MulticamSession, cam: Source) -> list[Source]:
+    """The recordings a camera's picture is read from: itself, its call recording, or each split member's files."""
+    if cam.parent:
+        return [session.source(cam.parent)]
+    if cam.members:
+        return [c for c in session.cameras() if not c.virtual and c.person in cam.members]
+    return [cam]
+
+
+def _shot_key(session: MulticamSession, cam: Optional[Source], command: list[str]) -> str:
+    """Names a cached shot by everything that decides its pixels.
+
+    The command carries the seek point, frame range, crop, look and encoder
+    settings; the files it reads are fingerprinted live so a re-export under
+    the same name can't serve an old shot.
+    """
+    files = [(_fingerprint(f.path), f.offset, f.speed, _fingerprint(f.input_lut) if f.input_lut else None)
+             for f in (_picture_files(session, cam) if cam else [])]
+    blob = json.dumps([RENDER_VERSION, command, files], default=str)
+    return hashlib.sha1(blob.encode()).hexdigest()[:20]
+
+
+def _fingerprint(path: str) -> tuple:
+    """A file's path, size and mtime as they are on disk right now."""
+    try:
+        st = os.stat(path)
+        return path, st.st_size, st.st_mtime_ns
+    except OSError:
+        return path, None, None
+
+
+def _probe_value(path: Path, *args: str) -> str:
+    res = proc_run(["ffprobe", "-v", "error", *args, "-of", "csv=p=0", str(path)], timeout=1800, check=False)
+    lines = res.stdout.strip().splitlines() if res.returncode == 0 else []
+    return lines[0].strip().rstrip(",") if lines else ""
+
+
+def _frame_count(path: Path) -> int:
+    """Video frames actually in a file, counted packet by packet rather than trusting the header."""
+    value = _probe_value(path, "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets")
+    return int(value) if value.isdigit() else -1
+
+
+def _media_duration(path: Path, stream: str = "") -> float:
+    value = _probe_value(path, *(["-select_streams", stream, "-show_entries", "stream=duration"] if stream
+                                 else ["-show_entries", "format=duration"]))
+    try:
+        return float(value)
+    except ValueError:
+        return 0.0
+
+
+LOUDNESS_TARGET = -16.0
+TRUE_PEAK_CEILING = -1.5
+
+
+def _loudness(path: Path) -> tuple[Optional[float], Optional[float]]:
+    """Integrated loudness (LUFS) and true peak (dBTP) of a file's first audio stream, by EBU R128."""
+    res = proc_run([
+        "ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-map", "0:a:0",
+        "-af", "ebur128=peak=true", "-f", "null", "-",
+    ], timeout=3600, check=False)
+    summary = res.stderr[res.stderr.rfind("Summary:"):] if "Summary:" in res.stderr else ""
+    lufs = re.search(r"I:\s+(-?[\d.]+|-inf) LUFS", summary)
+    peak = re.search(r"True peak:\s+Peak:\s+(-?[\d.]+|-inf) dBFS", summary)
+
+    def number(m) -> Optional[float]:
+        return float(m.group(1)) if m and m.group(1) != "-inf" else None
+
+    return number(lufs), number(peak)
+
+
+def _decode_errors(path: Path) -> str:
+    """Whatever ffmpeg complains about while decoding every frame and sample, or '' when clean."""
+    res = proc_run(["ffmpeg", "-hide_banner", "-v", "error", "-i", str(path), "-f", "null", "-"],
+                   timeout=7200, check=False)
+    return res.stderr.strip() or (f"ffmpeg exited with {res.returncode}" if res.returncode else "")
+
+
+def _ran_out(session: MulticamSession, cam: Source, piece: "Piece", fps: float, ends: dict[str, float]) -> list[str]:
+    """Warnings for files that stop before a piece does, so tpad holds their last frame."""
+    out = []
+    span = piece.frames / fps
+    files = _picture_files(session, cam)
+    if cam.members:
+        files = [f for f in files if f.timeline_start() <= piece.tl_start < f.timeline_end()]
+    for f in files:
+        if f.path not in ends:
+            ends[f.path] = _media_duration(Path(f.path), "v:0") or f.duration
+        short = f.source_in(piece.tl_start, span) + span - ends[f.path]
+        if short > 0.5 / fps:
+            out.append(f"{os.path.basename(f.path)} ran out {short:.2f} s before the end of the shot at "
+                       f"{piece.tl_start:.1f} s; its last frame is held.")
+    return out
 
 
 def _audio_inputs(session: MulticamSession) -> list[tuple[Source, int]]:
@@ -1597,10 +2015,23 @@ def _audio_inputs(session: MulticamSession) -> list[tuple[Source, int]]:
     return [(session.source(session.reference_id), -1)]
 
 
+MIX_RATE = 48000
+# asetrate only takes whole rates, so at 48 kHz the nearest one can be 10 ppm
+# off the drift; labelling the audio 1000 times faster first lets one resample
+# step land within 0.01 ppm, and the resample itself stays near 1:1.
+DRIFT_LABEL_SCALE = 1000
+
+
+def _drift_steps(speed: float) -> list[str]:
+    """Filter steps stretching MIX_RATE audio by `speed` through a resample, keeping its length exact."""
+    fast = MIX_RATE * DRIFT_LABEL_SCALE
+    return [f"asetrate={fast}", f"aresample={round(fast * speed)}", f"asetrate={MIX_RATE}"]
+
+
 def _aligned_input(s: Source, channel: int, start: float, duration: float) -> tuple[list[str], list[str]]:
-    """ffmpeg input args and mono filter steps that place a source on [start, start + duration]."""
+    """ffmpeg input args and mono MIX_RATE filter steps that place a source on [start, start + duration]."""
     src_start = s.source_time(start)
-    steps = ["aresample=async=1:first_pts=0"]
+    steps = [f"aresample={MIX_RATE}:async=1:first_pts=0"]
     if channel >= 0:
         steps.append(f"pan=mono|c0=c{channel}")
     elif s.audio_channels >= 2:
@@ -1608,11 +2039,11 @@ def _aligned_input(s: Source, channel: int, start: float, duration: float) -> tu
     else:
         steps.append("pan=mono|c0=c0")
     if abs(s.speed - 1.0) > 1e-7:
-        steps.append(f"atempo={1.0 / s.speed:.8f}")
+        steps += _drift_steps(s.speed)
     if src_start < 0:
-        steps.append(f"adelay={int(round(-src_start * 1000))}")
-    steps.append(f"apad,atrim=0:{duration:.4f}")
-    return ["-ss", f"{max(0.0, src_start):.4f}", "-i", s.path], steps
+        steps.append(f"adelay={round(-src_start * s.speed * MIX_RATE)}S")
+    steps.append(f"apad,atrim=0:{duration:.6f}")
+    return ["-ss", f"{max(0.0, src_start):.6f}", "-i", s.path], steps
 
 
 def _write_mix(session: MulticamSession, out: Path, start: float, duration: float, *,
@@ -1635,24 +2066,63 @@ def _write_mix(session: MulticamSession, out: Path, start: float, duration: floa
 
 def _mix_key(session: MulticamSession) -> str:
     """Changes whenever which mics are mixed, or where they sit, changes."""
-    feeds = [(s.id, ch, s.offset, s.speed, os.path.getmtime(s.path)) for s, ch in _audio_inputs(session)]
+    feeds = [(s.id, s.audio_stream_index, ch, s.offset, s.speed, os.path.getmtime(s.path))
+             for s, ch in _audio_inputs(session)]
     return hashlib.sha1(json.dumps(feeds, default=str).encode()).hexdigest()[:12]
 
 
-def _render_audio(session: MulticamSession, out: Path, start: float, duration: float) -> None:
-    _write_mix(
-        session, out, start, duration,
-        per_feed=("dynaudnorm=f=250:g=15:p=0.9",),
-        after="loudnorm=I=-16:TP=-1.5:LRA=11,aformat=channel_layouts=stereo",
-        encode=("-ar", "48000", "-c:a", "pcm_s16le"),
-    )
+# Rumble and handling noise sit under 70 Hz; a gentle high-pass takes them
+# out before leveling would lift them along with the voice.
+VOICE_CHAIN = ("highpass=f=70:poles=2", "dynaudnorm=f=250:g=15:p=0.9")
+
+
+def _normalization(path: Path) -> tuple[float, bool]:
+    """The linear gain (dB) that brings a mix to LOUDNESS_TARGET, and whether peaks then need limiting."""
+    from services.audio_normalize import _parse_loudnorm_stats
+
+    res = proc_run([
+        "ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
+        "-af", f"loudnorm=I={LOUDNESS_TARGET}:TP={TRUE_PEAK_CEILING}:LRA=11:print_format=json", "-f", "null", "-",
+    ], timeout=3600, check=False)
+    stats = _parse_loudnorm_stats(res.stderr)
+    if not stats:
+        return 0.0, False
+    gain = LOUDNESS_TARGET - float(stats["input_i"])
+    return gain, float(stats["input_tp"]) + gain > TRUE_PEAK_CEILING
+
+
+def _render_audio(session: MulticamSession, out: Path, start: float, duration: float) -> float:
+    """The episode mix: every mic high-passed and leveled, then one measured gain to LOUDNESS_TARGET.
+
+    Returns that gain in dB so the stems can carry it too. Only peaks the gain
+    would push past TRUE_PEAK_CEILING meet a limiter, and only on the mix.
+    """
+    premix = out.with_name(f"{out.stem}.premix.wav")
+    # Float keeps a sum of hot mics from clipping before the gain brings it down.
+    _write_mix(session, premix, start, duration, per_feed=VOICE_CHAIN, encode=("-c:a", "pcm_f32le"))
+    gain, limit = _normalization(premix)
+    steps = [f"volume={gain:.3f}dB"]
+    if limit:
+        # alimiter reads sample peaks; half a dB under the ceiling leaves room for the peaks between samples.
+        ceiling = 10 ** ((TRUE_PEAK_CEILING - 0.5) / 20)
+        steps.append(f"alimiter=limit={ceiling:.4f}:level=0:latency=1")
+    proc_run([
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(premix),
+        "-af", ",".join([*steps, "aformat=channel_layouts=stereo"]), "-ar", str(MIX_RATE), "-c:a", "pcm_s16le", str(out),
+    ], timeout=3600, check=True)
+    premix.unlink(missing_ok=True)
+    return gain
 
 
 def _render_stems(
     session: MulticamSession, out_dir: Path, start: float, duration: float,
-    splice: Optional[list[tuple[float, float]]] = None,
+    splice: Optional[list[tuple[float, float]]] = None, gain: float = 0.0,
 ) -> list[str]:
-    """One WAV per person; a person recorded across several files (recorder splits) gets them mixed in."""
+    """One WAV per person, processed like the mix and carrying its gain, so the stems sum to it.
+
+    A person recorded across several files (recorder splits) gets them mixed
+    in. Float samples keep a stem the mix's limiter caught from clipping here.
+    """
     stems = []
     for pid in session.person_ids():
         feeds = [(s, ch) for s, ch, who in session.person_mics() if who == pid and s.synced]
@@ -1662,18 +2132,20 @@ def _render_stems(
         for i, (s, ch) in enumerate(feeds):
             inp, steps = _aligned_input(s, ch, start, duration)
             args += inp
-            chains.append(f"[{i}:a:0]{','.join(steps)}[a{i}]")
+            chains.append(f"[{i}:a:0]{','.join([*steps, *VOICE_CHAIN])}[a{i}]")
         mix = "".join(f"[a{i}]" for i in range(len(feeds)))
-        graph = ";".join(chains) + (f";{mix}amix=inputs={len(feeds)}:normalize=0[out]" if len(feeds) > 1 else ";[a0]anull[out]")
+        level = f"volume={gain:.3f}dB"
+        graph = ";".join(chains) + (f";{mix}amix=inputs={len(feeds)}:normalize=0,{level}[out]" if len(feeds) > 1
+                                    else f";[a0]{level}[out]")
         # Person ids are unique slugs, so two people never share a file name.
         out = out_dir / f"{pid}.wav"
         full = out.with_name(f"{pid}.full.wav") if splice else out
         proc_run([
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args,
-            "-filter_complex", graph, "-map", "[out]", "-ar", "48000", "-c:a", "pcm_s24le", str(full),
+            "-filter_complex", graph, "-map", "[out]", "-ar", str(MIX_RATE), "-c:a", "pcm_f32le", str(full),
         ], timeout=3600, check=True)
         if splice:
-            _splice_audio(full, out, splice, ["-c:a", "pcm_s24le"])
+            _splice_audio(full, out, splice, ["-c:a", "pcm_f32le"])
             full.unlink(missing_ok=True)
         stems.append(str(out))
     return stems
@@ -1710,6 +2182,22 @@ def kept_segments(session: MulticamSession) -> list[tuple[float, float]]:
     return [(a, b) for a, b, r in _segments(session) if r is None]
 
 
+def drift_parts(seconds: float, drift: float, fps: float) -> int:
+    """How many pieces a stretch splits into so a clock off by `drift` (|speed - 1|) slips at most half a frame in each.
+
+    One frame of slack covers pieces landing a frame longer on the output grid.
+    """
+    return max(1, math.ceil(drift * (seconds + 1 / fps) * 2 * fps - 1e-9))
+
+
+def _camera_drift(session: MulticamSession, source_id: str) -> float:
+    """|speed - 1| of the worst-drifting file a camera draws its picture from."""
+    cam = next((s for s in session.sources if s.id == source_id), None)
+    if cam is None:
+        return 0.0
+    return max((abs(f.speed - 1.0) for f in _picture_files(session, cam)), default=0.0)
+
+
 def render_plan(session: MulticamSession, fps: float, *, review: bool = False) -> list[Piece]:
     """Every shot, split at removals, laid end to end on one output frame grid.
 
@@ -1717,9 +2205,13 @@ def render_plan(session: MulticamSession, fps: float, *, review: bool = False) -
     rounding drift against the audio; the MP4, the stems, and both editor
     timelines are all built from this list so they agree frame for frame.
     A review plan keeps the removed stretches in place, tagged with their removal.
+    A shot on a drifting camera is split into back-to-back pieces on that
+    camera, each short enough that the clock slips at most half a frame across
+    it; the cut list itself is unchanged.
     """
     pieces: list[Piece] = []
     out_t, out_f = 0.0, 0
+    drift = {c["source_id"]: _camera_drift(session, c["source_id"]) for c in session.cuts}
 
     def emit(source_id: Optional[str], a: float, b: float, removal: Optional[dict]) -> None:
         nonlocal out_t, out_f
@@ -1743,7 +2235,9 @@ def render_plan(session: MulticamSession, fps: float, *, review: bool = False) -
                 emit(None, t, c["start"], removal)
                 t = c["start"]
             e = min(c["end"], b)
-            emit(c["source_id"], t, e, removal)
+            parts = drift_parts(e - t, drift[c["source_id"]], fps)
+            for k in range(parts):
+                emit(c["source_id"], t + (e - t) * k / parts, t + (e - t) * (k + 1) / parts, removal)
             t = e
         if t < b:
             emit(None, t, b, removal)
@@ -1818,9 +2312,14 @@ def set_removals(session: MulticamSession, removals: list) -> MulticamSession:
 def _render_key(session: MulticamSession, stems: bool) -> str:
     """Everything the MP4 depends on, so an unchanged edit isn't rendered twice."""
     used = {c["source_id"] for c in session.cuts} | {s.id for s, _ in _audio_inputs(session)}
-    files = [(s.id, s.offset, s.speed, s.channel_people, s.person, os.path.getmtime(s.path))
+    files = [(s.id, s.offset, s.speed, s.channel_people, s.audio_stream_index, s.person, os.path.getmtime(s.path),
+              _fingerprint(s.input_lut) if s.input_lut else None)
              for s in session.sources if s.id in used and os.path.exists(s.path)]
-    blob = json.dumps([session.cuts, session.removals, session.look, stems, files], sort_keys=True, default=str)
+    # A tile or split screen takes its picture, and its LUT, from other files.
+    files += [(f.id, _fingerprint(f.input_lut)) for c in session.cameras() if c.id in used and c.virtual
+              for f in _picture_files(session, c) if f.input_lut]
+    audio = [VOICE_CHAIN, LOUDNESS_TARGET, TRUE_PEAK_CEILING]
+    blob = json.dumps([session.cuts, session.removals, session.look, stems, files, audio], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
 
@@ -1850,60 +2349,145 @@ def render_session(
         splice = [(a - start, b - start) for a, b in kept_segments(session)] if session.removals else None
         done = [0, 0]
         lock = threading.Lock()
+        shots_dir = _work_dir(session.session_id) / "shots"
+        warnings: list[str] = []
+        video_ends: dict[str, float] = {}
 
         def run(item):
             i, piece = item
-            chunk = work / f"shot-{i:05d}.mp4"
             cam = session.source(piece.source_id) if piece.source_id else None
-            _render_shot(session, cam, chunk, piece.tl_start, piece.frames, width, height, fps, session.look)
+            command = _shot_command(session, cam, piece.tl_start, piece.frames, width, height, fps, session.look)
+            chunk = shots_dir / _shot_key(session, cam, command) / "shot.mp4"
+            if not (chunk.exists() and _frame_count(chunk) == piece.frames):
+                chunk.parent.mkdir(parents=True, exist_ok=True)
+                tmp = chunk.with_name(f"shot.{i}.tmp.mp4")
+                proc_run([*command, str(tmp)], timeout=600 if cam is None else 3600, check=True)
+                got = _frame_count(tmp)
+                if abs(got - piece.frames) > 1:
+                    raise RuntimeError(f"Shot {i + 1} came out {got} frames long instead of {piece.frames}.")
+                os.replace(tmp, chunk)
+                if got != piece.frames:
+                    with lock:
+                        warnings.append(f"Shot {i + 1} came out {got} frames long instead of {piece.frames}.")
+            held = _ran_out(session, cam, piece, fps, video_ends) if cam is not None else []
             with lock:
+                warnings.extend(held)
                 done[0] += piece.frames
                 done[1] += 1
-                _emit(progress_callback, 3 + 80 * done[0] / total_frames, f"Cut {done[1]} of {len(jobs)} shots")
+                _emit(progress_callback, 3 + 78 * done[0] / total_frames, f"Cut {done[1]} of {len(jobs)} shots")
             return chunk
 
         workers = max(1, min(4, (os.cpu_count() or 2) // 2))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             chunks = list(pool.map(run, enumerate(jobs)))
 
-        _emit(progress_callback, 84, "Mixing microphones")
+        _emit(progress_callback, 82, "Mixing microphones")
         audio = work / "audio.wav"
-        _render_audio(session, audio, start, end - start)
+        gain = _render_audio(session, audio, start, end - start)
         if splice:
             _splice_audio(audio, work / "kept.wav", splice, ["-c:a", "pcm_s16le"])
             audio = work / "kept.wav"
+        short = duration - _media_duration(audio)
+        if short > 0.5 / fps:
+            warnings.append(f"The mixed audio is {short:.2f} s shorter than the picture; the end plays silent.")
 
-        _emit(progress_callback, 92, "Joining shots")
+        _emit(progress_callback, 88, "Joining shots")
         listing = work / "shots.txt"
         listing.write_text("".join(f"file '{c.as_posix()}'\n" for c in chunks), encoding="utf-8")
         partial = work / "episode.mp4"
+        # Capped at the plan's length rather than -shortest, which would quietly
+        # cut the picture to fit a short mix instead of letting the check above see it.
         proc_run([
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-f", "concat", "-safe", "0", "-i", str(listing), "-i", str(audio),
-            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
-            "-movflags", "+faststart", str(partial),
+            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{duration:.6f}", "-movflags", "+faststart", str(partial),
         ], timeout=3600, check=True)
-        video = out_dir / "episode.mp4"
-        # shutil.move falls back to copy+delete when work and output sit on different volumes.
-        shutil.move(str(partial), str(video))
+
+        _emit(progress_callback, 91, "Checking the episode")
+        validation = _validate(partial, total_frames, fps, warnings)
 
         stem_paths = []
         if stems:
             _emit(progress_callback, 96, "Writing separate mic tracks")
-            stem_paths = _render_stems(session, out_dir, start, end - start, splice)
+            # Built into `work`, not `out_dir`: if this fails, nothing at the
+            # canonical output path changes, and the video built above is
+            # discarded along with it instead of being published alone.
+            stem_paths = _render_stems(session, work, start, end - start, splice, gain)
+
+        # Every piece rendered; publish video, stems and the session record
+        # together. A crash between these renames can only ever leave either
+        # the previous complete render or this one in place, never a mix.
+        video = out_dir / "episode.mp4"
+        tmp_video = video.with_name(video.name + ".publishing")
+        # shutil.move falls back to copy+delete when work and output sit on different volumes.
+        shutil.move(str(partial), str(tmp_video))
+        pending_stems = []
+        for stem in stem_paths:
+            dest = out_dir / Path(stem).name
+            tmp_stem = dest.with_name(dest.name + ".publishing")
+            shutil.move(stem, str(tmp_stem))
+            pending_stems.append((tmp_stem, dest))
+
+        os.replace(str(tmp_video), str(video))
+        for tmp_stem, dest in pending_stems:
+            os.replace(str(tmp_stem), str(dest))
 
         session.outputs = {
             **session.outputs,
             "video": str(video),
-            "stems": stem_paths,
+            "stems": [str(dest) for _, dest in pending_stems],
             "duration": round(duration, 3),
             "render_key": key,
+            "validation": validation,
         }
         session.save()
-        _emit(progress_callback, 100, "Episode ready")
+        # Shots this edit no longer uses would pile up across re-cuts; keep only this render's.
+        used = {c.parent for c in chunks}
+        for d in shots_dir.iterdir() if shots_dir.exists() else []:
+            if d not in used:
+                shutil.rmtree(d, ignore_errors=True)
+        _emit(progress_callback, 100, "Episode ready" if not validation["warnings"]
+              else f"Episode ready with {len(validation['warnings'])} warning(s)")
         return session.outputs
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _validate(video: Path, frames_expected: int, fps: float, warnings: list[str]) -> dict:
+    """Check the muxed episode against its plan; raises on a broken file, warns on everything else.
+
+    A decode error or a picture more than a frame off the plan means the file
+    can't be trusted at all. Loudness off target or a held frame still makes
+    a usable episode, so those are reported, not fatal.
+    """
+    errors = _decode_errors(video)
+    if errors:
+        raise RuntimeError(f"The rendered episode doesn't decode cleanly: {errors[:400]}")
+    frames_actual = _frame_count(video)
+    if abs(frames_actual - frames_expected) > 1:
+        raise RuntimeError(f"The rendered episode has {frames_actual} frames; the cut needs {frames_expected}.")
+    warnings = list(warnings)
+    if frames_actual != frames_expected:
+        warnings.append(f"The episode has {frames_actual} frames; the cut planned {frames_expected}.")
+    duration = _media_duration(video)
+    if abs(duration - frames_expected / fps) > 1.5 / fps:
+        warnings.append(f"The episode runs {duration:.3f} s; the cut planned {frames_expected / fps:.3f} s.")
+    lufs, true_peak = _loudness(video)
+    if lufs is None:
+        warnings.append("The episode's audio is silent.")
+    elif abs(lufs - LOUDNESS_TARGET) > 1.0:
+        warnings.append(f"Loudness is {lufs:.1f} LUFS; the target is {LOUDNESS_TARGET:.0f} LUFS.")
+    if true_peak is not None and true_peak > TRUE_PEAK_CEILING + 0.5:
+        warnings.append(f"True peak is {true_peak:.1f} dBTP, above the {TRUE_PEAK_CEILING} dBTP ceiling.")
+    return {
+        "frames_expected": frames_expected,
+        "frames_actual": frames_actual,
+        "duration": round(duration, 3),
+        "lufs": lufs,
+        "true_peak": true_peak,
+        "warnings": warnings,
+    }
 
 
 def export_xml(session: MulticamSession, fmt: str, *, review: bool = False) -> str:
@@ -1925,9 +2509,31 @@ def export_xml(session: MulticamSession, fmt: str, *, review: bool = False) -> s
     else:
         out = out_dir / f"episode{tag}.fcpxml"
         multicam_xml.write_fcpxml(session, out, width=width, height=height, fps=fps, review=review)
-    session.outputs = {**session.outputs, f"{fmt}_review" if review else fmt: str(out)}
+    handoff = _write_color_handoff(session, out_dir)
+    session.outputs = {**session.outputs, f"{fmt}_review" if review else fmt: str(out), "color_handoff": str(handoff)}
     session.save()
     return str(out)
+
+
+def _write_color_handoff(session: MulticamSession, out_dir: Path) -> Path:
+    """Which LUT each camera file needs, beside the exported timeline.
+
+    Neither xmeml nor FCPXML carries a LUT an editor applies reliably, so the
+    colorist gets this list instead of a half-applied grade.
+    """
+    out = out_dir / "color_handoff.json"
+    names = {p.id: p.name for p in session.people}
+    cameras = [{
+        "source_id": c.id,
+        "file": c.path,
+        "person": names.get(c.person, c.person),
+        "input_lut": c.input_lut or None,
+    } for c in session.cameras() if c.synced and not c.virtual]
+    tmp = out.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"session": session.name, "look": session.look, "cameras": cameras}, indent=2),
+                   encoding="utf-8")
+    os.replace(tmp, out)
+    return out
 
 
 MAX_TIMELINE_BYTES = 200 * 1024 * 1024

@@ -116,8 +116,15 @@ def gcc_phat(ref: np.ndarray, src: np.ndarray, sample_rate: int, max_shift_secon
 class ClockFit:
     offset: float
     speed: float
-    residual_ms: float
-    checkpoints: int
+    residual_ms: float  # worst residual among the surviving (inlier) checkpoints
+    checkpoints: int  # surviving checkpoint count
+    total_checkpoints: int = 0  # checkpoints offered to the fit, before outliers were dropped
+    residual_all_ms: float = 0.0  # worst residual against every checkpoint, outliers included
+    speed_fallback: bool = False  # drift looked implausible, so speed was forced back to 1.0
+
+
+# Real clock drift between recorders stays far under this (|speed - 1|, so 1000 ppm).
+MAX_DRIFT = 1e-3
 
 
 def fit_clock(points: list[tuple[float, float, float]], *, max_residual: float = 0.02) -> Optional[ClockFit]:
@@ -125,12 +132,13 @@ def fit_clock(points: list[tuple[float, float, float]], *, max_residual: float =
 
     Checkpoints further than max_residual seconds from a Theil-Sen line are
     dropped before the weighted least-squares fit.
-    A single point yields speed 1. Implausible speeds (over 1000 ppm) fall back
+    A single point yields speed 1. Implausible speeds (over MAX_DRIFT) fall back
     to the median offset at speed 1, since real clock drift is far smaller.
     """
     if not points:
         return None
-    pts = np.array(points, dtype=np.float64)
+    all_pts = np.array(points, dtype=np.float64)
+    total = len(all_pts)
 
     def solve(p: np.ndarray) -> tuple[float, float]:
         if len(p) < 2 or np.ptp(p[:, 0]) < 1.0:
@@ -142,25 +150,32 @@ def fit_clock(points: list[tuple[float, float, float]], *, max_residual: float =
     # Theil-Sen seeds the outlier test; least squares alone lets one bad
     # checkpoint drag the line far enough that good points look bad too.
     slopes = [
-        (pts[j, 1] - pts[i, 1]) / (pts[j, 0] - pts[i, 0])
-        for i in range(len(pts)) for j in range(i + 1, len(pts))
-        if pts[j, 0] - pts[i, 0] >= 1.0
+        (all_pts[j, 1] - all_pts[i, 1]) / (all_pts[j, 0] - all_pts[i, 0])
+        for i in range(total) for j in range(i + 1, total)
+        if all_pts[j, 0] - all_pts[i, 0] >= 1.0
     ]
     speed = float(np.median(slopes)) if slopes else 1.0
-    offset = float(np.median(pts[:, 1] - speed * pts[:, 0]))
-    keep = np.abs(pts[:, 1] - (offset + speed * pts[:, 0])) <= max_residual
-    if keep.any():
-        pts = pts[keep]
+    offset = float(np.median(all_pts[:, 1] - speed * all_pts[:, 0]))
+    keep = np.abs(all_pts[:, 1] - (offset + speed * all_pts[:, 0])) <= max_residual
+    pts = all_pts[keep] if keep.any() else all_pts
     offset, speed = solve(pts)
     residual = np.abs(pts[:, 1] - (offset + speed * pts[:, 0]))
-    if abs(speed - 1.0) > 1e-3:
+    speed_fallback = abs(speed - 1.0) > MAX_DRIFT
+    if speed_fallback:
         offset, speed = float(np.median(pts[:, 1] - pts[:, 0])), 1.0
         residual = np.abs(pts[:, 1] - (offset + pts[:, 0]))
+    # Residual over every checkpoint offered to the fit, outliers included: a
+    # fit that dropped its way to a clean-looking inlier residual can still be
+    # wrong if most of the checkpoints it threw out disagreed with the line.
+    residual_all = np.abs(all_pts[:, 1] - (offset + speed * all_pts[:, 0]))
     return ClockFit(
         offset=offset,
         speed=speed,
         residual_ms=float(residual.max()) * 1000.0,
         checkpoints=len(pts),
+        total_checkpoints=total,
+        residual_all_ms=float(residual_all.max()) * 1000.0,
+        speed_fallback=speed_fallback,
     )
 
 
@@ -296,7 +311,8 @@ def plan_cuts(
     longer one opens wide for guest_delay seconds before going to the guest,
     as a call recording cuts between the split screen and the guest. Split
     camera files (part 1, part 2) are handled because every decision checks
-    which camera actually covers the moment.
+    which camera actually covers the moment. Once the shots are settled, a
+    cut made where someone starts to speak moves LEAD_IN seconds earlier.
     """
     if not cameras or range_end <= range_start:
         return []
@@ -389,11 +405,41 @@ def plan_cuts(
             broken.append({**shot, "start": cursor, "end": shot["end"]})
         shots = broken
 
+    _lead_in(shots, labels, by_id, range_start, min_shot)
     return [
         {"start": round(s["start"], 3), "end": round(s["end"], 3), "source_id": s["source_id"]}
         for s in shots
         if s["end"] - s["start"] > 1e-3
     ]
+
+
+# A cut made where someone starts to speak lands this much before their first
+# word, so the picture is already on them when the sound arrives.
+LEAD_IN = 0.12
+
+
+def _lead_in(shots: list[dict], labels: np.ndarray, by_id: dict[str, Camera], range_start: float,
+             min_shot: float) -> None:
+    """Move each cut that a speech onset caused up to LEAD_IN seconds earlier, in place.
+
+    The cut only moves back through silence (or the incoming speaker's own
+    sound), never across anyone else's words. It never leaves the outgoing
+    shot shorter than min_shot, and never reaches before the incoming camera
+    started rolling.
+    """
+    first = int(range_start / FRAME_SECONDS)
+    steps = int(round(LEAD_IN / FRAME_SECONDS))
+    for prev, shot in zip(shots, shots[1:]):
+        f = first + int(round((shot["start"] - range_start) / FRAME_SECONDS))
+        if not 0 < f < len(labels) or labels[f] == SILENT or labels[f] == labels[f - 1]:
+            continue
+        earliest = max(prev["start"] + min_shot, by_id[shot["source_id"]].start)
+        k = f
+        while (f - k < steps and k > 0 and labels[k - 1] in (SILENT, labels[f])
+               and range_start + (k - 1 - first) * FRAME_SECONDS >= earliest - 1e-9):
+            k -= 1
+        if k < f:
+            prev["end"] = shot["start"] = range_start + (k - first) * FRAME_SECONDS
 
 
 # A guest's full-frame shot runs this far past their last word, then the

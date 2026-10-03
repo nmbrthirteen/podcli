@@ -2,6 +2,7 @@ import os
 import sys
 
 import numpy as np
+import pytest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND_ROOT = os.path.join(ROOT, "backend")
@@ -10,6 +11,7 @@ if BACKEND_ROOT not in sys.path:
 
 from services.multicam_signal import (  # noqa: E402
     BOTH,
+    LEAD_IN,
     SILENT,
     Camera,
     coarse_lag,
@@ -95,6 +97,27 @@ def test_fit_clock_recovers_drift_and_drops_an_outlier():
 def test_fit_clock_rejects_implausible_speed():
     fit = fit_clock([(0, 5.0, 1.0), (100, 106.0, 1.0)])
     assert fit is not None and fit.speed == 1.0
+    # Falling back to speed 1.0 does not make the fit trustworthy: the 1 s
+    # drift between these two points still shows up as a large residual, and
+    # callers need that signal to flag the sync for review.
+    assert fit.speed_fallback is True
+    assert fit.residual_ms == pytest.approx(500.0, abs=1.0)
+    assert fit.residual_all_ms == pytest.approx(500.0, abs=1.0)
+
+
+def test_fit_clock_reports_total_checkpoints_and_outlier_residual():
+    speed = 1.0 + 80e-6
+    pts = [(s, 12.5 + s * speed, 1.0) for s in (60, 1200, 2400, 3600, 4800)]
+    pts.append((3000, 12.5 + 3000 * speed + 0.4, 1.0))
+    fit = fit_clock(pts)
+    assert fit is not None
+    assert fit.total_checkpoints == 6
+    assert fit.checkpoints == 5
+    # The inlier residual is tiny, but the dropped outlier was 0.4 s off: the
+    # all-checkpoints residual must still surface that.
+    assert fit.residual_ms < 0.01
+    assert fit.residual_all_ms == pytest.approx(400.0, abs=1.0)
+    assert fit.speed_fallback is False
 
 
 def _two_person_levels():
@@ -150,7 +173,8 @@ def test_plan_cuts_follows_the_speaker_and_folds_short_blips():
     cuts = plan_cuts(labels, ["host", "guest"], CAMS, range_start=0, range_end=27.5, min_shot=2.0)
     assert [c["source_id"] for c in cuts] == ["cam_host", "cam_guest"]
     assert cuts[0]["start"] == 0 and cuts[-1]["end"] == 27.5
-    assert abs(cuts[1]["start"] - 17.5) < 0.02
+    # The guest starts at 17.5 after a pause, so the cut leads in to them.
+    assert abs(cuts[1]["start"] - (17.5 - LEAD_IN)) < 0.02
 
 
 def test_plan_cuts_goes_wide_on_crosstalk():
@@ -261,3 +285,42 @@ def test_remote_style_returns_to_the_split_soon_after_the_answer_ends():
                      guests=frozenset({"guest"}), host_solo=False, guest_min=8, guest_delay=4)
     solo = next(c for c in cuts if c["source_id"] == "cam_guest")
     assert abs(solo["start"] - 8) < 0.05 and abs(solo["end"] - 25) < 0.05
+
+
+def test_a_cut_on_a_speech_onset_leads_in_through_silence_only():
+    # Host, a pause, then the guest: the cut moves LEAD_IN into the pause.
+    cuts = plan_cuts(_labels([(0, 6), (SILENT, 1), (1, 6)]), ["host", "guest"], CAMS,
+                     range_start=0, range_end=13, min_shot=2.0)
+    assert [c["source_id"] for c in cuts] == ["cam_host", "cam_guest"]
+    assert cuts[0]["end"] == cuts[1]["start"] == pytest.approx(7.0 - LEAD_IN)
+
+    # A pause shorter than the lead-in: the cut stops at the host's last word.
+    cuts = plan_cuts(_labels([(0, 6), (SILENT, 0.05), (1, 6)]), ["host", "guest"], CAMS,
+                     range_start=0, range_end=12.05, min_shot=2.0)
+    assert cuts[1]["start"] == pytest.approx(6.0)
+
+    # No pause at all: the guest's first word lands on the cut, as before.
+    cuts = plan_cuts(_labels([(0, 6), (1, 6)]), ["host", "guest"], CAMS, range_start=0, range_end=12, min_shot=2.0)
+    assert cuts[1]["start"] == pytest.approx(6.0)
+
+    # The host's shot can't drop under min_shot to make room.
+    cuts = plan_cuts(_labels([(SILENT, 1.0), (0, 1.0), (SILENT, 1.05), (1, 6)]), ["host", "guest"], CAMS,
+                     range_start=1.0, range_end=9.05, min_shot=2.0)
+    assert [c["source_id"] for c in cuts] == ["cam_host", "cam_guest"]
+    assert cuts[1]["start"] == pytest.approx(3.0)
+
+    # Nor reach back before the guest's camera started rolling.
+    late = [Camera("cam_host", "host", 0, 100), Camera("cam_guest", "guest", 6.95, 100)]
+    cuts = plan_cuts(_labels([(0, 6), (SILENT, 1), (1, 6)]), ["host", "guest"], late,
+                     range_start=0, range_end=13, min_shot=2.0)
+    assert cuts[1]["start"] == pytest.approx(6.95)
+
+
+def test_cuts_away_from_a_continuing_speaker_do_not_lead_in():
+    # The remote style holds the split for guest_delay into an answer; the cut
+    # to the guest falls mid-sentence, not on an onset, so it stays put.
+    labels = _labels([(0, 4), (SILENT, 1), (1, 20)])
+    cuts = plan_cuts(labels, ["host", "guest"], CAMS, range_start=0, range_end=25, min_shot=2.0,
+                     guests=frozenset({"guest"}), host_solo=False, guest_min=8.0, guest_delay=4.0)
+    solo = next(c for c in cuts if c["source_id"] == "cam_guest")
+    assert solo["start"] == pytest.approx(9.0)

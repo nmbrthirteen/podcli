@@ -6,6 +6,7 @@ import { whoLabel } from "./multicam-types";
 const STATUS: Record<string, { label: string; color: string; pill: string }> = {
   reference: { label: "Reference", color: "var(--green)", pill: "pill-green" },
   ok: { label: "Synced", color: "var(--green)", pill: "pill-green" },
+  review: { label: "Check sync", color: "var(--amber)", pill: "pill-amber" },
   rough: { label: "Rough sync", color: "var(--amber)", pill: "pill-amber" },
   manual: { label: "Set by hand", color: "var(--blue)", pill: "pill-sky" },
   assumed: { label: "Starts with the others", color: "var(--amber)", pill: "pill-amber" },
@@ -100,6 +101,12 @@ function SyncRow({ source, people, onEdit, disabled }: { source: McSource; peopl
         <span className="hint" style={{ color: "var(--red)" }}>{source.sync.message || "Sync this file, or type where it starts."}</span>
       )}
       {source.sync.status === "assumed" && <span className="hint">{source.sync.message}</span>}
+      {source.sync.status === "review" && (
+        <span className="hint" style={{ color: "var(--amber)" }}>
+          Residual {Math.round(Math.max(source.sync.residual_ms ?? 0, source.sync.residual_all_ms ?? 0))} ms
+          {source.sync.reasons?.length ? ` (${source.sync.reasons.join(", ")})` : ""}
+        </span>
+      )}
 
       <div style={{ display: "inline-flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
         {source.offset === null ? (

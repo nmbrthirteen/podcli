@@ -110,7 +110,7 @@ def push(session: mc.MulticamSession, *, model_size: str = "base", engine: Optio
 
     _request("POST", f"/v1/multicam/{opened['id']}/hybrid-complete", {"files": stored})
     latest = mc.MulticamSession.load(session.session_id)
-    latest.cloud = {"id": opened["id"], "url": editor_url(opened["id"])}
+    latest.cloud = {"id": opened["id"], "url": editor_url(opened["id"]), "basis": mc.sync_basis_signature(latest)}
     latest.save()
     _emit(progress_callback, 100, "In the cloud editor")
     return latest
@@ -134,6 +134,14 @@ def pull(session: mc.MulticamSession) -> mc.MulticamSession:
     edit_id = (session.cloud or {}).get("id")
     if not edit_id:
         raise MulticamCloudError("this edit was never sent to podcli cloud. Send it with --cloud first")
+    pushed_basis = (session.cloud or {}).get("basis")
+    current_basis = mc.sync_basis_signature(session)
+    if pushed_basis and pushed_basis != current_basis:
+        raise MulticamCloudError(
+            "sources moved on the timeline (re-synced, nudged, or re-mapped) since this edit was sent to the "
+            "podcli cloud editor. Its cuts and removals were made against the old positions and would land on "
+            "the wrong footage now. Send it again with --cloud before pulling."
+        )
     edit = _request("GET", f"/v1/multicam/{edit_id}/edit")
     state = edit.get("state") or {}
 
@@ -148,5 +156,8 @@ def pull(session: mc.MulticamSession) -> mc.MulticamSession:
     if cuts:
         session = mc.set_cuts(session, cuts)
     if isinstance(edit.get("removals"), list):
-        session = mc.set_removals(session, [{"start": r["start"], "end": r["end"]} for r in edit["removals"]])
+        session = mc.set_removals(session, [
+            {"start": r["start"], "end": r["end"], **({"reason": r["reason"]} if r.get("reason") else {})}
+            for r in edit["removals"]
+        ])
     return session

@@ -9,15 +9,19 @@ export interface McPerson {
 }
 
 export type McRole = "camera" | "mic" | "ignore";
-export type McSyncStatus = "reference" | "ok" | "rough" | "failed" | "manual" | "assumed";
+export type McSyncStatus = "reference" | "ok" | "review" | "rough" | "failed" | "manual" | "assumed";
 
 export interface McSourceSync {
   status?: McSyncStatus;
+  method?: "manual";
+  anchors?: { timeline: number; source: number }[];
   score?: number;
   checkpoints?: number;
   residual_ms?: number;
+  residual_all_ms?: number;
   drift_ppm?: number;
   message?: string;
+  reasons?: string[];
 }
 
 export interface McSource {
@@ -28,12 +32,16 @@ export interface McSource {
   duration: number;
   has_audio: boolean;
   audio_channels: number;
+  audio_stream_count?: number;
+  audio_stream_index?: number;
   width?: number;
   height?: number;
   fps?: number;
+  fps_warning?: string;
   role: McRole;
   person: string;
   channel_people: string[];
+  input_lut?: string;
   guessed: boolean;
   offset: number | null;
   speed: number;
@@ -72,12 +80,23 @@ export interface McStats {
   share?: Record<string, number>;
 }
 
+export interface McValidation {
+  frames_expected: number;
+  frames_actual: number;
+  duration: number;
+  lufs: number | null;
+  true_peak: number | null;
+  warnings: string[];
+}
+
 export interface McOutputs {
   video?: string;
   stems?: string[];
   duration?: number;
+  validation?: McValidation;
   premiere?: string;
   fcpxml?: string;
+  color_handoff?: string;
 }
 
 export interface McSession {
@@ -117,7 +136,8 @@ export interface McSessionSummary {
 
 export interface McPreviews {
   cameras: Record<string, string>;
-  looks: Record<string, string>;
+  /** Camera id to look name to still path. */
+  looks: Record<string, Record<string, string>>;
 }
 
 export interface McPreviewsResp extends McSession {

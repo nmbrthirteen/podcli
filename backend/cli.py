@@ -998,6 +998,8 @@ def _render_multicam(args, mc, session):
     done()
     for path in [outputs["video"], *(outputs.get("stems") or [])]:
         print(f"  ✓ {path}")
+    for warning in (outputs.get("validation") or {}).get("warnings") or []:
+        print(f"  ! {warning}", file=sys.stderr)
 
 
 def _pull_multicam(args, mc, target: str):
