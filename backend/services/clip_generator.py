@@ -1092,9 +1092,10 @@ def generate_clip(
             progress_callback(10, msg)
 
         segment_path = os.path.join(work_dir, "segment.mp4")
+        part_durations: Optional[list[float]] = None
         with timed("render", "cut", segments=len(keep_segments) if keep_segments else 1):
             if keep_segments and len(keep_segments) > 1:
-                cut_multi_segment(video_path, segment_path, keep_segments)
+                _, part_durations = cut_multi_segment(video_path, segment_path, keep_segments)
             else:
                 cut_segment(video_path, segment_path, start_second, end_second)
 
@@ -1103,24 +1104,36 @@ def generate_clip(
         if keep_segments and len(keep_segments) > 1 and transcript_words:
             remapped_words = []
             cumulative_t = 0.0
-            for seg in keep_segments:
+            for i, seg in enumerate(keep_segments):
                 seg_words = [
                     w for w in transcript_words
                     if w["end"] > seg["start"] and w["start"] < seg["end"]
                 ]
-                seg_duration = seg["end"] - seg["start"]
+                # Each part is encoded separately before the concat, and an
+                # encoder snaps a cut to whole frames — its real duration is
+                # typically a few ms off the requested end - start. Advancing
+                # cumulative_t by the planned length instead of the probed
+                # one drifts captions further out of sync with every segment
+                # concatenated in. Fall back to the planned length only if
+                # the part couldn't be probed.
+                requested_duration = seg["end"] - seg["start"]
+                actual_duration = (
+                    part_durations[i]
+                    if part_durations and part_durations[i] > 0
+                    else requested_duration
+                )
                 for w in seg_words:
                     # Clamp to segment bounds to avoid negative/overflow timestamps
                     # for words that straddle a segment boundary
                     remapped_start = max(0, cumulative_t + (w["start"] - seg["start"]))
-                    remapped_end = min(cumulative_t + seg_duration, cumulative_t + (w["end"] - seg["start"]))
+                    remapped_end = min(cumulative_t + actual_duration, cumulative_t + (w["end"] - seg["start"]))
                     if remapped_end > remapped_start:
                         remapped_words.append({
                             **w,
                             "start": round(remapped_start, 3),
                             "end": round(remapped_end, 3),
                         })
-                cumulative_t += seg_duration
+                cumulative_t += actual_duration
             crop_words = remapped_words
             crop_clip_start = 0
             caption_time_offset = 0

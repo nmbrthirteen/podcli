@@ -49,33 +49,57 @@ def cut_segment(
     return output_path
 
 
+def probe_duration(path: str) -> float:
+    """Read media duration in seconds (best effort, 0.0 if unreadable)."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=nk=1:nw=1",
+            path,
+        ]
+        result = proc_run(cmd, timeout=10, check=False)
+        if result.returncode != 0:
+            return 0.0
+        return float((result.stdout or "0").strip() or 0.0)
+    except Exception:
+        return 0.0
+
+
 def cut_multi_segment(
     input_path: str,
     output_path: str,
     segments: list[dict],
-) -> str:
+) -> tuple[str, list[float]]:
     """Cut multiple time ranges and concatenate them seamlessly.
 
     segments: [{"start": 10.5, "end": 25.0}, {"start": 30.2, "end": 45.0}]
 
-    Each segment is cut individually with frame-accurate encoding,
-    then concatenated with stream copy (matching codecs means no
-    re-encode needed).
+    Each segment is cut individually with frame-accurate encoding, then
+    concatenated with stream copy (matching codecs means no re-encode
+    needed). Returns (output_path, part_durations): the probed duration of
+    each encoded part, not the requested one. An encoder snaps a cut to
+    whole frames, so the actual part is typically a few milliseconds off
+    the requested end - start; captions timed from the requested length
+    instead of the probed one drift further with every cut concatenated in.
     """
     if len(segments) == 1:
-        return cut_segment(
+        out = cut_segment(
             input_path, output_path, segments[0]["start"], segments[0]["end"]
         )
+        return out, [probe_duration(out)]
 
     work_dir = os.path.dirname(output_path) or "."
     part_paths: list[str] = []
     concat_file = os.path.join(work_dir, "_concat_parts.txt")
 
     try:
+        part_durations: list[float] = []
         for i, seg in enumerate(segments):
             part_path = os.path.join(work_dir, f"_part_{i}.mp4")
             cut_segment(input_path, part_path, seg["start"], seg["end"])
             part_paths.append(part_path)
+            part_durations.append(probe_duration(part_path))
 
         with open(concat_file, "w", encoding="utf-8") as f:
             for p in part_paths:
@@ -93,7 +117,7 @@ def cut_multi_segment(
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg concat failed: {result.stderr[-500:]}")
 
-        return output_path
+        return output_path, part_durations
 
     finally:
         for p in part_paths:
