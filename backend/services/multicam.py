@@ -1384,6 +1384,19 @@ def _still(session: MulticamSession, cam: Source, tl: float, out: Path, look: st
     return out
 
 
+def _sync_basis(s: Source) -> str:
+    """Short fingerprint of a source's offset and speed.
+
+    Stills are cached to disk by filename. The source's mapping from timeline
+    time to source time (`source_time`) depends on offset and speed, so a
+    cache key that only captures the timeline moment `at` goes stale the
+    instant a nudge or re-sync changes that mapping: the filename looks the
+    same but would now decode a different source frame.
+    """
+    raw = f"{s.offset}:{s.speed}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:8]
+
+
 def previews(session: MulticamSession, *, looks: bool = False, at: Optional[float] = None) -> dict:
     """One still per camera, and optionally one still per look from the wide camera."""
     work = _work_dir(session.session_id)
@@ -1398,7 +1411,7 @@ def previews(session: MulticamSession, *, looks: bool = False, at: Optional[floa
         if s.kind != "video":
             continue
         t = moment(s)
-        out = work / f"frame-{s.id}-{int(t * 10)}.jpg"
+        out = work / f"frame-{s.id}-{int(t * 10)}-{_sync_basis(s)}.jpg"
         if not out.exists():
             _still(session, s, t, out)
         frames["cameras"][s.id] = str(out)
@@ -1406,10 +1419,11 @@ def previews(session: MulticamSession, *, looks: bool = False, at: Optional[floa
         cams = session.cameras() or [s for s in session.sources if s.kind == "video"]
         if cams:
             cam = next((c for c in cams if c.person == "wide"), cams[0])
+            t = moment(cam)
             for name in LOOKS:
-                out = work / f"look-{cam.id}-{name}.jpg"
+                out = work / f"look-{cam.id}-{name}-{int(t * 10)}-{_sync_basis(cam)}.jpg"
                 if not out.exists():
-                    _still(session, cam, moment(cam), out, look=name, width=640)
+                    _still(session, cam, t, out, look=name, width=640)
                 frames["looks"][name] = str(out)
     return frames
 

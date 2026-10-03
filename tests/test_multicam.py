@@ -526,6 +526,33 @@ def test_cli_json_mode_applies_a_cut_and_builds_the_preview(episode, monkeypatch
     assert "error" in json.loads(capsys.readouterr().out)
 
 
+def test_preview_stills_regenerate_after_a_nudge_instead_of_serving_a_stale_frame(episode):
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    mc.update_mapping(session, {"sources": [
+        {"id": s.id, "role": "camera", "person": "nika" if "one" in os.path.basename(s.path) else "ana"}
+        for s in session.sources if s.kind == "video"
+    ]})
+    session = mc.sync_session(session)
+    cam = next(s for s in session.sources if os.path.basename(s.path) == "cam_one.mp4")
+
+    frames = mc.previews(session, looks=True, at=cam.timeline_start() + 1.0)
+    before = frames["cameras"][cam.id]
+    look_before = frames["looks"][next(iter(frames["looks"]))]
+    assert os.path.exists(before) and os.path.exists(look_before)
+
+    # Nudging changes the offset->source mapping for the same timeline moment,
+    # so the cache key must change and a fresh still must be rendered: reusing
+    # the old file would show the pre-nudge frame.
+    mc.update_mapping(session, {"sources": [{"id": cam.id, "nudge": 2.0}]})
+    session = mc.MulticamSession.load(session.session_id)
+    cam = session.source(cam.id)
+    frames = mc.previews(session, looks=True, at=cam.timeline_start() + 1.0)
+    after = frames["cameras"][cam.id]
+    look_after = frames["looks"][next(iter(frames["looks"]))]
+    assert after != before and os.path.exists(after)
+    assert look_after != look_before and os.path.exists(look_after)
+
+
 def test_last_person_is_the_guest_and_roles_survive_renames(episode):
     session = mc.new_session(folder=str(episode), people=["Nihal", "Cameron", "Ana"])
     assert [(p.name, p.role) for p in session.people] == [("Nihal", "host"), ("Cameron", "host"), ("Ana", "guest")]
