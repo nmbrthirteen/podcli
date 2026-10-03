@@ -44,8 +44,17 @@ describe("findGroundingText", () => {
 
 describe("reconcileSegmentsForRange", () => {
   it("passes through when there are no segments", () => {
-    expect(reconcileSegmentsForRange(undefined, 0, 10)).toBeUndefined();
-    expect(reconcileSegmentsForRange([], 0, 10)).toEqual([]);
+    expect(reconcileSegmentsForRange(undefined, 0, 10, 0, 10)).toBeUndefined();
+    expect(reconcileSegmentsForRange([], 0, 10, 0, 10)).toEqual([]);
+  });
+
+  it("drops a single implicit full-range segment and lets the new bounds govern", () => {
+    // suggest_clips stores a single [start, end] segment with no custom cuts;
+    // clamping it only ever shrinks, so widening or shifting the clip left a
+    // stale segment overriding the new range at render time.
+    const segments = [{ start: 10, end: 60 }];
+    expect(reconcileSegmentsForRange(segments, 10, 60, 5, 70)).toBeUndefined();
+    expect(reconcileSegmentsForRange(segments, 10, 60, 20, 80)).toBeUndefined();
   });
 
   it("drops segments entirely outside the new range", () => {
@@ -53,7 +62,7 @@ describe("reconcileSegmentsForRange", () => {
       { start: 0, end: 5 },
       { start: 20, end: 25 },
     ];
-    expect(reconcileSegmentsForRange(segments, 20, 25)).toBeUndefined();
+    expect(reconcileSegmentsForRange(segments, 0, 25, 20, 25)).toBeUndefined();
   });
 
   it("clamps segments straddling a new boundary", () => {
@@ -61,25 +70,40 @@ describe("reconcileSegmentsForRange", () => {
       { start: 0, end: 10 },
       { start: 15, end: 25 },
     ];
-    expect(reconcileSegmentsForRange(segments, 5, 20)).toEqual([
+    expect(reconcileSegmentsForRange(segments, 0, 25, 5, 20)).toEqual([
       { start: 5, end: 10 },
       { start: 15, end: 20 },
     ]);
   });
 
-  it("clears a single segment that ends up spanning the whole new range", () => {
+  it("clears a single custom segment that ends up spanning the whole new range", () => {
     const segments = [{ start: 0, end: 30 }];
-    expect(reconcileSegmentsForRange(segments, 5, 20)).toBeUndefined();
+    expect(reconcileSegmentsForRange(segments, -10, 40, 5, 20)).toBeUndefined();
   });
 
-  it("keeps a multi-segment edit that still carries editorial cuts", () => {
+  it("stretches the first segment's start and the last segment's end to the new bounds", () => {
+    // The interior gap (8-12) is the editorial cut; the outer edges track
+    // the clip's own bounds, so widening the clip carries them along
+    // instead of leaving them pinned to the old range.
     const segments = [
       { start: 2, end: 8 },
       { start: 12, end: 18 },
     ];
-    expect(reconcileSegmentsForRange(segments, 0, 20)).toEqual([
+    expect(reconcileSegmentsForRange(segments, 2, 18, 0, 20)).toEqual([
+      { start: 0, end: 8 },
+      { start: 12, end: 20 },
+    ]);
+  });
+
+  it("drops and clamps alongside the outer-edge stretch for multi-segment edits", () => {
+    const segments = [
       { start: 2, end: 8 },
       { start: 12, end: 18 },
+      { start: 50, end: 60 }, // entirely outside the new range
+    ];
+    expect(reconcileSegmentsForRange(segments, 2, 60, 0, 20)).toEqual([
+      { start: 0, end: 8 },
+      { start: 12, end: 20 },
     ]);
   });
 });

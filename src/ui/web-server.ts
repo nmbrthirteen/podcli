@@ -4468,7 +4468,7 @@ app.post("/api/suggestions/modify", (req, res) => {
     // overrides the new start/end at render time (create_clip reads
     // keep_segments ahead of start_second/end_second).
     const nextSegments = reTimed
-      ? reconcileSegmentsForRange(clip.segments, nextStart, nextEnd)
+      ? reconcileSegmentsForRange(clip.segments, clip.start_second, clip.end_second, nextStart, nextEnd)
       : clip.segments;
     const nextHook: ClipHook | undefined =
       upd.hook === null ? undefined : upd.hook !== undefined ? upd.hook : clip.hook;
