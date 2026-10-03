@@ -85,4 +85,20 @@ describe("computeSelectionHash", () => {
     );
     expect(a).not.toBe(b);
   });
+
+  it("changes when the hook's range or mode is edited", () => {
+    const hooked = { ...clip(), hook: { start: 12, end: 14, mode: "repeat" as const } };
+    const base = computeSelectionHash(hooked, words);
+    const moved = computeSelectionHash({ ...hooked, hook: { ...hooked.hook, start: 12.5 } }, words);
+    const remoded = computeSelectionHash({ ...hooked, hook: { ...hooked.hook, mode: "move" } }, words);
+    expect(moved).not.toBe(base);
+    expect(remoded).not.toBe(base);
+  });
+
+  it("changes when a hook is cleared", () => {
+    const hooked = { ...clip(), hook: { start: 12, end: 14, mode: "repeat" as const } };
+    expect(computeSelectionHash({ ...hooked, hook: undefined }, words)).not.toBe(
+      computeSelectionHash(hooked, words),
+    );
+  });
 });

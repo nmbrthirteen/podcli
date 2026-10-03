@@ -74,6 +74,17 @@ export function reconcileSegmentsForRange(
   return clamped;
 }
 
+/** The suggestion whose range matches start/end within half a second. */
+export function findSuggestionForRange<T extends { start_second: number; end_second: number }>(
+  suggestions: T[] | undefined | null,
+  start: number,
+  end: number,
+): T | undefined {
+  return suggestions?.find(
+    (s) => Math.abs(s.start_second - start) < 0.5 && Math.abs(s.end_second - end) < 0.5,
+  );
+}
+
 export function findSuggestionSegments(
   suggestions: Array<{
     start_second: number;
@@ -83,9 +94,5 @@ export function findSuggestionSegments(
   start: number,
   end: number,
 ): Array<{ start: number; end: number }> | undefined {
-  if (!suggestions?.length) return undefined;
-  const match = suggestions.find(
-    (s) => Math.abs(s.start_second - start) < 0.5 && Math.abs(s.end_second - end) < 0.5,
-  );
-  return match?.segments;
+  return findSuggestionForRange(suggestions, start, end)?.segments;
 }

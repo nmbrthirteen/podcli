@@ -5,6 +5,7 @@ import { ClipsHistory } from "../services/clips-history.js";
 import { paths } from "../config/paths.js";
 import { webServerUrl } from "../config/server.js";
 import { validateClipRange } from "../utils/clip-validation.js";
+import { validateHook } from "../utils/clip-hook.js";
 import { transcriptVideoMismatch } from "../utils/video-identity.js";
 import { childLogger } from "../utils/logger.js";
 import type {
@@ -83,6 +84,12 @@ export const batchClipsToolDef = {
             },
             allow_ass_fallback: {
               type: "boolean",
+            },
+            hook: {
+              type: ["object", "null"],
+              description:
+                "Opening hook: { start, end, mode: repeat|move }, a 1-15s passage from inside the clip played first. " +
+                "Null renders without one.",
             },
           },
           required: ["start_second", "end_second"],
@@ -185,6 +192,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     write_clean_variant: input.write_clean_variant === true,
     logo_path: settings.logoPath || null,
     ...(s.segments && s.segments.length > 0 && { keep_segments: s.segments }),
+    ...(s.hook && { hook: s.hook }),
   });
 
   if (input.export_selected) {
@@ -241,6 +249,15 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     );
     if (rangeError) {
       return JSON.stringify({ error: `Clip ${i + 1}: ${rangeError}` });
+    }
+    const hookError = validateHook(
+      clips[i].hook,
+      clips[i].start_second,
+      clips[i].end_second,
+      clips[i].keep_segments,
+    );
+    if (hookError) {
+      return JSON.stringify({ error: `Clip ${i + 1}: ${hookError}` });
     }
   }
 

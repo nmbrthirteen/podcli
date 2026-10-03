@@ -12,8 +12,8 @@ import type { SuggestedClip, WordTimestamp } from "../models/index.js";
 export function computeSelectionHash(
   clip: Pick<
     SuggestedClip,
-    "start_second" | "end_second" | "segments" | "suggested_caption_style" | "title"
-  > & { hook?: unknown },
+    "start_second" | "end_second" | "segments" | "hook" | "suggested_caption_style" | "title"
+  >,
   transcriptWords: WordTimestamp[] | undefined | null,
 ): string {
   const wordsInRange = (transcriptWords || [])

@@ -40,6 +40,7 @@ import { paths, pythonEnv } from "../config/paths.js";
 import { webServerPort } from "../config/server.js";
 import { writeFileAtomicSync } from "../utils/atomic-file.js";
 import { maxClipSeconds, validateClipRange, validateSuggestionRange } from "../utils/clip-validation.js";
+import { playbackDuration, validateHook } from "../utils/clip-hook.js";
 import { advanceProgress, tagSubmittedClip, tagSubmittedClips } from "../utils/clip-results.js";
 import { DEMO_ASSETS_DIR } from "./demo-fixtures.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
@@ -48,6 +49,7 @@ import {
   sliceTranscript,
   sliceWords,
   findContentType,
+  findSuggestionForRange,
   findSuggestionSegments,
   reconcileSegmentsForRange,
 } from "../utils/transcript.js";
@@ -66,6 +68,7 @@ import type {
   AssetType,
   BatchClipsResult,
   ClipHistoryEntry,
+  ClipHook,
   ClipResult,
   Format,
   ProgressEvent,
@@ -406,12 +409,32 @@ function setExportState(phase: string, activeExportJobId: string | null) {
   persistState();
 }
 
-function enrichClipWithSegments<T extends { start_second: number; end_second: number; keep_segments?: Array<{ start: number; end: number }> }>(
-  clip: T,
-): T {
-  if (clip.keep_segments?.length) return clip;
-  const segments = findSuggestionSegments(uiState.suggestions, clip.start_second, clip.end_second);
-  return segments?.length ? { ...clip, keep_segments: segments } : clip;
+type ExportClip = {
+  start_second: number;
+  end_second: number;
+  keep_segments?: Array<{ start: number; end: number }>;
+  hook?: ClipHook | null;
+};
+
+/** Fill segments and hook the caller left out from the matching suggestion.
+ * An explicit hook: null stays null, so a render can opt out of one. */
+function enrichClipFromSuggestion<T extends ExportClip>(clip: T): T {
+  const match = findSuggestionForRange(uiState.suggestions, clip.start_second, clip.end_second);
+  if (!match) return clip;
+  return {
+    ...clip,
+    ...(!clip.keep_segments?.length && match.segments?.length && { keep_segments: match.segments }),
+    ...(clip.hook === undefined && match.hook && { hook: match.hook }),
+  };
+}
+
+function exportHookError(clips: ExportClip[]): string | null {
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    const err = validateHook(c.hook, c.start_second, c.end_second, c.keep_segments);
+    if (err) return clips.length > 1 ? `Clip ${i + 1}: ${err}` : err;
+  }
+  return null;
 }
 
 function createBatchHistoryRecorder({
@@ -442,6 +465,7 @@ function createBatchHistoryRecorder({
     crop_strategy?: string;
     format?: Format;
     keep_segments?: Array<{ start: number; end: number }>;
+    hook?: ClipHook | null;
   }>;
   logoPath?: string | null;
   outroPath?: string | null;
@@ -475,6 +499,7 @@ function createBatchHistoryRecorder({
           introPath,
           cleanFillers,
           keepSegments: spec?.keep_segments,
+          hook: spec?.hook,
         });
       } catch (err) {
         log.warn(`Failed to save recipe for ${label} clip`, { err: errMsg(err) });
@@ -1171,6 +1196,7 @@ app.post("/api/create-clip", async (req, res) => {
     allow_ass_fallback = false,
     content_type = null,
     keep_segments,
+    hook,
     caption_position = "auto",
     caption_font_scale = 100,
     logo_position = "top-left",
@@ -1249,11 +1275,17 @@ app.post("/api/create-clip", async (req, res) => {
 
   await fileManager.ensureDirectories();
 
-  const enriched = enrichClipWithSegments({
+  const enriched = enrichClipFromSuggestion({
     start_second,
     end_second,
     keep_segments: Array.isArray(keep_segments) ? keep_segments : undefined,
+    hook: hook as ClipHook | null | undefined,
   });
+  const hookError = exportHookError([enriched]);
+  if (hookError) {
+    res.status(400).json({ error: hookError });
+    return;
+  }
 
   const jobId = uuidv4();
   const job: JobState = {
@@ -1290,6 +1322,7 @@ app.post("/api/create-clip", async (req, res) => {
         caption_font_scale: normalizedFontScale,
         logo_position,
         ...(enriched.keep_segments?.length && { keep_segments: enriched.keep_segments }),
+        ...(enriched.hook && { hook: enriched.hook }),
       },
       (event) => {
         job.progress = event.percent;
@@ -1328,6 +1361,7 @@ app.post("/api/create-clip", async (req, res) => {
           introPath: intro_path,
           cleanFillers: clean_fillers,
           keepSegments: enriched.keep_segments,
+          hook: enriched.hook,
         });
         broadcastHistoryUpdated(jobId, [rec]);
       } catch (err) {
@@ -1414,9 +1448,12 @@ app.post("/api/batch-clips", async (req, res) => {
 
   await fileManager.ensureDirectories();
 
-  const enrichedClips = clips.map((c: { start_second: number; end_second: number; keep_segments?: Array<{ start: number; end: number }> }) =>
-    enrichClipWithSegments(c),
-  );
+  const enrichedClips = clips.map((c: ExportClip) => enrichClipFromSuggestion(c));
+  const batchHookError = exportHookError(enrichedClips);
+  if (batchHookError) {
+    res.status(400).json({ error: batchHookError });
+    return;
+  }
 
   const jobId = uuidv4();
   const job: JobState = {
@@ -3264,6 +3301,12 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
   }
   // If trimmed wider/narrower, keep only words inside the new bounds.
   const words = allWords.filter((w: any) => typeof w?.start !== "number" || (w.start >= startSecond && w.start < endSecond));
+  const recipeSegments = trimOnly ? undefined : (recipe.keep_segments as ExportClip["keep_segments"]);
+  // A trim that no longer holds the hook's passage renders without it.
+  const recipeHook = recipe.hook as ClipHook | undefined;
+  const hook = recipeHook && !validateHook(recipeHook, startSecond, endSecond, recipeSegments)
+    ? recipeHook
+    : undefined;
   const recipeAsset = (key: "logo_path" | "outro_path" | "intro_path") => {
     const value = recipe[key];
     return typeof value === "string" && value.trim() ? value : undefined;
@@ -3283,7 +3326,8 @@ app.post("/api/clips/:id/rerender", async (req, res) => {
       clean_fillers: trimOnly ? false : (recipe.clean_fillers !== undefined ? recipe.clean_fillers : true),
       trim_opening: trimOnly ? false : undefined,
       preserve_timing: trimOnly ? true : undefined,
-      ...(trimOnly ? {} : recipe.keep_segments ? { keep_segments: recipe.keep_segments } : {}),
+      ...(recipeSegments ? { keep_segments: recipeSegments } : {}),
+      ...(hook && { hook }),
       title: clip.title,
       output_dir: dirname(clip.output_path),
     });
@@ -4354,14 +4398,31 @@ app.post("/api/suggestions/modify", (req, res) => {
       res.status(400).json({ error: rangeError });
       return;
     }
-    // The energy score was measured over the old range.
-    if (nextStart !== clip.start_second || nextEnd !== clip.end_second) {
-      dropEnergy(clip);
-      // The old segments array is scoped to the old range; if left stale it
-      // overrides the new start/end at render time (create_clip reads
-      // keep_segments ahead of start_second/end_second).
-      clip.segments = reconcileSegmentsForRange(clip.segments, nextStart, nextEnd);
+    const reTimed = nextStart !== clip.start_second || nextEnd !== clip.end_second;
+    // The old segments array is scoped to the old range; if left stale it
+    // overrides the new start/end at render time (create_clip reads
+    // keep_segments ahead of start_second/end_second).
+    const nextSegments = reTimed
+      ? reconcileSegmentsForRange(clip.segments, nextStart, nextEnd)
+      : clip.segments;
+    const nextHook: ClipHook | undefined =
+      upd.hook === null ? undefined : upd.hook !== undefined ? upd.hook : clip.hook;
+    const hookError = validateHook(nextHook, nextStart, nextEnd, nextSegments);
+    if (hookError) {
+      res.status(400).json({
+        error: upd.hook === undefined
+          ? `${hookError} The new range no longer holds this clip's hook. Pass hook: null to clear it, or a new hook.`
+          : hookError,
+      });
+      return;
     }
+    // The energy score was measured over the old range.
+    if (reTimed) {
+      dropEnergy(clip);
+      clip.segments = nextSegments;
+    }
+    if (nextHook) clip.hook = { start: nextHook.start, end: nextHook.end, mode: nextHook.mode };
+    else delete clip.hook;
     if (typeof upd.title === "string") clip.title = upd.title;
     clip.start_second = nextStart;
     clip.end_second = nextEnd;
@@ -4373,7 +4434,8 @@ app.post("/api/suggestions/modify", (req, res) => {
     if (typeof upd.suggested_caption_style === "string") {
       clip.suggested_caption_style = upd.suggested_caption_style;
     }
-    clip.duration = Math.round((clip.end_second - clip.start_second) * 10) / 10;
+    clip.duration =
+      Math.round(playbackDuration(clip.start_second, clip.end_second, clip.segments, clip.hook) * 10) / 10;
     const fmtTime = (s: number) =>
       `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
     clip.timestamp_display = `${fmtTime(clip.start_second)} → ${fmtTime(clip.end_second)}`;
@@ -4465,7 +4527,7 @@ app.post("/api/mcp/export", async (req, res) => {
 
   // Apply style settings to clips that don't have their own
   const styledClips = clips.map((c: any) =>
-    enrichClipWithSegments({
+    enrichClipFromSuggestion({
       start_second: c.start_second,
       end_second: c.end_second,
       title: c.title || "clip",
@@ -4478,8 +4540,14 @@ app.post("/api/mcp/export", async (req, res) => {
         (Array.isArray(c.keep_segments) && c.keep_segments.length > 0 && c.keep_segments) ||
         (Array.isArray(c.keep_segment) && c.keep_segment.length > 0 && c.keep_segment) ||
         undefined,
+      hook: c.hook,
     }),
   );
+  const mcpHookError = exportHookError(styledClips);
+  if (mcpHookError) {
+    res.status(400).json({ error: mcpHookError });
+    return;
+  }
 
   const jobId = uuidv4();
   const job: JobState = {

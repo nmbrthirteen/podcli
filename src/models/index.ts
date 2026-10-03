@@ -1,3 +1,7 @@
+import type { ClipHook } from "../utils/clip-hook.js";
+
+export type { ClipHook, HookMode } from "../utils/clip-hook.js";
+
 // === Task Communication Models ===
 
 export interface TaskRequest {
@@ -96,6 +100,8 @@ export interface ClipResult {
   vtt_path?: string;
   /** Same audio/loudness/intro/outro, without burned captions. */
   clean_output_path?: string;
+  /** The hook as rendered, edges widened to whole words. */
+  hook?: ClipHook;
 }
 
 export interface SuggestedClip {
@@ -110,6 +116,8 @@ export interface SuggestedClip {
   reasoning: string;
   preview_text: string;
   segments?: Array<{ start: number; end: number }>;
+  /** Spoken passage from inside the clip, played before it. */
+  hook?: ClipHook;
   suggested_caption_style?: string;
   timestamp_display?: string;
   content_type?: string;
@@ -198,6 +206,8 @@ export interface CreateClipInput {
   allow_ass_fallback?: boolean;
   keep_caption_overlay?: boolean;
   write_clean_variant?: boolean;
+  /** Overrides the suggestion's hook; null renders without one. */
+  hook?: ClipHook | null;
 }
 
 export interface BatchClipSpec {
@@ -213,6 +223,7 @@ export interface BatchClipSpec {
   keep_caption_overlay?: boolean;
   write_clean_variant?: boolean;
   keep_segments?: Array<{ start: number; end: number }>;
+  hook?: ClipHook | null;
 }
 
 export interface BatchClipsInput {

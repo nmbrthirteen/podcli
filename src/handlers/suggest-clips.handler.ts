@@ -11,6 +11,23 @@ import {
   validateSuggestionContext,
   validateSuggestionRange,
 } from "../utils/clip-validation.js";
+import { playbackDuration, validateHook } from "../utils/clip-hook.js";
+
+/** Shared by suggest_clips, modify_clip, create_clip and batch_create_clips. */
+export const hookSchema = z
+  .object({
+    start: z.number().describe("Hook start in seconds, on the source clock"),
+    end: z.number().describe("Hook end in seconds, on the source clock"),
+    mode: z
+      .enum(["repeat", "move"])
+      .describe(
+        "repeat: the passage plays first and again in place. move: it plays first and is cut from its place.",
+      ),
+  })
+  .describe(
+    "Opening hook: a 1-15s passage from inside the clip, played before the clip. " +
+      "It must be a line actually spoken inside the clip's range (or its segments), never invented text.",
+  );
 
 const suggestionSchema = z.object({
   title: z.string().describe("Short catchy title for the clip"),
@@ -28,6 +45,7 @@ const suggestionSchema = z.object({
       "Multi-cut keep-ranges within the clip. Use to cut out filler/tangents " +
         "in the middle. Omit for a single continuous clip.",
     ),
+  hook: hookSchema.optional(),
   payoff: z
     .string()
     .describe(
@@ -114,6 +132,7 @@ export async function handleSuggestClips(input: SuggestClipsInput): Promise<stri
     const errors = [
       validateSuggestionRange(s.start_second, s.end_second),
       validateSuggestionContext(s),
+      validateHook(s.hook, s.start_second, s.end_second, s.segments),
     ].filter((e): e is string => e !== null);
     for (const error of errors) {
       problems.push(`Suggestion ${i + 1} ("${s.title}"): ${error}`);
@@ -128,11 +147,9 @@ export async function handleSuggestClips(input: SuggestClipsInput): Promise<stri
 
   // Validate and enrich suggestions
   const enriched = suggestions.map((s, i) => {
-    // Compute duration from segments if available, otherwise from start/end
+    // Kept segments (or the whole range), plus whatever the hook adds.
     const segments = s.segments?.filter((seg) => seg.end > seg.start) || [];
-    const keptDuration = segments.length > 0
-      ? segments.reduce((sum, seg) => sum + (seg.end - seg.start), 0)
-      : s.end_second - s.start_second;
+    const keptDuration = playbackDuration(s.start_second, s.end_second, segments, s.hook);
 
     return {
       clip_number: i + 1,
@@ -142,6 +159,7 @@ export async function handleSuggestClips(input: SuggestClipsInput): Promise<stri
       end_second: s.end_second,
       segments: segments.length > 0 ? segments : [{ start: s.start_second, end: s.end_second }],
       duration: Math.round(keptDuration * 10) / 10,
+      ...(s.hook && { hook: s.hook }),
       payoff: s.payoff,
       standalone: s.standalone,
       context_line: s.context_line || "",

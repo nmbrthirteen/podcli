@@ -6,6 +6,7 @@ import type { ClipResult, CreateClipInput, SuggestedClip, UIState } from "../mod
 import { childLogger } from "../utils/logger.js";
 import { sliceTranscript } from "../utils/transcript.js";
 import { validateClipRange } from "../utils/clip-validation.js";
+import { validateHook } from "../utils/clip-hook.js";
 import { transcriptVideoMismatch } from "../utils/video-identity.js";
 
 const log = childLogger("create-clip");
@@ -142,6 +143,12 @@ export const createClipToolDef = {
           "Also render a second file with the same audio, loudness, and intro/outro but no burned captions. Returns clean_output_path.",
         default: false,
       },
+      hook: {
+        type: ["object", "null"],
+        description:
+          "Opening hook: { start, end, mode: repeat|move }, a 1-15s passage from inside the clip played first. " +
+          "Auto-loaded from clip_number if omitted; null renders without one.",
+      },
     },
     required: [],
   },
@@ -186,6 +193,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
 
   // Pull multi-cut segments from suggestion (if available)
   const keepSegments = suggestion?.segments ?? null;
+  const hook = input.hook !== undefined ? input.hook : suggestion?.hook ?? null;
 
   // When the caller relies on the session transcript (rather than passing
   // transcript_words explicitly), refuse to render against a video that was
@@ -212,6 +220,10 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
   if (rangeError) {
     return JSON.stringify({ error: rangeError });
   }
+  const hookError = validateHook(hook, startSecond, endSecond, keepSegments);
+  if (hookError) {
+    return JSON.stringify({ error: hookError });
+  }
 
   const result = await executor.execute<ClipResult>("create_clip", {
     video_path: videoPath,
@@ -233,6 +245,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     ...(input.name_card ? { name_card: input.name_card } : {}),
     ...(input.motion ? { motion: input.motion } : {}),
     ...(keepSegments && { keep_segments: keepSegments }),
+    ...(hook && { hook }),
   });
 
   if (!result.data) {
@@ -250,6 +263,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     ...(data.srt_path && { srt_path: data.srt_path }),
     ...(data.vtt_path && { vtt_path: data.vtt_path }),
     ...(data.clean_output_path && { clean_output_path: data.clean_output_path }),
+    ...(data.hook && { hook: data.hook }),
     message: `Clip created successfully! ${data.duration}s, ${data.file_size_mb}MB`,
   });
 }

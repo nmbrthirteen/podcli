@@ -37,6 +37,7 @@ import AssetPicker from './AssetPicker';
 import { assetSrc, useAssets } from './useAssets';
 import RecentSources from './RecentSources';
 import MomentTrim from './MomentTrim';
+import { playbackDuration, playbackRanges, validateHook } from '../../utils/clip-hook';
 import { useDialog } from './useDialog';
 import { PageHeader } from './Page';
 import { buildPreviewChunks, activePreviewChunk, selectPreviewWords } from './captionChunks';
@@ -812,7 +813,7 @@ const onKeyActivate = (fn) => (e) => {
 
       // Clip editing
       const [editingClip, setEditingClip] = useState(null); // index
-      const [editForm, setEditForm] = useState({ title: '', start: 0, end: 0, payoff: '', contextLine: '' });
+      const [editForm, setEditForm] = useState({ title: '', start: 0, end: 0, payoff: '', contextLine: '', hook: null });
       const [editDuration, setEditDuration] = useState(0);
       const editDialogRef = useDialog(editingClip !== null, () => setEditingClip(null));
       const previewDialogRef = useDialog(!!previewFile, () => setPreviewFile(null));
@@ -931,8 +932,22 @@ const onKeyActivate = (fn) => (e) => {
           end: clip.end_second,
           payoff: clip.payoff || '',
           contextLine: clip.context_line || '',
+          hook: clip.hook || null,
         });
       };
+
+      // Saving drops segments, but the server restores them while the range
+      // stays within half a second, so the hook is checked against the same.
+      const editedClip = editingClip !== null ? suggestions[editingClip] : null;
+      const editSegments = editedClip
+        && Math.abs(editedClip.start_second - editForm.start) < 0.5
+        && Math.abs(editedClip.end_second - editForm.end) < 0.5
+        ? editedClip.segments : undefined;
+      const editHookError = validateHook(editForm.hook, editForm.start, editForm.end, editSegments);
+      const setEditHook = (patch) => setEditForm(f => ({ ...f, hook: patch && { ...f.hook, ...patch } }));
+      const addEditHook = () => setEditForm(f => ({
+        ...f, hook: { start: f.start, end: Math.min(f.end, f.start + 3), mode: 'repeat' },
+      }));
 
       const clampEditTime = (v) => {
         const n = Number.isFinite(v) ? Math.max(0, v) : 0;
@@ -940,7 +955,7 @@ const onKeyActivate = (fn) => (e) => {
       };
 
       const saveClipEdit = () => {
-        if (editingClip === null || editForm.end <= editForm.start) return;
+        if (editingClip === null || editForm.end <= editForm.start || editHookError) return;
         const edited = suggestions[editingClip];
         const reTimed = edited && (edited.start_second !== editForm.start || edited.end_second !== editForm.end);
         setSuggestions(prev => {
@@ -952,8 +967,9 @@ const onKeyActivate = (fn) => (e) => {
             end_second: editForm.end,
             payoff: editForm.payoff,
             context_line: editForm.contextLine,
-            duration: Math.round(editForm.end - editForm.start),
+            duration: Math.round(playbackDuration(editForm.start, editForm.end, editSegments, editForm.hook)),
             segments: undefined,
+            hook: editForm.hook || undefined,
           };
           return next;
         });
@@ -1440,6 +1456,7 @@ const onKeyActivate = (fn) => (e) => {
         crop_strategy: cropStrategy,
         format,
         ...(Array.isArray(c.segments) && c.segments.length > 0 && { keep_segments: c.segments }),
+        hook: c.hook || null,
       });
 
       const startExport = async () => {
@@ -1610,6 +1627,7 @@ const onKeyActivate = (fn) => (e) => {
             title: c.title, caption_style: captionStyle, caption_position: captionPosition, caption_font_scale: captionFontScale, logo_position: logoPosition, crop_strategy: cropStrategy, format,
             transcript_words: transcript?.words || [], logo_path: logoPath || undefined, outro_path: outroPath || undefined, intro_path: introPath || undefined, clean_fillers: cleanFillers || undefined,
             ...(Array.isArray(c.segments) && c.segments.length > 0 && { keep_segments: c.segments }),
+            hook: c.hook || null,
           })
         });
         setRetryJobId(data.job_id);
@@ -2643,6 +2661,7 @@ const onKeyActivate = (fn) => (e) => {
                           )}
                           <div className="clip-meta">
                             {fmt(clip.start_second)} {'\u2192'} {fmt(clip.end_second)} {'\u00B7'} {clip.duration}s
+                            {clip.hook && <> {'\u00B7'} opens with {fmt(clip.hook.start)}</>}
                             {energy && (
                               <span className={`energy-badge ${energy.level}`} title={`Energy: ${energy.score}/10`}>
                                 {energy.level === 'high' ? <Activity size={10} /> : energy.level === 'medium' ? '~' : '○'} {energy.score.toFixed(1)}
@@ -2927,10 +2946,51 @@ const onKeyActivate = (fn) => (e) => {
                     {editForm.end <= editForm.start && <span style={{ color: 'var(--red)' }}> {'·'} end must be after start</span>}
                   </div>
                 </div>
+                <div className="edit-field">
+                  <label>Opening hook</label>
+                  {!editForm.hook ? (
+                    <button className="btn btn-ghost btn-sm" onClick={addEditHook} disabled={editForm.end <= editForm.start}>
+                      <Plus size={12} /> Add a spoken line to open with
+                    </button>
+                  ) : (
+                    <>
+                      <div className="time-row">
+                        <div>
+                          <input type="number" step="0.1" min={editForm.start} max={editForm.end} value={editForm.hook.start}
+                            onChange={e => setEditHook({ start: clampEditTime(parseFloat(e.target.value)) })}
+                            aria-label="Hook start in seconds" style={{ textAlign: 'center' }} />
+                          <div className="hint-xs" style={{ textAlign: 'center', marginTop: 2 }}>{fmt(editForm.hook.start)}</div>
+                        </div>
+                        <div className="arrow"><ArrowRight size={14} /></div>
+                        <div>
+                          <input type="number" step="0.1" min={editForm.start} max={editForm.end} value={editForm.hook.end}
+                            onChange={e => setEditHook({ end: clampEditTime(parseFloat(e.target.value)) })}
+                            aria-label="Hook end in seconds" style={{ textAlign: 'center' }} />
+                          <div className="hint-xs" style={{ textAlign: 'center', marginTop: 2 }}>{fmt(editForm.hook.end)}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                        <select value={editForm.hook.mode} onChange={e => setEditHook({ mode: e.target.value })}
+                          aria-label="Hook mode" style={{ flex: 1 }}>
+                          <option value="repeat">Repeat: plays first, then again in place</option>
+                          <option value="move">Move: plays first, cut from its place</option>
+                        </select>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setEditHook(null)}>Clear hook</button>
+                      </div>
+                      <div className="hint" style={{ marginTop: 6, textAlign: 'center' }}>
+                        {editHookError
+                          ? <span style={{ color: 'var(--red)' }}>{editHookError}</span>
+                          : <>Plays {playbackRanges(editForm.start, editForm.end, editSegments, editForm.hook)
+                              .map(r => `${fmt(r.start)}-${fmt(r.end)}`).join(', then ')}
+                              {' \u00B7 '}{Math.round(playbackDuration(editForm.start, editForm.end, editSegments, editForm.hook))}s total</>}
+                      </div>
+                    </>
+                  )}
+                </div>
                 <div className="clip-edit-actions">
                   <button className="btn btn-ghost btn-sm" onClick={deleteClipEdit} style={{ color: 'var(--red)', marginRight: 'auto' }}>Delete clip</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => setEditingClip(null)}>Cancel</button>
-                  <button className="btn btn-primary btn-sm" onClick={saveClipEdit} disabled={!editForm.title.trim() || editForm.end <= editForm.start}>Save</button>
+                  <button className="btn btn-primary btn-sm" onClick={saveClipEdit} disabled={!editForm.title.trim() || editForm.end <= editForm.start || !!editHookError}>Save</button>
                 </div>
               </div>
             </div>

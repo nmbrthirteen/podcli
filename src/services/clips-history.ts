@@ -6,7 +6,7 @@ import { paths } from "../config/paths.js";
 import { writeFileAtomic } from "../utils/atomic-file.js";
 import { sliceTranscript, sliceWords } from "../utils/transcript.js";
 import { isDemoMode, demoClips } from "../ui/demo-fixtures.js";
-import type { BatchClipsResult, ClipHistoryEntry, Format, WordTimestamp } from "../models/index.js";
+import type { BatchClipsResult, ClipHistoryEntry, ClipHook, Format, WordTimestamp } from "../models/index.js";
 
 type BatchResultRow = BatchClipsResult["results"][number];
 
@@ -23,6 +23,7 @@ export interface BatchClipSpec {
   start_second: number;
   end_second: number;
   keep_segments?: Array<{ start: number; end: number }>;
+  hook?: ClipHook | null;
 }
 
 export interface BatchRecipeContext {
@@ -210,6 +211,7 @@ export class ClipsHistory {
         introPath: ctx.introPath,
         cleanFillers: ctx.cleanFillers,
         keepSegments: spec?.keep_segments,
+        hook: spec?.hook,
       });
     }
   }
@@ -223,6 +225,7 @@ export class ClipsHistory {
       introPath?: string | null;
       cleanFillers?: boolean;
       keepSegments?: Array<{ start: number; end: number }>;
+      hook?: ClipHook | null;
     },
   ): Promise<void> {
     const words = sliceWords(ctx.transcriptWords ?? [], rec.start_second, rec.end_second);
@@ -237,6 +240,7 @@ export class ClipsHistory {
       clean_fillers: ctx.cleanFillers ?? false,
       transcript_words: words,
       ...(ctx.keepSegments?.length && { keep_segments: ctx.keepSegments }),
+      ...(ctx.hook && { hook: ctx.hook }),
     });
     if (ctx.keepSegments?.length) {
       await this.update(rec.id, { keep_segments: ctx.keepSegments });
