@@ -31,18 +31,24 @@ behavior, not a roadmap.
 
 ## Transcription
 
-- Three engines: `whisper-py` (OpenAI Whisper, default), `whispercpp`
-  (local, no network), and `assemblyai` (`backend/services/engines.py`).
+- Four engines: `whisper-py` (OpenAI Whisper, default), `whispercpp`
+  (local, no network), `omnilingual` (local, ~1600 languages) and
+  `assemblyai` (`backend/services/engines.py`).
+- `omnilingual` runs Meta's Omnilingual ASR 1B CTC model on the CPU. The
+  first run downloads 1 GB. It returns lowercase text with no punctuation,
+  so captions and sentence splits come from pauses alone. It takes no
+  language hint; test a 40 s sample before a full run, and compare it with
+  `compare_transcription_engines`.
 - Speaker diarization runs on the `whisper-py` and `assemblyai` paths.
-  `whispercpp` never produces speaker labels. Every word comes back with
+  `whispercpp` and `omnilingual` never produce speaker labels. Every word comes back with
   `speaker: null` (`backend/services/transcription_whispercpp.py:67,215`).
 - Diarization needs `HF_TOKEN` set (see `docs/configuration.md`). Without
   it, or if diarization fails for any other reason, transcription still
   completes. It just comes back with no speaker labels, degrading
   silently rather than failing the job.
 - Language support follows whichever engine is in use; podcli does not add
-  or restrict language coverage beyond what Whisper, whisper.cpp, or
-  AssemblyAI support natively.
+  or restrict language coverage beyond what Whisper, whisper.cpp,
+  Omnilingual ASR, or AssemblyAI support natively.
 
 ## Captions
 

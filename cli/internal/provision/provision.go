@@ -86,22 +86,24 @@ const vadSHA = "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf
 
 // omnilingualRevision pins the "omnilingual" engine's model download
 // (sherpa-onnx CTC, ~1600 languages, including ones whisper.cpp handles
-// poorly) the same way the ggml downloads are pinned.
-const omnilingualRevision = "6abf1ece20cd2308bdb7d13cd78ec1c44fa4c094"
+// poorly) the same way the ggml downloads are pinned. The 1B v2 model is
+// used because the 300M one takes no language hint and wrote accented
+// English in Arabic script on real podcast audio.
+const omnilingualRevision = "5243e02858d1428b8fbeeb5f7f1cc6fccf4d9433"
 
 func omnilingualURL(file string) string {
-	return "https://huggingface.co/csukuangfj/sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-int8-2025-11-12/resolve/" +
+	return "https://huggingface.co/csukuangfj2/sherpa-onnx-omnilingual-asr-1600-languages-1B-ctc-v2-int8-2026-02-05/resolve/" +
 		omnilingualRevision + "/" + file
 }
 
 var omnilingualFiles = map[string]model{
 	"model.int8.onnx": {
 		URL:    omnilingualURL("model.int8.onnx"),
-		SHA256: "e7c4e54ee4c4c47829cc6667d5d00ed8ea7bef1dcfeef0fce766f77752a2726c",
+		SHA256: "8af72da192fc2c8567c328d4f8059bdf47f182a0369077893c295ef39740c637",
 	},
 	"tokens.txt": {
 		URL:    omnilingualURL("tokens.txt"),
-		SHA256: "a7a044c52cb29cbe8b0dc1953e92cefd4ca16b0ed968177b6beab21f9a7d0b31",
+		SHA256: "7d99997ef207ff14c2cfe825f2aa037528ea250113cc3c6392bfe49326884ba6",
 	},
 	"LICENSE": {
 		URL:    omnilingualURL("LICENSE"),
