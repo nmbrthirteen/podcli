@@ -24,6 +24,7 @@ import uuid
 import wave
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -291,16 +292,34 @@ def scan_folder(folder: str) -> list[str]:
     return found
 
 
-_TIMECODE_RE = re.compile(r"^(\d{2})([:;])(\d{2})([:;])(\d{2})([:;])(\d{2})$")
+_TIMECODE_RE = re.compile(r"^(\d{2})([:;.])(\d{2})([:;.])(\d{2})([:;.])(\d{2})$")
 
 
-def _ntsc_frame_duration(fps: float) -> tuple[float, int]:
+def _ntsc_frame_duration(fps: float, r_frame_rate: str = "") -> tuple[float, int]:
     """Exact frame duration and the nominal (rounded) frame rate for an NTSC-pulldown fps.
 
     29.97 is really 30000/1001 fps, so each frame lasts 1001/30000 s, not 1/30 s. The
     same pulldown ratio applies to 59.94 and 23.976. Integer rates (25, 24, 30 exactly)
     have no pulldown and use a plain 1/fps duration.
+
+    avg_frame_rate (what `fps` usually comes from) is measured, not declared, and a
+    steady 25 fps camera can read 24.98 by measurement noise alone, which a bare
+    closeness check mistakes for pulldown. r_frame_rate is the stream's exact time
+    base; every real pulldown rate reduces to a fraction with denominator 1001, so
+    when it's available that decides, not the noisy float.
     """
+    if r_frame_rate:
+        try:
+            exact = Fraction(str(r_frame_rate))
+        except (ValueError, ZeroDivisionError):
+            exact = None
+        if exact and exact > 0:
+            rounded = round(float(exact))
+            if rounded <= 0:
+                return 0.0, 0
+            if exact.denominator == 1001:
+                return 1001.0 / (rounded * 1000.0), rounded
+            return 1.0 / rounded, rounded
     rounded = round(fps)
     if rounded <= 0:
         return 0.0, 0
@@ -309,7 +328,7 @@ def _ntsc_frame_duration(fps: float) -> tuple[float, int]:
     return 1.0 / rounded, rounded
 
 
-def _timecode_seconds(info: dict, fps: float, sample_rate: int) -> float:
+def _timecode_seconds(info: dict, fps: float, sample_rate: int, r_frame_rate: str = "") -> float:
     """Embedded start timecode (pro cameras) or BWF time reference (field recorders), in seconds.
 
     Honors drop-frame timecode (separator ';' before the frame field): drop-frame
@@ -326,7 +345,7 @@ def _timecode_seconds(info: dict, fps: float, sample_rate: int) -> float:
                 h, m1, mi, m2, sec, m3, frames = m.groups()
                 h, mi, sec, frames = int(h), int(mi), int(sec), int(frames)
                 drop_frame = m3 == ";"
-                frame_duration, fps_round = _ntsc_frame_duration(fps)
+                frame_duration, fps_round = _ntsc_frame_duration(fps, r_frame_rate)
                 if fps_round <= 0:
                     continue
                 total_frames = fps_round * 3600 * h + fps_round * 60 * mi + fps_round * sec + frames
@@ -393,7 +412,7 @@ def probe_source(path: str) -> Source:
         width=int(video.get("width") or 0) if video else 0,
         height=int(video.get("height") or 0) if video else 0,
         fps=round(fps, 3),
-        timecode=round(_timecode_seconds(info, fps, sample_rate), 6),
+        timecode=round(_timecode_seconds(info, fps, sample_rate, video.get("r_frame_rate") if video else ""), 6),
         file_size=stat.st_size,
         file_mtime_ns=stat.st_mtime_ns,
         fps_warning=fps_warning,
@@ -414,12 +433,41 @@ def _file_identity(s: Source) -> str:
 
 
 def _source_changed_on_disk(s: Source) -> bool:
-    """True if the file at `s.path` no longer matches what was probed."""
+    """True if the file at `s.path` no longer matches what was probed.
+
+    A session saved before file identity was tracked has file_size and
+    file_mtime_ns both at their dataclass default of 0. That is not evidence
+    the file shrank to nothing; it means we never recorded an identity for
+    it. Treat that pair as unknown rather than as a mismatch, so an old
+    session doesn't look "changed" on every single source the first time it
+    reopens under the new code.
+    """
+    if s.file_size == 0 and s.file_mtime_ns == 0:
+        return False
     try:
         stat = os.stat(s.path)
     except OSError:
         return False
     return stat.st_size != s.file_size or stat.st_mtime_ns != s.file_mtime_ns
+
+
+def backfill_file_identity(session: "MulticamSession") -> bool:
+    """Stamp file_size/file_mtime_ns on sources saved before identity tracking existed.
+
+    Stat-only, and never resets sync, cuts, or range: an old session without
+    this fingerprint hasn't necessarily changed, it just predates the field.
+    """
+    changed = False
+    for s in session.sources:
+        if s.virtual or not s.path or (s.file_size or s.file_mtime_ns):
+            continue
+        try:
+            stat = os.stat(s.path)
+        except OSError:
+            continue
+        s.file_size, s.file_mtime_ns = stat.st_size, stat.st_mtime_ns
+        changed = True
+    return changed
 
 
 def refresh_stale_sources(session: "MulticamSession") -> bool:
@@ -442,6 +490,10 @@ def refresh_stale_sources(session: "MulticamSession") -> bool:
         s.duration, s.has_audio, s.audio_channels = fresh.duration, fresh.has_audio, fresh.audio_channels
         s.width, s.height, s.fps, s.timecode = fresh.width, fresh.height, fresh.fps, fresh.timecode
         s.file_size, s.file_mtime_ns = fresh.file_size, fresh.file_mtime_ns
+        s.fps_warning = fresh.fps_warning
+        s.audio_stream_count = fresh.audio_stream_count
+        s.audio_stream_channels = fresh.audio_stream_channels
+        s.audio_stream_index = min(s.audio_stream_index, max(0, fresh.audio_stream_count - 1))
         s.offset, s.speed, s.sync = None, 1.0, {
             "status": "failed",
             "message": "This file changed on disk since it was last synced. Sync again.",
@@ -451,6 +503,7 @@ def refresh_stale_sources(session: "MulticamSession") -> bool:
         session.activity_key = ""
         session.cuts = []
         session.range_start = session.range_end = None
+        place_views(session)
     return affected_in_use
 
 
@@ -723,6 +776,22 @@ def collect_files(folder: str = "", files: Optional[list] = None) -> list[str]:
     return found
 
 
+def open_session(session_id: str) -> MulticamSession:
+    """Load a session by id, catching up on file-identity bookkeeping once.
+
+    `new_session` already does this for the folder-reopen path. Everything
+    that instead jumps straight to a known session id (the MCP tool, the CLI,
+    the podcli cloud resolver) went through plain `MulticamSession.load` and
+    so never noticed a camera file that changed or was replaced on disk.
+    """
+    session = MulticamSession.load(session_id)
+    backfilled = backfill_file_identity(session)
+    refreshed = refresh_stale_sources(session)
+    if backfilled or refreshed:
+        session.save()
+    return session
+
+
 def find_session(found: list[str]) -> Optional[MulticamSession]:
     """The saved edit for exactly these files, including ones that couldn't be read."""
     wanted = set(found)
@@ -806,8 +875,11 @@ def new_session(
     # caller makes after, under the same lock as any other.
     existing = find_session(found)
     if existing:
-        if refresh_stale_sources(existing):
+        backfilled = backfill_file_identity(existing)
+        refreshed = refresh_stale_sources(existing)
+        if backfilled or refreshed:
             existing.save()
+        if refreshed:
             _emit(progress_callback, 100, f"Reopened the edit for these {len(found)} files; "
                                            "one or more changed on disk and need syncing again")
         else:
@@ -1286,9 +1358,12 @@ def _sync_review_reasons(fit: sig.ClockFit, match: sig.CoarseMatch, overlap_seco
     checkpoints to trust a long overlap's drift estimate.
     """
     reasons = []
-    worst_residual_ms = max(fit.residual_ms, fit.residual_all_ms)
-    if worst_residual_ms > 30.0:
-        reasons.append(f"residual {worst_residual_ms:.0f} ms")
+    # residual_all_ms includes the checkpoints the fit already rejected as
+    # outliers, so one bad checkpoint correctly thrown out would otherwise
+    # flag an inlier fit that's actually clean. Judge the fit on the
+    # residual it was actually built from; residual_all_ms is still reported.
+    if fit.residual_ms > 30.0:
+        reasons.append(f"residual {fit.residual_ms:.0f} ms")
     if fit.speed_fallback:
         reasons.append("drift fit was implausible, so speed was forced back to 1.0")
     dropped = fit.total_checkpoints - fit.checkpoints
@@ -1674,6 +1749,20 @@ def _lut_step(s: Source) -> str:
     return f"lut3d=file={_filter_path(s.input_lut)}," if s.input_lut else ""
 
 
+def _check_luts_exist(session: MulticamSession) -> None:
+    """Fail now, naming the camera, rather than deep inside an ffmpeg worker later.
+
+    A LUT set at map time can get moved or deleted on disk by the time a
+    render or a preview actually reads it; without this, ffmpeg's own error
+    surfaces from inside a shot or a still with no indication of which
+    camera (or which of several in a split) it was for.
+    """
+    missing = [s for s in session.sources if s.input_lut and not os.path.isfile(s.input_lut)]
+    if missing:
+        names = ", ".join(f"{source_label(session, s)} ({s.input_lut})" for s in missing)
+        raise ValueError(f"The LUT set for {names} is missing. Pick it again or clear it.")
+
+
 def _still(session: MulticamSession, cam: Source, tl: float, out: Path, look: str = "none", width: int = 480) -> Path:
     args, graph = _picture(session, cam, tl, width, (width * 9 // 16) & ~1)
     tail = f";[pic]{LOOKS[look]}[still]" if LOOKS.get(look) else ";[pic]null[still]"
@@ -1700,6 +1789,7 @@ def _still_basis(session: MulticamSession, s: Source) -> str:
 
 def previews(session: MulticamSession, *, looks: bool = False, at: Optional[float] = None) -> dict:
     """One still per camera, and optionally one still per look per camera, each through its input LUT."""
+    _check_luts_exist(session)
     work = _work_dir(session.session_id)
     frames: dict = {"cameras": {}, "looks": {}}
 
@@ -1714,16 +1804,30 @@ def previews(session: MulticamSession, *, looks: bool = False, at: Optional[floa
         t = moment(s)
         out = work / f"frame-{s.id}-{int(t * 10)}-{_still_basis(session, s)}.jpg"
         if not out.exists():
+            # A nudge or re-sync changes the basis (and often the moment), so the
+            # old filename never matches again; delete it rather than let every
+            # edit leave one more still behind.
+            for stale in work.glob(f"frame-{s.id}-*.jpg"):
+                if stale != out:
+                    stale.unlink(missing_ok=True)
             _still(session, s, t, out)
         frames["cameras"][s.id] = str(out)
     if looks:
         # Cameras rarely match out of the box, so each one shows every look on its own picture.
-        for cam in session.cameras() or [s for s in session.sources if s.kind == "video"]:
+        candidates = session.cameras() or [s for s in session.sources if s.kind == "video"]
+        # Once a cut exists, a camera that never actually appears in it (an
+        # alternate angle left mapped but unused) doesn't need four look
+        # renders; before any cut exists there's nothing to filter by yet.
+        used = {c["source_id"] for c in session.cuts}
+        for cam in [c for c in candidates if not used or c.id in used]:
             t = moment(cam)
             frames["looks"][cam.id] = {}
             for name in LOOKS:
                 out = work / f"look-{cam.id}-{name}-{int(t * 10)}-{_still_basis(session, cam)}.jpg"
                 if not out.exists():
+                    for stale in work.glob(f"look-{cam.id}-{name}-*.jpg"):
+                        if stale != out:
+                            stale.unlink(missing_ok=True)
                     _still(session, cam, t, out, look=name, width=640)
                 frames["looks"][cam.id][name] = str(out)
     return frames
@@ -2029,11 +2133,38 @@ def _loudness(path: Path) -> tuple[Optional[float], Optional[float]]:
     return number(lufs), number(peak)
 
 
-def _decode_errors(path: Path) -> str:
-    """Whatever ffmpeg complains about while decoding every frame and sample, or '' when clean."""
-    res = proc_run(["ffmpeg", "-hide_banner", "-v", "error", "-i", str(path), "-f", "null", "-"],
-                   timeout=7200, check=False)
-    return res.stderr.strip() or (f"ffmpeg exited with {res.returncode}" if res.returncode else "")
+def _decode_errors(path: Path, *, full: bool = False) -> str:
+    """Whatever ffmpeg complains about while decoding the episode, or '' when clean.
+
+    A full decode is exhaustive but costs minutes per hour of 1080p on every
+    single render, almost all of it spent re-confirming frames nothing
+    touched. By default this instead decodes the first and last 10 s plus
+    three points spread through the middle: enough to catch what a render
+    is actually at risk of (a bad concat seam between shots, a broken mux,
+    a codec fault at the point it happened) without paying for the whole
+    file. Pass full=True (render_session(..., validate="full")) for the
+    exhaustive check when that trade-off isn't acceptable.
+    """
+    if full:
+        res = proc_run(["ffmpeg", "-hide_banner", "-v", "error", "-i", str(path), "-f", "null", "-"],
+                       timeout=7200, check=False)
+        return res.stderr.strip() or (f"ffmpeg exited with {res.returncode}" if res.returncode else "")
+    duration = _media_duration(path) or 0.0
+    spans = [0.0]
+    if duration > 10.0:
+        spans.append(max(0.0, duration - 10.0))
+    for frac in (0.25, 0.5, 0.75):
+        t = duration * frac
+        if all(abs(t - s) > 10.0 for s in spans):
+            spans.append(t)
+    errors = []
+    for t in spans:
+        res = proc_run(["ffmpeg", "-hide_banner", "-v", "error", "-ss", f"{t:.3f}", "-i", str(path),
+                        "-t", "10", "-f", "null", "-"], timeout=600, check=False)
+        err = res.stderr.strip() or (f"ffmpeg exited with {res.returncode}" if res.returncode else "")
+        if err:
+            errors.append(err)
+    return "; ".join(errors)
 
 
 def _ran_out(session: MulticamSession, cam: Source, piece: "Piece", fps: float, ends: dict[str, float]) -> list[str]:
@@ -2106,7 +2237,7 @@ def _write_mix(session: MulticamSession, out: Path, start: float, duration: floa
     for i, (s, ch) in enumerate(feeds if feeds is not None else _audio_inputs(session)):
         inp, steps = _aligned_input(s, ch, start, duration)
         args += inp
-        chains.append(f"[{i}:a:0]{','.join([*steps, *per_feed])}[a{i}]")
+        chains.append(f"[{i}:a:{s.audio_stream_index}]{','.join([*steps, *per_feed])}[a{i}]")
     n = len(chains)
     mix = "".join(f"[a{i}]" for i in range(n)) + f"amix=inputs={n}:normalize=0," if n > 1 else "[a0]"
     proc_run([
@@ -2142,7 +2273,8 @@ def _normalization(path: Path) -> tuple[float, bool]:
     return gain, float(stats["input_tp"]) + gain > TRUE_PEAK_CEILING
 
 
-def _render_audio(session: MulticamSession, out: Path, start: float, duration: float) -> float:
+def _render_audio(session: MulticamSession, out: Path, start: float, duration: float,
+                   splice: Optional[list[tuple[float, float]]] = None) -> float:
     """The episode mix: every mic high-passed and leveled, then one measured gain to LOUDNESS_TARGET.
 
     Returns that gain in dB so the stems can carry it too. Only peaks the gain
@@ -2151,6 +2283,15 @@ def _render_audio(session: MulticamSession, out: Path, start: float, duration: f
     premix = out.with_name(f"{out.stem}.premix.wav")
     # Float keeps a sum of hot mics from clipping before the gain brings it down.
     _write_mix(session, premix, start, duration, per_feed=VOICE_CHAIN, encode=("-c:a", "pcm_f32le"))
+    if splice:
+        # Measure loudness on what actually airs: a retake or a dead patch
+        # removed from the episode shouldn't pull the target gain around,
+        # whether it's silence (would ask for too much gain) or loud
+        # cross-talk no one hears in the final cut (would ask for too little).
+        kept = out.with_name(f"{out.stem}.premix-kept.wav")
+        _splice_audio(premix, kept, splice, ["-c:a", "pcm_f32le"])
+        premix.unlink(missing_ok=True)
+        premix = kept
     gain, limit = _normalization(premix)
     steps = [f"volume={gain:.3f}dB"]
     if limit:
@@ -2183,7 +2324,7 @@ def _render_stems(
         for i, (s, ch) in enumerate(feeds):
             inp, steps = _aligned_input(s, ch, start, duration)
             args += inp
-            chains.append(f"[{i}:a:0]{','.join([*steps, *VOICE_CHAIN])}[a{i}]")
+            chains.append(f"[{i}:a:{s.audio_stream_index}]{','.join([*steps, *VOICE_CHAIN])}[a{i}]")
         mix = "".join(f"[a{i}]" for i in range(len(feeds)))
         level = f"volume={gain:.3f}dB"
         graph = ";".join(chains) + (f";{mix}amix=inputs={len(feeds)}:normalize=0,{level}[out]" if len(feeds) > 1
@@ -2378,13 +2519,19 @@ def render_session(
     session: MulticamSession,
     *,
     stems: bool = True,
+    validate: str = "sample",
     progress_callback: ProgressCallback = None,
 ) -> dict:
+    if validate not in ("sample", "full"):
+        raise ValueError("validate must be 'sample' or 'full'")
     if not session.cuts:
         raise ValueError("Plan the cuts before rendering")
+    _check_luts_exist(session)
     key = _render_key(session, stems)
     video = session.outputs.get("video")
-    if session.outputs.get("render_key") == key and video and os.path.exists(video):
+    # A validate="full" request is for checking an existing render, not for
+    # getting a cached answer back unexamined, so it always re-earns its check.
+    if validate != "full" and session.outputs.get("render_key") == key and video and os.path.exists(video):
         _emit(progress_callback, 100, "Already rendered with these settings")
         return session.outputs
     width, height, fps = _output_format(session)
@@ -2434,10 +2581,7 @@ def render_session(
 
         _emit(progress_callback, 82, "Mixing microphones")
         audio = work / "audio.wav"
-        gain = _render_audio(session, audio, start, end - start)
-        if splice:
-            _splice_audio(audio, work / "kept.wav", splice, ["-c:a", "pcm_s16le"])
-            audio = work / "kept.wav"
+        gain = _render_audio(session, audio, start, end - start, splice)
         short = duration - _media_duration(audio)
         if short >= 1 / fps:
             warnings.append(f"The mixed audio is {short:.2f} s shorter than the picture; the end plays silent.")
@@ -2456,7 +2600,7 @@ def render_session(
         ], timeout=3600, check=True)
 
         _emit(progress_callback, 91, "Checking the episode")
-        validation = _validate(partial, total_frames, fps, warnings)
+        validation = _validate(partial, total_frames, fps, warnings, full=validate == "full")
 
         stem_paths = []
         if stems:
@@ -2467,32 +2611,45 @@ def render_session(
             stem_paths = _render_stems(session, work, start, end - start, splice, gain)
 
         # Every piece rendered; publish video, stems and the session record
-        # together. A crash between these renames can only ever leave either
-        # the previous complete render or this one in place, never a mix.
-        video = out_dir / "episode.mp4"
-        tmp_video = video.with_name(video.name + ".publishing")
-        # shutil.move falls back to copy+delete when work and output sit on different volumes.
-        shutil.move(str(partial), str(tmp_video))
-        pending_stems = []
-        for stem in stem_paths:
-            dest = out_dir / Path(stem).name
-            tmp_stem = dest.with_name(dest.name + ".publishing")
-            shutil.move(stem, str(tmp_stem))
-            pending_stems.append((tmp_stem, dest))
-
-        os.replace(str(tmp_video), str(video))
-        for tmp_stem, dest in pending_stems:
-            os.replace(str(tmp_stem), str(dest))
+        # together. There's no atomic rename across several files, so build
+        # the whole render in a fresh directory nothing points at yet, then
+        # flip the session to it in session.save()'s single tmp-file-plus-
+        # os.replace write. A crash before that save leaves the previous
+        # complete render exactly as it was; a crash during it can't leave a
+        # mix, because the new render's files are already complete by then
+        # and the old render's files haven't been touched.
+        old_outputs = session.outputs
+        publish_dir = Path(tempfile.mkdtemp(prefix="render-", dir=out_dir))
+        try:
+            video = publish_dir / "episode.mp4"
+            shutil.move(str(partial), str(video))  # falls back to copy+delete when work and output sit on different volumes.
+            stems = []
+            for stem in stem_paths:
+                dest = publish_dir / Path(stem).name
+                shutil.move(stem, str(dest))
+                stems.append(str(dest))
+        except Exception:
+            shutil.rmtree(publish_dir, ignore_errors=True)
+            raise
 
         session.outputs = {
-            **session.outputs,
+            **old_outputs,
             "video": str(video),
-            "stems": [str(dest) for _, dest in pending_stems],
+            "stems": stems,
             "duration": round(duration, 3),
             "render_key": key,
             "validation": validation,
         }
         session.save()
+
+        # The session now points only at the new render; the old one (if
+        # it's one of our own versioned directories, not a path from before
+        # this layout existed) is unreachable. Drop it, which also clears
+        # out a stem for a person no longer in the edit instead of leaving
+        # it to look current.
+        old_dir = Path(old_outputs["video"]).parent if old_outputs.get("video") else None
+        if old_dir and old_dir != publish_dir and old_dir.parent == out_dir and old_dir.name.startswith("render-"):
+            shutil.rmtree(old_dir, ignore_errors=True)
         # Shots this edit no longer uses would pile up across re-cuts; keep only this render's.
         used = {c.parent for c in chunks}
         for d in shots_dir.iterdir() if shots_dir.exists() else []:
@@ -2505,14 +2662,14 @@ def render_session(
         shutil.rmtree(work, ignore_errors=True)
 
 
-def _validate(video: Path, frames_expected: int, fps: float, warnings: list[str]) -> dict:
+def _validate(video: Path, frames_expected: int, fps: float, warnings: list[str], *, full: bool = False) -> dict:
     """Check the muxed episode against its plan; raises on a broken file, warns on everything else.
 
     A decode error or a picture more than a frame off the plan means the file
     can't be trusted at all. Loudness off target or a held frame still makes
     a usable episode, so those are reported, not fatal.
     """
-    errors = _decode_errors(video)
+    errors = _decode_errors(video, full=full)
     if errors:
         raise RuntimeError(f"The rendered episode doesn't decode cleanly: {errors[:400]}")
     frames_actual = _frame_count(video)

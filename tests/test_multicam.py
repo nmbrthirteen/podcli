@@ -280,6 +280,69 @@ def test_a_stems_failure_does_not_strand_a_video_with_no_outputs_record(episode,
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_a_crash_right_before_publish_never_exposes_a_mix_of_old_and_new_outputs(episode, monkeypatch):
+    """Publishing used to swap the live video into place, then the live stems,
+
+    as two separate renames: a crash between them left the new video sitting
+    next to the old stems. Simulate that same kind of crash right at the one
+    spot that's supposed to make the whole publish atomic, and check the old,
+    complete render is still exactly what the session points at.
+    """
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    mc.update_mapping(session, {"sources": [
+        {"id": s.id, "role": "camera", "person": "nika" if "one" in os.path.basename(s.path) else "ana"}
+        for s in session.sources if s.kind == "video"
+    ]})
+    session = mc.plan_session(mc.sync_session(session))
+
+    first = mc.render_session(session)
+    old_video, old_stems = first["video"], first["stems"]
+    assert os.path.exists(old_video) and all(os.path.exists(s) for s in old_stems)
+    old_mtimes = {p: os.path.getmtime(p) for p in [old_video, *old_stems]}
+
+    session = mc.MulticamSession.load(session.session_id)
+    mc.update_mapping(session, {"look": "warm"})  # forces a different render_key
+
+    monkeypatch.setattr(mc.MulticamSession, "save", lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError, match="boom"):
+        mc.render_session(session)
+
+    # Read the session straight off disk: MulticamSession.load is still patched.
+    on_disk = json.loads((mc._sessions_dir() / f"{session.session_id}.json").read_text())
+    reloaded = type(session)(**{**on_disk,
+                                 "people": [mc.Person(**p) for p in on_disk["people"]],
+                                 "sources": [mc.Source(**s) for s in on_disk["sources"]]})
+    assert reloaded.outputs["video"] == old_video
+    assert reloaded.outputs["stems"] == old_stems
+    # Not just the same paths: the bytes the session record still names must
+    # be literally untouched, not quietly overwritten by the failed render.
+    assert {p: os.path.getmtime(p) for p in [old_video, *old_stems]} == old_mtimes
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_removing_a_person_drops_their_old_stem_from_the_published_outputs(episode):
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    mc.update_mapping(session, {"sources": [
+        {"id": s.id, "role": "camera", "person": "nika" if "one" in os.path.basename(s.path) else "ana"}
+        for s in session.sources if s.kind == "video"
+    ]})
+    session = mc.plan_session(mc.sync_session(session))
+    first = mc.render_session(session)
+    assert len(first["stems"]) == 2
+    old_stems = first["stems"]
+
+    # Ana leaves the edit: her camera and her mic are both ignored.
+    ana_sources = [s for s in session.sources if s.person == "ana"]
+    session = mc.update_mapping(session, {"sources": [{"id": s.id, "role": "ignore"} for s in ana_sources]})
+    session = mc.plan_session(mc.sync_session(session))
+    second = mc.render_session(session)
+
+    assert len(second["stems"]) == 1
+    # Her old stem isn't left behind looking like it's still part of this edit.
+    assert not any(os.path.exists(s) for s in old_stems if "ana" in os.path.basename(s))
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 def test_sync_measures_clock_drift(sandbox):
     folder = sandbox / "drift"
     folder.mkdir()
@@ -306,14 +369,20 @@ def test_sync_review_reasons_flag_a_fit_that_looks_clean_but_isnt():
     good_match = sig.CoarseMatch(lag_seconds=0.0, score=30.0, peak_ratio=0.1)
     assert mc._sync_review_reasons(clean, good_match, overlap_seconds=1200.0) == []
 
-    # Speed was forced back to 1.0, and the full-checkpoint residual (500 ms)
-    # is nothing like the tidy inlier residual (5 ms) the caller would see if
-    # it only looked at residual_ms.
+    # Speed was forced back to 1.0: flagged for that even though the inlier
+    # residual (5 ms) is tidy.
     bad_fallback = sig.ClockFit(offset=0.0, speed=1.0, residual_ms=5.0, checkpoints=2, total_checkpoints=2,
                                  residual_all_ms=500.0, speed_fallback=True)
     reasons = mc._sync_review_reasons(bad_fallback, good_match, overlap_seconds=60.0)
-    assert any("residual" in r for r in reasons)
     assert any("implausible" in r for r in reasons)
+
+    # One checkpoint was a real outlier and got correctly dropped (4 of 5
+    # survive, under the 40% dropped threshold): residual_all_ms is large
+    # only because it still includes that outlier. The fit the sync actually
+    # used is the tidy inlier one, so this must not flag for review.
+    one_outlier_dropped = sig.ClockFit(offset=0.0, speed=1.0, residual_ms=5.0, checkpoints=4, total_checkpoints=5,
+                                        residual_all_ms=500.0, speed_fallback=False)
+    assert mc._sync_review_reasons(one_outlier_dropped, good_match, overlap_seconds=60.0) == []
 
     # Too few checkpoints over a long overlap, and most checkpoints dropped.
     sparse = sig.ClockFit(offset=0.0, speed=1.0, residual_ms=1.0, checkpoints=1, total_checkpoints=6,
@@ -438,6 +507,31 @@ def test_exports_keep_stereo_sides_apart_and_honor_camera_timecode(sandbox):
     assert cam_asset.get("start") == "3600s"
     cam_clips = [c for c in fcp.iter("asset-clip") if c.get("lane") == "1"]
     assert all(Fraction(c.get("start").rstrip("s")) >= 3600 for c in cam_clips)
+
+
+def test_exports_point_a_second_audio_stream_at_the_right_track_not_channel_one(sandbox):
+    """A mic file with one mono stream per mic (a camera's second XLR input, say).
+
+    audio_stream_index picks the stream; the editor timelines must land the
+    mic's track/channel at the position that stream actually sits at in the
+    file, not always at channel 1.
+    """
+    cam = _source("cam.mp4", role="camera", person="host", offset=0.0, duration=40.0)
+    mic = _source("mic.mp4", kind="video", role="mic", person="host", offset=0.0, duration=40.0,
+                  audio_stream_count=2, audio_stream_channels=[1, 1], audio_stream_index=1)
+    session = mc.MulticamSession(session_id="abc123abc905", name="ep", people=[mc.Person("host", "Host")],
+                                 sources=[cam, mic], reference_id="mic",
+                                 cuts=[{"start": 0.0, "end": 40.0, "source_id": "cam"}])
+
+    premiere = ET.parse(mc.export_xml(session, "premiere")).getroot()
+    assert premiere.findtext("./sequence/media/audio/track/clipitem/sourcetrack/trackindex") == "2"
+    mic_file = next(f for f in premiere.iter("file") if f.findtext("name") == "mic.mp4")
+    assert mic_file.findtext("media/audio/channelcount") == "2"
+
+    fcp = ET.parse(mc.export_xml(session, "fcpxml")).getroot()
+    assert {c.get("srcCh") for c in fcp.iter("audio-channel-source")} == {"2"}
+    mic_asset = next(a for a in fcp.iter("asset") if a.get("name") == "mic.mp4")
+    assert mic_asset.get("audioChannels") == "2"
 
 
 # --- podcli multicam ------------------------------------------------------------
@@ -608,6 +702,10 @@ def test_preview_stills_regenerate_after_a_nudge_instead_of_serving_a_stale_fram
     look_after = frames["looks"][cam.id]["natural"]
     assert after != before and os.path.exists(after)
     assert look_after != look_before and os.path.exists(look_after)
+    # The pre-nudge stills aren't left behind: every nudge would otherwise
+    # pile up one more frame and one more look per camera, forever.
+    assert not os.path.exists(before)
+    assert not os.path.exists(look_before)
 
 
 def test_reopening_a_session_with_an_unchanged_camera_keeps_its_sync(episode):
@@ -620,6 +718,77 @@ def test_reopening_a_session_with_an_unchanged_camera_keeps_its_sync(episode):
     assert reopened.session_id == session.session_id
     assert reopened.source(cam.id).synced
     assert reopened.source(cam.id).offset == cam.offset
+
+
+def test_source_changed_on_disk_treats_a_zero_zero_identity_as_unknown(tmp_path):
+    path = tmp_path / "f.mp4"
+    path.write_bytes(b"x")
+    s = _source(str(path), file_size=0, file_mtime_ns=0)
+    assert mc._source_changed_on_disk(s) is False
+
+
+def test_reopening_an_old_shape_session_backfills_identity_without_resetting_sync(episode):
+    """A session saved before file_size/file_mtime_ns existed has both at 0.
+
+    That must read as "no fingerprint recorded yet", not "the file shrank to
+    nothing": reopening it should stamp the real identity in and leave sync,
+    cuts and range exactly as they were.
+    """
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    session = mc.sync_session(session)
+    session = mc.plan_session(session)
+    cuts_before = session.cuts
+    cam = next(s for s in session.sources if os.path.basename(s.path) == "cam_one.mp4")
+    offset_before = cam.offset
+    assert cuts_before and cam.synced
+
+    # Simulate the old session shape directly on disk, as if saved before
+    # file identity was tracked.
+    for s in session.sources:
+        s.file_size = s.file_mtime_ns = 0
+    session.save()
+
+    reopened = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    assert reopened.cuts == cuts_before
+    fresh = reopened.source(cam.id)
+    assert fresh.synced and fresh.offset == offset_before
+    assert fresh.file_size != 0 and fresh.file_mtime_ns != 0
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_refresh_stale_sources_copies_every_probe_field_and_resets_its_tiles(sandbox):
+    """Re-probing a replaced file used to only copy duration/size/fps.
+
+    A call recording that gained a second audio stream, or lost the one a
+    tile's audio_stream_index pointed at, kept the stale stream count and an
+    out-of-range index; a pane cropped out of it kept showing as synced
+    because nothing told the virtual camera built from it to refresh too.
+    """
+    path = sandbox / "call.mp4"
+    _ffmpeg("-f", "lavfi", "-i", "color=s=160x90:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+            "-map", "0:v", "-map", "1:a", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+            str(path))
+    src = mc.probe_source(str(path))
+    assert src.audio_stream_count == 1
+    src.role, src.person, src.offset, src.audio_stream_index = "camera", "host", 0.0, 0
+    pane = _source(str(path), role="camera", person="pane1", parent=src.id, crop=[0.0, 0.0, 0.5, 1.0],
+                   offset=5.0, duration=2.0, sync={"status": "ok"})
+    session = mc.MulticamSession(session_id="abc123abc906", name="ep",
+                                 people=[mc.Person("host", "Host")], sources=[src, pane])
+
+    # Re-export with a second audio stream: same path, new bytes.
+    _ffmpeg("-f", "lavfi", "-i", "color=s=160x90:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+            "-f", "lavfi", "-i", "sine=f=440:r=48000:d=2", "-map", "0:v", "-map", "1:a", "-map", "2:a",
+            "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-y", str(path))
+
+    assert mc.refresh_stale_sources(session)
+    assert src.audio_stream_count == 2
+    assert src.audio_stream_channels == [1, 1]
+    assert src.audio_stream_index == 0  # still in range, so left alone
+    assert src.offset is None and src.sync["status"] == "failed"
+    # The pane cropped from it is no longer synced either, not left showing stale.
+    assert pane.offset is None and pane.sync["status"] == "failed"
+    assert pane.sync == src.sync
 
 
 def test_reopening_a_session_detects_a_camera_replaced_on_disk(episode):
@@ -642,6 +811,33 @@ def test_reopening_a_session_detects_a_camera_replaced_on_disk(episode):
     assert not fresh.synced
     assert fresh.sync["status"] == "failed"
     assert reopened.cuts == []
+
+
+def test_loading_by_session_id_also_catches_a_camera_replaced_on_disk(episode, monkeypatch):
+    """The MCP tool and the CLI jump straight to a known session id instead of
+
+    reopening by folder, so they used to skip the stale-file check entirely:
+    a camera swapped out underneath an open session kept its old sync and cut.
+    """
+    import main as backend
+
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    session = mc.sync_session(session)
+    session = mc.plan_session(session)
+    cam_path = episode / "cam_one.mp4"
+    cam = next(s for s in session.sources if os.path.basename(s.path) == "cam_one.mp4")
+    assert cam.synced and session.cuts
+
+    _ffmpeg("-f", "lavfi", "-i", "color=c=yellow:s=160x90:r=30:d=40", "-i", str(episode.parent / "one.wav"),
+            "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-y", str(cam_path))
+
+    sent = []
+    monkeypatch.setattr(backend, "emit_result", lambda task, status, data=None, error=None: sent.append((status, data, error)))
+    backend.handle_manage_multicam("t", {"action": "show", "session_id": session.session_id})
+    assert sent[0][0] == "success", sent
+    fresh = next(s for s in sent[0][1]["sources"] if s["id"] == cam.id)
+    assert fresh["sync"]["status"] == "failed"
+    assert sent[0][1]["cuts"] == []
 
 
 def test_last_person_is_the_guest_and_roles_survive_renames(episode):
@@ -1114,6 +1310,15 @@ def test_timecode_seconds_handles_ntsc_pulldown_and_drop_frame(fps, tc, expected
     assert mc._timecode_seconds(info, fps, 48000) == pytest.approx(expected, abs=1e-6)
 
 
+def test_timecode_seconds_accepts_a_dot_separator_as_non_drop():
+    # Some cameras and field recorders write the non-drop separator as '.'
+    # instead of ':'. It must parse the same as the all-':' form, not read 0.0.
+    info_dot = {"format": {"tags": {"timecode": "01.00.00.10"}}}
+    info_colon = {"format": {"tags": {"timecode": "01:00:00:10"}}}
+    assert mc._timecode_seconds(info_dot, 25.0, 48000) == pytest.approx(3600 + 10 / 25, abs=1e-6)
+    assert mc._timecode_seconds(info_dot, 25.0, 48000) == mc._timecode_seconds(info_colon, 25.0, 48000)
+
+
 def test_timecode_seconds_falls_back_to_time_reference_without_embedded_timecode():
     info = {"format": {"tags": {"time_reference": "48000"}}}
     assert mc._timecode_seconds(info, 29.97, 48000) == pytest.approx(1.0, abs=1e-6)
@@ -1125,6 +1330,20 @@ def _fake_probe(tmp_path, monkeypatch, video_stream):
     info = {"format": {"duration": "10.0", "tags": {}}, "streams": [{"codec_type": "video", **video_stream}]}
     monkeypatch.setattr(mc, "get_video_info", lambda p: info)
     return mc.probe_source(str(path))
+
+
+def test_timecode_pulldown_is_decided_from_r_frame_rate_not_the_noisy_average(tmp_path, monkeypatch):
+    """A steady 25 fps camera's avg_frame_rate can measure 24.98 by noise alone.
+
+    Deciding pulldown from that average instead of the stream's exact
+    r_frame_rate would misread a plain 25 fps file as NTSC and shift its
+    embedded start timecode by seconds.
+    """
+    src = _fake_probe(tmp_path, monkeypatch, {
+        "avg_frame_rate": "2498/100", "r_frame_rate": "25/1",
+        "tags": {"timecode": "01:00:00:10"},
+    })
+    assert src.timecode == pytest.approx(3600 + 10 / 25, abs=1e-6)
 
 
 def test_probe_source_counts_multiple_audio_streams(tmp_path, monkeypatch):
@@ -1173,6 +1392,28 @@ def test_extract_reads_the_selected_audio_stream_not_always_the_first(sandbox):
     src.audio_stream_index = 1
     tone = mc._read_wav(mc._extract(src, sandbox / "stream1.wav"))
     assert np.abs(tone).mean() > 1000  # stream 1 is a 440 Hz tone
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_mix_and_stems_honor_audio_stream_index_not_always_the_first_stream(sandbox):
+    path = sandbox / "two_streams.mp4"
+    _ffmpeg("-f", "lavfi", "-i", "color=s=160x90:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+            "-f", "lavfi", "-i", "sine=f=440:r=48000:d=2",
+            "-map", "0:v", "-map", "1:a", "-map", "2:a", "-shortest",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path))
+    mic = _source(str(path), kind="video", role="mic", person="host", offset=0.0, duration=2.0,
+                  audio_stream_count=2, audio_stream_channels=[1, 1], audio_stream_index=1)
+
+    mix = sandbox / "mix.wav"
+    mc._write_mix(mc.MulticamSession(session_id="abc123abc903", name="ep", sources=[mic]),
+                  mix, 0.0, 2.0, encode=("-ac", "1", "-c:a", "pcm_s16le"), feeds=[(mic, -1)])
+    assert np.abs(mc._read_wav(mix)).mean() > 1000  # the tone on stream 1, not the silence on stream 0
+
+    session = mc.MulticamSession(session_id="abc123abc904", name="ep", people=[mc.Person("host", "Host")],
+                                 sources=[mic])
+    stems = mc._render_stems(session, sandbox, 0.0, 2.0)
+    assert len(stems) == 1
+    assert np.abs(_read_f32(stems[0])).mean() > 0.05
 
 
 def test_probe_source_warns_on_variable_frame_rate(tmp_path, monkeypatch):
@@ -1329,8 +1570,8 @@ def test_render_warns_when_a_camera_runs_out_or_the_mix_is_short(sandbox, monkey
 
     real_audio = mc._render_audio
 
-    def short_audio(session, out, start, duration):
-        return real_audio(session, out, start, duration - 1.0)
+    def short_audio(session, out, start, duration, splice=None):
+        return real_audio(session, out, start, duration - 1.0, splice)
 
     monkeypatch.setattr(mc, "_render_audio", short_audio)
     outputs = mc.render_session(session, stems=False)
@@ -1345,7 +1586,7 @@ def test_render_warns_when_a_camera_runs_out_or_the_mix_is_short(sandbox, monkey
 def test_render_fails_on_decode_errors_or_a_wrong_frame_count(episode, monkeypatch):
     session = _planned(episode)
     out_dir = mc._output_dir(session)
-    monkeypatch.setattr(mc, "_decode_errors", lambda path: "Invalid NAL unit size")
+    monkeypatch.setattr(mc, "_decode_errors", lambda path, **k: "Invalid NAL unit size")
     with pytest.raises(RuntimeError, match="decode"):
         mc.render_session(session)
     assert not (out_dir / "episode.mp4").exists()
@@ -1356,6 +1597,34 @@ def test_render_fails_on_decode_errors_or_a_wrong_frame_count(episode, monkeypat
     with pytest.raises(RuntimeError, match="frames"):
         mc.render_session(session)
     assert not (out_dir / "episode.mp4").exists()
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_decode_check_samples_a_few_short_spans_by_default_not_the_whole_file(episode, monkeypatch):
+    """A full decode of a finished episode costs minutes per hour of 1080p.
+
+    The default check must still pass a clean file, but it must do it by
+    decoding a handful of short, bounded spans, not the whole thing; asking
+    for validate="full" is the only way to get the exhaustive decode.
+    """
+    video = mc.render_session(_planned(episode), stems=False)["video"]
+    calls = []
+    real_run = mc.proc_run
+
+    def recording_run(cmd, **k):
+        calls.append(cmd)
+        return real_run(cmd, **k)
+
+    monkeypatch.setattr(mc, "proc_run", recording_run)
+    assert mc._decode_errors(video) == ""
+    decodes = [c for c in calls if c[0] == "ffmpeg"]
+    assert decodes and all("-t" in c for c in decodes), "every sampled decode must be bounded to a short span"
+    assert len(decodes) <= 5
+
+    calls.clear()
+    assert mc._decode_errors(video, full=True) == ""
+    decodes = [c for c in calls if c[0] == "ffmpeg"]
+    assert len(decodes) == 1 and "-t" not in decodes[0], "a full decode has no time bound"
 
 
 # --- audio chain --------------------------------------------------------------------
@@ -1431,6 +1700,31 @@ def test_two_pass_mix_hits_the_target_and_the_stems_sum_to_it(episode, monkeypat
     assert v["lufs"] == pytest.approx(mc.LOUDNESS_TARGET, abs=1.0)
     assert v["true_peak"] <= mc.TRUE_PEAK_CEILING + 0.5
     assert v["warnings"] == []
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_loudness_gain_is_measured_on_the_kept_audio_not_the_removed_stretch(sandbox):
+    """A removed stretch (a retake, a long silence) shouldn't pull the
+
+    target gain around: it never airs. Measuring it on the whole premix
+    instead of what the splice keeps asks for the wrong gain for the
+    episode anyone actually hears.
+    """
+    kept = _speech(10, 21)
+    # A removed stretch, loud enough to drag a whole-file measurement's
+    # target gain down well below what the kept 10 s alone would ask for.
+    loud_removed = 8.0 * _speech(5, 22)
+    _write_wav(sandbox / "mic.wav", np.concatenate([kept, loud_removed]))
+    mic = _source(str(sandbox / "mic.wav"), kind="audio", role="mic", offset=0.0, duration=15.0)
+    session = mc.MulticamSession(session_id="abc123abc907", name="ep", sources=[mic])
+
+    gain_whole = mc._render_audio(session, sandbox / "whole.wav", 0.0, 15.0)
+    gain_kept = mc._render_audio(session, sandbox / "kept.wav", 0.0, 15.0, splice=[(0.0, 10.0)])
+    assert gain_kept != pytest.approx(gain_whole, abs=0.5)
+
+    lufs_kept, _ = mc._loudness(sandbox / "kept.wav")
+    assert lufs_kept == pytest.approx(mc.LOUDNESS_TARGET, abs=0.5)
+    assert mc._media_duration(sandbox / "kept.wav") == pytest.approx(10.0, abs=0.05)
 
 
 # --- manual drift anchors -------------------------------------------------------------
@@ -1552,6 +1846,47 @@ def test_input_lut_colors_renders_stills_and_looks_and_exports_hand_it_off(episo
     luts = {c["source_id"]: c["input_lut"] for c in handoff["cameras"]}
     assert luts[red.id] == str(lut)
     assert all(v is None for k, v in luts.items() if k != red.id)
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_previews_only_renders_looks_for_cameras_actually_used_in_the_cut(episode):
+    """Four look stills per camera is wasted work for a camera that's mapped
+
+    but never actually appears in the cut (an alternate angle left in,
+    say). Once a cut exists, only cameras it actually uses should get them.
+    """
+    session = _planned(episode)
+    cam_one = next(s for s in session.sources if s.path.endswith("cam_one.mp4"))
+    cam_two = next(s for s in session.sources if s.path.endswith("cam_two.mp4"))
+    mc.set_cuts(session, [{"start": session.cuts[0]["start"], "end": session.cuts[-1]["end"],
+                           "source_id": cam_one.id}])
+
+    stills = mc.previews(session, looks=True)
+    assert cam_one.id in stills["looks"]
+    assert cam_two.id not in stills["looks"]
+
+
+def test_a_lut_deleted_after_mapping_fails_fast_and_names_the_camera(episode):
+    """A LUT picked at map time can later be moved or deleted on disk.
+
+    Without an upfront check, ffmpeg's own error about the missing file
+    surfaces from deep inside a shot or a still render, with nothing saying
+    which camera's LUT broke.
+    """
+    session = _planned(episode)
+    red = next(s for s in session.sources if s.path.endswith("cam_one.mp4"))
+    lut = _cube(episode.parent / "luts" / "invert.cube")
+    mc.update_mapping(session, {"sources": [{"id": red.id, "input_lut": str(lut)}]})
+
+    os.remove(lut)
+
+    with pytest.raises(ValueError, match="cam_one.mp4") as render_exc:
+        mc.render_session(session, stems=False)
+    assert "missing" in str(render_exc.value).lower()
+
+    with pytest.raises(ValueError, match="cam_one.mp4") as preview_exc:
+        mc.previews(session)
+    assert "missing" in str(preview_exc.value).lower()
 
 
 def test_lut_is_refused_on_a_mic(sandbox):

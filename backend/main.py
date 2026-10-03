@@ -1085,7 +1085,7 @@ def handle_manage_multicam(task_id: str, params: dict):
             emit_result(task_id, "success", data={"deleted": True, "session_id": session_id})
             return
 
-        session = mc.MulticamSession.load(session_id)
+        session = mc.open_session(session_id)
         if action == "render" and any(k in params for k in MULTICAM_MAP_KEYS if k != "look"):
             # A mapping change can drop the cut, and a render needs one: map, then plan, then render.
             raise ValueError("render takes only look and stems. Change the mapping with 'map', then 'plan' again.")
@@ -1115,7 +1115,10 @@ def handle_manage_multicam(task_id: str, params: dict):
             stems = params.get("stems", True)
             if not isinstance(stems, bool):
                 raise ValueError("stems is true or false")
-            mc.render_session(session, stems=stems, progress_callback=progress("rendering"))
+            validate = params.get("validate", "sample")
+            if validate not in ("sample", "full"):
+                raise ValueError("validate must be 'sample' or 'full'")
+            mc.render_session(session, stems=stems, validate=validate, progress_callback=progress("rendering"))
         elif action == "export":
             data["export_path"] = mc.export_xml(session, params.get("format", "premiere"), review=bool(params.get("review")))
         elif action == "import_timeline":

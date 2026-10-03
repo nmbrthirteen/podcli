@@ -45,6 +45,25 @@ def _text(parent: ET.Element, tag: str, value) -> ET.Element:
     return el
 
 
+def _total_audio_channels(source) -> int:
+    """Every channel in the file, across all of its audio streams.
+
+    A camera that carries one mono stream per mic exposes each as its own
+    audio_stream_channels entry; an editor addresses them as consecutive
+    track/channel numbers across the whole file, not per stream.
+    """
+    return sum(source.audio_stream_channels) or max(1, source.audio_channels)
+
+
+def _stream_channel_offset(source) -> int:
+    """How many channels sit before the chosen audio_stream_index in the file.
+
+    Lets a track/channel index built from `channel` alone (0-based within the
+    selected stream) land on the right stream instead of always the first.
+    """
+    return sum(source.audio_stream_channels[:source.audio_stream_index])
+
+
 def _pieces(source, plan, fps: float) -> list[tuple[int, int, float, dict | None]]:
     """(output_frame_in, output_frame_out, source_seconds_at_in, removal) for one file across the episode.
 
@@ -201,7 +220,7 @@ def write_xmeml(session, out_path: Path, *, width: int, height: int, fps: float,
             _text(sc, "height", source.height)
         if source.has_audio:
             a = ET.SubElement(fm, "audio")
-            _text(a, "channelcount", max(1, source.audio_channels))
+            _text(a, "channelcount", _total_audio_channels(source))
 
     def clipitem(track: ET.Element, source, f0: int, f1: int, src_seconds: float,
                  *, name: str, audio_channel: int | None = None, removal: dict | None = None) -> None:
@@ -220,7 +239,7 @@ def write_xmeml(session, out_path: Path, *, width: int, height: int, fps: float,
         if audio_channel is not None:
             st = ET.SubElement(item, "sourcetrack")
             _text(st, "mediatype", "audio")
-            _text(st, "trackindex", max(1, audio_channel + 1))
+            _text(st, "trackindex", _stream_channel_offset(source) + max(0, audio_channel) + 1)
         elif (scale := _fit_scale(source, width, height)) is not None:
             _basic_motion(item, scale)
         if removal is not None:
@@ -305,7 +324,7 @@ def write_fcpxml(session, out_path: Path, *, width: int, height: int, fps: float
                 format_id=formats[key],
                 has_video=True,
                 has_audio=source.has_audio,
-                audio_channels=source.audio_channels,
+                audio_channels=_total_audio_channels(source),
                 start=src_t(source, 0.0),
             ))
         else:
@@ -317,7 +336,7 @@ def write_fcpxml(session, out_path: Path, *, width: int, height: int, fps: float
                 "hasVideo": "0",
                 "hasAudio": "1",
                 "audioSources": "1",
-                "audioChannels": str(max(1, source.audio_channels)),
+                "audioChannels": str(_total_audio_channels(source)),
                 "audioRate": "48000",
             })
             ET.SubElement(asset, "media-rep", {"kind": "original-media", "src": fx.file_uri(Path(source.path))})
@@ -383,7 +402,10 @@ def write_fcpxml(session, out_path: Path, *, width: int, height: int, fps: float
                 "audioRole": "dialogue",
                 "srcEnable": "audio",
             })
-            if channel >= 0:
-                ET.SubElement(clip, "audio-channel-source", {"srcCh": str(channel + 1), "role": "dialogue"})
+            offset = _stream_channel_offset(source)
+            if channel >= 0 or offset:
+                ET.SubElement(clip, "audio-channel-source", {
+                    "srcCh": str(offset + max(0, channel) + 1), "role": "dialogue",
+                })
 
     fx.write_fcpxml(out_path, resources, library)
