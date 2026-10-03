@@ -87,6 +87,18 @@ jobs:
       - run: node scripts/gen-docs-manifest.mjs
       - run: node scripts/check-docs-drift.mjs
 
+  release-hygiene:
+    name: Release hygiene check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+      - run: node scripts/release-hygiene.mjs
+
   python:
     name: Python tests
     runs-on: ${{ matrix.os }}
@@ -102,6 +114,17 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
+      - name: Install ffmpeg
+        # Without this, every test that shells out to ffmpeg/ffprobe skips —
+        # about 22 tests were silently not running on any OS.
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg ;;
+            macOS)   brew install --quiet ffmpeg ;;
+            Windows) choco install ffmpeg -y --no-progress ;;
+          esac
+          ffmpeg -version | head -1
       - name: Install minimal test deps
         # Skip whisper/torch — tests don't exercise them and they balloon CI time.
         run: |

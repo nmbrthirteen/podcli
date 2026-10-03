@@ -412,13 +412,19 @@ class AICliDiscoveryTests(unittest.TestCase):
             self.assertEqual(found, cli)
 
     def test_find_cli_falls_back_to_shell_lookup(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as home:
             cli = os.path.join(tmp, "claude")
             with open(cli, "w", encoding="utf-8") as fh:
                 fh.write("#!/bin/sh\n")
-            with mock.patch.object(ai, "_shell_lookup", return_value=cli):
-                with mock.patch("shutil.which", return_value=None):
-                    found = ai._find_cli("claude", [])
+            # Without redirecting HOME, _find_cli's fixed lookup dirs (e.g.
+            # ~/.local/bin) hit the real filesystem — on a machine with an
+            # actual claude CLI installed there, it wins before shell lookup
+            # ever runs, and this test passes for the wrong reason.
+            with mock.patch.dict(os.environ, {"HOME": home, "PATH": ""}, clear=False):
+                with mock.patch("os.path.expanduser", side_effect=lambda p: p.replace("~", home)):
+                    with mock.patch.object(ai, "_shell_lookup", return_value=cli):
+                        with mock.patch("shutil.which", return_value=None):
+                            found = ai._find_cli("claude", [])
             self.assertEqual(found, cli)
 
     def test_get_ai_cli_status_reports_candidates(self):
