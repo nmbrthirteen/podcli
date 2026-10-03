@@ -10,6 +10,7 @@ import {
   resolveAssetName,
   formatTranscriptText,
   safeUpper,
+  describePeople,
 } from "./lib";
 
 describe("fmt", () => {
@@ -230,5 +231,21 @@ describe("safeUpper", () => {
 
   it("passes through empty strings", () => {
     expect(safeUpper("")).toBe("");
+  });
+});
+
+describe("describePeople", () => {
+  it("names each person and the second their face came from", () => {
+    expect(describePeople([
+      { side: "left", role: "guest", from: "seats", source_time: 72 },
+      { side: "right", role: "host", from: "seats", source_time: 9 },
+    ])).toBe("guest at 1:12, host at 0:09");
+  });
+
+  it("falls back to the side when the role is unknown and skips a missing time", () => {
+    expect(describePeople([
+      { side: "left", role: null, from: "image", source_time: null },
+      { side: "right", role: null, from: "seats", source_time: 3 },
+    ])).toBe("left person, right person at 0:03");
   });
 });

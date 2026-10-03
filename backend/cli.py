@@ -124,16 +124,20 @@ def _json_object_arg(raw: str | None, name: str):
     return parsed
 
 
-def _cached_face_map(video_path: str):
-    """Face maps are keyed by video content, not by transcript, so an imported
-    transcript can still borrow the map from an earlier run on the same file."""
+def _cached_transcript(video_path: str) -> dict:
+    """The cached transcript for this video, or {} when there is none."""
     try:
         from services.transcript_packer import load_cached_transcript_for_video
 
-        cached = load_cached_transcript_for_video(video_path)
+        return load_cached_transcript_for_video(video_path) or {}
     except Exception:
-        return None
-    return (cached or {}).get("face_map")
+        return {}
+
+
+def _cached_face_map(video_path: str):
+    """Face maps are keyed by video content, not by transcript, so an imported
+    transcript can still borrow the map from an earlier run on the same file."""
+    return _cached_transcript(video_path).get("face_map")
 
 
 def _suggestions_session_path(cache_hash: str) -> str:
@@ -1672,7 +1676,7 @@ def cmd_process(args):
     _thumb_photo = None
     if _thumb_enabled:
         try:
-            from services.thumbnail_ai import generate_variations as _tv, thumbnail_to_video_frame as _ttv
+            from services.thumbnail_ai import render_variations as _tv, thumbnail_to_video_frame as _ttv
             _thumb_gen = _tv
             _thumb_to_video = _ttv
             _thumb_logo = config.get("logo_path") or None
@@ -1746,7 +1750,7 @@ def cmd_process(args):
                         output_path=os.path.join(clip_thumb_dir, "_lead_frame.jpg"),
                         start_second=result.get("start_second", clip.get("start_second", 0)),
                     )
-                    thumb_paths = _thumb_gen(
+                    rendered_thumbs = _thumb_gen(
                         title=clip.get("title", f"Clip {i+1}"),
                         output_dir=clip_thumb_dir,
                         photo_path=lead_frame or _thumb_photo,
@@ -1755,7 +1759,14 @@ def cmd_process(args):
                         end_second=result.get("end_second", clip.get("end_second")),
                         logo_path=_thumb_logo,
                         config=_thumb_style,
+                        grounding=_clip_grounding(clip),
+                        face_map=face_map,
+                        segments=segments,
                     )
+                    thumb_paths = rendered_thumbs["paths"]
+                    _pair = rendered_thumbs["pair"]
+                    if _pair and _pair["layout"] != "pair":
+                        print(f"                 ℹ {_pair['reason']}")
                     if thumb_paths and _thumb_placement == "off":
                         print(f"                 + {len(thumb_paths)} thumbnail(s) in "
                               f"{os.path.basename(clip_thumb_dir)}/")
@@ -3157,6 +3168,12 @@ def cmd_thumbnail_config(args):
     raise ValueError(f"unknown thumbnail-config action: {action}")
 
 
+def _clip_grounding(clip: dict) -> dict | None:
+    """A suggestion's payoff, question and opening line, for grounding thumbnail copy."""
+    grounding = {k: clip.get(k) for k in ("payoff", "context_line", "preview_text")}
+    return grounding if any(grounding.values()) else None
+
+
 def _grounding_from_args(args) -> dict | None:
     """Collect the clip's payoff/question/opening-line CLI flags into the dict
     thumbnail_ai expects, or None if the caller passed none of them (e.g. a
@@ -3219,35 +3236,80 @@ def _check_frame(path):
         sys.exit(1)
 
 
+def _pair_from_args(args, output_dir: str) -> dict | None:
+    """The two-person panels the thumbnail flags ask for, or None for one face.
+
+    The template's own layout applies when --layout is not given. Speaker
+    turns and the face map come from the cached transcript of --video.
+    """
+    from services.thumbnail_ai import _load_brand_config, resolve_pair
+
+    video = getattr(args, "video", None)
+    cached = _cached_transcript(video) if video else {}
+    try:
+        return resolve_pair(
+            _load_brand_config(), output_dir, video,
+            getattr(args, "start", None), getattr(args, "end", None),
+            layout=getattr(args, "layout", None),
+            left_image=getattr(args, "left_image", None),
+            right_image=getattr(args, "right_image", None),
+            swap=bool(getattr(args, "swap", False)),
+            face_map=cached.get("face_map"), segments=cached.get("segments"),
+        )
+    except ValueError as err:
+        print(f"thumbnail failed: {err}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _layout_report(pair: dict | None) -> dict:
+    """What a thumbnail result says about its layout: which people, from which source seconds."""
+    if not pair:
+        return {"layout": "single"}
+    if pair["layout"] != "pair":
+        return {"layout": "single", "note": pair["reason"]}
+    return {"layout": "pair", "roles": pair["roles"], "swapped": pair["swapped"], "people": pair["people"]}
+
+
 def cmd_thumbnail_render(args):
     """Render one final thumbnail from a chosen frame + headline.
 
     Empty line1/line2 let the AI write the text; a chosen frame is used as-is.
+    With the pair layout the two people come from --video between --start and
+    --end, or from --left-image and --right-image, and the frame is the
+    fallback when two people cannot be told apart.
     """
     from services.thumbnail_ai import generate_thumbnail_with_template
     from services.asset_store import resolve_logo
 
-    _check_frame(args.frame)
-    frame_info = json.loads(args.frame_info) if args.frame_info else None
+    pair = _pair_from_args(args, os.path.dirname(os.path.abspath(args.output)))
+    people = pair["people"] if pair and pair["layout"] == "pair" else None
+    if not people:
+        if not args.frame:
+            reason = f" {pair['reason']}" if pair else ""
+            print(f"thumbnail render failed: no frame to fall back on.{reason}", file=sys.stderr)
+            sys.exit(1)
+        _check_frame(args.frame)
+    frame_info = json.loads(args.frame_info) if args.frame_info and not people else None
     out = generate_thumbnail_with_template(
         title=args.title,
-        frame_path=args.frame,
+        frame_path=None if people else args.frame,
         output_path=args.output,
         logo_path=resolve_logo(args.logo) if args.logo else None,
         frame_info=frame_info,
         line1_override=args.line1 or None,
         line2_override=args.line2 or None,
         grounding=_grounding_from_args(args),
+        people=people,
     )
     if not out:
         print("thumbnail render failed", file=sys.stderr)
         sys.exit(1)
-    print(json.dumps({"path": out}))
+    print(json.dumps({"path": out, **_layout_report(pair)}))
 
 
 def cmd_thumbnails(args):
     """Generate thumbnail variations for a title."""
-    from services.thumbnail_ai import generate_variations
+    from services.thumbnail_ai import render_variations
     from services.asset_store import resolve as resolve_asset, resolve_logo
 
     accent = "\033[38;2;212;135;74m"
@@ -3291,23 +3353,41 @@ def cmd_thumbnails(args):
         print(f"\n  {bold}Generating {args.variations} thumbnail variations...{reset}")
         print(f"  Title: {accent}{args.title}{reset}")
 
-    paths = generate_variations(
-        title=args.title,
-        output_dir=args.output,
-        photo_path=photo,
-        video_path=video,
-        start_second=getattr(args, "start", None),
-        end_second=getattr(args, "end", None),
-        logo_path=logo,
-        config={"variations": args.variations},
-        line1=getattr(args, "line1", None),
-        line2=getattr(args, "line2", None),
-    )
+    cached = _cached_transcript(video) if video else {}
+    try:
+        rendered = render_variations(
+            title=args.title,
+            output_dir=args.output,
+            photo_path=photo,
+            video_path=video,
+            start_second=getattr(args, "start", None),
+            end_second=getattr(args, "end", None),
+            logo_path=logo,
+            config={"variations": args.variations},
+            line1=getattr(args, "line1", None),
+            line2=getattr(args, "line2", None),
+            layout=getattr(args, "layout", None),
+            left_image=getattr(args, "left_image", None),
+            right_image=getattr(args, "right_image", None),
+            swap=bool(getattr(args, "swap", False)),
+            face_map=cached.get("face_map"),
+            segments=cached.get("segments"),
+        )
+    except ValueError as err:
+        print(f"  {red}✗{reset} {err}", file=sys.stderr)
+        sys.exit(1)
+    paths = rendered["paths"]
+    report = _layout_report(rendered["pair"])
 
     if as_json:
-        print(json.dumps({"paths": paths}))
+        print(json.dumps({"paths": paths, **report}))
         return
 
+    if report.get("note"):
+        print(f"  {gray}{report['note']}{reset}")
+    for person in report.get("people", []):
+        when = f" at {person['source_time']:.1f}s" if person.get("source_time") is not None else ""
+        print(f"  {gray}{person['side'].capitalize()}: {person.get('role') or 'person'}{when}{reset}")
     for p in paths:
         print(f"  {green}✓{reset} {p}")
     print(f"\n  {gray}Open the folder to preview and pick the best one.{reset}\n")
@@ -4894,6 +4974,15 @@ def _first_run_setup() -> bool:
     return True
 
 
+def _add_pair_args(parser) -> None:
+    parser.add_argument("--layout", choices=["single", "pair"],
+                        help="single: one face. pair: the guest left and the host right, from the clip's "
+                             "footage. Defaults to the template's layout")
+    parser.add_argument("--left-image", dest="left_image", help="Image of the person on the left (pair layout)")
+    parser.add_argument("--right-image", dest="right_image", help="Image of the person on the right (pair layout)")
+    parser.add_argument("--swap", action="store_true", help="Swap the two people's sides (pair layout)")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="podcli",
@@ -5254,6 +5343,7 @@ def main():
     thumb.add_argument("--line1", help="Explicit first thumbnail line (skips AI rewrite)")
     thumb.add_argument("--line2", help="Explicit second thumbnail line")
     thumb.add_argument("--json", action="store_true", help="Emit JSON {paths:[...]} to stdout")
+    _add_pair_args(thumb)
 
     # ── thumbnail-config ──
     tcfg = sub.add_parser("thumbnail-config", help="Show, export, import, or reset the thumbnail template")
@@ -5281,7 +5371,12 @@ def main():
     # ── thumbnail-render (one final thumbnail from a chosen frame + headline) ──
     trnd = sub.add_parser("thumbnail-render", help="Render one thumbnail PNG from a chosen frame + headline")
     trnd.add_argument("title", help="Clip/episode title")
-    trnd.add_argument("--frame", required=True, help="Background frame image path")
+    trnd.add_argument("--frame", help="Background frame image path. Optional with the pair layout, "
+                                      "where it is the fallback when two people cannot be told apart")
+    trnd.add_argument("--video", help="Source video the pair layout takes both people from")
+    trnd.add_argument("--start", type=float, help="Clip start in --video (seconds)")
+    trnd.add_argument("--end", type=float, help="Clip end in --video (seconds)")
+    _add_pair_args(trnd)
     trnd.add_argument("-o", "--output", required=True, help="Destination PNG path")
     trnd.add_argument("--line1", help="Headline line 1 (empty = AI writes it)")
     trnd.add_argument("--line2", help="Headline line 2 (empty = AI writes it)")

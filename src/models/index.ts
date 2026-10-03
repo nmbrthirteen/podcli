@@ -1,6 +1,8 @@
 import type { ClipHook } from "../utils/clip-hook.js";
+import type { ThumbnailLayout, ThumbnailPerson } from "../utils/thumbnail-layout.js";
 
 export type { ClipHook, HookMode } from "../utils/clip-hook.js";
+export type { ThumbnailLayout, ThumbnailPerson } from "../utils/thumbnail-layout.js";
 
 // === Task Communication Models ===
 
@@ -347,6 +349,8 @@ export interface ClipThumbnailConfig {
   preview_path?: string; // chosen thumbnail PNG
   variations?: string[]; // all generated thumbnail PNGs to pick from
   card_seconds?: number; // duration of the thumbnail card baked into the clip start
+  layout?: ThumbnailLayout; // the layout the chosen thumbnail was drawn with
+  people?: ThumbnailPerson[]; // pair layout only: who sits on each side
 }
 
 export interface ClipHistoryEntry {

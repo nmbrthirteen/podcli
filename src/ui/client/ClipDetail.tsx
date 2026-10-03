@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PageHeader } from "./Page";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { api, upload, fmt, basename, labelStyle } from "./lib";
+import { api, upload, fmt, basename, labelStyle, describePeople } from "./lib";
+import { needsFrame, type ThumbnailLayout, type ThumbnailPerson } from "../../utils/thumbnail-layout";
 import ClipPlayer from "./ClipPlayer";
 import { BackIcon } from "./icons";
 import ReframeEditor from "./ReframeEditor";
@@ -16,6 +17,8 @@ interface ThumbnailConfig {
   timestamp?: number;
   preview_path?: string;
   variations?: string[];
+  layout?: ThumbnailLayout;
+  people?: ThumbnailPerson[];
 }
 
 interface Clip {
@@ -62,6 +65,8 @@ export default function ClipDetail() {
   const [frameOpts, setFrameOpts] = useState<any[]>([]);
   const [frameIdx, setFrameIdx] = useState(0);
   const [selFrame, setSelFrame] = useState<{ path: string; info?: any } | null>(null);
+  const [thumbLayout, setThumbLayout] = useState<ThumbnailLayout>("single");
+  const [swapSides, setSwapSides] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [msgErr, setMsgErr] = useState(false);
@@ -86,6 +91,7 @@ export default function ClipDetail() {
           const tc = found.thumbnail_config || {};
           setLine1(tc.line1 ?? "");
           setLine2(tc.line2 ?? "");
+          setThumbLayout(tc.layout ?? "single");
         }
       })
       .finally(() => setLoading(false));
@@ -139,17 +145,24 @@ export default function ClipDetail() {
     } catch (e: any) { setMsg(`Upload failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
+  const pairLayout = thumbLayout === "pair";
+
   const renderThumb = async () => {
-    if (!selFrame) { setMsg("Select or upload a frame first"); setMsgErr(true); return; }
+    if (!selFrame && needsFrame(thumbLayout)) { setMsg("Select or upload a frame first"); setMsgErr(true); return; }
     setBusy("render"); setMsg(null); setMsgErr(false);
     try {
       const r = await api(`/clips/${clip.id}/thumbnail/render`, {
         method: "POST",
-        body: JSON.stringify({ line1: line1 || undefined, line2: line2 || undefined, frame_path: selFrame.path, frame_info: selFrame.info }),
+        body: JSON.stringify({
+          line1: line1 || undefined, line2: line2 || undefined,
+          frame_path: selFrame?.path, frame_info: selFrame?.info,
+          layout: thumbLayout, swap: pairLayout && swapSides,
+        }),
       });
       if (r.error) throw new Error(r.error);
       setBust(Date.now()); load();
-      setMsg("Thumbnail generated"); setMsgErr(false);
+      if (r.note) { setMsg(r.note); setMsgErr(true); }
+      else { setMsg(r.people?.length ? `Thumbnail generated: ${describePeople(r.people)}` : "Thumbnail generated"); setMsgErr(false); }
     } catch (e: any) { setMsg(`Generate failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
@@ -374,10 +387,19 @@ export default function ClipDetail() {
                 </div>
               </div>
               <div className="thumb-edit-controls">
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                  <button className={`btn btn-ghost btn-sm ${!pairLayout ? "selected" : ""}`} onClick={() => setThumbLayout("single")} disabled={busy !== null}>One person</button>
+                  <button className={`btn btn-ghost btn-sm ${pairLayout ? "selected" : ""}`} onClick={() => setThumbLayout("pair")} disabled={busy !== null}>Two people</button>
+                  {pairLayout && (
+                    <label className="meta" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input type="checkbox" checked={swapSides} onChange={(e) => setSwapSides(e.target.checked)} disabled={busy !== null} /> Swap sides
+                    </label>
+                  )}
+                </div>
                 <input type="text" value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Line 1" style={{ width: "100%" }} />
                 <input type="text" value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Line 2 (highlighted)" style={{ width: "100%", marginTop: 8 }} />
                 <div className="set-actions" style={{ marginTop: 10 }}>
-                  <button className="btn btn-primary btn-sm" onClick={renderThumb} disabled={busy !== null || !selFrame}>
+                  <button className="btn btn-primary btn-sm" onClick={renderThumb} disabled={busy !== null || (!selFrame && needsFrame(thumbLayout))}>
                     {busy === "render" ? <div className="spinner sm" /> : (tc.preview_path ? "Regenerate" : "Generate")}
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={newFrame} disabled={busy !== null} title="Pull a different frame from the clip">
@@ -388,7 +410,13 @@ export default function ClipDetail() {
                   </button>
                   <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,.webp" style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && uploadFrame(e.target.files[0])} />
                 </div>
-                <div className="hint" style={{ marginTop: 8 }}>Leave line 1 and line 2 empty to auto-write the text.</div>
+                <div className="hint" style={{ marginTop: 8 }}>
+                  Leave line 1 and line 2 empty to auto-write the text.
+                  {pairLayout && " Two people puts the guest left and the host right, both from this clip. A selected frame is used if podcli cannot tell them apart."}
+                </div>
+                {tc.layout === "pair" && tc.people?.length ? (
+                  <div className="hint" style={{ marginTop: 4 }}>Current thumbnail: {describePeople(tc.people)}</div>
+                ) : null}
               </div>
             </div>
 

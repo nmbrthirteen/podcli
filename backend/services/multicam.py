@@ -736,6 +736,54 @@ def find_session(found: list[str]) -> Optional[MulticamSession]:
     return None
 
 
+def session_for_render(video_path: str) -> Optional[MulticamSession]:
+    """The saved edit whose rendered episode is this file, if any."""
+    target = os.path.realpath(video_path)
+    for p in sorted(_sessions_dir().glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            session = MulticamSession.load(p.stem)
+        except (ValueError, OSError, TypeError, json.JSONDecodeError):
+            continue
+        video = session.outputs.get("video")
+        if video and os.path.realpath(video) == target:
+            return session
+    return None
+
+
+def render_to_timeline(session: MulticamSession, seconds: float) -> Optional[float]:
+    """The timeline second shown at this second of the rendered episode, or None past its end.
+
+    The render starts at the first cut and leaves the removed stretches out.
+    """
+    if not session.cuts or seconds < 0:
+        return None
+    left = seconds
+    for a, b in kept_segments(session):
+        if left < b - a:
+            return a + left
+        left -= b - a
+    return None
+
+
+def person_still(session: MulticamSession, person_id: str, timeline_seconds: float, out: Path,
+                 width: int = 1280) -> Optional[dict]:
+    """A still from this person's own camera at a timeline second.
+
+    Returns {"path", "camera", "camera_time"}, or None when no camera of theirs
+    is rolling then. A split screen is skipped: it shows everyone at once.
+    """
+    for cam in session.cameras():
+        if cam.person != person_id or cam.members:
+            continue
+        src = session.source(cam.parent) if cam.parent else cam
+        if not (src.synced and src.timeline_start() <= timeline_seconds < src.timeline_end()):
+            continue
+        _still(session, cam, timeline_seconds, out, width=width)
+        return {"path": str(out), "camera": src.path,
+                "camera_time": round(src.source_time(timeline_seconds), 3)}
+    return None
+
+
 def rename_people(session: MulticamSession, names: list[str]) -> MulticamSession:
     """Rename people in order, keeping ids so every file mapped to them stays mapped."""
     ids = [p.id for p in session.people]

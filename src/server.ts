@@ -2145,17 +2145,35 @@ export function createServer(): McpServer {
   // =============================================
   server.tool(
     "manage_thumbnail_config",
-    "Show, export, import, or reset the thumbnail template (colors, fonts, frame, box, layout) podcli uses to generate thumbnails. 'show' returns the effective config; 'export' writes it to a file path; 'import' replaces it from a file path; 'reset' reverts to the generic default.",
+    "Show, export, import, or reset the thumbnail template (colors, fonts, frame, box, layout) podcli uses to generate thumbnails. 'show' returns the effective config; 'export' writes it to a file path; 'import' replaces it from a file path; 'reset' reverts to the generic default; 'set_layout' picks the layout: 'single' (one face) or 'pair' (two people from the clip, guest left and host right, for interview clips; falls back to one face when podcli cannot tell two people apart).",
     {
-      action: z.enum(["show", "export", "import", "reset"]).describe("Config action"),
+      action: z.enum(["show", "export", "import", "reset", "set_layout"]).describe("Config action"),
       path: z.string().optional().describe("File path for export (destination) or import (source)"),
+      layout: z
+        .enum(["single", "pair"])
+        .optional()
+        .describe("For set_layout. single: one face behind the headline. pair: the guest left and the host right, both from the clip's own footage"),
     },
-    async ({ action, path: filePath }) => {
+    async ({ action, path: filePath, layout }) => {
       try {
         if ((action === "export" || action === "import") && !filePath) {
           return mcpError(`'path' is required for action '${action}'.`);
         }
+        if (action === "set_layout" && !layout) {
+          return mcpError("'layout' is required for action 'set_layout': 'single' or 'pair'.");
+        }
         const base = `${webServerUrl}/api/thumbnail-config`;
+        if (action === "set_layout") {
+          const current = await fetch(base);
+          if (!current.ok) throw new Error(`HTTP ${current.status}`);
+          const res = await fetch(base, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...(await current.json()), layout }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return { content: [{ type: "text" as const, text: `Thumbnail layout set to ${layout}.` }] };
+        }
         if (action === "show") {
           const res = await fetch(base);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
