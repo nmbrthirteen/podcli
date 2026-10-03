@@ -1237,6 +1237,15 @@ def test_timecode_seconds_handles_ntsc_pulldown_and_drop_frame(fps, tc, expected
     assert mc._timecode_seconds(info, fps, 48000) == pytest.approx(expected, abs=1e-6)
 
 
+def test_timecode_seconds_accepts_a_dot_separator_as_non_drop():
+    # Some cameras and field recorders write the non-drop separator as '.'
+    # instead of ':'. It must parse the same as the all-':' form, not read 0.0.
+    info_dot = {"format": {"tags": {"timecode": "01.00.00.10"}}}
+    info_colon = {"format": {"tags": {"timecode": "01:00:00:10"}}}
+    assert mc._timecode_seconds(info_dot, 25.0, 48000) == pytest.approx(3600 + 10 / 25, abs=1e-6)
+    assert mc._timecode_seconds(info_dot, 25.0, 48000) == mc._timecode_seconds(info_colon, 25.0, 48000)
+
+
 def test_timecode_seconds_falls_back_to_time_reference_without_embedded_timecode():
     info = {"format": {"tags": {"time_reference": "48000"}}}
     assert mc._timecode_seconds(info, 29.97, 48000) == pytest.approx(1.0, abs=1e-6)

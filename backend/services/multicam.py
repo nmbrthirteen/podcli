@@ -291,7 +291,7 @@ def scan_folder(folder: str) -> list[str]:
     return found
 
 
-_TIMECODE_RE = re.compile(r"^(\d{2})([:;])(\d{2})([:;])(\d{2})([:;])(\d{2})$")
+_TIMECODE_RE = re.compile(r"^(\d{2})([:;.])(\d{2})([:;.])(\d{2})([:;.])(\d{2})$")
 
 
 def _ntsc_frame_duration(fps: float) -> tuple[float, int]:
