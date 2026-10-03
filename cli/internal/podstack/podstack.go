@@ -6,7 +6,10 @@
 package podstack
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -75,28 +78,137 @@ func warnEmptyKnowledge() {
 	fmt.Fprintf(os.Stderr, "  %sKnowledge base is empty.%s Run %spodcli knowledge init%s first, or %s/bootstrap-knowledge%s in your agent, so the workflow knows your show.\n", colYellow, colReset, colAccent, colReset, colAccent, colReset)
 }
 
-// installCommands writes the embedded slash-command files into
-// <project>/.claude/commands so the agent can resolve /<cmd>. Existing files are
-// left untouched, so a user's local edits win.
-func installCommands(project string) error {
-	dest := filepath.Join(project, ".claude", "commands")
-	if err := os.MkdirAll(dest, 0o755); err != nil {
+// manifestName is the install-tracking file, hidden among the slash commands
+// it describes. It is not itself a command (no .md suffix), so Names() and
+// IsCommand() never see it.
+const manifestName = ".podcli-manifest.json"
+
+// installManifest records the sha256 of the content podcli last wrote for
+// each command file, so a later install can tell "podcli wrote this and
+// nothing has touched it since" (safe to overwrite with the new version)
+// apart from "the user edited this" (leave it alone).
+type installManifest struct {
+	Files map[string]string `json:"files"`
+}
+
+func readManifest(dest string) installManifest {
+	m := installManifest{Files: map[string]string{}}
+	data, err := os.ReadFile(filepath.Join(dest, manifestName))
+	if err != nil {
+		return m
+	}
+	_ = json.Unmarshal(data, &m)
+	if m.Files == nil {
+		m.Files = map[string]string{}
+	}
+	return m
+}
+
+func writeManifest(dest string, m installManifest) error {
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
 		return err
 	}
-	return fs.WalkDir(commands, "commands", func(p string, d fs.DirEntry, err error) error {
+	return os.WriteFile(filepath.Join(dest, manifestName), data, 0o644)
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// installReport summarizes what installCommands did, for callers that want
+// to tell the user about files it left alone.
+type installReport struct {
+	Installed    []string // written for the first time
+	Updated      []string // podcli-owned, unmodified by the user, refreshed to the new version
+	UserModified []string // changed since podcli last wrote them — left alone
+}
+
+func (r installReport) hasUpdates() bool {
+	return len(r.Installed) > 0 || len(r.Updated) > 0
+}
+
+// installCommands writes the embedded slash-command files into
+// <project>/.claude/commands so the agent can resolve /<cmd>. A manifest
+// tracks the hash of what podcli wrote for each file: on a later run (e.g.
+// after `podcli update`), a file whose on-disk hash still matches that
+// record gets refreshed to the new embedded version; a file the user edited
+// is left untouched and reported instead of silently overwritten. A file
+// that predates the manifest (no record at all) is treated the same way —
+// left alone — and its current content becomes the new baseline, so podcli
+// never clobbers an install from before this tracking existed.
+func installCommands(project string) (installReport, error) {
+	var report installReport
+	dest := filepath.Join(project, ".claude", "commands")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return report, err
+	}
+	manifest := readManifest(dest)
+	changed := false
+
+	err := fs.WalkDir(commands, "commands", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		target := filepath.Join(dest, filepath.Base(p))
-		if _, err := os.Stat(target); err == nil {
-			return nil
-		}
-		data, err := commands.ReadFile(p)
+		name := filepath.Base(p)
+		target := filepath.Join(dest, name)
+		embedded, err := commands.ReadFile(p)
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0o644)
+		embeddedHash := sha256Hex(embedded)
+
+		current, statErr := os.ReadFile(target)
+		if statErr != nil {
+			// Never installed here before.
+			if err := os.WriteFile(target, embedded, 0o644); err != nil {
+				return err
+			}
+			manifest.Files[name] = embeddedHash
+			changed = true
+			report.Installed = append(report.Installed, name)
+			return nil
+		}
+
+		lastInstalledHash, tracked := manifest.Files[name]
+		currentHash := sha256Hex(current)
+
+		if !tracked {
+			// Predates the manifest: don't know if this is a stock file or a
+			// user edit, so leave it and adopt its current state as the baseline.
+			manifest.Files[name] = currentHash
+			changed = true
+			return nil
+		}
+
+		if currentHash != lastInstalledHash {
+			// The user changed it since podcli last wrote it.
+			report.UserModified = append(report.UserModified, name)
+			return nil
+		}
+
+		if currentHash == embeddedHash {
+			return nil // already current
+		}
+
+		if err := os.WriteFile(target, embedded, 0o644); err != nil {
+			return err
+		}
+		manifest.Files[name] = embeddedHash
+		changed = true
+		report.Updated = append(report.Updated, name)
+		return nil
 	})
+	if err != nil {
+		return report, err
+	}
+	if changed {
+		if err := writeManifest(dest, manifest); err != nil {
+			return report, err
+		}
+	}
+	return report, nil
 }
 
 // Run launches the agent for cmd with the remaining args as the slash-command
@@ -137,8 +249,12 @@ func Run(cmd string, args []string) int {
 	if err != nil {
 		project = "."
 	}
-	if err := installCommands(project); err != nil {
+	report, err := installCommands(project)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "  %swarning:%s could not install slash commands: %v\n", colYellow, colReset, err)
+	}
+	if len(report.UserModified) > 0 {
+		fmt.Fprintf(os.Stderr, "  %sKept your edits%s to: %s\n", colDim, colReset, strings.Join(report.UserModified, ", "))
 	}
 	warnEmptyKnowledge()
 
