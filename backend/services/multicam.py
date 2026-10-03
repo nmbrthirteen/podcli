@@ -24,6 +24,7 @@ import uuid
 import wave
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -294,13 +295,31 @@ def scan_folder(folder: str) -> list[str]:
 _TIMECODE_RE = re.compile(r"^(\d{2})([:;.])(\d{2})([:;.])(\d{2})([:;.])(\d{2})$")
 
 
-def _ntsc_frame_duration(fps: float) -> tuple[float, int]:
+def _ntsc_frame_duration(fps: float, r_frame_rate: str = "") -> tuple[float, int]:
     """Exact frame duration and the nominal (rounded) frame rate for an NTSC-pulldown fps.
 
     29.97 is really 30000/1001 fps, so each frame lasts 1001/30000 s, not 1/30 s. The
     same pulldown ratio applies to 59.94 and 23.976. Integer rates (25, 24, 30 exactly)
     have no pulldown and use a plain 1/fps duration.
+
+    avg_frame_rate (what `fps` usually comes from) is measured, not declared, and a
+    steady 25 fps camera can read 24.98 by measurement noise alone, which a bare
+    closeness check mistakes for pulldown. r_frame_rate is the stream's exact time
+    base; every real pulldown rate reduces to a fraction with denominator 1001, so
+    when it's available that decides, not the noisy float.
     """
+    if r_frame_rate:
+        try:
+            exact = Fraction(str(r_frame_rate))
+        except (ValueError, ZeroDivisionError):
+            exact = None
+        if exact and exact > 0:
+            rounded = round(float(exact))
+            if rounded <= 0:
+                return 0.0, 0
+            if exact.denominator == 1001:
+                return 1001.0 / (rounded * 1000.0), rounded
+            return 1.0 / rounded, rounded
     rounded = round(fps)
     if rounded <= 0:
         return 0.0, 0
@@ -309,7 +328,7 @@ def _ntsc_frame_duration(fps: float) -> tuple[float, int]:
     return 1.0 / rounded, rounded
 
 
-def _timecode_seconds(info: dict, fps: float, sample_rate: int) -> float:
+def _timecode_seconds(info: dict, fps: float, sample_rate: int, r_frame_rate: str = "") -> float:
     """Embedded start timecode (pro cameras) or BWF time reference (field recorders), in seconds.
 
     Honors drop-frame timecode (separator ';' before the frame field): drop-frame
@@ -326,7 +345,7 @@ def _timecode_seconds(info: dict, fps: float, sample_rate: int) -> float:
                 h, m1, mi, m2, sec, m3, frames = m.groups()
                 h, mi, sec, frames = int(h), int(mi), int(sec), int(frames)
                 drop_frame = m3 == ";"
-                frame_duration, fps_round = _ntsc_frame_duration(fps)
+                frame_duration, fps_round = _ntsc_frame_duration(fps, r_frame_rate)
                 if fps_round <= 0:
                     continue
                 total_frames = fps_round * 3600 * h + fps_round * 60 * mi + fps_round * sec + frames
@@ -393,7 +412,7 @@ def probe_source(path: str) -> Source:
         width=int(video.get("width") or 0) if video else 0,
         height=int(video.get("height") or 0) if video else 0,
         fps=round(fps, 3),
-        timecode=round(_timecode_seconds(info, fps, sample_rate), 6),
+        timecode=round(_timecode_seconds(info, fps, sample_rate, video.get("r_frame_rate") if video else ""), 6),
         file_size=stat.st_size,
         file_mtime_ns=stat.st_mtime_ns,
         fps_warning=fps_warning,

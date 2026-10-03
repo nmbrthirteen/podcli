@@ -1259,6 +1259,20 @@ def _fake_probe(tmp_path, monkeypatch, video_stream):
     return mc.probe_source(str(path))
 
 
+def test_timecode_pulldown_is_decided_from_r_frame_rate_not_the_noisy_average(tmp_path, monkeypatch):
+    """A steady 25 fps camera's avg_frame_rate can measure 24.98 by noise alone.
+
+    Deciding pulldown from that average instead of the stream's exact
+    r_frame_rate would misread a plain 25 fps file as NTSC and shift its
+    embedded start timecode by seconds.
+    """
+    src = _fake_probe(tmp_path, monkeypatch, {
+        "avg_frame_rate": "2498/100", "r_frame_rate": "25/1",
+        "tags": {"timecode": "01:00:00:10"},
+    })
+    assert src.timecode == pytest.approx(3600 + 10 / 25, abs=1e-6)
+
+
 def test_probe_source_counts_multiple_audio_streams(tmp_path, monkeypatch):
     path = tmp_path / "cam.mxf"
     path.write_bytes(b"0")
