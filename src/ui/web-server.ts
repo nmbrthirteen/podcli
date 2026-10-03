@@ -593,6 +593,7 @@ function clearEpisodeSessionState(): void {
   uiState.filePath = "";
   uiState.activeExportJobId = null;
   uiState.transcript = null;
+  uiState.transcriptVideoIdentity = null;
   uiState.rawTranscriptText = "";
   uiState.silenceOriginal = null;
   uiState.silencePlan = null;
@@ -843,6 +844,10 @@ app.post("/api/download-video", async (req, res) => {
       registerSourcePath(filePath);
       uiState.videoPath = filePath;
       uiState.filePath = filePath;
+      // A fresh download has no transcript yet; a stale identity from
+      // whatever video was loaded before would otherwise still read as "the
+      // transcript belongs to this video" until the next transcribe call.
+      uiState.transcriptVideoIdentity = null;
       uiState.lastUpdated = Date.now();
       persistState();
       broadcastSSE("state-sync", uiState);
@@ -1113,6 +1118,7 @@ app.post("/api/transcribe", async (req, res) => {
     uiState.transcript = cached as unknown as typeof uiState.transcript;
     uiState.videoPath = file_path;
     uiState.filePath = file_path;
+    uiState.transcriptVideoIdentity = computeVideoIdentity(file_path);
     registerSourcePath(file_path);
     uiState.lastUpdated = Date.now();
     persistState();
@@ -1177,6 +1183,7 @@ app.post("/api/transcribe", async (req, res) => {
       uiState.transcript = result.data as unknown as typeof uiState.transcript;
       uiState.videoPath = file_path;
       uiState.filePath = file_path;
+      uiState.transcriptVideoIdentity = computeVideoIdentity(file_path);
       registerSourcePath(file_path);
       uiState.lastUpdated = Date.now();
       persistState();
