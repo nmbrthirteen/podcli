@@ -9,8 +9,17 @@ func TestTranscribeModel(t *testing.T) {
 	if got := transcribeModel([]string{"process", "episode.mp4"}); got != "base" {
 		t.Fatalf("default model = %q, want base", got)
 	}
-	if got := transcribeModel([]string{"process", "episode.mp4", "--fast"}); got != "tiny.en" {
-		t.Fatalf("fast model = %q, want tiny.en", got)
+	if got := transcribeModel([]string{"process", "episode.mp4", "--fast"}); got != "tiny" {
+		t.Fatalf("fast model with unset language = %q, want tiny (multilingual, no language conditioning)", got)
+	}
+	if got := transcribeModel([]string{"process", "episode.mp4", "--fast", "--language", "en"}); got != "tiny.en" {
+		t.Fatalf("fast english model = %q, want tiny.en", got)
+	}
+	if got := transcribeModel([]string{"process", "episode.mp4", "--fast", "--language", "ka"}); got != "tiny" {
+		t.Fatalf("fast non-english model = %q, want tiny", got)
+	}
+	if got := transcribeModel([]string{"process", "episode.mp4", "--fast", "--language=ka"}); got != "tiny" {
+		t.Fatalf("fast non-english model (= form) = %q, want tiny", got)
 	}
 }
 

@@ -200,12 +200,37 @@ func runEngine(args []string) int {
 }
 
 func transcribeModel(args []string) string {
+	fast := false
 	for _, arg := range args {
 		if arg == "--fast" {
-			return "tiny.en"
+			fast = true
+			break
 		}
 	}
-	return "base"
+	if !fast {
+		return "base"
+	}
+	// tiny.en is English-only; unset language runs auto-detection, which
+	// needs the multilingual tiny model same as any non-English request.
+	lang := strings.ToLower(transcribeLanguage(args))
+	if lang == "en" || lang == "english" {
+		return "tiny.en"
+	}
+	return "tiny"
+}
+
+// transcribeLanguage extracts --language/--language=<value> the same way
+// transcribeEngine extracts --engine.
+func transcribeLanguage(args []string) string {
+	lang := ""
+	for i, a := range args {
+		if a == "--language" && i+1 < len(args) {
+			lang = args[i+1]
+		} else if strings.HasPrefix(a, "--language=") {
+			lang = strings.TrimPrefix(a, "--language=")
+		}
+	}
+	return lang
 }
 
 func configCmd(args []string) int {

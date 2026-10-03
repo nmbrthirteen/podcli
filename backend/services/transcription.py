@@ -48,9 +48,16 @@ def _whispercpp_cli() -> Optional[str]:
     return hermetic if os.path.exists(hermetic) else None
 
 
+
+# "large" alone doesn't name a real ggml file (upstream ships v1/v2/v3/v3-turbo
+# builds); provisioning always fetches large-v3, so resolve the same way here.
+_WHISPERCPP_MODEL_ALIASES = {"large": "large-v3"}
+
+
 def _whispercpp_model(model_size: str) -> str:
+    resolved = _WHISPERCPP_MODEL_ALIASES.get(model_size, model_size)
     return os.environ.get("PODCLI_WHISPERCPP_MODEL") or os.path.join(
-        _managed_home(), "models", f"ggml-{model_size}.bin"
+        _managed_home(), "models", f"ggml-{resolved}.bin"
     )
 
 

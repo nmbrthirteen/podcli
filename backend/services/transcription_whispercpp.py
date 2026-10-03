@@ -164,7 +164,7 @@ def transcribe_file(
     model_path: str,
     whisper_cli: str = "whisper-cli",
     ffmpeg: str = "ffmpeg",
-    language: Optional[str] = "en",
+    language: Optional[str] = None,
     dtw_model: Optional[str] = None,
     threads: int = 4,
     vad: bool = False,
@@ -196,8 +196,9 @@ def transcribe_file(
             # systematic early bias (silence-removal remapping). Off by default;
             # the energy-snap below addresses the same defect without the bias.
             cmd += ["--vad", "--vad-model", vad_model]
-        if language:
-            cmd += ["-l", language]
+        # An unset language must not fall through to whisper-cli's own "en"
+        # default; "auto" makes it run language detection instead.
+        cmd += ["-l", language or "auto"]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=7200)
 
         with open(out_base + ".json", encoding="utf-8") as f:
@@ -224,7 +225,15 @@ def transcribe_file(
             "segments": segments,
             "words": words,
             "duration": segments[-1]["end"] if segments else 0.0,
-            "language": (data.get("params") or {}).get("language") or language or "en",
+            # whisper-cli reports the language it actually detected under
+            # "result"; "params" only echoes back what we passed in ("auto"
+            # when unset), so it can't label the output.
+            "language": (
+                (data.get("result") or {}).get("language")
+                or (data.get("params") or {}).get("language")
+                or language
+                or "en"
+            ),
         }
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

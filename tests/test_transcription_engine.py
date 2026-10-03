@@ -80,5 +80,24 @@ class TranscriptionEngineTests(unittest.TestCase):
             tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=False)
 
 
+class WhisperCppModelAliasTests(unittest.TestCase):
+    """"large" alone doesn't name a real ggml file upstream (v1/v2/v3/v3-turbo
+    are separate downloads); provisioning always fetches large-v3, so the
+    model path lookup must resolve the same alias."""
+
+    def setUp(self):
+        self._saved = os.environ.pop("PODCLI_WHISPERCPP_MODEL", None)
+
+    def tearDown(self):
+        if self._saved is not None:
+            os.environ["PODCLI_WHISPERCPP_MODEL"] = self._saved
+
+    def test_large_resolves_to_large_v3(self):
+        self.assertTrue(tr._whispercpp_model("large").endswith("ggml-large-v3.bin"))
+
+    def test_medium_is_unaliased(self):
+        self.assertTrue(tr._whispercpp_model("medium").endswith("ggml-medium.bin"))
+
+
 if __name__ == "__main__":
     unittest.main()

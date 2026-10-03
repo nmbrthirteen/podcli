@@ -35,22 +35,53 @@ type artifactState struct {
 	Files map[string]string `json:"files"`
 }
 
+// whisperCppRevision pins every ggml-*.bin download to this commit of
+// ggerganov/whisper.cpp so an upstream re-upload (or a force-push that
+// reshuffles "main") can't silently swap the bytes behind a pinned hash.
+const whisperCppRevision = "5359861c739e955e79d9a303bcbc70fb988958b1"
+
+func whisperCppURL(file string) string {
+	return "https://huggingface.co/ggerganov/whisper.cpp/resolve/" + whisperCppRevision + "/" + file
+}
+
 var models = map[string]model{
 	"base": {
-		URL:    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+		URL:    whisperCppURL("ggml-base.bin"),
 		SHA256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
 	},
+	"tiny": {
+		URL:    whisperCppURL("ggml-tiny.bin"),
+		SHA256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+	},
 	"tiny.en": {
-		URL:    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+		URL:    whisperCppURL("ggml-tiny.en.bin"),
 		SHA256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
 	},
 	"small": {
-		URL:    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+		URL:    whisperCppURL("ggml-small.bin"),
 		SHA256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+	},
+	"medium": {
+		URL:    whisperCppURL("ggml-medium.bin"),
+		SHA256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+	},
+	"large-v3": {
+		URL:    whisperCppURL("ggml-large-v3.bin"),
+		SHA256: "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
 	},
 }
 
-const vadURL = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin"
+// modelAliases maps a schema-level size name to the models key that actually
+// has a pinned download. "large" alone is ambiguous upstream (v1/v2/v3); we
+// always provision large-v3, the current best-accuracy build.
+var modelAliases = map[string]string{
+	"large": "large-v3",
+}
+
+// whisperVADRevision pins the Silero VAD download the same way.
+const whisperVADRevision = "9ffd54a1e1ee413ddf265af9913beaf518d1639b"
+
+const vadURL = "https://huggingface.co/ggml-org/whisper-vad/resolve/" + whisperVADRevision + "/ggml-silero-v5.1.2.bin"
 const vadSHA = "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
 
 func ModelPath(size string) string {
@@ -69,12 +100,16 @@ func have(p string) bool {
 }
 
 func EnsureModel(size string) (string, error) {
-	dest := ModelPath(size)
-	m, ok := models[size]
-	if !ok {
-		return "", fmt.Errorf("unknown model size %q (known: base, tiny.en, small)", size)
+	resolved := size
+	if alias, ok := modelAliases[size]; ok {
+		resolved = alias
 	}
-	if err := download(m.URL, dest, m.SHA256, "ggml-"+size); err != nil {
+	dest := ModelPath(resolved)
+	m, ok := models[resolved]
+	if !ok {
+		return "", fmt.Errorf("unknown model size %q (known: base, tiny, tiny.en, small, medium, large)", size)
+	}
+	if err := download(m.URL, dest, m.SHA256, "ggml-"+resolved); err != nil {
 		return "", err
 	}
 	return dest, nil
