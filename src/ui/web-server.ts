@@ -1993,16 +1993,29 @@ app.get("/api/outputs", async (_req, res) => {
   try {
     await mkdir(paths.output, { recursive: true });
     const files = await readdir(paths.output);
-    const clips = files
-      .filter((f) => f.endsWith(".mp4"))
+    const mp4Files = files.filter((f) => f.endsWith(".mp4"));
+    // A clean (caption-free) variant renders to "<stem>_clean.mp4" next to
+    // its main clip — fold it into that clip's entry instead of listing it
+    // as a second, unrelated-looking clip.
+    const cleanByStem = new Map<string, string>();
+    for (const f of mp4Files) {
+      if (f.endsWith("_clean.mp4")) {
+        cleanByStem.set(f.slice(0, -"_clean.mp4".length), f);
+      }
+    }
+    const clips = mp4Files
+      .filter((f) => !f.endsWith("_clean.mp4"))
       .map((f) => {
         const fullPath = join(paths.output, f);
         const stat = statSync(fullPath);
+        const stem = f.slice(0, -".mp4".length);
+        const cleanFilename = cleanByStem.get(stem);
         return {
           filename: f,
           path: fullPath,
           size_mb: Math.round((stat.size / (1024 * 1024)) * 100) / 100,
           created: stat.mtime.toISOString(),
+          ...(cleanFilename && { clean_output_path: join(paths.output, cleanFilename) }),
         };
       })
       .sort(
