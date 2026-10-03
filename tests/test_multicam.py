@@ -657,6 +657,42 @@ def test_reopening_an_old_shape_session_backfills_identity_without_resetting_syn
     assert fresh.file_size != 0 and fresh.file_mtime_ns != 0
 
 
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_refresh_stale_sources_copies_every_probe_field_and_resets_its_tiles(sandbox):
+    """Re-probing a replaced file used to only copy duration/size/fps.
+
+    A call recording that gained a second audio stream, or lost the one a
+    tile's audio_stream_index pointed at, kept the stale stream count and an
+    out-of-range index; a pane cropped out of it kept showing as synced
+    because nothing told the virtual camera built from it to refresh too.
+    """
+    path = sandbox / "call.mp4"
+    _ffmpeg("-f", "lavfi", "-i", "color=s=160x90:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+            "-map", "0:v", "-map", "1:a", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+            str(path))
+    src = mc.probe_source(str(path))
+    assert src.audio_stream_count == 1
+    src.role, src.person, src.offset, src.audio_stream_index = "camera", "host", 0.0, 0
+    pane = _source(str(path), role="camera", person="pane1", parent=src.id, crop=[0.0, 0.0, 0.5, 1.0],
+                   offset=5.0, duration=2.0, sync={"status": "ok"})
+    session = mc.MulticamSession(session_id="abc123abc906", name="ep",
+                                 people=[mc.Person("host", "Host")], sources=[src, pane])
+
+    # Re-export with a second audio stream: same path, new bytes.
+    _ffmpeg("-f", "lavfi", "-i", "color=s=160x90:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+            "-f", "lavfi", "-i", "sine=f=440:r=48000:d=2", "-map", "0:v", "-map", "1:a", "-map", "2:a",
+            "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-y", str(path))
+
+    assert mc.refresh_stale_sources(session)
+    assert src.audio_stream_count == 2
+    assert src.audio_stream_channels == [1, 1]
+    assert src.audio_stream_index == 0  # still in range, so left alone
+    assert src.offset is None and src.sync["status"] == "failed"
+    # The pane cropped from it is no longer synced either, not left showing stale.
+    assert pane.offset is None and pane.sync["status"] == "failed"
+    assert pane.sync == src.sync
+
+
 def test_reopening_a_session_detects_a_camera_replaced_on_disk(episode):
     session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
     session = mc.sync_session(session)

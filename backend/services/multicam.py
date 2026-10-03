@@ -471,6 +471,10 @@ def refresh_stale_sources(session: "MulticamSession") -> bool:
         s.duration, s.has_audio, s.audio_channels = fresh.duration, fresh.has_audio, fresh.audio_channels
         s.width, s.height, s.fps, s.timecode = fresh.width, fresh.height, fresh.fps, fresh.timecode
         s.file_size, s.file_mtime_ns = fresh.file_size, fresh.file_mtime_ns
+        s.fps_warning = fresh.fps_warning
+        s.audio_stream_count = fresh.audio_stream_count
+        s.audio_stream_channels = fresh.audio_stream_channels
+        s.audio_stream_index = min(s.audio_stream_index, max(0, fresh.audio_stream_count - 1))
         s.offset, s.speed, s.sync = None, 1.0, {
             "status": "failed",
             "message": "This file changed on disk since it was last synced. Sync again.",
@@ -480,6 +484,7 @@ def refresh_stale_sources(session: "MulticamSession") -> bool:
         session.activity_key = ""
         session.cuts = []
         session.range_start = session.range_end = None
+        place_views(session)
     return affected_in_use
 
 
