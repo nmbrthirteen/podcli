@@ -594,7 +594,7 @@ def test_preview_stills_regenerate_after_a_nudge_instead_of_serving_a_stale_fram
 
     frames = mc.previews(session, looks=True, at=cam.timeline_start() + 1.0)
     before = frames["cameras"][cam.id]
-    look_before = frames["looks"][next(iter(frames["looks"]))]
+    look_before = frames["looks"][cam.id]["natural"]
     assert os.path.exists(before) and os.path.exists(look_before)
 
     # Nudging changes the offset->source mapping for the same timeline moment,
@@ -605,7 +605,7 @@ def test_preview_stills_regenerate_after_a_nudge_instead_of_serving_a_stale_fram
     cam = session.source(cam.id)
     frames = mc.previews(session, looks=True, at=cam.timeline_start() + 1.0)
     after = frames["cameras"][cam.id]
-    look_after = frames["looks"][next(iter(frames["looks"]))]
+    look_after = frames["looks"][cam.id]["natural"]
     assert after != before and os.path.exists(after)
     assert look_after != look_before and os.path.exists(look_after)
 
