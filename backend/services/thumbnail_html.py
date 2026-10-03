@@ -115,7 +115,7 @@ def _load_config() -> dict:
         # headline would fall through to the browser's generic sans-serif with
         # no brand voice at all. Noto Sans Georgian is the same family the
         # Remotion caption renderer bundles for the same reason (see
-        # remotion/src/types.ts FONT) — kept consistent so a thumbnail and its
+        # remotion/src/types.ts FONT), kept consistent so a thumbnail and its
         # clip's captions render the same typeface for non-Latin text.
         "font_family": "'Inter', 'Helvetica Neue', 'Arial', 'Noto Sans Georgian', sans-serif",
         "font_import_url": "https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Noto+Sans+Georgian:wght@400;700&display=swap",
@@ -739,7 +739,7 @@ body {{
     font-weight: {l2_weight};
     font-style: {l2_style};
     letter-spacing: {l2_spacing};
-    /* See .line1 above — casing is resolved in Python, not here. */
+    /* See .line1 above: casing is resolved in Python, not here. */
     text-transform: none;
     line-height: {l2_lh};
     background: {hl_color};

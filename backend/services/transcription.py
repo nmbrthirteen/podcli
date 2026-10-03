@@ -153,7 +153,7 @@ def _transcribe_with_omnilingual(file_path, progress_callback, wav_path=None):
         )
 
     # Resumable: a crash partway through a long file loses at most the
-    # window that was decoding, not the whole run — a rerun with the same
+    # window that was decoding, not the whole run. A rerun with the same
     # file/model/language skips every window that already has a receipt.
     #
     # The key has to change whenever a resumed window's receipt would no
@@ -695,12 +695,12 @@ def transcribe_file(
     wav_path: optional pre-extracted 16 kHz mono WAV shared across analysis
     stages — used by whisper.cpp and diarization instead of re-decoding.
 
-    start_seconds/duration_seconds: sample mode — transcribe only a window of
+    start_seconds/duration_seconds: sample mode, transcribe only a window of
     the source (e.g. to test a language on 40s before committing to a full
     run) instead of the whole file. The result is marked complete: False and
     its timestamps are relative to the sample window, not the source;
     sample_offset_seconds carries where in the source the window started.
-    Diarization and face analysis are skipped — a throwaway sample isn't
+    Diarization and face analysis are skipped: a throwaway sample isn't
     worth the extra passes, and both would need frame/audio access to the
     original file that the trimmed clip doesn't carry.
 
@@ -815,7 +815,7 @@ def _transcribe_file_inner(
         elif error is not None:
             raise RuntimeError(
                 "The whisper-py engine needs the full source install (openai-whisper + torch). "
-                "This native install ships whisper.cpp — rerun with --engine whispercpp."
+                "This native install ships whisper.cpp. Rerun with --engine whispercpp."
             ) from error
 
     if use_cpp:

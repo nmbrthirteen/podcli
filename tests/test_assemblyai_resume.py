@@ -86,7 +86,7 @@ class AssemblyAIResumeTests(unittest.TestCase):
             )
         upload.assert_not_called()
         self.assertEqual(result["transcript"], "hello world")
-        # Only the poll GET — no POST to create a new transcript.
+        # Only the poll GET, no POST to create a new transcript.
         self.assertEqual(req.call_count, 1)
         polled_url = req.call_args_list[0][0][1]
         self.assertIn("tid-existing", polled_url)

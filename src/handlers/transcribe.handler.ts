@@ -75,7 +75,7 @@ export const transcribeToolDef = {
         type: "number",
         description:
           "Sample mode: only transcribe a window starting here (seconds into the source), " +
-          "instead of the whole file — e.g. to test a language on 40s before committing to " +
+          "instead of the whole file, e.g. to test a language on 40s before committing to " +
           "a full run. Pair with duration_seconds. The result is marked complete: false and " +
           "is not written to the main transcript cache.",
       },
@@ -108,7 +108,7 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const resolvedEngine = await resolveTranscribeEngine(executor, engine, modelSize);
   const cacheKey = { engine: resolvedEngine, model: modelSize, language };
 
-  // A sample is a throwaway check on a slice of the file — it must never
+  // A sample is a throwaway check on a slice of the file. It must never
   // serve (or pollute) the main transcript cache, which is keyed by the
   // whole file and assumed complete.
   const cachedRaw = isSample ? null : await cache.get(filePath, cacheKey);
@@ -158,13 +158,13 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   const actualEngine = data.engine ?? resolvedEngine;
 
   if (isSample) {
-    // Not cached and not packed — it's a slice of the file, not the whole
+    // Not cached and not packed: it's a slice of the file, not the whole
     // transcript the cache/packed-view keys assume.
     return JSON.stringify({ cached: false, packed_ready: false, ...formatResult(data) });
   }
 
   // Cache the raw result under what it actually ran with, not the prediction
-  // above — resolveTranscribeEngine can't see a model-load failure that only
+  // above: resolveTranscribeEngine can't see a model-load failure that only
   // shows up once transcribe_file tries it for real.
   await cache.set(filePath, data, { engine: actualEngine, model: modelSize, language });
   const packed = await cache.getPackedMarkdown(filePath, { engine: actualEngine, model: modelSize, language });

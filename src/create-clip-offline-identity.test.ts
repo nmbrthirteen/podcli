@@ -7,7 +7,7 @@ import { join } from "path";
 // when the caller omits it (e.g. clip_number-only calls). handleCreateClip
 // and handleBatchClips only run the "transcript belongs to a different
 // video" guard when transcript_words arrives null, so filling it from state
-// in server.ts has to run that guard itself — otherwise a render against a
+// in server.ts has to run that guard itself. Otherwise a render against a
 // video that was swapped in after the transcript was generated goes through
 // unchecked. These tests never need the studio server: the check runs
 // before server.ts even tries to reach it.

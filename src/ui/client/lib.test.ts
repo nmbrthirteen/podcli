@@ -256,7 +256,7 @@ describe("buildUiStateSyncPayload", () => {
   // from videoPath and the rest of the syncable state. After silence
   // removal, videoPath and transcript update together in one render, but
   // the two separate fetches could still arrive at the server in either
-  // order — a videoPath-only request landing after the transcript-only one
+  // order. A videoPath-only request landing after the transcript-only one
   // looked exactly like a bare set_video (videoPath with no transcript in
   // the request) and cleared the transcript that had just arrived.
 

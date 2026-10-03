@@ -3,7 +3,7 @@
 Every rendered clip's captions are burned from a word list already retimed
 to the clip's own playback clock (0 at the first frame of the exported
 file). These sidecars are the same words and the same clock, written out as
-plain subtitle files instead of pixels — useful for platforms that take an
+plain subtitle files instead of pixels, useful for platforms that take an
 uploaded subtitle track, for accessibility, and for anyone editing the clip
 further downstream.
 """

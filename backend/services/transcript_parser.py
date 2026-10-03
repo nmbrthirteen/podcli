@@ -347,7 +347,7 @@ def parse_speaker_transcript(
         raw_text: The raw transcript text
         total_duration: Total duration of the podcast in seconds
         time_adjust: Seconds to add/subtract from all timestamps (e.g., -1.0 to shift 1s earlier)
-        language: Language of the transcript, if known. Defaults to "und" (undetermined) —
+        language: Language of the transcript, if known. Defaults to "und" (undetermined):
             this format carries no language info of its own to detect it from.
     """
     lines = raw_text.strip().split("\n")

@@ -2,12 +2,12 @@
 
 Meta's Omnilingual ASR CTC model covers ~1600 languages, including ones
 whisper.cpp handles poorly. It's character-level CTC: tokens.txt has no
-SentencePiece "continuation vs. word-start" convention — token id 4 is a
+SentencePiece "continuation vs. word-start" convention. Token id 4 is a
 literal space character, emitted by the model itself as a word boundary.
 Grouping tokens into words means splitting the token stream on that space
 token, not on a leading-marker prefix like the whisper.cpp adapter does.
 
-The model takes no language conditioning — there's no -l equivalent. It
+The model takes no language conditioning: there's no -l equivalent. It
 decodes everything through the same multilingual weights.
 """
 
@@ -37,7 +37,7 @@ MODEL_FILES = {
 WINDOW_SECONDS = 20.0
 CONTEXT_SECONDS = 1.0
 
-# Mirrors transcript_packer.SILENCE_SPLIT_SEC — the pause length that splits
+# Mirrors transcript_packer.SILENCE_SPLIT_SEC: the pause length that splits
 # a run of words into separate segments.
 SEGMENT_PAUSE_SECONDS = 0.5
 
@@ -219,7 +219,7 @@ def transcribe_file(
     written to run_dir/window-<i>.json as soon as they're decoded, and a
     rerun with the same run_dir skips any window that already has one. The
     final transcript is only assembled (and the receipts cleared) once every
-    window has a receipt — a crash mid-file loses at most the window that
+    window has a receipt. A crash mid-file loses at most the window that
     was decoding, not the whole run."""
     if not os.path.exists(file_path):
         raise FileNotFoundError(file_path)
@@ -239,7 +239,7 @@ def transcribe_file(
 
     try:
         samples, sr, duration = _read_wav_mono16(wav_path)
-        recognizer = None  # lazily loaded — a fully-resumed run never needs it
+        recognizer = None  # lazily loaded: a fully-resumed run never needs it
 
         all_words: list[dict] = []
         n_windows = max(1, int(duration // WINDOW_SECONDS) + (1 if duration % WINDOW_SECONDS else 0))
@@ -311,7 +311,7 @@ def transcribe_file(
             "segments": segments,
             "words": words_out,
             "duration": round(duration, 3),
-            # The model takes no language conditioning — it decodes every
+            # The model takes no language conditioning: it decodes every
             # language through the same weights. "und" reflects that nothing
             # was detected or requested, not that detection failed.
             "language": "und",

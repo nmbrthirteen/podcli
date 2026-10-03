@@ -123,7 +123,7 @@ def test_word_straddling_a_cut_is_not_stitched_across_it():
 
 def test_segments_still_stitch_across_a_removed_gap():
     # Sentence-level segments intentionally keep the old stitching behavior
-    # (see test_remap_transcript_closes_removed_gaps) — only words are
+    # (see test_remap_transcript_closes_removed_gaps), only words are
     # reassigned by midpoint.
     keep_segments = [{"start": 0.5, "end": 2.0}, {"start": 4.5, "end": 6.0}]
     mapped = _map_range(1.0, 5.4, keep_segments)

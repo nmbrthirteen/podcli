@@ -417,7 +417,7 @@ class AICliDiscoveryTests(unittest.TestCase):
             with open(cli, "w", encoding="utf-8") as fh:
                 fh.write("#!/bin/sh\n")
             # Without redirecting HOME, _find_cli's fixed lookup dirs (e.g.
-            # ~/.local/bin) hit the real filesystem — on a machine with an
+            # ~/.local/bin) hit the real filesystem. On a machine with an
             # actual claude CLI installed there, it wins before shell lookup
             # ever runs, and this test passes for the wrong reason.
             with mock.patch.dict(os.environ, {"HOME": home, "PATH": ""}, clear=False):

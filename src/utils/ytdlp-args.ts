@@ -125,7 +125,7 @@ export function normalizeChannelUrl(url: string): string {
 
 // One JSON object per line, tab would collide with titles that contain one.
 // --flat-playlist skips resolving each video's own page, so listing a
-// channel's uploads never pulls anything beyond the playlist metadata —
+// channel's uploads never pulls anything beyond the playlist metadata,
 // nowhere close to a full-video download.
 export function buildChannelListArgs(opts: YtDlpListOptions): string[] {
   const args = ["-m", "yt_dlp"];
@@ -145,7 +145,7 @@ export interface YtDlpVideoInfoOptions {
 
 // Dumps one video's full metadata (including subtitle/automatic_captions
 // track URLs) as JSON, with --skip-download so this never fetches the
-// video itself — only the page and timed-text track list.
+// video itself, only the page and timed-text track list.
 export function buildVideoInfoArgs(opts: YtDlpVideoInfoOptions): string[] {
   const args = ["-m", "yt_dlp"];
   args.push("--ignore-config", "--no-config-locations", "--no-plugin-dirs");

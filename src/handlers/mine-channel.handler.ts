@@ -20,7 +20,7 @@ export const mineChannelToolDef = {
     "action='list' lists a channel's uploads (title, duration, upload date), flagging ones already mined " +
     "into clip_history so you don't re-suggest from them. action='mine' fetches one video's existing " +
     "captions (never the video itself), preferring the original-language track over an auto-translated one, " +
-    "and converts them to podcli's word-level transcript format — feed the result straight into the " +
+    "and converts them to podcli's word-level transcript format. Feed the result straight into the " +
     "suggest_clips flow the same way import_transcript's output is used. Never downloads a full video; " +
     "that only happens if you separately choose to render a clip from one.",
 };
@@ -171,7 +171,7 @@ export async function mineVideoCaptions(
       already_mined: alreadyMined,
       track: null,
       transcript: null,
-      message: "No captions available for this video — nothing to mine.",
+      message: "No captions available for this video, nothing to mine.",
     };
   }
 
@@ -200,7 +200,7 @@ export async function mineVideoCaptions(
       text: words.map((w) => w.word).join(" "),
     },
     message: alreadyMined
-      ? "This video already has clips in history — review before re-mining to avoid duplicates."
+      ? "This video already has clips in history. Review before re-mining to avoid duplicates."
       : `Mined ${words.length} words from the ${track.kind} ${track.lang} track. ` +
         "Use this transcript the same way import_transcript's output is used, then suggest_clips.",
   };

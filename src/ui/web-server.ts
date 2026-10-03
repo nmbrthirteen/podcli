@@ -170,7 +170,7 @@ interface UIState {
   silenceOriginal: SilenceOriginal | null;
   silencePlan: SilencePlan | null;
   // True when the persisted videoPath didn't exist at startup (e.g. an
-  // external drive is unmounted) — the session (transcript, suggestions)
+  // external drive is unmounted). The session (transcript, suggestions)
   // is kept rather than wiped, since the file may well come back.
   videoMissing: boolean;
   suggestions: SuggestedClip[];
@@ -204,7 +204,7 @@ function loadPersistedState(): UIState {
       const raw = readFileSync(paths.uiState, "utf-8");
       const saved = JSON.parse(raw);
       // A missing video (e.g. its external drive is unmounted) doesn't mean
-      // the episode is gone — the transcript and suggestions are kept as a
+      // the episode is gone. The transcript and suggestions are kept as a
       // session the file may rejoin; flag it instead so the caller can warn
       // and skip anything that needs the file on disk right now.
       const videoMissing = !!saved.videoPath && !existsSync(saved.videoPath);
@@ -1112,7 +1112,7 @@ app.post("/api/transcribe", async (req, res) => {
   const resolvedEngine = await resolveTranscribeEngine(executor, engine, model_size);
   const cacheKey = { engine: resolvedEngine, model: model_size, language };
 
-  // A sample is a throwaway check on a slice of the file — never serve or
+  // A sample is a throwaway check on a slice of the file. Never serve or
   // populate the session/UI state from the main cache (keyed by, and
   // assumed to describe, the whole file).
   const cachedRaw = isSample ? null : await cache.get(file_path, cacheKey);
@@ -1178,7 +1178,7 @@ app.post("/api/transcribe", async (req, res) => {
       job.message = "Transcription complete";
       job.result = result.data;
 
-      // A sample result is a slice, not the episode — leave the session/UI
+      // A sample result is a slice, not the episode. Leave the session/UI
       // state and the main cache alone. The caller reads it via job_status.
       if (isSample) return;
 
@@ -1200,7 +1200,7 @@ app.post("/api/transcribe", async (req, res) => {
       // forever: the job id lived only in the tab that started it, and nothing
       // else announces that the transcript landed.
       broadcastSSE("state-sync", uiState);
-      // Cache it under the engine it actually ran with — a fresh resolution
+      // Cache it under the engine it actually ran with. A fresh resolution
       // (or the pre-transcribe request) can differ from what transcribe_file
       // fell back to once it tried loading the model for real.
       try {
@@ -2007,7 +2007,7 @@ app.get("/api/outputs", async (_req, res) => {
     const files = await readdir(paths.output);
     const mp4Files = files.filter((f) => f.endsWith(".mp4"));
     // A clean (caption-free) variant renders to "<stem>_clean.mp4" next to
-    // its main clip — fold it into that clip's entry instead of listing it
+    // its main clip. Fold it into that clip's entry instead of listing it
     // as a second, unrelated-looking clip.
     const cleanByStem = new Map<string, string>();
     for (const f of mp4Files) {
@@ -4373,7 +4373,7 @@ app.post("/api/ui-state", (req, res) => {
           if (segments?.length) {
             // The restored segments (and any hook) change what actually
             // plays, so the duration has to be recomputed rather than
-            // carried over from before the edit — otherwise a clip with an
+            // carried over from before the edit. Otherwise a clip with an
             // opening hook reports a duration that excludes it.
             merged = {
               ...incoming,

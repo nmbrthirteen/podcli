@@ -107,7 +107,7 @@ def handle_transcribe(task_id: str, params: dict):
     is_sample = (duration_seconds or 0) > 0 or (start_seconds or 0) > 0
 
     # One shared 16 kHz mono wav feeds transcription, energy and reactions
-    # instead of decoding the source three times. Skipped for a sample run —
+    # instead of decoding the source three times. Skipped for a sample run:
     # transcribe_file extracts its own trimmed window, and decoding the full
     # source here would undo the whole point of a quick sample.
     shared_wav = None
@@ -135,7 +135,7 @@ def handle_transcribe(task_id: str, params: dict):
         apply_corrections(result.get("words", []), result.get("segments", []))
 
         # A sample is a throwaway language/quality check on a slice of the
-        # source — energy/event signals and the packed view are keyed by the
+        # source. Energy/event signals and the packed view are keyed by the
         # full file and meant to describe the whole episode, so skip them
         # rather than caching partial (or source-wide-but-wrongly-expensive)
         # data under those keys.
@@ -174,7 +174,7 @@ def handle_transcribe(task_id: str, params: dict):
                 result["packed_path"] = packed_path
                 result["packed_size_bytes"] = len(packed_md.encode("utf-8"))
             except Exception as e:
-                # Non-fatal — transcription result is still useful without the packed view
+                # Non-fatal: transcription result is still useful without the packed view
                 emit_progress(task_id, "packing", 99, f"Packer skipped: {e}")
     finally:
         if previous_engine is None:
@@ -990,7 +990,7 @@ def handle_analyze_silence(task_id: str, params: dict):
 
 def handle_compare_engines(task_id: str, params: dict):
     """Transcribe the same sample window with two engines and report where
-    they disagree — see services/engine_comparison.py for the scoring."""
+    they disagree. See services/engine_comparison.py for the scoring."""
     import time as _time
     from config.paths import paths
     from services.engine_comparison import compare_engines

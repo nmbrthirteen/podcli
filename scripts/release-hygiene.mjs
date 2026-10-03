@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-// Real source recordings/renders have no business in git history — they
+// Real source recordings/renders have no business in git history. They
 // belong in data/ or podcli-clips/, both gitignored. Icons, logos, and other
 // still-image UI assets are handled by the size check below instead, since
 // those are legitimately tracked.
@@ -17,7 +17,7 @@ const MEDIA_EXTENSIONS = new Set([
   ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg",
 ]);
 
-// Files over 1MB that are legitimately tracked. Keep this list short — add
+// Files over 1MB that are legitimately tracked. Keep this list short, add
 // to it only when the file truly belongs in history (a model weight, a brand
 // asset), not as a workaround for a one-off mistake.
 const LARGE_FILE_ALLOWLIST = new Set([
@@ -36,7 +36,7 @@ const SECRET_PATTERNS = [
   { name: "OpenAI-style secret key", re: /\bsk-[A-Za-z0-9]{32,}\b/ },
 ];
 
-// .env.example documents the shape of the file without real values — keep it.
+// .env.example documents the shape of the file without real values, keep it.
 const ENV_FILE_RE = /(^|\/)\.env(\..+)?$/;
 const ENV_ALLOWLIST = new Set([".env.example"]);
 
@@ -94,7 +94,7 @@ export function matchSecretPatterns(content) {
 
 // Known fixture files that intentionally contain fake secrets shaped like
 // the real thing, to test matchSecretPatterns itself. Everything else still
-// gets scanned — a real secret pasted into some other test is still a leak.
+// gets scanned. A real secret pasted into some other test is still a leak.
 const SECRET_SCAN_ALLOWLIST = new Set(["scripts/release-hygiene.test.mjs"]);
 
 function checkSecretPatterns(files) {

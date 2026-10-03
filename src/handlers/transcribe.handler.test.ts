@@ -30,7 +30,7 @@ vi.mock("../services/engine-resolve.js", () => ({
 
 const { handleTranscribe } = await import("./transcribe.handler.js");
 
-describe("handleTranscribe — sample mode", () => {
+describe("handleTranscribe, sample mode", () => {
   beforeEach(() => {
     executeMock.mockReset();
     cacheGetMock.mockReset();

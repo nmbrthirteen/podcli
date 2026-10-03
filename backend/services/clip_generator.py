@@ -1155,7 +1155,7 @@ def generate_clip(
                     if w["end"] > seg["start"] and w["start"] < seg["end"]
                 ]
                 # Each part is encoded separately before the concat, and an
-                # encoder snaps a cut to whole frames — its real duration is
+                # encoder snaps a cut to whole frames, so its real duration is
                 # typically a few ms off the requested end - start. Advancing
                 # cumulative_t by the planned length instead of the probed
                 # one drifts captions further out of sync with every segment
@@ -1508,7 +1508,7 @@ def generate_clip(
         # shifted past whatever intro got prepended). clip_words is populated
         # for overlay-only renders too (logo/cards with captions off), so
         # gate on whether captions were actually requested rather than just
-        # "were there words" — otherwise a captions-off render still gets an
+        # "were there words": otherwise a captions-off render still gets an
         # .srt/.vtt describing dialogue nothing on screen shows.
         want_subtitles = write_subtitles if write_subtitles is not None else captions
         output_base, _ = os.path.splitext(final_path)
@@ -1534,7 +1534,7 @@ def generate_clip(
             sidecar_paths = write_sidecars(retimed_words, output_base)
 
         # Optional clean variant: the same audio, loudness, and intro/outro,
-        # minus burned captions — built from the cropped (pre-caption)
+        # minus burned captions, built from the cropped (pre-caption)
         # source with the identical normalize_audio/concat_outro calls the
         # main render used, so the two files only differ in the overlay.
         clean_output_path = None
@@ -1568,8 +1568,8 @@ def generate_clip(
         if progress_callback:
             progress_callback(100, "Clip complete!")
 
-        # "duration" has always meant the content's own length — what
-        # clip_history and the learnings it feeds record — not however long
+        # "duration" has always meant the content's own length: what
+        # clip_history and the learnings it feeds record, not however long
         # the delivered file plays including intro/outro. Derive it from the
         # probed actual_duration (not the planned `duration` window) so a
         # source that ran out early still gets caught by the check above and
@@ -1580,7 +1580,7 @@ def generate_clip(
             "output_path": final_path,
             "duration": round(content_duration, 2),
             # The probed duration of the file actually on disk, including any
-            # intro/outro — for callers that need the delivered file's full
+            # intro/outro, for callers that need the delivered file's full
             # playback length rather than just its content.
             "output_duration": round(actual_duration, 2),
             "file_size_mb": file_size_mb,

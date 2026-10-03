@@ -1,4 +1,4 @@
-"""Caption font glyph coverage — a pre-render check, not a render step.
+"""Caption font glyph coverage: a pre-render check, not a render step.
 
 Before burning captions, verify the font that will actually draw them has
 glyphs for every character in the clip's text. A font silently missing a
@@ -79,7 +79,7 @@ def _format_warning(missing: list[str], where: str) -> str:
 
 
 def resolve_ass_font_path(font_name: str, bold: bool = False) -> Optional[str]:
-    """The exact font file fc-match/libass resolves for an ASS style — the
+    """The exact font file fc-match/libass resolves for an ASS style, the
     same resolution caption_renderer.py's pixel-width measurer uses.
     """
     style = "Bold" if bold else "Regular"
@@ -121,7 +121,7 @@ def _font_charset_ranges(font_path: str) -> Optional[list[tuple[int, int]]]:
 
 def check_ass_font_coverage(text: str, font_name: str, bold: bool = False) -> Optional[str]:
     """Warning naming characters the resolved ASS font has no glyph for, or
-    None if it covers everything (or coverage couldn't be determined — this
+    None if it covers everything (or coverage couldn't be determined; this
     never fails the render, so an undetermined font is treated as fine).
     """
     if not text:

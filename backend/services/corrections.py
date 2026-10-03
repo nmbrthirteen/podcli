@@ -92,7 +92,7 @@ def _merge_multiword_corrections(words: list[dict], corrections: dict[str, str])
     "open AI" -> "OpenAI") into the corrected word(s).
 
     Segment text gets multi-word corrections for free from the regex pass
-    below, but captions are burned from individual words — left split,
+    below, but captions are burned from individual words. Left split,
     "open" and "AI" render as two separate caption words instead of the
     fix. The merged word(s) span from the start of the first matched word
     to the end of the last one, so caption timing stays continuous.
@@ -168,7 +168,7 @@ def apply_corrections(
     Modifies the 'word' field in each word dict and the 'text' field
     in each segment dict. Multi-word corrections can change the number of
     words (several words merge into the correction's word(s)), so the
-    `words` list itself is replaced in-place via slice assignment —
+    `words` list itself is replaced in-place via slice assignment, so
     callers that hold a reference to the original list still see the
     update. Returns the same lists (mutated).
     """

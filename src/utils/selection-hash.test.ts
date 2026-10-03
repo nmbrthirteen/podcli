@@ -65,7 +65,7 @@ describe("computeSelectionHash", () => {
   it("ignores words outside the clip range", () => {
     const a = computeSelectionHash(clip(), words);
     const extraOutside = [...words, { word: "far-away", start: 500, end: 501, confidence: 1 }];
-    // "far-away" is outside [10, 20) only because of its start time — adding
+    // "far-away" is outside [10, 20) only because of its start time. Adding
     // a word inside the range should matter, outside should not.
     const b = computeSelectionHash(clip(), extraOutside);
     expect(a).toBe(b);

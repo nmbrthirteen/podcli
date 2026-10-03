@@ -7,7 +7,7 @@ import { PythonExecutor } from "./python-executor.js";
  * The transcript cache is keyed by engine. Reading the cache with the raw
  * request (e.g. undefined, meaning "whisper-py unless this install can't run
  * it") instead of what transcribe_file resolves to always misses on a native
- * install, because the write afterward lands under "whispercpp" — the key
+ * install, because the write afterward lands under "whispercpp", the key
  * the read never looked at.
  */
 /**

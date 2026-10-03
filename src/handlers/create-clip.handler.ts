@@ -197,7 +197,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
 
   // When the caller relies on the session transcript (rather than passing
   // transcript_words explicitly), refuse to render against a video that was
-  // swapped in after that transcript was generated — set_video clears the
+  // swapped in after that transcript was generated. set_video clears the
   // transcript itself, but older sessions or a stale on-disk state file can
   // still carry a mismatched one.
   if (input.transcript_words == null && transcript) {

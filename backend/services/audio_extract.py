@@ -23,8 +23,8 @@ def extract_wav_16k_mono(
     """Extract audio as 16 kHz mono 16-bit PCM WAV. Returns the wav path.
 
     When wav_path is None a temp file is created; the caller owns cleanup.
-    start_seconds/duration_seconds trim the output to a window of the source
-    — used for sample-mode transcription (test a language on a short clip
+    start_seconds/duration_seconds trim the output to a window of the source,
+    used for sample-mode transcription (test a language on a short clip
     instead of the full episode).
     """
     owns_wav = wav_path is None

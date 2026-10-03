@@ -157,8 +157,8 @@ export class TranscriptCache {
    * (the pre-existing call shape) is treated as engine-only.
    *
    * base model and auto/empty language contribute no suffix, so a cache
-   * written before model/language were tracked — always base, whisper-py (or
-   * whatever engine was passed), auto-detected language — still reads back
+   * written before model/language were tracked (always base, whisper-py, or
+   * whatever engine was passed, auto-detected language) still reads back
    * under the same key. Any other model or language gets its own key instead
    * of silently colliding with that implicit default.
    */

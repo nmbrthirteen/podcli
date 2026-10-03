@@ -1,4 +1,4 @@
-"""Tests for backend.services.subtitle_export — SRT/VTT sidecar generation."""
+"""Tests for backend.services.subtitle_export: SRT/VTT sidecar generation."""
 
 import os
 import sys

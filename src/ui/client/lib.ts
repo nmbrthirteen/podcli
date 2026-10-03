@@ -40,7 +40,7 @@ export const labelStyle: CSSProperties = {
 // Scripts with no case distinction whose letters Unicode nonetheless assigns
 // an uppercase mapping for display styling (Georgian Mkhedruli -> Mtavruli).
 // Kept in sync with remotion/src/text.ts and backend/utils/text.py's
-// safe_upper — this is the same fix for the studio's live caption/thumbnail
+// safe_upper. This is the same fix for the studio's live caption/thumbnail
 // preview, so it doesn't show a different alphabet than the final render.
 const CASELESS_SCRIPT_RANGES: Array<[number, number]> = [
   [0x10a0, 0x10ff], // Georgian (Mkhedruli, Asomtavruli)
@@ -350,7 +350,7 @@ export function findClipResult<T extends ClipResultRow>(
  * Body for the combined POST /api/ui-state sync. Transcript rides in this
  * same request whenever it changed, rather than a request of its own:
  * after silence removal, videoPath and transcript update together in one
- * render, and splitting them into separate fetches raced on the server — a
+ * render, and splitting them into separate fetches raced on the server. A
  * videoPath-only request landing after the transcript-only one looked
  * exactly like a bare set_video (videoPath with no transcript), which
  * clears the transcript server-side as if it were stale. One request can't

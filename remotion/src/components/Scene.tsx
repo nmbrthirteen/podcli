@@ -93,7 +93,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
           fontWeight: WEIGHT[size],
           lineHeight: LINE_HEIGHT[size],
           letterSpacing: TRACKING[size] * unit,
-          // Resolved per-run below via safeUpper — CSS text-transform would
+          // Resolved per-run below via safeUpper. CSS text-transform would
           // still remap caseless scripts like Georgian to a different alphabet.
           textTransform: "none",
           color: toneOf(brand, accent, block.tone, size === "xs" ? "muted" : "ink"),

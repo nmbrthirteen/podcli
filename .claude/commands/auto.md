@@ -46,16 +46,16 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
    - Call `transcribe_start(file_path)` → returns `{job_id, cached, estimate}` immediately.
    - If `cached: true`, skip to step 3.
    - Otherwise emit a short status to the user: _"Transcription started — estimated {estimate}. I'll check progress every 30s."_
-   - Loop: call `job_status(job_id, wait_seconds: 30)`. Between calls, emit ONE terse line to the user like `"Progress: 47% — pyannote diarization"`. Keep it to one line per poll — no repeat prose. Exit the loop when `done: true`.
+   - Loop: call `job_status(job_id, wait_seconds: 30)`. Between calls, emit ONE terse line to the user like `"Progress: 47%, pyannote diarization"`. Keep it to one line per poll, no repeat prose. Exit the loop when `done: true`.
    - If `status: "error"`, stop and report the error.
 3. Read the packed transcript: `get_ui_state(include_transcript: true)`. This returns a compact phrase-grouped view with speakers, silence gaps, and energy peaks.
    - **If the header says speakers: 0**, stop and tell the user before going further. Without speaker labels you cannot tell a question from an answer, so the whole question-with-the-answer rule below is inert and the picks will be worse. Offer to re-transcribe with `transcribe_start(file_path, enable_diarization: true)`. Only continue without it if the user says to.
-4. If `.podcli/knowledge/` exists, read `01-brand-identity.md`, `02-voice-and-tone.md`, and `04-shorts-creation-guide.md` for show context. Skip silently if missing — `/auto` works on any content.
+4. If `.podcli/knowledge/` exists, read `01-brand-identity.md`, `02-voice-and-tone.md`, and `04-shorts-creation-guide.md` for show context. Skip silently if missing: `/auto` works on any content.
 5. Call `clip_history` to see what's already been shipped for this episode. Avoid duplicates in the proposal.
 
-**Fallback**: if `transcribe_start` returns an error about the Web UI not running, tell the user and offer either (a) start the Web UI in another terminal then retry — `podcli studio` for a launcher install, `npm run ui` in a source checkout — or (b) fall back to the synchronous `transcribe_podcast` (no live progress, works silently).
+**Fallback**: if `transcribe_start` returns an error about the Web UI not running, tell the user and offer either (a) start the Web UI in another terminal then retry (`podcli studio` for a launcher install, `npm run ui` in a source checkout), or (b) fall back to the synchronous `transcribe_podcast` (no live progress, works silently).
 
-6. **Ask once, reuse the answer.** `get_ui_state` lists this episode's unanswered decisions under `OPEN QUESTIONS` (clip count, duration range, captions, language, thumbnails, delivery target). Ask whichever are relevant to this run — batched, not one dialog box per field — then call `record_decisions(video_path, ...)` with the answers. On every later run against this same video, those fields are already answered and won't appear in `OPEN QUESTIONS` again.
+6. **Ask once, reuse the answer.** `get_ui_state` lists this episode's unanswered decisions under `OPEN QUESTIONS` (clip count, duration range, captions, language, thumbnails, delivery target). Ask whichever are relevant to this run, batched, not one dialog box per field, then call `record_decisions(video_path, ...)` with the answers. On every later run against this same video, those fields are already answered and won't appear in `OPEN QUESTIONS` again.
 
 ### Phase 2 — Topic Map (silent)
 

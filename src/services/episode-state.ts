@@ -19,10 +19,10 @@ const QUESTIONS: Array<{ field: keyof EpisodeDecisions; question: string }> = [
   { field: "clipCount", question: "How many clips should this episode produce?" },
   { field: "clipDurationRange", question: "What's the target clip duration range (seconds)?" },
   { field: "captionsEnabled", question: "Should clips have captions burned in?" },
-  { field: "captionStyle", question: "Which caption style — hormozi, karaoke, subtle, or branded?" },
+  { field: "captionStyle", question: "Which caption style: hormozi, karaoke, subtle, or branded?" },
   { field: "language", question: "What language is this episode in?" },
   { field: "thumbnailsWanted", question: "Do you want thumbnails generated for these clips?" },
-  { field: "deliveryTarget", question: "Where are these clips headed — YouTube Shorts, TikTok, Instagram, or just export?" },
+  { field: "deliveryTarget", question: "Where are these clips headed: YouTube Shorts, TikTok, Instagram, or just export?" },
 ];
 
 /**
@@ -63,7 +63,7 @@ export class EpisodeState {
 
   async keyFor(videoPath: string): Promise<string | null> {
     const identity = computeVideoIdentity(resolve(videoPath));
-    if (!identity) return null; // video not found on disk — nothing to key against
+    if (!identity) return null; // video not found on disk, nothing to key against
     return this.keyForIdentity(identity);
   }
 

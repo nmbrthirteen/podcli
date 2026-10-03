@@ -54,7 +54,7 @@ describe("PodStack command frontmatter matches registered MCP tools", () => {
       const source = readFileSync(join(commandsDir, file), "utf-8");
       const { body } = parseFrontmatter(source);
       // Only call-shaped references, e.g. `set_video(file_path)` or
-      // `job_status(job_id, wait_seconds: 30)` — bare backticked words like
+      // `job_status(job_id, wait_seconds: 30)`. Bare backticked words like
       // `payoff` or `async_mode` are field names, not tool calls.
       const calls = Array.from(body.matchAll(/`([a-z][a-z0-9_]*)\(/g)).map((m) => m[1]);
       const unknown = calls.filter((name) => !toolNames.has(name));

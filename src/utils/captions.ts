@@ -49,7 +49,7 @@ export function selectBestCaptionTrack(
 /**
  * Parse WebVTT cue text into {start, end, text}. Strips inline tags
  * (<c>, <00:00:01.000>, voice spans) that auto-captions use for
- * word-by-word highlighting — podcli derives its own word timing from the
+ * word-by-word highlighting. podcli derives its own word timing from the
  * cue span instead, so these would only be noise in the text.
  */
 export function parseVtt(vtt: string): CaptionCue[] {

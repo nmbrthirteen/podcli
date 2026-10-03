@@ -95,7 +95,7 @@ export const Audiogram: React.FC<AudiogramProps> = ({
             fontWeight: 700,
             fontSize: Math.round(height * 0.022),
             letterSpacing: "0.08em",
-            // Resolved below via safeUpper — CSS text-transform would still
+            // Resolved below via safeUpper. CSS text-transform would still
             // remap caseless scripts like Georgian to a different alphabet.
             textTransform: "none",
           }}

@@ -19,7 +19,7 @@ export const compareEnginesToolDef = {
   description:
     "Transcribe the same sample window of a file with two engines and report where their output " +
     "disagrees, in 20s windows by default. This measures disagreement between the two engines' " +
-    "output, not accuracy against a ground-truth transcript — neither engine is assumed correct. " +
+    "output, not accuracy against a ground-truth transcript. Neither engine is assumed correct. " +
     "Writes comparison.json and a self-contained comparison.html (with a sample audio player and " +
     "per-window seek buttons) to output_dir.",
   inputSchema: {
