@@ -112,6 +112,8 @@ class Source:
     height: int = 0
     fps: float = 0.0
     timecode: float = 0.0  # embedded start timecode in seconds; editors address media from here
+    file_size: int = 0  # size at probe time; a mismatch on reopen means the file changed underneath us
+    file_mtime_ns: int = 0  # mtime at probe time, nanosecond resolution
     role: str = "ignore"  # "camera" | "mic" | "ignore"
     # camera: a person id or "wide"; mic: a person id, or "" for a shared room mic
     person: str = ""
@@ -350,6 +352,7 @@ def probe_source(path: str) -> Source:
         if not 1 <= fps <= 240:
             fps = 30.0
     sample_rate = int(audio.get("sample_rate") or 0) if audio else 0
+    stat = os.stat(path)
     return Source(
         # Built from name and size so the same recording gets the same id
         # on another machine and a saved edit or cut list still points at it.
@@ -363,7 +366,61 @@ def probe_source(path: str) -> Source:
         height=int(video.get("height") or 0) if video else 0,
         fps=round(fps, 3),
         timecode=round(_timecode_seconds(info, fps, sample_rate), 6),
+        file_size=stat.st_size,
+        file_mtime_ns=stat.st_mtime_ns,
     )
+
+
+def _file_identity(s: Source) -> str:
+    """Short fingerprint of the file state a source was last probed against.
+
+    Used to key derived caches (extracted sync audio, activity) so that a
+    file silently changing underneath its source (replaced, re-exported,
+    re-encoded) can't serve stale cached work keyed only on the source id,
+    which is built from basename and size and so does not change.
+    """
+    return hashlib.sha1(f"{s.file_size}:{s.file_mtime_ns}".encode()).hexdigest()[:8]
+
+
+def _source_changed_on_disk(s: Source) -> bool:
+    """True if the file at `s.path` no longer matches what was probed."""
+    try:
+        stat = os.stat(s.path)
+    except OSError:
+        return False
+    return stat.st_size != s.file_size or stat.st_mtime_ns != s.file_mtime_ns
+
+
+def refresh_stale_sources(session: "MulticamSession") -> bool:
+    """Re-probe any source whose file changed since it was last probed.
+
+    A saved session reopens by matching the set of file paths alone, so a
+    camera file swapped out for a re-export with the same name silently kept
+    its old sync, offset and caches. Re-probe it, reset everything derived
+    from its old bytes, and let the normal flows (sync, activity, previews)
+    regenerate against the new file.
+    """
+    affected_in_use = False
+    for s in session.sources:
+        if s.virtual or not s.path or not _source_changed_on_disk(s):
+            continue
+        try:
+            fresh = probe_source(s.path)
+        except Exception:
+            continue
+        s.duration, s.has_audio, s.audio_channels = fresh.duration, fresh.has_audio, fresh.audio_channels
+        s.width, s.height, s.fps, s.timecode = fresh.width, fresh.height, fresh.fps, fresh.timecode
+        s.file_size, s.file_mtime_ns = fresh.file_size, fresh.file_mtime_ns
+        s.offset, s.speed, s.sync = None, 1.0, {
+            "status": "failed",
+            "message": "This file changed on disk since it was last synced. Sync again.",
+        }
+        affected_in_use = affected_in_use or _in_use(session, s)
+    if affected_in_use:
+        session.activity_key = ""
+        session.cuts = []
+        session.range_start = session.range_end = None
+    return affected_in_use
 
 
 _WIDE = re.compile(r"(^|[^a-z])(wide|master|main|both|all|group|ws|two.?shot|2.?shot|overview)([^a-z]|$)")
@@ -670,7 +727,12 @@ def new_session(
     # caller makes after, under the same lock as any other.
     existing = find_session(found)
     if existing:
-        _emit(progress_callback, 100, f"Reopened the edit for these {len(found)} files")
+        if refresh_stale_sources(existing):
+            existing.save()
+            _emit(progress_callback, 100, f"Reopened the edit for these {len(found)} files; "
+                                           "one or more changed on disk and need syncing again")
+        else:
+            _emit(progress_callback, 100, f"Reopened the edit for these {len(found)} files")
         return existing
     named = [(str(p.get("name", "")).strip(), p.get("role")) if isinstance(p, dict) else (str(p or "").strip(), None)
              for p in (people or [])]
@@ -929,7 +991,11 @@ def _cut_inputs(session: MulticamSession) -> str:
 # ---------------------------------------------------------------------------
 
 def _extract(source: Source, out: Path, channel: int = -1, rate: int = SYNC_RATE) -> Path:
-    if out.exists() and out.stat().st_mtime >= os.path.getmtime(source.path):
+    # Keyed on the probed file identity, not a live mtime check: a replaced
+    # file can land within the same mtime second, and the id in `out`'s name
+    # (basename:size) doesn't change either, so neither alone is reliable.
+    out = out.with_name(f"{out.stem}-{_file_identity(source)}{out.suffix}")
+    if out.exists():
         return out
     tmp = out.with_suffix(".tmp.wav")
     pick = "pan=mono|c0=c0" if source.audio_channels < 2 else "pan=mono|c0=0.5*c0+0.5*c1"
@@ -1165,7 +1231,7 @@ def sync_session(
 # ---------------------------------------------------------------------------
 
 def _activity_key(session: MulticamSession) -> str:
-    feeds = [(s.id, ch, pid, s.offset, s.speed) for s, ch, pid in session.person_mics()]
+    feeds = [(s.id, _file_identity(s), ch, pid, s.offset, s.speed) for s, ch, pid in session.person_mics()]
     blob = json.dumps([feeds, session.speaker_map, session.person_ids()], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:16]
 

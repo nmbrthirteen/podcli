@@ -583,6 +583,40 @@ def test_preview_stills_regenerate_after_a_nudge_instead_of_serving_a_stale_fram
     assert look_after != look_before and os.path.exists(look_after)
 
 
+def test_reopening_a_session_with_an_unchanged_camera_keeps_its_sync(episode):
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    session = mc.sync_session(session)
+    cam = next(s for s in session.sources if os.path.basename(s.path) == "cam_one.mp4")
+    assert cam.synced
+
+    reopened = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    assert reopened.session_id == session.session_id
+    assert reopened.source(cam.id).synced
+    assert reopened.source(cam.id).offset == cam.offset
+
+
+def test_reopening_a_session_detects_a_camera_replaced_on_disk(episode):
+    session = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    session = mc.sync_session(session)
+    cam_path = episode / "cam_one.mp4"
+    cam = next(s for s in session.sources if os.path.basename(s.path) == "cam_one.mp4")
+    assert cam.synced
+    old_identity = (cam.file_size, cam.file_mtime_ns)
+
+    # Re-export the same file path with different content: same name, same id
+    # (basename:size can coincide), but the bytes underneath changed.
+    _ffmpeg("-f", "lavfi", "-i", "color=c=yellow:s=160x90:r=30:d=40", "-i", str(episode.parent / "one.wav"),
+            "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-y", str(cam_path))
+
+    reopened = mc.new_session(folder=str(episode), people=["Nika", "Ana"])
+    assert reopened.session_id == session.session_id
+    fresh = reopened.source(cam.id)
+    assert (fresh.file_size, fresh.file_mtime_ns) != old_identity
+    assert not fresh.synced
+    assert fresh.sync["status"] == "failed"
+    assert reopened.cuts == []
+
+
 def test_last_person_is_the_guest_and_roles_survive_renames(episode):
     session = mc.new_session(folder=str(episode), people=["Nihal", "Cameron", "Ana"])
     assert [(p.name, p.role) for p in session.people] == [("Nihal", "host"), ("Cameron", "host"), ("Ana", "guest")]
