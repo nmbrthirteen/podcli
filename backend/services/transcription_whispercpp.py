@@ -106,8 +106,15 @@ def _voiced_intervals(wav_path: str, bridge: float = 0.3, thresh_ratio: float = 
     if len(samples) < frame:
         return []
     nf = 1 + (len(samples) - frame) // hop
-    idx = np.arange(nf)[:, None] * hop + np.arange(frame)[None, :]
-    rms = np.sqrt((samples[idx] ** 2).mean(axis=1))
+    # The old (nf, frame) index matrix gathered every window at once —
+    # ~1GB of int64 indices alone for a 1-hour 16kHz file, before even
+    # touching the gathered samples. A running sum of squares gives the same
+    # per-frame RMS in O(n) memory instead of O(nf * frame).
+    sq = samples * samples
+    csum = np.concatenate(([0.0], np.cumsum(sq, dtype=np.float32)))
+    starts = np.arange(nf) * hop
+    window_sums = csum[starts + frame] - csum[starts]
+    rms = np.sqrt(np.maximum(window_sums, 0.0) / frame)
     peak = float(rms.max())
     if peak <= 0:
         return []
