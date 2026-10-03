@@ -327,7 +327,46 @@ def analyze_silence(
     return plan
 
 
-def _map_range(start: float, end: float, keep_segments: list[dict]) -> Optional[tuple[float, float]]:
+def _map_point(t: float, keep_segments: list[dict]) -> Optional[tuple[float, float]]:
+    """Map a single instant through keep_segments. None if t fell in a
+    removed range; otherwise its output position as a zero-length range."""
+    cursor = 0.0
+    for segment in keep_segments:
+        if segment["start"] <= t <= segment["end"]:
+            mapped = cursor + (t - segment["start"])
+            return mapped, mapped
+        cursor += segment["end"] - segment["start"]
+    return None
+
+
+def _map_range(
+    start: float,
+    end: float,
+    keep_segments: list[dict],
+    *,
+    assign_by_midpoint: bool = False,
+) -> Optional[tuple[float, float]]:
+    # A zero (or inverted) duration item has no overlap for the interval test
+    # below to find — overlap_end > overlap_start never holds when they're
+    # equal — so it always mapped to None and got dropped. Map it as a point
+    # instead: keep it if it falls inside a kept range, drop it if not.
+    if end <= start:
+        return _map_point(start, keep_segments)
+    if assign_by_midpoint:
+        # A word that straddles a cut (part of it sits in the removed gap
+        # between two kept ranges) belongs wholly to whichever side holds its
+        # midpoint, not to a stitched span across the cut — stitching would
+        # silently absorb the cut into the word's own duration.
+        midpoint = (start + end) / 2.0
+        cursor = 0.0
+        for segment in keep_segments:
+            seg_start, seg_end = segment["start"], segment["end"]
+            if seg_start <= midpoint <= seg_end:
+                overlap_start = max(start, seg_start)
+                overlap_end = min(end, seg_end)
+                return cursor + overlap_start - seg_start, cursor + overlap_end - seg_start
+            cursor += seg_end - seg_start
+        return None
     output_cursor = 0.0
     mapped_parts: list[tuple[float, float]] = []
     for segment in keep_segments:
@@ -344,7 +383,12 @@ def _map_range(start: float, end: float, keep_segments: list[dict]) -> Optional[
     return mapped_parts[0][0], mapped_parts[-1][1]
 
 
-def remap_timed_items(items: list[dict], keep_segments: list[dict]) -> list[dict]:
+def remap_timed_items(
+    items: list[dict],
+    keep_segments: list[dict],
+    *,
+    assign_by_midpoint: bool = False,
+) -> list[dict]:
     remapped: list[dict] = []
     for item in items:
         try:
@@ -352,16 +396,25 @@ def remap_timed_items(items: list[dict], keep_segments: list[dict]) -> list[dict
             end = float(item["end"])
         except (KeyError, TypeError, ValueError):
             continue
-        mapped = _map_range(start, end, keep_segments)
-        if not mapped or mapped[1] - mapped[0] < 0.01:
+        mapped = _map_range(start, end, keep_segments, assign_by_midpoint=assign_by_midpoint)
+        if mapped is None:
             continue
-        remapped.append({**item, "start": round(mapped[0], 3), "end": round(mapped[1], 3)})
+        mapped_start, mapped_end = mapped
+        # The 10ms floor only makes sense for a real interval that got
+        # clipped down to near-nothing; a genuinely zero-duration source item
+        # (mapped_start == mapped_end by construction, from _map_point) is
+        # meant to be kept as a point marker.
+        if end > start and mapped_end - mapped_start < 0.01:
+            continue
+        remapped.append({**item, "start": round(mapped_start, 3), "end": round(mapped_end, 3)})
     return remapped
 
 
 def remap_transcript(transcript: dict, keep_segments: list[dict]) -> dict:
     remapped = dict(transcript or {})
-    remapped["words"] = remap_timed_items(list(remapped.get("words") or []), keep_segments)
+    remapped["words"] = remap_timed_items(
+        list(remapped.get("words") or []), keep_segments, assign_by_midpoint=True
+    )
     remapped["segments"] = remap_timed_items(list(remapped.get("segments") or []), keep_segments)
     remapped["duration"] = round(sum(s["end"] - s["start"] for s in keep_segments), 3)
     remapped["silence_removed"] = True
