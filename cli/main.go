@@ -114,9 +114,31 @@ func refreshStudioBundles() {
 // ensureRuntime self-provisions on first run so `podcli` works without a separate
 // `podcli setup`. Not called on the mcp path, whose stdout is the JSON-RPC channel;
 // that path calls refreshBackend directly, which only writes to stderr.
+// setupDoneStamp marks a setup that ran to the end, whatever it had to skip.
+// Setup extracts the backend before any download, so a backend alone does not
+// prove the runtime arrived.
+func setupDoneStamp() string { return filepath.Join(paths.RuntimeDir(), ".setup-complete") }
+
+// setupInterrupted reports a managed install whose first setup stopped after
+// the backend landed but before the Python runtime did, e.g. a Ctrl-C during
+// the model download. Without this check every later run trusted the backend
+// and ran it on whatever python3 was on PATH.
+func setupInterrupted() bool {
+	root, ok := engine.BackendRoot()
+	if !ok || root != filepath.Join(paths.RuntimeDir(), "backend") || os.Getenv("PODCLI_PYTHON") != "" {
+		return false
+	}
+	return !fileExists(setupDoneStamp()) && engine.Python() == "python3"
+}
+
 func ensureRuntime() error {
-	if _, ok := engine.BackendRoot(); !ok {
-		fmt.Fprintln(os.Stderr, "First run - setting up podcli (one-time download)...")
+	_, ok := engine.BackendRoot()
+	if interrupted := ok && setupInterrupted(); !ok || interrupted {
+		if interrupted {
+			fmt.Fprintln(os.Stderr, "Finishing an interrupted podcli setup...")
+		} else {
+			fmt.Fprintln(os.Stderr, "First run - setting up podcli (one-time download)...")
+		}
 		// setup reports on stdout, which belongs to the command being run here:
 		// `--json` callers parse it as exactly one JSON object.
 		stdout := os.Stdout
@@ -409,6 +431,9 @@ func setup(args []string) int {
 		} else {
 			fmt.Printf("  browser:  ready\n")
 		}
+	}
+	if err := os.WriteFile(setupDoneStamp(), []byte(Version+"\n"), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "  setup:   could not record completion (%v)\n", err)
 	}
 	if engine.MCPServer() != "" {
 		if mcpRegisteredToSelf() {

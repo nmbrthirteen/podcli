@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -50,6 +51,42 @@ class VideoProcessorTests(unittest.TestCase):
         self.assertEqual(out, "/tmp/out.mp4")
         self.assertGreaterEqual(run_ffmpeg.call_count, 2)
         self.assertEqual(run_ffmpeg.call_args_list[1].kwargs.get("label"), "outro_hardcut_soft_audio")
+
+    def test_soft_audio_fallback_removes_the_scaled_outro(self):
+        out_dir = tempfile.mkdtemp()
+        out = os.path.join(out_dir, "clip.mp4")
+        scaled = out + ".outro_scaled.mp4"
+        run_fail = mock.Mock(returncode=1, stdout="", stderr="xfade unavailable")
+
+        def fake_ffmpeg(**kwargs):
+            with open(kwargs["output_path"], "wb") as f:
+                f.write(b"x")
+            return kwargs["output_path"]
+
+        with mock.patch.object(vp, "get_dimensions", return_value=(1080, 1920)), \
+             mock.patch.object(vp, "_get_media_duration_seconds", side_effect=[20.0, 5.0]), \
+             mock.patch.object(vp, "_has_audio_stream", return_value=True), \
+             mock.patch.object(vp, "get_video_encode_flags", return_value=vp.CPU_FLAGS), \
+             mock.patch.object(vp, "_run_ffmpeg_with_fallback", side_effect=fake_ffmpeg), \
+             mock.patch.object(vp, "proc_run", return_value=run_fail):
+            self.assertEqual(vp.concat_outro("/tmp/in.mp4", "/tmp/outro.mp4", out), out)
+
+        self.assertTrue(os.path.exists(out))
+        self.assertFalse(os.path.exists(scaled))
+
+    def test_a_failed_outro_cleanup_keeps_the_finished_join(self):
+        run_fail = mock.Mock(returncode=1, stdout="", stderr="xfade unavailable")
+        with mock.patch.object(vp, "get_dimensions", return_value=(1080, 1920)), \
+             mock.patch.object(vp, "_get_media_duration_seconds", side_effect=[20.0, 5.0]), \
+             mock.patch.object(vp, "_has_audio_stream", return_value=True), \
+             mock.patch.object(vp, "get_video_encode_flags", return_value=vp.CPU_FLAGS), \
+             mock.patch.object(vp.os, "remove", side_effect=PermissionError("locked")), \
+             mock.patch.object(vp, "_run_ffmpeg_with_fallback", side_effect=["/tmp/scaled.mp4", "/tmp/out.mp4"]) as run_ffmpeg, \
+             mock.patch.object(vp, "proc_run", return_value=run_fail):
+            out = vp.concat_outro("/tmp/in.mp4", "/tmp/outro.mp4", "/tmp/out.mp4")
+
+        self.assertEqual(out, "/tmp/out.mp4")
+        self.assertEqual(run_ffmpeg.call_count, 2)
 
     def test_resolve_speaker_sides_does_not_guess_from_transcript_order(self):
         speaker_side = vp._resolve_speaker_sides(

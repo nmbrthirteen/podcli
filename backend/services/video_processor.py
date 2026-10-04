@@ -3260,7 +3260,7 @@ def concat_outro(
         audio_fade_start = max(0.0, main_duration - audio_fade)
         AFMT = "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo"
         try:
-            return _run_ffmpeg_with_fallback(
+            joined = _run_ffmpeg_with_fallback(
                 cmd_parts_before_enc=[
                     "ffmpeg", "-y",
                     "-i", input_path,
@@ -3283,7 +3283,15 @@ def concat_outro(
                 label="outro_hardcut_soft_audio",
             )
         except Exception:
-            pass
+            joined = None
+        if joined:
+            # The scaled outro sits in the user's output folder. A failed
+            # delete must not send a finished join into the fallback below.
+            try:
+                os.remove(outro_scaled)
+            except OSError:
+                pass
+            return joined
 
     # Fallback 2: pure hard cut concat
     main_reenc = output_path + ".main_reenc.mp4"
