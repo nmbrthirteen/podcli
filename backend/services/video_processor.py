@@ -3282,13 +3282,16 @@ def concat_outro(
                 output_path=output_path,
                 label="outro_hardcut_soft_audio",
             )
-            # The scaled outro sits in the user's output folder; this path
-            # used to return before removing it.
-            if os.path.exists(outro_scaled):
-                os.remove(outro_scaled)
-            return joined
         except Exception:
-            pass
+            joined = None
+        if joined:
+            # The scaled outro sits in the user's output folder. A failed
+            # delete must not send a finished join into the fallback below.
+            try:
+                os.remove(outro_scaled)
+            except OSError:
+                pass
+            return joined
 
     # Fallback 2: pure hard cut concat
     main_reenc = output_path + ".main_reenc.mp4"
