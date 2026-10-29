@@ -13,6 +13,7 @@ One-command processing:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -75,6 +76,61 @@ from config.paths import paths
 from config.server import DEFAULT_PORT, resolve_web_server_port, web_server_url
 from presets import DEFAULT_PRESET, MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 from services.knowledge_base import is_empty as kb_is_empty, kb_files
+
+_ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
+
+
+def _use_color(stream=None) -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    stream = sys.stdout if stream is None else stream
+    return hasattr(stream, "isatty") and stream.isatty()
+
+
+def _want_spinner() -> bool:
+    if os.environ.get("NO_COLOR") or os.environ.get("PODCLI_QUIET"):
+        return False
+    return hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+
+
+def _non_interactive(args=None) -> bool:
+    if os.environ.get("PODCLI_YES"):
+        return True
+    if args is not None and (getattr(args, "yes", False) or getattr(args, "json", False)):
+        return True
+    return not (sys.stdin.isatty() and sys.stdout.isatty())
+
+
+class _PlainStream:
+    def __init__(self, inner):
+        self._inner = inner
+
+    def write(self, s):
+        if isinstance(s, str):
+            s = _ANSI_RE.sub("", s)
+        return self._inner.write(s)
+
+    def writelines(self, lines):
+        for line in lines:
+            self.write(line)
+
+    def flush(self):
+        return self._inner.flush()
+
+    def isatty(self):
+        return False
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def _install_plain_streams():
+    if not _use_color(sys.stdout) and not isinstance(sys.stdout, _PlainStream):
+        sys.stdout = _PlainStream(sys.stdout)
+    if not _use_color(sys.stderr) and not isinstance(sys.stderr, _PlainStream):
+        sys.stderr = _PlainStream(sys.stderr)
 
 
 def _parse_json_transcript(raw_text):
@@ -468,7 +524,7 @@ def _should_enter_post_render_loop(config: dict, interrupted: bool, results: lis
     """Open the post-render rerender flow on explicit config or partial interrupt recovery."""
     # The post-render loop is interactive (prompt_toolkit); never enter it
     # without a real terminal or it crashes with OSError [Errno 22].
-    if not sys.stdin.isatty():
+    if config.get("non_interactive") or not sys.stdin.isatty():
         return False
     return bool(config.get("post_render_review", False) or (interrupted and _has_successful_results(results)))
 
@@ -1027,6 +1083,94 @@ def _pull_multicam(args, mc, target: str):
     return session
 
 
+def _parse_content_text(raw: str) -> dict:
+    titles, tags, hashtags = [], [], []
+    description_lines = []
+    section = None
+    for line in (raw or "").splitlines():
+        stripped = line.strip()
+        upper = stripped.upper()
+        if upper.startswith("TITLES"):
+            section = "titles"
+            continue
+        if upper.startswith("DESCRIPTION"):
+            section = "description"
+            continue
+        if upper.startswith("HASHTAGS"):
+            section = "hashtags"
+            continue
+        if upper.startswith("TAGS"):
+            section = "tags"
+            continue
+        if upper.startswith("TOP PICK"):
+            section = None
+            continue
+        if not stripped:
+            continue
+        if section == "titles":
+            titles.append(re.sub(r"^\d+\.\s*", "", stripped))
+        elif section == "description":
+            description_lines.append(stripped)
+        elif section == "tags":
+            tags.extend(part.strip() for part in stripped.split(",") if part.strip())
+        elif section == "hashtags":
+            hashtags.extend(part for part in stripped.split() if part.startswith("#"))
+    return {
+        "titles": titles,
+        "description": " ".join(description_lines).strip(),
+        "tags": tags,
+        "hashtags": hashtags,
+    }
+
+
+def _emit_process_json(*, json_out, video_path, output_dir, quality, clips, results, interrupted):
+    payload_clips = []
+    for i, result in enumerate(results):
+        clip = clips[i] if i < len(clips) else {}
+        path = result.get("output_path")
+        captions = {}
+        if path:
+            base, _ = os.path.splitext(path)
+            if os.path.exists(base + ".srt"):
+                captions["srt"] = base + ".srt"
+            if os.path.exists(base + ".vtt"):
+                captions["vtt"] = base + ".vtt"
+        content = {}
+        raw = result.get("content_text")
+        if not raw and result.get("content_path") and os.path.exists(result["content_path"]):
+            with open(result["content_path"], encoding="utf-8") as fh:
+                raw = fh.read()
+        if raw:
+            content = _parse_content_text(raw)
+            content["path"] = result.get("content_path")
+        entry = {
+            "index": i + 1,
+            "title": clip.get("title") or result.get("title"),
+            "path": path,
+            "duration": result.get("duration") or clip.get("duration"),
+            "output_duration": result.get("output_duration"),
+            "start_second": result.get("start_second", clip.get("start_second")),
+            "end_second": result.get("end_second", clip.get("end_second")),
+            "score": clip.get("score"),
+            "file_size_mb": result.get("file_size_mb"),
+            "status": result.get("status", "ok" if path else "error"),
+            "error": result.get("error"),
+            "captions": captions or None,
+            "thumbnails": result.get("thumbnail_paths") or None,
+            "content": content or None,
+        }
+        payload_clips.append({k: v for k, v in entry.items() if v is not None})
+    payload = {
+        "ok": not interrupted and any(c.get("path") for c in payload_clips),
+        "interrupted": bool(interrupted),
+        "video": video_path,
+        "output_dir": output_dir,
+        "quality": quality,
+        "clips": payload_clips,
+    }
+    print(json.dumps(payload, ensure_ascii=False), file=json_out, flush=True)
+
+
 def cmd_process(args):
     """Full auto pipeline: transcribe → suggest → export."""
     from services.clip_generator import generate_clip
@@ -1035,6 +1179,11 @@ def cmd_process(args):
     from services.audio_events import get_event_profile, is_available as audio_events_available
     from services.encoder import get_encoder_info
     from presets import get_preset, DEFAULT_PRESET, MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
+
+    json_out = sys.stdout
+    args._json_out = json_out
+    if getattr(args, "json", False):
+        sys.stdout = sys.stderr
 
     # Load preset or defaults
     if args.preset:
@@ -1124,9 +1273,11 @@ def cmd_process(args):
     if args.top:
         config["top_clips"] = args.top
     if getattr(args, "review_each", False):
-        config["review_each_clip"] = True
+            config["review_each_clip"] = True
     if getattr(args, "post_review", False):
         config["post_render_review"] = True
+    if getattr(args, "yes", False) or getattr(args, "json", False):
+        config["non_interactive"] = True
     if args.logo:
         from services.asset_store import resolve as resolve_asset
         resolved = resolve_asset(args.logo)
@@ -1233,8 +1384,18 @@ def cmd_process(args):
             config["outro_path"] = ""
         os.environ["PODCLI_TRANSITION_AUTOFIX_PASSES"] = "0"
 
-    # Set quality env var before importing video_processor
-    quality = config.get("quality", os.environ.get("PODCLI_QUALITY", "max"))
+    if getattr(args, "quiet", False):
+        os.environ["PODCLI_QUIET"] = "1"
+    if getattr(args, "yes", False) or getattr(args, "json", False):
+        os.environ["PODCLI_YES"] = "1"
+        config["non_interactive"] = True
+        config["review_each_clip"] = False
+        config["post_render_review"] = False
+
+    # Set quality env var before encoding. media_probe.cpu_flags() reads this
+    # at call time so the value here is what actually encodes, not a leftover
+    # from import.
+    quality = config.get("quality") or os.environ.get("PODCLI_QUALITY") or "high"
     os.environ["PODCLI_QUALITY"] = quality
 
     # Output directory: explicit --output wins. Otherwise preset runs get
@@ -1376,9 +1537,11 @@ def cmd_process(args):
             from services.transcription import transcribe_file
             import threading
 
-            # Spinner runs in background while Whisper blocks
+            # Spinner runs in background while Whisper blocks. Off when stderr
+            # isn't a TTY, NO_COLOR is set, or --json/--quiet was passed.
             _spin_stop = threading.Event()
             _spin_msg = ["Loading model..."]
+            _spinning = _want_spinner()
 
             def _spinner():
                 frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -1389,8 +1552,10 @@ def cmd_process(args):
                     _spin_stop.wait(0.12)
                 print(f"\r         {'':60}", end="\r")  # clear line
 
-            spin_thread = threading.Thread(target=_spinner, daemon=True)
-            spin_thread.start()
+            spin_thread = None
+            if _spinning:
+                spin_thread = threading.Thread(target=_spinner, daemon=True)
+                spin_thread.start()
 
             def _transcribe_progress(pct, msg):
                 _spin_msg[0] = f"{msg} ({pct}%)" if pct < 100 else msg
@@ -1410,11 +1575,13 @@ def cmd_process(args):
                 )
             except (RuntimeError, FileNotFoundError, subprocess.CalledProcessError) as e:
                 _spin_stop.set()
-                spin_thread.join(timeout=1)
+                if spin_thread:
+                    spin_thread.join(timeout=1)
                 print(f"\r{' ' * 70}\r  ✗ {e}\n", flush=True)
                 sys.exit(1)
             _spin_stop.set()
-            spin_thread.join(timeout=1)
+            if spin_thread:
+                spin_thread.join(timeout=1)
             words = result["words"]
             segments = result["segments"]
             print(f"         Done: {len(segments)} segments, {len(words)} words")
@@ -1712,7 +1879,11 @@ def cmd_process(args):
     print(f"\n  [4/4] Exporting {len(clips)} clips{_ai_label} to {output_dir}/")
     results = []
     t0 = time.time()
-    _skip_review = not config.get("review_each_clip", False) or not sys.stdin.isatty()
+    _skip_review = (
+        not config.get("review_each_clip", False)
+        or config.get("non_interactive")
+        or not sys.stdin.isatty()
+    )
     interrupted = False
 
     try:
@@ -1788,6 +1959,8 @@ def cmd_process(args):
                     _pair = rendered_thumbs["pair"]
                     if _pair and _pair["layout"] != "pair":
                         print(f"                 ℹ {_pair['reason']}")
+                    if thumb_paths:
+                        result["thumbnail_paths"] = thumb_paths
                     if thumb_paths and _thumb_placement == "off":
                         print(f"                 + {len(thumb_paths)} thumbnail(s) in "
                               f"{os.path.basename(clip_thumb_dir)}/")
@@ -1795,10 +1968,12 @@ def cmd_process(args):
                         thumb_video = os.path.join(clip_thumb_dir, "thumb_frame.mp4")
                         _thumb_to_video(thumb_paths[0], thumb_video, duration=_thumb_intro_duration)
                         from services.video_processor import concat_outro
+                        from services.media_probe import align_av_duration as _align_av_duration
                         final_with_thumb = result["output_path"].replace(".mp4", "_with_thumb.mp4")
                         # Hard cut — thumbnail uses the frame just before content,
                         # so playback feels like the clip has started.
                         concat_outro(thumb_video, result["output_path"], final_with_thumb, crossfade_duration=0.0)
+                        _align_av_duration(final_with_thumb)
                         os.replace(final_with_thumb, result["output_path"])
                         print(f"                 + thumbnail prepended ({_thumb_intro_duration:.2f}s, {len(thumb_paths)} variations in {os.path.basename(clip_thumb_dir)}/)")
                 except Exception as e:
@@ -1817,6 +1992,8 @@ def cmd_process(args):
                         _content_path = result["output_path"].replace(".mp4", "_content.md")
                         with open(_content_path, "w", encoding="utf-8") as _cf:
                             _cf.write(f"# {clip.get('title', 'Clip')}\n\n{content_result['raw_text']}")
+                        result["content_path"] = _content_path
+                        result["content_text"] = content_result.get("raw_text", "")
 
                         # Pretty-print in terminal
                         _accent = "\033[38;2;212;135;74m"
@@ -2019,6 +2196,17 @@ def cmd_process(args):
     if not _ai_cli_path:
         print(f"\n  {gray}For titles, descriptions & tags: install Claude Code or Codex CLI{reset}")
 
+    if getattr(args, "json", False):
+        _emit_process_json(
+            json_out=getattr(args, "_json_out", sys.__stdout__),
+            video_path=video_path,
+            output_dir=output_dir,
+            quality=quality,
+            clips=clips,
+            results=results,
+            interrupted=interrupted,
+        )
+
     # ── Post-render iteration ──
     if _should_enter_post_render_loop(config, interrupted, results):
         if interrupted and not config.get("post_render_review", False):
@@ -2049,6 +2237,9 @@ class _Spinner:
     def __enter__(self):
         import threading
         self._stop.clear()
+        if not _want_spinner():
+            print(f"{self._indent}{self._msg}", flush=True)
+            return self
 
         def _run():
             frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -2111,7 +2302,7 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
     # Non-interactive (piped/scripted/no TTY): skip the picker and render all
     # suggested clips. The picker uses prompt_toolkit, which raises
     # OSError [Errno 22] when stdin isn't a real terminal.
-    if not sys.stdin.isatty():
+    if config.get("non_interactive") or not sys.stdin.isatty():
         print(f"\n         Non-interactive run — rendering all {len(clips)} suggested clips.")
         return clips
 
@@ -4500,7 +4691,10 @@ def print_help():
     print(f"    {green}--fast{reset}                 Draft mode: tiny Whisper, heuristic clips, low quality")
     print(f"    {green}--logo{reset} {gray}<asset|path>{reset}     Overlay logo image")
     print(f"    {green}--outro{reset} {gray}<asset|path>{reset}    Append outro video")
-    print(f"    {green}--quality{reset} {gray}<level>{reset}       low | medium | high | max")
+    print(f"    {green}--quality{reset} {gray}<level>{reset}       low | medium | high | max {dim}(default: high){reset}")
+    print(f"    {green}--json{reset}                 One JSON object on stdout; logs on stderr")
+    print(f"    {green}-y{reset}, {green}--yes{reset}               Do not prompt")
+    print(f"    {green}-q{reset}, {green}--quiet{reset}             No spinners")
     print(f"    {green}--no-energy{reset}            Skip audio energy analysis")
     print(f"    {green}--no-speakers{reset}          Skip speaker detection (faster)")
     print(f"    {green}--no-cache{reset}             Force re-transcription")
@@ -4508,6 +4702,7 @@ def print_help():
     print()
     print(f"  {bold}Examples:{reset}")
     print(f"    {dim}${reset} podcli process episode.mp4")
+    print(f"    {dim}${reset} podcli process episode.mp4 --json --yes")
     print(f"    {dim}${reset} podcli process ep42.mp4 -t transcript.json --top 8 --caption-style hormozi")
     print(f"    {dim}${reset} podcli process ep42.mp4 --preset myshow --quality max")
     print(f"    {dim}${reset} podcli assets add mylogo ~/branding/logo.png")
@@ -4820,7 +5015,7 @@ def _onboarding_marker() -> str:
 
 
 def _needs_onboarding() -> bool:
-    if os.environ.get("PODCLI_NO_ONBOARDING"):
+    if os.environ.get("PODCLI_NO_ONBOARDING") or os.environ.get("PODCLI_YES"):
         return False
     if os.path.exists(_onboarding_marker()):
         return False
@@ -5109,6 +5304,12 @@ def main():
     proc.add_argument("--allow-ass-fallback", action="store_true", help="Use ASS captions if Remotion rendering fails")
     proc.add_argument("--review-each", action="store_true", help="Review each rendered clip interactively")
     proc.add_argument("--post-review", action="store_true", help="Open the post-render review loop after export")
+    proc.add_argument("--json", action="store_true",
+                      help="Emit one JSON object to stdout (clip paths, durations, scores, titles, captions); logs go to stderr")
+    proc.add_argument("-y", "--yes", action="store_true",
+                      help="Do not prompt; render every suggested clip")
+    proc.add_argument("-q", "--quiet", action="store_true",
+                      help="No spinners; keep stderr to warnings and errors")
 
     # ── reel (highlights, detect once then iterate fast) ──
     reel_p = sub.add_parser("reel", help="Create and iterate on a highlights reel")
@@ -5555,6 +5756,12 @@ def main():
 
     args = parser.parse_args()
 
+    if getattr(args, "yes", False) or getattr(args, "json", False):
+        os.environ["PODCLI_YES"] = "1"
+    if getattr(args, "quiet", False):
+        os.environ["PODCLI_QUIET"] = "1"
+    _install_plain_streams()
+
     if getattr(args, "json", False):
         # --json promises stdout holds only the JSON result.
         import contextlib
@@ -5567,7 +5774,9 @@ def main():
         print_help()
         return
 
-    if _needs_onboarding() and not _first_run_setup():
+    if getattr(args, "json", False) or getattr(args, "yes", False):
+        pass
+    elif _needs_onboarding() and not _first_run_setup():
         print("  Setup cancelled. Your command did not run.", file=sys.stderr)
         sys.exit(130)
 
@@ -5580,7 +5789,7 @@ def main():
     elif args.command == "workspace":
         cmd_workspace(args)
     elif args.command == "process":
-        if not getattr(args, "no_banner", False):
+        if not getattr(args, "no_banner", False) and not getattr(args, "json", False):
             print()
         cmd_process(args)
     elif args.command == "studio":
@@ -6107,7 +6316,7 @@ def _interactive_process():
     quality = questionary.select(
         "Quality:",
         choices=["low", "medium", "high", "max"],
-        default="max",
+        default="high",
         style=qstyle,
     ).ask()
     if quality is None:
@@ -6509,7 +6718,7 @@ def _interactive_presets():
     quality = questionary.select(
         "Quality:",
         choices=["low", "medium", "high", "max"],
-        default=config.get("quality", "max"),
+        default=config.get("quality", "high"),
         style=qstyle,
     ).ask()
     if quality:

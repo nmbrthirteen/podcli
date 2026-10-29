@@ -7,11 +7,14 @@
 
 import { randomUUID } from "crypto";
 import { z } from "zod";
+import { PythonExecutor } from "../services/python-executor.js";
 import {
   validateSuggestionContext,
   validateSuggestionRange,
 } from "../utils/clip-validation.js";
 import { playbackDuration, validateHook } from "../utils/clip-hook.js";
+
+const rankExecutor = new PythonExecutor();
 
 /** Shared by suggest_clips, modify_clip, create_clip and batch_create_clips. */
 export const hookSchema = z
@@ -183,4 +186,27 @@ function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+export const rankClipCandidatesToolDef = {
+  name: "rank_clip_candidates",
+  description:
+    "After transcribe_podcast, call this instead of reading the whole transcript. " +
+    "Returns ~20 pre-ranked, sentence-aligned candidates (start/end, duration, score, title, preview). " +
+    "Pick from the list, then submit winners with suggest_clips or render with create_clip.\n\n" +
+    "Uses the cached transcript for video_path. Does not call an AI CLI.",
+};
+
+export async function handleRankClipCandidates(input: {
+  video_path?: string;
+  top_n?: number;
+}): Promise<string> {
+  const result = await rankExecutor.execute<{
+    count: number;
+    candidates: Array<Record<string, unknown>>;
+  }>("rank_candidates", {
+    video_path: input.video_path,
+    top_n: input.top_n ?? 20,
+  });
+  return JSON.stringify(result.data ?? result);
 }

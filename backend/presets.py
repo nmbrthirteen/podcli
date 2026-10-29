@@ -43,7 +43,7 @@ DEFAULT_PRESET = {
     "min_clip_duration": MIN_CLIP_DURATION,
     "target_lufs": -14.0,
     "energy_boost": True,
-    "quality": "max",
+    "quality": "high",
     "no_speakers": False,
     "allow_ass_fallback": True,
     "use_ass_captions": False,

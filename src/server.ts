@@ -9,6 +9,8 @@ import {
   handleTranscribeStart,
   jobStatusToolDef,
   handleJobStatus,
+  processEpisodeToolDef,
+  handleProcessEpisode,
 } from "./handlers/transcribe.handler.js";
 import {
   compareEnginesToolDef,
@@ -18,6 +20,8 @@ import {
   suggestClipsToolDef,
   suggestClipsInputShape,
   handleSuggestClips,
+  rankClipCandidatesToolDef,
+  handleRankClipCandidates,
   hookSchema,
 } from "./handlers/suggest-clips.handler.js";
 import {
@@ -491,7 +495,7 @@ export function createServer(): McpServer {
   );
 
   // =============================================
-  // Tool: job_status (generic poll — transcribe, render, batch)
+  // Tool: job_status (generic poll — transcribe, render, batch, process_episode)
   // =============================================
   server.tool(
     jobStatusToolDef.name,
@@ -503,6 +507,55 @@ export function createServer(): McpServer {
     async (input) => {
       try {
         const text = await handleJobStatus(input);
+        return { content: [{ type: "text" as const, text }] };
+      } catch (err: unknown) {
+        return mcpError(err);
+      }
+    },
+  );
+
+  // =============================================
+  // Tool: process_episode
+  // =============================================
+  server.tool(
+    processEpisodeToolDef.name,
+    processEpisodeToolDef.description,
+    {
+      video_path: z.string().describe("Absolute path to the episode video or audio"),
+      transcript: z.string().optional().describe("Existing transcript path (.srt, .vtt, .txt, .json)"),
+      top: z.number().optional().describe("How many clips to export. Default 5."),
+      output: z.string().optional().describe("Output directory"),
+      quality: z.enum(["low", "medium", "high", "max"]).optional(),
+      caption_style: z.enum(["branded", "hormozi", "karaoke", "subtle"]).optional(),
+      crop: z.enum(["center", "face", "speaker", "speaker-hardcut"]).optional(),
+      format: z.enum(["vertical", "horizontal", "square"]).optional(),
+      language: z.string().optional(),
+      engine: z.enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"]).optional(),
+      fast: z.boolean().optional(),
+    },
+    async (input) => {
+      try {
+        const text = await handleProcessEpisode(input);
+        return { content: [{ type: "text" as const, text }] };
+      } catch (err: unknown) {
+        return mcpError(err);
+      }
+    },
+  );
+
+  // =============================================
+  // Tool: rank_clip_candidates
+  // =============================================
+  server.tool(
+    rankClipCandidatesToolDef.name,
+    rankClipCandidatesToolDef.description,
+    {
+      video_path: z.string().describe("Episode video whose transcript is already cached"),
+      top_n: z.number().min(1).max(40).optional().describe("How many candidates to return. Default 20."),
+    },
+    async (input) => {
+      try {
+        const text = await handleRankClipCandidates(input);
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         return mcpError(err);
@@ -2975,12 +3028,16 @@ export function createServer(): McpServer {
               "This both sets the video AND generates a transcript with word-level timestamps.",
               "If the user already pasted a transcript in the UI, you can skip to Step 3.",
               "",
-              "## Step 3: Read the transcript",
-              "Call get_ui_state(include_transcript: true) to read the full transcript.",
-              "Also check if there's a knowledge base with podcast context (host names, show style, etc).",
+              "## Step 3: Shortlist clips without reading the whole transcript",
+              "Call rank_clip_candidates(video_path) for ~20 sentence-aligned, pre-ranked candidates.",
+              "Only call get_ui_state(include_transcript: true) if you need to rewrite a range.",
               "",
-              "## Step 4: Analyze and suggest clips",
-              "Read through the transcript carefully. Look for:",
+              "## Step 3b (one-shot): process_episode",
+              "process_episode(video_path) transcribes, ranks, and renders in one job. Poll job_status.",
+              "Use this when the user wants finished clips, not a review pass.",
+              "",
+              "## Step 4: Pick from the shortlist",
+              "From the candidates, look for:",
               "- Controversial or surprising statements",
               "- Strong emotional moments (laughter, passion, anger)",
               "- Clear actionable advice or insights",
