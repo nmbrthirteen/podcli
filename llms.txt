@@ -5,7 +5,7 @@ Open-source AI podcast clipper. Turn a long episode into short clips with face t
 Install: `curl -fsSL https://podcli.com/install.sh | sh`
 Windows: `irm https://podcli.com/install.ps1 | iex`
 
-Version: 2.8.1
+Version: 2.8.2
 License: AGPL-3.0. Commercial licensing: siradze@nikusha.me
 Repo: https://github.com/nmbrthirteen/podcli
 Site: https://podcli.com
