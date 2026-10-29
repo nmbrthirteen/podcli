@@ -43,6 +43,7 @@ from services.opening_hook import (
 )
 from config.caption_styles import get_style
 from services.formats import get_format
+from services.media_probe import align_av_duration, ffmpeg_timeout
 
 _FILLER_WORDS = frozenset([
     "um", "uh", "uhh", "uhm", "umm", "hmm", "hm", "mhm",
@@ -270,9 +271,21 @@ def _apply_local_transition_smoothing(
         output_path,
     ]
     try:
-        result = proc_run(cmd, timeout=300, check=False)
-        return result.returncode == 0 and os.path.exists(output_path)
+        duration = _get_media_duration(input_path)
+        result = proc_run(cmd, timeout=ffmpeg_timeout(duration), check=False)
+        ok = result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0
+        if not ok and os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+        return ok
     except Exception:
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
         return False
 
 
@@ -1452,6 +1465,8 @@ def generate_clip(
             os.close(fd)
 
         shutil.copy2(final_video_path, final_path)
+
+        align_av_duration(final_path)
 
         # Optional bounded QA/autofix pass for transition jumps.
         # Hard-capped to avoid any infinite rerender loop.

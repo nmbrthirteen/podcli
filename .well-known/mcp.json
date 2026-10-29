@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "podcli": {
+      "command": "podcli",
+      "args": ["mcp"],
+      "description": "Transcribe, shortlist clips, and render shorts. Run podcli setup once before this."
+    }
+  }
+}

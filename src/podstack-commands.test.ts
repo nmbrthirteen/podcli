@@ -39,6 +39,11 @@ describe("PodStack command frontmatter matches registered MCP tools", () => {
     expect(toolNames.size).toBeGreaterThan(0);
   });
 
+  it("registers rank_clip_candidates and process_episode", () => {
+    expect(toolNames.has("rank_clip_candidates")).toBe(true);
+    expect(toolNames.has("process_episode")).toBe(true);
+  });
+
   for (const file of commandFiles) {
     it(`${file}: every mcp__podcli__* in allowed-tools is a registered tool`, () => {
       const source = readFileSync(join(commandsDir, file), "utf-8");

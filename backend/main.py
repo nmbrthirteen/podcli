@@ -806,6 +806,141 @@ def handle_suggest_clips(task_id: str, params: dict):
     emit_result(task_id, "success", data={"clips": clips})
 
 
+def handle_rank_candidates(task_id: str, params: dict):
+    """Sentence-aligned heuristic ranking. Returns a shortlist, not the transcript."""
+    from services.transcript_packer import load_cached_transcript_for_video
+    import cli as cli_mod
+
+    segments = params.get("segments") or []
+    video_path = params.get("video_path")
+    if not segments:
+        if not video_path:
+            emit_result(task_id, "error", error="video_path or segments is required")
+            return
+        cached = load_cached_transcript_for_video(video_path)
+        if not cached:
+            emit_result(
+                task_id,
+                "error",
+                error="No transcript cached for this video. Call transcribe_podcast first.",
+            )
+            return
+        segments = cached.get("segments") or []
+    if not segments:
+        emit_result(task_id, "error", error="Transcript has no segments to rank")
+        return
+
+    top_n = int(params.get("top_n") or 20)
+    top_n = max(1, min(top_n, 40))
+    emit_progress(task_id, "ranking", 10, f"Ranking up to {top_n} sentence-aligned candidates...")
+    clips = cli_mod._suggest_clips(segments=segments, top_n=top_n)
+    candidates = []
+    for i, clip in enumerate(clips):
+        preview = clip.get("preview") or clip.get("preview_text") or clip.get("quote") or ""
+        candidates.append({
+            "rank": i + 1,
+            "start_second": clip.get("start_second"),
+            "end_second": clip.get("end_second"),
+            "duration": clip.get("duration"),
+            "score": clip.get("score"),
+            "title": clip.get("title"),
+            "preview": str(preview)[:180],
+            "reasons": clip.get("reasons") or [],
+        })
+    emit_result(task_id, "success", data={"count": len(candidates), "candidates": candidates})
+
+
+def handle_process_episode(task_id: str, params: dict):
+    """Run `process` non-interactively and return the --json payload."""
+    import argparse
+    import io
+    import cli as cli_mod
+
+    video_path = params.get("video_path") or params.get("file_path")
+    if not video_path:
+        emit_result(task_id, "error", error="video_path is required")
+        return
+    emit_progress(task_id, "process", 1, "Processing episode...")
+    args = argparse.Namespace(
+        video=video_path,
+        transcript=params.get("transcript"),
+        top=params.get("top") or params.get("top_n"),
+        output=params.get("output"),
+        preset=params.get("preset"),
+        engine=params.get("engine"),
+        assemblyai_api_key=params.get("assemblyai_api_key"),
+        fast=bool(params.get("fast")),
+        thumbnails=params.get("thumbnails"),
+        caption_style=params.get("caption_style"),
+        crop=params.get("crop"),
+        format=params.get("format"),
+        profile=params.get("profile"),
+        logo=params.get("logo"),
+        outro=params.get("outro"),
+        no_outro=bool(params.get("no_outro", False)),
+        intro=params.get("intro"),
+        time_adjust=params.get("time_adjust"),
+        no_energy=bool(params.get("no_energy", False)),
+        no_speakers=bool(params.get("no_speakers", False)),
+        no_cache=bool(params.get("no_cache", False)),
+        no_resume=bool(params.get("no_resume", False)),
+        quality=params.get("quality"),
+        allow_ass_fallback=bool(params.get("allow_ass_fallback", False)),
+        review_each=False,
+        post_review=False,
+        json=True,
+        yes=True,
+        quiet=True,
+        no_banner=True,
+        cloud=False,
+        language=params.get("language"),
+        template=None,
+        caption_position=None,
+        caption_scale=None,
+        face_map=None,
+        crop_keyframes=None,
+        thumbnail_placement=None,
+        logo_position=None,
+        logo_scale=None,
+        topic=None,
+        progress=False,
+        progress_color=None,
+        brand=None,
+        style=None,
+        font_family=None,
+        name_card=None,
+        motion=None,
+        bookend_fade=None,
+    )
+    buf = io.StringIO()
+    old_out = sys.stdout
+    try:
+        sys.stdout = buf
+        cli_mod.cmd_process(args)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        if code not in (0, None):
+            emit_result(task_id, "error", error=f"process exited {code}")
+            return
+    finally:
+        sys.stdout = old_out
+
+    raw = buf.getvalue().strip()
+    payload = None
+    for line in reversed(raw.splitlines() or [""]):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                payload = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+    if payload is None:
+        emit_result(task_id, "error", error="process finished without a JSON result")
+        return
+    emit_result(task_id, "success", data=payload)
+
+
 def handle_manage_env(task_id: str, params: dict):
     """List/set/unset user secrets in the global .env (e.g. HF_TOKEN)."""
     from services.env_settings import run_env_action
@@ -1194,6 +1329,8 @@ TASK_HANDLERS = {
     "presets": handle_presets,
     "corrections": handle_corrections,
     "suggest_clips": handle_suggest_clips,
+    "rank_candidates": handle_rank_candidates,
+    "process_episode": handle_process_episode,
     "find_moment": handle_find_moment,
     "manage_env": handle_manage_env,
     "ai_cli_status": handle_ai_cli_status,

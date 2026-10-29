@@ -22,6 +22,8 @@ from services.media_probe import (
     CPU_FLAGS,
     FFMPEG_TIMEOUT as _FFMPEG_TIMEOUT,
     QUALITY_PRESETS,
+    align_av_duration,
+    ffmpeg_timeout,
     get_dimensions,
     get_video_info,
     get_media_duration_seconds as _get_media_duration_seconds,
@@ -3197,6 +3199,44 @@ def concat_outro(
     )
 
     outro_duration = _get_media_duration_seconds(outro_scaled, default=0.0)
+    if crossfade_duration <= 0:
+        # Hard cut (thumbnail prepend, bookend_fade=0). No afade: a 0-duration
+        # fade can drop packets and leave video longer than audio.
+        AFMT = "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo"
+        if _has_audio_stream(input_path) and _has_audio_stream(outro_scaled):
+            try:
+                joined = _run_ffmpeg_with_fallback(
+                    cmd_parts_before_enc=[
+                        "ffmpeg", "-y",
+                        "-i", input_path,
+                        "-i", outro_scaled,
+                        "-filter_complex",
+                        (
+                            "[0:v][1:v]concat=n=2:v=1:a=0[v];"
+                            f"[0:a]{AFMT}[a0];[1:a]{AFMT}[a1];"
+                            "[a0][a1]concat=n=2:v=0:a=1[a]"
+                        ),
+                        "-map", "[v]",
+                        "-map", "[a]",
+                    ],
+                    cmd_parts_after_enc=[
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                        "-movflags", "+faststart",
+                    ],
+                    output_path=output_path,
+                    label="hardcut_concat",
+                    duration_s=(main_duration or 0) + (outro_duration or 0),
+                )
+            except Exception:
+                joined = None
+            if joined:
+                try:
+                    os.remove(outro_scaled)
+                except OSError:
+                    pass
+                align_av_duration(output_path)
+                return output_path
+        safe_crossfade = 0.0
     safe_crossfade = min(safe_crossfade, max(0.05, main_duration - 0.05))
     if outro_duration > 0:
         safe_crossfade = min(safe_crossfade, max(0.05, outro_duration - 0.05))
@@ -3239,7 +3279,11 @@ def concat_outro(
                     "-movflags", "+faststart",
                     output_path,
                 ]
-                result = proc_run(xfade_cmd, timeout=_FFMPEG_TIMEOUT, check=False)
+                result = proc_run(
+                    xfade_cmd,
+                    timeout=ffmpeg_timeout((main_duration or 0) + (outro_duration or 0)),
+                    check=False,
+                )
                 if result.returncode == 0:
                     if os.path.exists(outro_scaled):
                         os.remove(outro_scaled)
@@ -3259,31 +3303,34 @@ def concat_outro(
         audio_fade = min(safe_crossfade, max(0.05, max(0.1, main_duration) - 0.05))
         audio_fade_start = max(0.0, main_duration - audio_fade)
         AFMT = "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo"
-        try:
-            joined = _run_ffmpeg_with_fallback(
-                cmd_parts_before_enc=[
-                    "ffmpeg", "-y",
-                    "-i", input_path,
-                    "-i", outro_scaled,
-                    "-filter_complex",
-                    (
-                        "[0:v][1:v]concat=n=2:v=1:a=0[v];"
-                        f"[0:a]{AFMT},afade=t=out:st={audio_fade_start}:d={audio_fade}[a0];"
-                        f"[1:a]{AFMT},afade=t=in:st=0:d={audio_fade}[a1];"
-                        "[a0][a1]concat=n=2:v=0:a=1[a]"
-                    ),
-                    "-map", "[v]",
-                    "-map", "[a]",
-                ],
-                cmd_parts_after_enc=[
-                    "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
-                    "-movflags", "+faststart",
-                ],
-                output_path=output_path,
-                label="outro_hardcut_soft_audio",
-            )
-        except Exception:
-            joined = None
+        joined = None
+        if audio_fade >= 0.05:
+            try:
+                joined = _run_ffmpeg_with_fallback(
+                    cmd_parts_before_enc=[
+                        "ffmpeg", "-y",
+                        "-i", input_path,
+                        "-i", outro_scaled,
+                        "-filter_complex",
+                        (
+                            "[0:v][1:v]concat=n=2:v=1:a=0[v];"
+                            f"[0:a]{AFMT},afade=t=out:st={audio_fade_start}:d={audio_fade}[a0];"
+                            f"[1:a]{AFMT},afade=t=in:st=0:d={audio_fade}[a1];"
+                            "[a0][a1]concat=n=2:v=0:a=1[a]"
+                        ),
+                        "-map", "[v]",
+                        "-map", "[a]",
+                    ],
+                    cmd_parts_after_enc=[
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
+                        "-movflags", "+faststart",
+                    ],
+                    output_path=output_path,
+                    label="outro_hardcut_soft_audio",
+                    duration_s=(main_duration or 0) + (outro_duration or 0),
+                )
+            except Exception:
+                joined = None
         if joined:
             # The scaled outro sits in the user's output folder. A failed
             # delete must not send a finished join into the fallback below.

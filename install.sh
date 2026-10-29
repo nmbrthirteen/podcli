@@ -64,7 +64,7 @@ case "$arch" in
 esac
 target="${goos}-${goarch}"
 if [ "$target" = "darwin-amd64" ]; then
-  err "Intel Macs aren't supported yet. Apple Silicon, Linux, and Windows are available."
+  err "Intel Macs aren't supported. Apple Silicon, Linux (x64 and arm64), and Windows (x64) are."
 fi
 mkdir -p "$bin_dir"
 

@@ -1,5 +1,7 @@
 """Tests for backend.cli helpers: the shared WAV cache and Studio port resolution."""
 
+import argparse
+import json
 import os
 import sys
 import tempfile
@@ -139,3 +141,49 @@ class JsonObjectArgTests(unittest.TestCase):
     def test_a_json_array_is_not_an_object(self):
         with self.assertRaises(SystemExit):
             cli_mod._json_object_arg("[1, 2]", "--style")
+
+
+class AgentOutputHelpersTests(unittest.TestCase):
+    def test_no_color_disables_color(self):
+        with mock.patch.dict(os.environ, {"NO_COLOR": "1"}, clear=False):
+            self.assertFalse(cli_mod._use_color())
+
+    def test_parse_content_text(self):
+        raw = (
+            "TITLES\n1. First title\n2. Second title\n"
+            "DESCRIPTION\nA short blurb about the clip.\n"
+            "TAGS\nalpha, beta\n"
+            "HASHTAGS\n#one #two\n"
+        )
+        parsed = cli_mod._parse_content_text(raw)
+        self.assertEqual(parsed["titles"], ["First title", "Second title"])
+        self.assertIn("blurb", parsed["description"])
+        self.assertEqual(parsed["tags"], ["alpha", "beta"])
+        self.assertEqual(parsed["hashtags"], ["#one", "#two"])
+
+    def test_want_spinner_off_when_quiet(self):
+        with mock.patch.dict(os.environ, {"PODCLI_QUIET": "1"}, clear=False):
+            self.assertFalse(cli_mod._want_spinner())
+
+    def test_non_interactive_yes_flag(self):
+        ns = argparse.Namespace(yes=True, json=False)
+        self.assertTrue(cli_mod._non_interactive(ns))
+
+    def test_emit_process_json_writes_one_object(self):
+        import io
+
+        buf = io.StringIO()
+        cli_mod._emit_process_json(
+            json_out=buf,
+            video_path="/ep.mp4",
+            output_dir="/out",
+            quality="high",
+            clips=[{"title": "A", "start_second": 1, "end_second": 12, "score": 9}],
+            results=[{"output_path": "/out/a.mp4", "duration": 11, "status": "ok"}],
+            interrupted=False,
+        )
+        payload = json.loads(buf.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["quality"], "high")
+        self.assertEqual(payload["clips"][0]["title"], "A")
+        self.assertEqual(payload["clips"][0]["path"], "/out/a.mp4")
