@@ -78,9 +78,29 @@ func main() {
 	}
 }
 
+// isMetaFlag reports --help/--version (and short forms) anywhere before `--`.
+// Those must never start a download: `podcli process --help` is a help request,
+// not a first run of process.
+func isMetaFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		switch a {
+		case "--help", "-h", "--version", "-v":
+			return true
+		}
+	}
+	return false
+}
+
 // wantsRuntime gates first-run auto-provisioning: only commands that need the
-// backend trigger the download, not lightweight ones like config.
+// backend trigger the download, not lightweight ones like config, and never
+// --help/--version even when they sit on a command that would otherwise provision.
 func wantsRuntime(args []string) bool {
+	if isMetaFlag(args) {
+		return false
+	}
 	if len(args) == 0 {
 		return true
 	}
@@ -194,43 +214,72 @@ func ensureBackendDeps() error {
 
 func runEngine(args []string) int {
 	update.NotifyIfOutdated(Version)
+	helpOrVersion := isMetaFlag(args)
 	if wantsRuntime(args) {
 		if err := ensureRuntime(); err != nil {
 			fmt.Fprintln(os.Stderr, "podcli:", err)
 			return 1
 		}
-	} else if err := refreshBackend(); err != nil {
-		fmt.Fprintln(os.Stderr, "podcli:", err)
-		return 1
+	} else if !helpOrVersion {
+		if err := refreshBackend(); err != nil {
+			fmt.Fprintln(os.Stderr, "podcli:", err)
+			return 1
+		}
 	}
 	if wantsStudio(args) {
 		refreshStudioBundles()
 	}
-	switch transcribeEngine(args) {
-	case "whispercpp":
-		model, err := provision.EnsureModel(transcribeModel(args))
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "podcli: provisioning model:", err)
-			return 1
+	if !helpOrVersion {
+		switch transcribeEngine(args) {
+		case "whispercpp":
+			model, err := provision.EnsureModel(transcribeModel(args))
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "podcli: provisioning model:", err)
+				return 1
+			}
+			os.Setenv("PODCLI_ENGINE", "whispercpp")
+			os.Setenv("PODCLI_WHISPERCPP_MODEL", model)
+		case "omnilingual":
+			model, tokens, err := provision.EnsureOmnilingualModel()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "podcli: provisioning omnilingual model:", err)
+				return 1
+			}
+			os.Setenv("PODCLI_ENGINE", "omnilingual")
+			os.Setenv("PODCLI_OMNILINGUAL_MODEL", model)
+			os.Setenv("PODCLI_OMNILINGUAL_TOKENS", tokens)
 		}
-		os.Setenv("PODCLI_ENGINE", "whispercpp")
-		os.Setenv("PODCLI_WHISPERCPP_MODEL", model)
-	case "omnilingual":
-		model, tokens, err := provision.EnsureOmnilingualModel()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "podcli: provisioning omnilingual model:", err)
-			return 1
-		}
-		os.Setenv("PODCLI_ENGINE", "omnilingual")
-		os.Setenv("PODCLI_OMNILINGUAL_MODEL", model)
-		os.Setenv("PODCLI_OMNILINGUAL_TOKENS", tokens)
 	}
 	code, err := engine.Run(args)
 	if err != nil {
+		if helpOrVersion {
+			if hasFlag(args, "--version", "-v") {
+				fmt.Printf("podcli %s\n", Version)
+				return 0
+			}
+			printHelp()
+			return 0
+		}
 		fmt.Fprintln(os.Stderr, "podcli:", err)
 		return 1
 	}
 	return code
+}
+
+func hasFlag(args []string, names ...string) bool {
+	want := map[string]struct{}{}
+	for _, n := range names {
+		want[n] = struct{}{}
+	}
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		if _, ok := want[a]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func transcribeModel(args []string) string {
@@ -827,10 +876,11 @@ type doctorCheck struct {
 }
 
 type doctorReport struct {
-	Version string            `json:"version"`
-	Paths   map[string]string `json:"paths"`
-	Checks  []doctorCheck     `json:"checks"`
-	OK      bool              `json:"ok"`
+	Version     string            `json:"version"`
+	Paths       map[string]string `json:"paths"`
+	Provisioned map[string]bool   `json:"provisioned"`
+	Checks      []doctorCheck     `json:"checks"`
+	OK          bool              `json:"ok"`
 }
 
 func firstLine(s string) string {
@@ -1030,9 +1080,20 @@ func doctor(args []string) int {
 
 	checks := runDoctorChecks()
 	allOK := checksAllOK(checks)
+	_, backendOK := engine.BackendRoot()
+	provisioned := map[string]bool{
+		"backend":  backendOK,
+		"python":   engine.IsHermeticPython() || engine.Python() != "python3",
+		"studio":   engine.StudioServer() != "",
+		"mcp":      engine.MCPServer() != "",
+		"remotion": fileExists(provision.RemotionScript()),
+		"ffmpeg":   engine.FFmpeg() != "",
+		"whisper":  engine.WhisperCLI() != "",
+		"node":     engine.Node() != "",
+	}
 
 	if asJSON {
-		report := doctorReport{Version: Version, Paths: pathInfo, Checks: checks, OK: allOK}
+		report := doctorReport{Version: Version, Paths: pathInfo, Provisioned: provisioned, Checks: checks, OK: allOK}
 		data, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "podcli: doctor:", err)
@@ -1134,7 +1195,7 @@ Launcher commands:
   login | logout | whoami
                        podcli Pro account on this machine
   sync                 Reconcile clips, assets, and knowledge with your workspace
-  doctor               Show resolved paths, interpreter, backend, ffmpeg, models
+  doctor [--json]      Show resolved paths, interpreter, backend, ffmpeg, models
   version              Print version
   update               Check for and apply a newer release
   uninstall            Remove podcli app files (keeps user data unless --purge)
@@ -1142,9 +1203,17 @@ Launcher commands:
                        Provision runtimes + models (--speakers adds pyannote+torch, ~2GB)
   setup --refresh      Re-provision runtimes for this launcher version, skipping models
   mcp                  Run the MCP server (stdio) for Claude/Codex
-  mcp install          Register the MCP server with Claude Code
+  mcp install          Register the MCP server with Claude Code and Codex
   config set update.auto off    Disable auto-update (also: PODCLI_NO_UPDATE=1)
   config get update.auto
+
+process --json --yes writes one JSON object to stdout and skips prompts.
+--help and --version never download. First run of process, studio, transcribe,
+or multicam provisions the engine. podcli mcp does not — stdout is JSON-RPC —
+so run podcli setup first.
+
+Exit codes: 0 success, 1 runtime or processing error, 2 usage, 130 interrupted.
+NO_COLOR=1 (or a non-TTY stdout) turns off colour and spinners.
 
 Run a command with --help for its options.
 `, Version)

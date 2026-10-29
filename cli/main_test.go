@@ -6,6 +6,59 @@ import (
 	"testing"
 )
 
+func TestIsMetaFlag(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"--help"}, true},
+		{[]string{"-h"}, true},
+		{[]string{"--version"}, true},
+		{[]string{"-v"}, true},
+		{[]string{"process", "--help"}, true},
+		{[]string{"process", "episode.mp4", "-h"}, true},
+		{[]string{"process", "--version"}, true},
+		{[]string{"process", "episode.mp4"}, false},
+		{[]string{"process", "--json", "episode.mp4"}, false},
+		{[]string{"process", "--", "--help"}, false},
+		{[]string{}, false},
+	} {
+		if got := isMetaFlag(tc.args); got != tc.want {
+			t.Errorf("isMetaFlag(%q) = %v, want %v", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestWantsRuntimeSkipsHelp(t *testing.T) {
+	if !wantsRuntime([]string{"process", "episode.mp4"}) {
+		t.Fatal("process should provision")
+	}
+	if wantsRuntime([]string{"process", "--help"}) {
+		t.Fatal("process --help must not provision")
+	}
+	if wantsRuntime([]string{"process", "episode.mp4", "-h"}) {
+		t.Fatal("process ... -h must not provision")
+	}
+	if wantsRuntime([]string{"--help"}) {
+		t.Fatal("top-level --help must not provision")
+	}
+	if wantsRuntime([]string{"config"}) {
+		t.Fatal("config should not provision")
+	}
+	if !wantsRuntime(nil) {
+		t.Fatal("bare podcli should provision")
+	}
+}
+
+func TestHasFlag(t *testing.T) {
+	if !hasFlag([]string{"process", "--version"}, "--version", "-v") {
+		t.Fatal("expected --version")
+	}
+	if hasFlag([]string{"process", "--", "--version"}, "--version", "-v") {
+		t.Fatal("-- after -- is a positional")
+	}
+}
+
 func TestTranscribeModel(t *testing.T) {
 	if got := transcribeModel([]string{"process", "episode.mp4"}); got != "base" {
 		t.Fatalf("default model = %q, want base", got)

@@ -30,7 +30,7 @@
 podcli process episode.mp4
 ```
 
-That one command transcribes the episode, picks the moments worth clipping, crops to whoever is speaking, and burns the captions in. Transcription and rendering run on your machine. The only network calls are the optional Claude or Codex requests when you use AI clip scoring.
+That one command transcribes the episode, picks the moments worth clipping, crops to whoever is speaking, and burns the captions in. Transcription and rendering run on your machine. Clip scoring uses Claude Code or Codex login, or an Anthropic API key; without those it falls back to heuristics.
 
 ## Install
 
@@ -48,7 +48,7 @@ curl -fsSL https://podcli.com/install.sh | sh
 irm https://podcli.com/install.ps1 | iex
 ```
 
-Runs on macOS (Apple Silicon), Linux (x64 and arm64), and Windows (x64). Intel Mac support is in progress.
+Runs on macOS (Apple Silicon), Linux (x64 and arm64), and Windows (x64). Intel Macs aren't supported.
 
 ## Quick start
 
@@ -97,7 +97,7 @@ Clips land in `podcli-clips/` in the directory you ran it from, so each show kee
 
 **Shipping it**
 
-- 30 MCP tools, so an agent can transcribe, score, render, and publish through conversation
+- 32 MCP tools, so an agent can transcribe, score, render, and publish through conversation
 - YouTube publishing plus performance analytics to see which clips landed
 - DaVinci Resolve export as FCPXML when you want to finish by hand
 - Presets, clip history with duplicate detection, and a transcript cache
@@ -108,7 +108,7 @@ If you are weighing podcli against the cloud clippers, this is the difference:
 
 - Runs locally. Transcription and rendering happen on your machine by default, so episodes stay there. Only the optional cloud engine (AssemblyAI) and publishing to YouTube send anything out.
 - Free and open source under AGPL-3.0. Exports are unlimited, full quality, and watermark-free.
-- Agent-native. 30 MCP tools let Claude Code or Codex drive the whole flow, transcription through publishing.
+- Agent-native. 32 MCP tools let Claude Code or Codex drive the whole flow, transcription through publishing.
 - A knowledge base keeps titles, captions, and descriptions in your show's voice, and stops the engine from resuggesting moments you already published.
 - DaVinci Resolve handoff. Export any clip as FCPXML when you want to finish the edit yourself.
 
@@ -119,6 +119,17 @@ podcli is an [MCP](https://modelcontextprotocol.io) server, so an agent can tran
 ```bash
 podcli mcp install    # registers it with Claude Code and Codex, whichever CLI is on PATH
 ```
+
+`--help` and `--version` never download anything. First run of `process`, `studio`, `transcribe`, or `multicam` provisions the engine. `podcli mcp` does not — stdout is JSON-RPC — so run `podcli setup` once before you point an agent at it.
+
+```bash
+podcli process episode.mp4 --json --yes
+podcli doctor --json
+```
+
+`--json` writes one object to stdout and logs to stderr. `-y/--yes` skips prompts. `NO_COLOR=1` (or a non-TTY) turns off colour and spinners.
+
+`rank_clip_candidates` returns a shortlist so the agent does not have to read the whole transcript. `process_episode` runs the pipeline as one job; poll it with `job_status`. The workflow lives in [SKILL.md](SKILL.md). Tool names are generated into [llms.txt](llms.txt).
 
 Claude Desktop and Codex setup is in the [MCP docs](https://podcli.com/docs/mcp-server).
 

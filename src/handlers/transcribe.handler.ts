@@ -1,9 +1,21 @@
 import { basename } from "path";
+import { randomUUID } from "crypto";
 import { PythonExecutor } from "../services/python-executor.js";
 import { TranscriptCache, needsDiarizationRetry } from "../services/transcript-cache.js";
 import { resolveTranscribeEngine, engineCanDiarize } from "../services/engine-resolve.js";
 import { webServerUrl } from "../config/server.js";
 import type { TranscriptResult } from "../models/index.js";
+
+type LocalJob = {
+  status: "pending" | "running" | "done" | "error";
+  progress: number;
+  message: string;
+  result?: unknown;
+  error?: string;
+};
+
+const localJobs = new Map<string, LocalJob>();
+const processExecutor = new PythonExecutor();
 
 const executor = new PythonExecutor();
 const cache = new TranscriptCache();
@@ -32,8 +44,9 @@ export const transcribeToolDef = {
     "phrase-grouped markdown view (~10x smaller than raw segments).\n" +
     "Caching: Results are cached by file hash — same file won't be re-transcribed.\n" +
     "Supported formats: MP4, MOV, WebM, MKV, MP3, WAV.\n\n" +
-    "After transcription: call get_ui_state(include_transcript: true) to read the transcript, " +
-    "then analyze it for viral moments and call suggest_clips.",
+    "After transcription: call rank_clip_candidates(video_path) for a ~20-clip shortlist " +
+    "(do not read the whole transcript unless you need to rewrite a range). " +
+    "Or call process_episode(video_path) to transcribe, rank, and render in one job.",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -294,12 +307,12 @@ export async function handleTranscribeStart(input: TranscribeInput): Promise<str
 export const jobStatusToolDef = {
   name: "job_status",
   description:
-    "Poll the status of any background job (transcription, clip render, batch export). " +
+    "Poll the status of any background job (transcription, clip render, batch export, process_episode). " +
     "Supports long-polling: pass wait_seconds (1–60) to block until the job changes state " +
     "or the timeout elapses, whichever comes first. Paces Claude's polling naturally so " +
     "the spinner doesn't spam and the user sees steady progress text.\n\n" +
     "Returns { status: 'running'|'done'|'error', progress, message, done, result? }.\n" +
-    "Use after transcribe_start or batch_create_clips(async_mode: true).",
+    "Use after transcribe_start, process_episode, or batch_create_clips(async_mode: true).",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -324,6 +337,34 @@ export async function handleJobStatus(input: {
   const wait = Math.max(0, Math.min(60, input.wait_seconds ?? 30));
   const deadline = Date.now() + wait * 1000;
   let lastProgress = -1;
+
+  const local = localJobs.get(input.job_id);
+  if (local) {
+    while (true) {
+      const job = localJobs.get(input.job_id);
+      if (!job) break;
+      const terminal = job.status === "done" || job.status === "error";
+      const progressChanged = job.progress !== lastProgress;
+      if (terminal || progressChanged || Date.now() >= deadline) {
+        return JSON.stringify({
+          status: job.status,
+          progress: job.progress,
+          message: job.message,
+          done: terminal,
+          result: job.result,
+          error: job.error,
+          next_step:
+            job.status === "done"
+              ? "Job complete. The result field lists clip paths, durations, scores, titles, and captions."
+              : job.status === "error"
+                ? "Job failed — check the error. Retry process_episode if appropriate."
+                : `Still running — call job_status("${input.job_id}", wait_seconds: 30) again.`,
+        });
+      }
+      lastProgress = job.progress;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
 
   try {
     while (true) {
@@ -369,4 +410,74 @@ export async function handleJobStatus(input: {
     }
     throw err;
   }
+}
+
+export const processEpisodeToolDef = {
+  name: "process_episode",
+  description:
+    "One-shot episode job: transcribe, rank moments, render clips, write titles/descriptions/tags. " +
+    "Returns { job_id } immediately. Poll with job_status until done; the result is the same JSON " +
+    "`podcli process --json` prints (clip paths, durations, scores, titles, captions).\n\n" +
+    "Does not require the web studio. For a shortlist without rendering, use rank_clip_candidates instead.",
+};
+
+export async function handleProcessEpisode(input: {
+  video_path: string;
+  transcript?: string;
+  top?: number;
+  output?: string;
+  quality?: string;
+  caption_style?: string;
+  crop?: string;
+  format?: string;
+  language?: string;
+  engine?: string;
+  fast?: boolean;
+}): Promise<string> {
+  const jobId = randomUUID();
+  localJobs.set(jobId, {
+    status: "running",
+    progress: 0,
+    message: "Starting episode process",
+  });
+  void processExecutor
+    .execute("process_episode", {
+      video_path: input.video_path,
+      transcript: input.transcript,
+      top: input.top,
+      output: input.output,
+      quality: input.quality,
+      caption_style: input.caption_style,
+      crop: input.crop,
+      format: input.format,
+      language: input.language,
+      engine: input.engine,
+      fast: input.fast,
+    }, (event) => {
+      const job = localJobs.get(jobId);
+      if (!job || job.status !== "running") return;
+      job.progress = event.percent;
+      job.message = event.message;
+    })
+    .then((result) => {
+      localJobs.set(jobId, {
+        status: "done",
+        progress: 100,
+        message: "Done",
+        result: result.data,
+      });
+    })
+    .catch((err: unknown) => {
+      localJobs.set(jobId, {
+        status: "error",
+        progress: 0,
+        message: "Failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  return JSON.stringify({
+    job_id: jobId,
+    status: "running",
+    next_step: `Poll job_status("${jobId}", wait_seconds: 30) until done. The result field lists clip paths.`,
+  });
 }

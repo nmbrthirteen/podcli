@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"podcli/internal/provision"
@@ -157,5 +159,22 @@ func TestChecksAllOKCountsFailLevelChecks(t *testing.T) {
 	}
 	if checksAllOK(checks) {
 		t.Fatal("a fail-level check must flip doctor's overall result to failing")
+	}
+}
+
+func TestDoctorReportJSONIncludesProvisioned(t *testing.T) {
+	report := doctorReport{
+		Version:     "test",
+		Paths:       map[string]string{"home": "/tmp"},
+		Provisioned: map[string]bool{"mcp": false, "backend": true},
+		OK:          true,
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"provisioned"`) || !strings.Contains(s, `"mcp":false`) {
+		t.Fatalf("provisioned map missing from doctor JSON: %s", s)
 	}
 }

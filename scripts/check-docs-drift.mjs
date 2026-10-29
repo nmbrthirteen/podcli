@@ -17,6 +17,26 @@ const readme = read("README.md");
 const errors = [];
 const warnings = [];
 
+try {
+  const llms = read("llms.txt");
+  const llmsCount = [...llms.matchAll(/(\d+) tools/g)].map((m) => Number(m[1]));
+  for (const claim of llmsCount) {
+    if (claim !== manifest.mcpToolCount) {
+      errors.push(`llms.txt mentions "${claim} tools" but src registers ${manifest.mcpToolCount}. Re-run: node scripts/gen-docs-manifest.mjs`);
+    }
+  }
+  const listed = [...llms.matchAll(/^- ([a-z][a-z0-9_]+)$/gm)].map((m) => m[1]).sort();
+  if (Array.isArray(manifest.mcpToolNames) && listed.length) {
+    const registered = [...manifest.mcpToolNames].sort();
+    const missing = registered.filter((t) => !listed.includes(t));
+    const stale = listed.filter((t) => !registered.includes(t));
+    if (missing.length) errors.push(`llms.txt is missing tools: ${missing.join(", ")}`);
+    if (stale.length) errors.push(`llms.txt lists unregistered tools: ${stale.join(", ")}`);
+  }
+} catch {
+  errors.push("llms.txt not found. Run: node scripts/gen-docs-manifest.mjs");
+}
+
 if (/single-page/i.test(readme) && manifest.studioRouteCount > 1) {
   errors.push(`README calls the studio "single-page" but it has ${manifest.studioRouteCount} routes.`);
 }

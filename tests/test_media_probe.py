@@ -145,5 +145,42 @@ class VideoProcessorReExportsTests(unittest.TestCase):
         self.assertEqual(vp._FFMPEG_TIMEOUT, media_probe.FFMPEG_TIMEOUT)
 
 
+class CpuFlagsAndTimeoutTests(unittest.TestCase):
+    def test_cpu_flags_follow_podcli_quality(self):
+        old = os.environ.get("PODCLI_QUALITY")
+        try:
+            os.environ["PODCLI_QUALITY"] = "max"
+            flags = media_probe.cpu_flags()
+            self.assertEqual(flags[flags.index("-crf") + 1], "14")
+            self.assertEqual(flags[flags.index("-preset") + 1], "slower")
+            os.environ["PODCLI_QUALITY"] = "high"
+            flags = media_probe.cpu_flags()
+            self.assertEqual(flags[flags.index("-crf") + 1], "18")
+        finally:
+            if old is None:
+                os.environ.pop("PODCLI_QUALITY", None)
+            else:
+                os.environ["PODCLI_QUALITY"] = old
+
+    def test_ffmpeg_timeout_scales_with_duration(self):
+        self.assertEqual(media_probe.ffmpeg_timeout(), 300)
+        self.assertGreater(media_probe.ffmpeg_timeout(40), 300)
+        self.assertLessEqual(media_probe.ffmpeg_timeout(10_000), 1800)
+
+    def test_stream_durations(self):
+        info = {
+            "streams": [
+                {"codec_type": "video", "duration": "39.4"},
+                {"codec_type": "audio", "duration": "32.8"},
+            ]
+        }
+        with mock.patch.object(media_probe, "get_video_info", return_value=info):
+            self.assertEqual(media_probe.stream_durations("/fake.mp4"), (39.4, 32.8))
+
+    def test_align_av_skips_when_streams_agree(self):
+        with mock.patch.object(media_probe, "stream_durations", return_value=(33.0, 32.95)):
+            self.assertEqual(media_probe.align_av_duration("/fake.mp4"), "/fake.mp4")
+
+
 if __name__ == "__main__":
     unittest.main()

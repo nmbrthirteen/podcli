@@ -31,7 +31,7 @@ Both share the same knowledge base at `.podcli/knowledge/`.
 
 ## MCP tools (podcli engine)
 
-All 30 tools registered by the MCP server.
+All 32 tools registered by the MCP server.
 
 **Transcription and input**
 
@@ -39,7 +39,7 @@ All 30 tools registered by the MCP server.
 |------|-------------|
 | `transcribe_podcast` | Transcribe audio/video with Whisper word timestamps + speaker detection |
 | `transcribe_start` | Start transcription as a background job, returns a job_id immediately |
-| `job_status` | Poll any background job (transcription, render, batch export) with long-polling |
+| `job_status` | Poll any background job (transcription, render, batch export, process_episode) with long-polling |
 | `set_video` | Set the working video without transcribing |
 | `import_transcript` | Import an external transcript with word-level timestamps, skips Whisper |
 | `parse_transcript` | Parse a speaker-labeled plain text transcript into word-level timestamps |
@@ -51,6 +51,8 @@ All 30 tools registered by the MCP server.
 | Tool | What it does |
 |------|-------------|
 | `get_ui_state` | Read session state (video, transcript, suggestions, settings) and next steps |
+| `rank_clip_candidates` | Return ~20 pre-ranked, sentence-aligned clip candidates from the cached transcript (no full transcript in the result) |
+| `process_episode` | One-shot job: transcribe, rank, render; poll with `job_status` and read clip paths from the result |
 | `suggest_clips` | Submit clip suggestions, assigns clip numbers, pushes them to the web UI |
 | `modify_clip` | Adjust a suggested clip: timing, title, caption style, or delete it |
 | `toggle_clip` | Select or deselect a suggested clip for export |

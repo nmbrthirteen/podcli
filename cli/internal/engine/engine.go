@@ -19,9 +19,12 @@ import (
 type stderrFilter struct{ buf []byte }
 
 func isStderrNoise(line string) bool {
+	trim := strings.TrimSpace(line)
 	return strings.HasPrefix(line, "objc[") ||
 		strings.Contains(line, "FP16 is not supported") ||
-		strings.HasPrefix(strings.TrimSpace(line), "warnings.warn(")
+		strings.HasPrefix(trim, "warnings.warn(") ||
+		strings.HasPrefix(trim, "[ WARN:") ||
+		strings.HasPrefix(trim, "[WARN:")
 }
 
 func (w *stderrFilter) Write(p []byte) (int, error) {

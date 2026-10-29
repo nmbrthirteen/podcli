@@ -59,6 +59,9 @@ def _process_args(video_path, transcript_path, output_dir):
         allow_ass_fallback=False,
         review_each=False,
         post_review=False,
+        json=False,
+        yes=False,
+        quiet=False,
     )
 
 

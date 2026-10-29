@@ -14,9 +14,11 @@ from typing import Optional
 
 from services.encoder import get_video_encode_flags
 from services.media_probe import (
-    CPU_FLAGS,
     FFMPEG_TIMEOUT,
+    cpu_flags,
+    ffmpeg_timeout,
     get_dimensions,
+    get_media_duration_seconds,
     has_audio_stream,
 )
 from utils.proc import run as proc_run
@@ -129,10 +131,12 @@ def burn_captions(
         output_path,
     ]
 
-    result = proc_run(cmd, timeout=FFMPEG_TIMEOUT, check=False)
+    burn_timeout = ffmpeg_timeout(get_media_duration_seconds(input_path, default=30.0))
+    result = proc_run(cmd, timeout=burn_timeout, check=False)
 
     # Fallback to CPU if HW encoder failed
-    if result.returncode != 0 and enc_flags != CPU_FLAGS:
+    fallback_flags = cpu_flags()
+    if result.returncode != 0 and enc_flags != fallback_flags:
         print(
             "Warning: HW encoder failed for caption burn, falling back to libx264",
             file=sys.stderr,
@@ -143,11 +147,11 @@ def burn_captions(
             "-filter_complex", filter_complex,
             "-map", "[out]",
             *audio_map,
-            *CPU_FLAGS,
+            *fallback_flags,
             "-movflags", "+faststart",
             output_path,
         ]
-        result = proc_run(cmd_fallback, timeout=FFMPEG_TIMEOUT, check=False)
+        result = proc_run(cmd_fallback, timeout=burn_timeout, check=False)
 
     if gradient_overlay and gradient_path and os.path.exists(gradient_path):
         os.remove(gradient_path)
