@@ -2,7 +2,7 @@
 
 All functions here are side-effect-free: they take keyframe / window
 lists and return strings or lists. No ffmpeg is actually invoked from
-this module — the caller passes the returned expressions into a
+this module: the caller passes the returned expressions into a
 filter_complex graph.
 
 Extracted from video_processor.py so the pure math can be unit-tested
@@ -57,7 +57,7 @@ def build_cam_expr(
         quick_reframe_jump = 90
 
         if jump < 2:
-            # Negligible movement — hold.
+            # Negligible movement: hold.
             parts.append(f"if(between(t\\,{t0:.3f}\\,{t1:.3f})\\,{x0}\\,")
         elif jump >= blurred_cut_jump:
             # Very large jumps in non-split layouts still read better as

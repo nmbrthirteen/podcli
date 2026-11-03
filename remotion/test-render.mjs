@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Quick test render — generates a captioned clip to ~/Downloads/
+ * Quick test render: generates a captioned clip to ~/Downloads/
  * Uses the same caching as production.
  *
  * Usage:
@@ -39,6 +39,7 @@ const words = [
 
 const fps = 30;
 const durationInFrames = Math.ceil(5.5 * fps);
+
 const outputPath = path.join(
   process.env.HOME,
   "Downloads",
@@ -47,21 +48,23 @@ const outputPath = path.join(
 
 // Try to load logo from podcli asset registry
 let logoPath = "";
+
 try {
   const home = process.env.PODCLI_HOME
     ? path.resolve(process.env.PODCLI_HOME)
     : path.join(PROJECT_ROOT, ".podcli");
+
   const registryPath = path.join(home, "assets", "registry.json");
+
   if (!fs.existsSync(registryPath)) {
     console.warn("No assets registry at", registryPath);
   } else {
     const registry = JSON.parse(fs.readFileSync(registryPath, "utf-8"));
     const logo = registry.assets?.find((a) => a.type === "logo");
+
     if (logo?.path && fs.existsSync(logo.path)) logoPath = logo.path;
   }
 } catch {}
-
-let logoSrc;
 
 const inputProps = {
   videoSrc: "",

@@ -1,4 +1,4 @@
-"""Tests for backend.services.motion_filters — pure string builders."""
+"""Tests for backend.services.motion_filters: pure string builders."""
 
 import os
 import sys
@@ -165,7 +165,7 @@ class BuildMotionZoomFilterTests(unittest.TestCase):
 
 
 class SimplifyKeyframesTests(unittest.TestCase):
-    """Parity check against the video_processor_helpers tests — ensures
+    """Parity check against the video_processor_helpers tests; ensures
     the extraction kept the same behavior."""
 
     def test_collinear_middle_dropped(self):

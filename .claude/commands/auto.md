@@ -1,5 +1,5 @@
 ---
-description: One-verb pipeline — drop a video, confirm strategy, render clips
+description: One-verb pipeline. Drop a video, confirm strategy, render clips
 allowed-tools: Read, Bash, mcp__podcli__transcribe_podcast, mcp__podcli__transcribe_start, mcp__podcli__job_status, mcp__podcli__get_ui_state, mcp__podcli__set_video, mcp__podcli__suggest_clips, mcp__podcli__batch_create_clips, mcp__podcli__knowledge_base, mcp__podcli__clip_history, mcp__podcli__record_decisions
 argument-hint: [video-path-or-episode-slug] [optional: count e.g. "5 clips"]
 triggers:
@@ -9,7 +9,7 @@ triggers:
   - one-shot this
 ---
 
-# /auto — One-Verb Pipeline
+# /auto: One-Verb Pipeline
 
 > Drop raw footage, confirm a strategy, get rendered clips back. Inspired by video-use: "LLM reads, doesn't watch."
 
@@ -19,7 +19,7 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
 
 ## Rules
 
-1. **Read, don't watch.** Reason about clips from the packed markdown view — not raw segments, not frame dumps.
+1. **Read, don't watch.** Reason about clips from the packed markdown view, not raw segments, not frame dumps.
 2. **Strategy first, render after.** Propose the cut list and WAIT for user confirmation before calling `batch_create_clips`.
 3. **Knowledge base is context, not template.** If `.podcli/knowledge/` exists, read it for brand voice and format preferences. If not, infer from the content itself.
 4. **Never silently render.** Every clip that ships must appear in the proposal the user approved.
@@ -32,20 +32,20 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
 | Field | Required | Source |
 |-------|----------|--------|
 | Video path | Yes | First argument, or set via `set_video` |
-| Clip count | Optional | Second argument, e.g. `"5 clips"`. Default: propose what the content supports (3–8). |
+| Clip count | Optional | Second argument, e.g. `"5 clips"`. Default: propose what the content supports (3-8). |
 | Brief | Optional | Anything after the count, e.g. `"focus on the investor pitch moments"`. |
 
 ---
 
 ## Flow
 
-### Phase 1 — Inventory
+### Phase 1: Inventory
 
 1. If a video path was given, call `set_video(file_path)`. If no path, read `get_ui_state` and use the current video.
-2. **Transcribe with progress narration.** Transcription takes 15–25 min on a 60-min episode — do NOT use the silent `transcribe_podcast` for long files. Instead:
+2. **Transcribe with progress narration.** Transcription takes 15-25 min on a 60-min episode: do NOT use the silent `transcribe_podcast` for long files. Instead:
    - Call `transcribe_start(file_path)` → returns `{job_id, cached, estimate}` immediately.
    - If `cached: true`, skip to step 3.
-   - Otherwise emit a short status to the user: _"Transcription started — estimated {estimate}. I'll check progress every 30s."_
+   - Otherwise emit a short status to the user: _"Transcription started, estimated {estimate}. I'll check progress every 30s."_
    - Loop: call `job_status(job_id, wait_seconds: 30)`. Between calls, emit ONE terse line to the user like `"Progress: 47%, pyannote diarization"`. Keep it to one line per poll, no repeat prose. Exit the loop when `done: true`.
    - If `status: "error"`, stop and report the error.
 3. Read the packed transcript: `get_ui_state(include_transcript: true)`. This returns a compact phrase-grouped view with speakers, silence gaps, and energy peaks.
@@ -57,7 +57,7 @@ This command orchestrates the existing MCP tools on top of the compact packed tr
 
 6. **Ask once, reuse the answer.** `get_ui_state` lists this episode's unanswered decisions under `OPEN QUESTIONS` (clip count, duration range, captions, language, thumbnails, delivery target). Ask whichever are relevant to this run, batched, not one dialog box per field, then call `record_decisions(video_path, ...)` with the answers. On every later run against this same video, those fields are already answered and won't appear in `OPEN QUESTIONS` again.
 
-### Phase 2 — Topic Map (silent)
+### Phase 2: Topic Map (silent)
 
 Before picking a single clip, map the whole episode. Clips get cut out of topics, never out of loose lines.
 
@@ -77,7 +77,7 @@ Per topic, hold:
 
 Keep the map internal. It feeds Phase 3 and is only shown if the user asks for it.
 
-### Phase 3 — Cut Planning (silent)
+### Phase 3: Cut Planning (silent)
 
 Work inside one topic at a time. Set boundaries by meaning, not by the clock.
 
@@ -112,7 +112,7 @@ Work inside one topic at a time. Set boundaries by meaning, not by the clock.
 
 **Run the standalone check.** Name what the viewer must already know. If that is anything other than "nothing", the start moves back until the clip covers it. If it cannot, drop the moment.
 
-### Phase 4 — Strategy Proposal (GATE)
+### Phase 4: Strategy Proposal (GATE)
 
 Emit a numbered strategy table. Do NOT render yet.
 
@@ -140,26 +140,26 @@ Unused peaks / skipped moments:
 Confirm? (yes / redirect / change specific clips)
 ```
 
-**Stop here. Wait for the user's response.** Do not call `batch_create_clips` on implicit approval — require an explicit "yes", "go", "ship it", or similar.
+**Stop here. Wait for the user's response.** Do not call `batch_create_clips` on implicit approval. Require an explicit "yes", "go", "ship it", or similar.
 
-### Phase 5 — Render (with live progress)
+### Phase 5: Render (with live progress)
 
 Once the user confirms:
 
 1. Call `suggest_clips` with the approved list. Every entry carries `payoff`, `standalone`, `context_line`, and `preview_text` (the real opening line, verbatim) alongside the timings. The tool rejects a clip whose context is missing and tells you which one; fix it and resubmit the full list rather than dropping it.
 2. Call `batch_create_clips(clip_numbers=[1,2,...], async_mode: true)` → returns `{job_id, clip_count}` immediately.
-3. Emit to the user: _"Rendering {clip_count} clips — I'll report progress per clip."_
-4. Loop: `job_status(job_id, wait_seconds: 30)` → emit ONE terse line per poll, e.g. `"Rendering 3/7 — clip #3 (speaker crop)"`. Exit when `done: true`.
+3. Emit to the user: _"Rendering {clip_count} clips. I'll report progress per clip."_
+4. Loop: `job_status(job_id, wait_seconds: 30)` → emit ONE terse line per poll, e.g. `"Rendering 3/7, clip #3 (speaker crop)"`. Exit when `done: true`.
 5. When done, print the output paths and a one-line-per-clip summary (from the result field).
 
-**Fallback**: if `async_mode` fails (Web UI down), fall back to sync `batch_create_clips(clip_numbers=[...])` — renders silently but still works.
+**Fallback**: if `async_mode` fails (Web UI down), fall back to sync `batch_create_clips(clip_numbers=[...])`, renders silently but still works.
 
-### Phase 6 — Persist
+### Phase 6: Persist
 
 Write a compact session log to `.podcli/sessions/<episode-slug>.md` (create the dir if missing):
 
 ```markdown
-# <episode-label> — <ISO date>
+# <episode-label>: <ISO date>
 
 ## Proposed
 <the strategy table>
@@ -172,14 +172,14 @@ Write a compact session log to `.podcli/sessions/<episode-slug>.md` (create the 
 - <any user redirects>
 ```
 
-This gives next week's session something to pick up from. Not required — skip silently on I/O failure.
+This gives next week's session something to pick up from. Not required: skip silently on I/O failure.
 
 ---
 
 ## Error Handling
 
 - **Three-strike rule**: if any phase fails 3 times in a row, STOP and report. Do not continue with partial state.
-- **No transcription yet**: call `transcribe_podcast`. It runs Whisper + diarization + auto-packs — takes minutes on a 60-min episode.
+- **No transcription yet**: call `transcribe_podcast`. It runs Whisper + diarization + auto-packs, takes minutes on a 60-min episode.
 - **No packed view available**: `get_ui_state` falls back to raw segments automatically. Proceed, but flag lower reasoning quality in the proposal.
 - **User says "redirect"**: discard the current proposal, ask what to change, re-propose. Don't argue.
 
@@ -187,9 +187,9 @@ This gives next week's session something to pick up from. Not required — skip 
 
 ## What `/auto` Is NOT
 
-- Not a content-package generator — use `/produce-shorts` for titles/descriptions/thumbnails across the whole pipeline.
-- Not a self-eval loop yet — `timeline_view` (the visual composite that would verify cut boundaries on rendered output) is not built. For now, trust the cut planner and inspect output manually.
-- Not autonomous — the strategy gate is mandatory. No clips ship without explicit user confirmation.
+- Not a content-package generator: use `/produce-shorts` for titles/descriptions/thumbnails across the whole pipeline.
+- Not a self-eval loop yet: `timeline_view` (the visual composite that would verify cut boundaries on rendered output) is not built. For now, trust the cut planner and inspect output manually.
+- Not autonomous: the strategy gate is mandatory. No clips ship without explicit user confirmation.
 
 ---
 
@@ -197,7 +197,7 @@ This gives next week's session something to pick up from. Not required — skip 
 
 Return one of:
 
-- **DONE** — Strategy approved, all N clips rendered, session log written.
-- **PARTIAL** — Some clips rendered, some failed. Report which succeeded and the failure reason for the rest.
-- **CANCELLED** — User redirected or rejected the strategy. No clips rendered.
-- **BLOCKED** — Upstream failure (transcription, no audio, corrupt source). Report the specific ask needed to unblock.
+- **DONE**: Strategy approved, all N clips rendered, session log written.
+- **PARTIAL**: Some clips rendered, some failed. Report which succeeded and the failure reason for the rest.
+- **CANCELLED**: User redirected or rejected the strategy. No clips rendered.
+- **BLOCKED**: Upstream failure (transcription, no audio, corrupt source). Report the specific ask needed to unblock.

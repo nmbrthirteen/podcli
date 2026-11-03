@@ -7,6 +7,7 @@ describe("selectBestCaptionTrack", () => {
       { en: [{ ext: "vtt", url: "manual-en" }] },
       { en: [{ ext: "vtt", url: "auto-en" }] },
     );
+
     expect(track).toEqual({ lang: "en", kind: "manual", ext: "vtt", url: "manual-en" });
   });
 
@@ -16,6 +17,7 @@ describe("selectBestCaptionTrack", () => {
       "ka-orig": [{ ext: "vtt", url: "original-ka" }],
       en: [{ ext: "vtt", url: "translated-en" }],
     });
+
     expect(track?.lang).toBe("ka-orig");
     expect(track?.url).toBe("original-ka");
   });
@@ -27,6 +29,7 @@ describe("selectBestCaptionTrack", () => {
         { ext: "json3", url: "json3-url" },
       ],
     });
+
     expect(track?.url).toBe("json3-url");
   });
 
@@ -38,6 +41,7 @@ describe("selectBestCaptionTrack", () => {
         { ext: "ttml", url: "ttml-url" },
       ],
     });
+
     expect(track?.url).toBe("vtt-url");
   });
 
@@ -59,6 +63,7 @@ describe("parseVtt", () => {
       "second line here",
       "",
     ].join("\n");
+
     const cues = parseVtt(vtt);
     expect(cues).toEqual([
       { start: 1, end: 4, text: "Hello world" },
@@ -74,6 +79,7 @@ describe("parseVtt", () => {
       "<00:00:01.000><c> Hello</c><00:00:01.500><c> world</c>",
       "",
     ].join("\n");
+
     const cues = parseVtt(vtt);
     expect(cues).toEqual([{ start: 1, end: 4, text: "Hello world" }]);
   });
@@ -112,6 +118,7 @@ describe("cuesToWords", () => {
       { start: 0, end: 2, text: "hello world" },
       { start: 2, end: 4, text: "next sentence" },
     ]);
+
     expect(words.map((w) => w.word)).toEqual(["hello", "world", "next", "sentence"]);
   });
 
@@ -139,6 +146,7 @@ describe("cuesToWords", () => {
       "today and I'm excited",
       "&gt;&gt; Definitely.<00:00:05.680><c> Yeah.</c>",
     ].join("\n");
+
     expect(cuesToWords(parseVtt(vtt)).map((w) => w.word)).toEqual([
       "It's", "a", "great", "pleasure", "today", "and", "I'm", "excited", "Definitely.", "Yeah.",
     ]);
@@ -149,6 +157,7 @@ describe("cuesToWords", () => {
       { start: 0, end: 2, text: "first cue" },
       { start: 2, end: 4, text: "second cue" },
     ]);
+
     expect(words.map((w) => w.word)).toEqual(["first", "cue", "second", "cue"]);
   });
 
@@ -166,6 +175,7 @@ describe("parseJson3", () => {
         { tStartMs: 2080, dDurationMs: 1000, segs: [{ utf8: ">> Definitely." }] },
       ],
     });
+
     const { words, segments } = parseJson3(raw);
     expect(words.map((w) => w.word)).toEqual(["It's", "a", "great", "Definitely."]);
     expect(words[1].start).toBeCloseTo(0.4);
@@ -180,10 +190,12 @@ describe("parseJson3", () => {
         { tStartMs: 1000, dDurationMs: 1000, segs: [{ utf8: "Something" }, { utf8: " like", tOffsetMs: 300 }] },
       ],
     });
+
     const { words } = parseJson3(raw);
     expect(words.map((w) => w.word)).toEqual(["Okay.", "Something", "like"]);
     words.forEach((w, i) => {
       expect(w.end).toBeGreaterThanOrEqual(w.start);
+
       if (i > 0) expect(w.start).toBeGreaterThanOrEqual(words[i - 1].end);
     });
   });

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { callTool } from "./test-support/mcp-client.js";
 
 // get_ui_state used to report "Web UI is not running" whenever the Web UI
 // process was down, even though the same state it would have served lives on
@@ -29,6 +30,7 @@ beforeAll(async () => {
 afterAll(() => {
   if (savedHome === undefined) delete process.env.PODCLI_HOME;
   else process.env.PODCLI_HOME = savedHome;
+
   if (savedData === undefined) delete process.env.PODCLI_DATA;
   else process.env.PODCLI_DATA = savedData;
   rmSync(tmp, { recursive: true, force: true });
@@ -39,15 +41,10 @@ afterEach(() => {
   rmSync(uiStatePath, { force: true });
 });
 
-function getUiStateHandler() {
-  const server = createServer() as unknown as {
-    _registeredTools: Record<string, { handler: (args: unknown, extra: unknown) => Promise<{ content: { text: string }[] }> }>;
-  };
-  return server._registeredTools["get_ui_state"].handler;
-}
+const getUiState = (include_transcript: boolean) => callTool(createServer(), "get_ui_state", { include_transcript });
 
 function stubWebUiDown() {
-  globalThis.fetch = (() => Promise.reject(new Error("fetch failed"))) as typeof fetch;
+  globalThis.fetch = () => Promise.reject(new Error("fetch failed"));
 }
 
 describe("get_ui_state offline fallback", () => {
@@ -65,9 +62,7 @@ describe("get_ui_state offline fallback", () => {
     );
     stubWebUiDown();
 
-    const handler = getUiStateHandler();
-    const result = await handler({ include_transcript: false }, {});
-    const text = result.content[0].text;
+    const { text } = await getUiState(false);
 
     expect(text).toContain("/videos/ep42.mp4");
     expect(text).toContain("Transcript: 3 words");
@@ -77,9 +72,7 @@ describe("get_ui_state offline fallback", () => {
   it("falls back to start-from-scratch guidance when there is no state anywhere", async () => {
     stubWebUiDown();
 
-    const handler = getUiStateHandler();
-    const result = await handler({ include_transcript: false }, {});
-    const text = result.content[0].text;
+    const { text } = await getUiState(false);
 
     expect(text).toContain("Start from scratch");
   });

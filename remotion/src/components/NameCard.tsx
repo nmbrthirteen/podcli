@@ -49,6 +49,7 @@ export const NameCard: React.FC<NameCardProps> = ({
     motion: motion ?? MOTION.nameCard,
     scale: 12 * s,
   });
+
   if (opacity <= 0) return null;
 
   return (

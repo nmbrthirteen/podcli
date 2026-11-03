@@ -39,6 +39,7 @@ export default function SetupChecklist() {
   const createKnowledge = async () => {
     setCreating(true);
     setError(null);
+
     try {
       await api("/knowledge/init", { method: "POST" });
       load();
@@ -89,6 +90,7 @@ export default function SetupChecklist() {
   ];
 
   const done = steps.filter((s) => s.done).length;
+
   if (done === steps.length) return null;
 
   return (

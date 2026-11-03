@@ -12,7 +12,13 @@ export interface CacheKeyParts {
   model?: string;
   language?: string;
 }
+
 export type CacheKey = string | CacheKeyParts;
+
+/** A bare string is the pre-existing call shape and means engine only. */
+function keyParts(key?: CacheKey): CacheKeyParts {
+  return key instanceof Object ? key : { engine: key };
+}
 
 /**
  * Caches transcripts by file hash so we don't re-transcribe
@@ -24,19 +30,16 @@ export type CacheKey = string | CacheKeyParts;
  * that asks for speaker labels is otherwise answered with the speaker-less
  * transcript that is already on disk. Re-transcribing then looks like a no-op.
  */
-export function hasSpeakerLabels(transcript: unknown): boolean {
-  const t = transcript as {
-    speaker_segments?: Array<{ speaker?: unknown }>;
-    words?: Array<{ speaker?: unknown }>;
-  } | null;
+export function hasSpeakerLabels(t: Partial<Pick<TranscriptResult, "speaker_segments" | "words">> | null | undefined): boolean {
   if (!t) return false;
+
   // Read the labels, not the count. A summary can report two speakers while
   // the segments and per-word fields are both empty, and the packer then emits
   // "S?" on every line. Trusting the count would serve that cache back to a
   // request that asked for speakers.
-  const labelled = (items?: Array<{ speaker?: unknown }>) =>
-    items?.some((i) => typeof i.speaker === "string" && i.speaker.trim().length > 0) ??
-    false;
+  const labelled = (items?: Array<{ speaker?: string | null }>) =>
+    items?.some((i) => (i.speaker?.trim().length ?? 0) > 0) ?? false;
+
   return labelled(t.speaker_segments) || labelled(t.words);
 }
 
@@ -51,13 +54,13 @@ export function hasSpeakerLabels(transcript: unknown): boolean {
  * genuinely found one speaker".
  */
 export function needsDiarizationRetry(
-  cached: unknown,
+  cached: Pick<TranscriptResult, "diarization_attempted"> | null | undefined,
   enableDiarization: boolean,
   engineCanDiarize: boolean,
 ): boolean {
   if (!cached || !enableDiarization || !engineCanDiarize) return false;
-  const attempted = (cached as { diarization_attempted?: unknown }).diarization_attempted;
-  return attempted !== true;
+
+  return cached.diarization_attempted !== true;
 }
 
 export class TranscriptCache {
@@ -94,13 +97,14 @@ export class TranscriptCache {
       };
 
       const stream = createReadStream(filePath);
-      stream.on("data", (chunk) => {
-        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
+      stream.on("data", (buf: Buffer) => {
+
         if (bytesRead < maxBytes) {
           const remaining = maxBytes - bytesRead;
           hash.update(buf.subarray(0, Math.min(buf.length, remaining)));
           bytesRead += buf.length;
         }
+
         if (bytesRead >= maxBytes) {
           stream.destroy();
         }
@@ -128,15 +132,19 @@ export class TranscriptCache {
 
   private engineSuffix(engine?: string): string {
     const value = (engine ?? "").trim().toLowerCase();
+
     if (["whispercpp", "whisper-cpp", "whisper.cpp", "cpp"].includes(value)) {
       return "-whispercpp";
     }
+
     if (["assemblyai", "assembly-ai", "aai"].includes(value)) {
       return "-assemblyai";
     }
+
     if (["omnilingual", "omni", "omnilingual-asr"].includes(value)) {
       return "-omnilingual";
     }
+
     return "";
   }
 
@@ -163,12 +171,13 @@ export class TranscriptCache {
    * of silently colliding with that implicit default.
    */
   private keySuffix(key?: CacheKey): string {
-    const parts = typeof key === "string" ? { engine: key } : key ?? {};
+    const parts = keyParts(key);
     const engineSuffix = this.engineSuffix(parts.engine);
     const model = (parts.model ?? "").trim().toLowerCase();
     const modelSuffix = model && model !== "base" ? `-m${model}` : "";
     const language = this.sanitizeLanguage(parts.language);
     const languageSuffix = language && language !== "auto" ? `-l${language}` : "";
+
     return `${engineSuffix}${modelSuffix}${languageSuffix}`;
   }
 
@@ -180,6 +189,8 @@ export class TranscriptCache {
       if (!existsSync(cachePath)) return null;
 
       const data = await readFile(cachePath, "utf-8");
+
+      // SAFETY: cache files are written only by set() and the Python transcription cache, both in TranscriptResult shape.
       return JSON.parse(data) as TranscriptResult;
     } catch {
       return null;
@@ -204,19 +215,23 @@ export class TranscriptCache {
    */
   async getPackedMarkdown(filePath: string, key?: CacheKey): Promise<string | null> {
     try {
-      const parts = typeof key === "string" ? { engine: key } : key ?? {};
+      const parts = keyParts(key);
+
       if (parts.model !== undefined || parts.language !== undefined) {
         // The caller knows exactly which combo it wants: read that key
         // only, never silently substitute a different model/language's view.
         const hash = await this.getFileHashForEngine(filePath, parts);
+
         return await this.readPackedByHash(hash);
       }
+
       // The caller only knows the engine (e.g. get_ui_state, which has a
       // cached transcript object but not the model/language that produced
       // it), fall back to the same deterministic scan the Python side uses
       // in find_cached_transcript_path.
       const hash = await this.getFileHash(filePath);
       const found = await this.findPackedPath(hash, parts.engine);
+
       return found ? await readFile(found, "utf-8") : null;
     } catch {
       return null;
@@ -231,15 +246,20 @@ export class TranscriptCache {
   private async findPackedPath(hash: string, engine?: string): Promise<string | null> {
     const engineSuffix = this.engineSuffix(engine);
     const exact = join(paths.packed, `${hash}${engineSuffix}.md`);
+
     if (existsSync(exact)) return exact;
+
     if (!existsSync(paths.packed)) return null;
     const { readdirSync, statSync } = await import("fs");
     const prefix = `${hash}${engineSuffix}`;
     const tailRe = /^(-m[a-z0-9]+)?(-l[a-z0-9-]+)?\.md$/;
+
     const candidates = readdirSync(paths.packed)
       .filter((name) => name.startsWith(prefix) && tailRe.test(name.slice(prefix.length)))
       .map((name) => join(paths.packed, name));
+
     if (!candidates.length) return null;
+
     return candidates.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
   }
 
@@ -254,6 +274,7 @@ export class TranscriptCache {
         .update(rawText, "utf-8")
         .digest("hex")
         .slice(0, 16);
+
       return await this.readPackedByHash(hash);
     } catch {
       return null;
@@ -262,7 +283,9 @@ export class TranscriptCache {
 
   private async readPackedByHash(hash: string): Promise<string | null> {
     const packedPath = join(paths.packed, `${hash}.md`);
+
     if (!existsSync(packedPath)) return null;
+
     return await readFile(packedPath, "utf-8");
   }
 }

@@ -1,4 +1,4 @@
-"""Multi-signal saliency engine — fuse channels, peak-pick, expand reactions, snap.
+"""Multi-signal saliency engine: fuse channels, peak-pick, expand reactions, snap.
 
 For profiles whose candidate source is "saliency" (party, action), moments are
 generated from a fused interestingness curve instead of from an LLM reading the
@@ -24,7 +24,7 @@ GRID_HZ = 1.0  # common time grid; energy is per-second, so 1 Hz is the natural 
 
 
 def _robust_z(x: np.ndarray) -> np.ndarray:
-    """Median/MAD normalization — resistant to the heavy tails of RMS and reactions."""
+    """Median/MAD normalization: resistant to the heavy tails of RMS and reactions."""
     if x.size == 0:
         return x
     med = np.median(x)
@@ -240,7 +240,7 @@ def detect_highlights(
     If a transcript is provided, clip boundaries snap to whole sentences so each clip
     is a complete thought; `words` (with punctuation) gives true sentence edges and is
     preferred over `segments`. Without any transcript, boundaries snap to audio lulls.
-    `reaction_threshold` is the laughter/cheer level that counts as a reaction — low
+    `reaction_threshold` is the laughter/cheer level that counts as a reaction: low
     (~0.06) for conversational chuckles, higher for loud belly-laughs/crowds.
     `energy_data`/`events_data` accept the profiles the orchestration layer already
     computed so the source audio isn't decoded again; `wav_path` is a pre-extracted
@@ -284,7 +284,7 @@ def detect_highlights(
         progress_callback(70, "Selecting highlight moments...")
     min_gap_bins = max(1, int(profile.peak_min_gap_sec * GRID_HZ))
 
-    # Reaction moments are primary candidates — a detected laugh/cheer is almost always
+    # Reaction moments are primary candidates: a detected laugh/cheer is almost always
     # worth a clip regardless of loudness, so they aren't made to out-compete energy in
     # the blended curve. Energy peaks then fill the rest, minus any that collide with a
     # reaction. Reaction score is offset above energy so reactions rank first.
@@ -342,7 +342,7 @@ def detect_highlights_pooled(
     progress_callback: Optional[Callable] = None,
 ) -> list[dict]:
     """
-    Detect highlights across many videos and rank them globally — "the best N bits
+    Detect highlights across many videos and rank them globally: "the best N bits
     from tonight" across a folder of party clips.
 
     Each returned clip carries a `source_file`. Ranking is reaction-first, then by

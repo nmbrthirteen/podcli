@@ -1,4 +1,4 @@
-"""Tests for backend.services.media_probe — extracted ffmpeg helpers."""
+"""Tests for backend.services.media_probe: extracted ffmpeg helpers."""
 
 import os
 import sys
@@ -92,7 +92,7 @@ class HasAudioStreamTests(unittest.TestCase):
             self.assertFalse(media_probe.has_audio_stream("/fake.mp4"))
 
     def test_assumes_yes_on_probe_failure(self):
-        # Defensive default — pipeline should still try audio filters
+        # Defensive default: pipeline should still try audio filters
         with mock.patch.object(
             media_probe, "get_video_info", side_effect=RuntimeError("boom")
         ):

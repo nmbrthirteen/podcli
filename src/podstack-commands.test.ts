@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync, readdirSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { createServer } from "./server.js";
+import { listToolNames } from "./test-support/mcp-client.js";
 
 // Catches the class of bug fixed alongside this test: a PodStack command
 // frontmatter or body references an MCP tool name that doesn't match what
@@ -10,16 +11,22 @@ import { createServer } from "./server.js";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const commandsDir = join(repoRoot, ".claude", "commands");
 
-function registeredToolNames(): Set<string> {
-  const server = createServer() as unknown as { _registeredTools: Record<string, unknown> };
-  return new Set(Object.keys(server._registeredTools));
+function registeredToolNames(): Promise<Set<string>> {
+  return listToolNames(createServer());
 }
 
-function parseFrontmatter(source: string): { allowedTools: string[]; body: string } {
+interface Frontmatter {
+  allowedTools: string[];
+  body: string;
+}
+
+function parseFrontmatter(source: string): Frontmatter {
   const match = source.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+
   if (!match) return { allowedTools: [], body: source };
   const [, frontmatter, body] = match;
   const line = frontmatter.split("\n").find((l) => l.startsWith("allowed-tools:"));
+
   const allowedTools = line
     ? line
         .slice("allowed-tools:".length)
@@ -27,13 +34,18 @@ function parseFrontmatter(source: string): { allowedTools: string[]; body: strin
         .map((t) => t.trim())
         .filter(Boolean)
     : [];
+
   return { allowedTools, body };
 }
 
 const commandFiles = readdirSync(commandsDir).filter((f) => f.endsWith(".md"));
 
 describe("PodStack command frontmatter matches registered MCP tools", () => {
-  const toolNames = registeredToolNames();
+  let toolNames = new Set<string>();
+
+  beforeAll(async () => {
+    toolNames = await registeredToolNames();
+  });
 
   it("the server registers at least one tool", () => {
     expect(toolNames.size).toBeGreaterThan(0);
@@ -49,9 +61,11 @@ describe("PodStack command frontmatter matches registered MCP tools", () => {
       const source = readFileSync(join(commandsDir, file), "utf-8");
       const { allowedTools } = parseFrontmatter(source);
       const mcpTools = allowedTools.filter((t) => t.startsWith("mcp__podcli__"));
+
       const unknown = mcpTools
         .map((t) => t.slice("mcp__podcli__".length))
         .filter((name) => !toolNames.has(name));
+
       expect(unknown, `${file} allows unknown tools: ${unknown.join(", ")}`).toEqual([]);
     });
 

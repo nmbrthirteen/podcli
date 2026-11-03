@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from utils.log import warn as log_warn
 import sys
 from typing import Optional
 
@@ -121,7 +122,7 @@ def has_audio_stream(video_path: str) -> bool:
         info = get_video_info(video_path)
         return any(s.get("codec_type") == "audio" for s in info.get("streams", []))
     except Exception:
-        # Assume yes if we can't check — missing audio is reasonably rare
+        # Assume yes if we can't check. Missing audio is reasonably rare
         # and downstream concat filters will surface the real error.
         return True
 
@@ -219,8 +220,8 @@ def align_av_duration(path: str, slack: float = 0.2) -> str:
         if result.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
             os.replace(tmp, path)
             return path
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("media-probe", "proxy encode failed", error=exc)
     if os.path.exists(tmp):
         try:
             os.remove(tmp)

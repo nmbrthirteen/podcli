@@ -60,18 +60,22 @@ export function checkMediaFiles(files) {
 
 function checkLargeFiles(files) {
   const errors = [];
+
   for (const f of files) {
     if (LARGE_FILE_ALLOWLIST.has(f)) continue;
     let size;
+
     try {
       size = statSync(join(root, f)).size;
     } catch {
       continue; // deleted-but-staged path, or a submodule gitlink; not our concern here
     }
+
     if (size > MAX_SIZE_BYTES) {
       errors.push(`file over 1MB, not on the allowlist: ${f} (${(size / 1024 / 1024).toFixed(2)}MB)`);
     }
   }
+
   return errors;
 }
 
@@ -89,7 +93,7 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 
 export function matchSecretPatterns(content) {
-  return SECRET_PATTERNS.filter(({ re }) => re.test(content)).map(({ name }) => name);
+  return SECRET_PATTERNS.flatMap(({ re, name }) => (re.test(content) ? [name] : []));
 }
 
 // Known fixture files that intentionally contain fake secrets shaped like
@@ -99,19 +103,24 @@ const SECRET_SCAN_ALLOWLIST = new Set(["scripts/release-hygiene.test.mjs"]);
 
 function checkSecretPatterns(files) {
   const errors = [];
+
   for (const f of files) {
     if (SECRET_SCAN_ALLOWLIST.has(f)) continue;
+
     if (!TEXT_EXTENSIONS.has(extname(f).toLowerCase())) continue;
     let content;
+
     try {
       content = readFileSync(join(root, f), "utf8");
     } catch {
       continue;
     }
+
     for (const name of matchSecretPatterns(content)) {
       errors.push(`possible ${name} in ${f}`);
     }
   }
+
   return errors;
 }
 
@@ -119,6 +128,7 @@ function checkSecretPatterns(files) {
 // above without running the whole CLI (and without a stray process.exit).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const files = trackedFiles();
+
   const errors = [
     ...checkMediaFiles(files),
     ...checkLargeFiles(files),
@@ -128,6 +138,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   if (errors.length) {
     console.error("Release hygiene check failed:");
+
     for (const e of errors) console.error("  -", e);
     process.exit(1);
   }

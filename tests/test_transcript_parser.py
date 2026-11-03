@@ -1,4 +1,4 @@
-"""Tests for backend.services.transcript_parser — format detection and parsing."""
+"""Tests for backend.services.transcript_parser: format detection and parsing."""
 
 import json
 import os

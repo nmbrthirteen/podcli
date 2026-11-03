@@ -1,5 +1,5 @@
 """
-Clip generator — orchestrates the full pipeline for creating a short-form clip.
+Clip generator: orchestrates the full pipeline for creating a short-form clip.
 
 Pipeline: cut segment → crop to 9:16 → render captions → burn captions
           (+ optional gradient overlay + logo) → normalize audio
@@ -17,7 +17,7 @@ from typing import Optional, Callable
 
 from utils.proc import run as proc_run, ProcError
 from utils.text import safe_filename
-from utils.log import timed
+from utils.log import timed, warn as log_warn
 from config.paths import paths
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -108,7 +108,7 @@ def _trim_weak_opening(
         # If the opening already has question/exclamation energy, keep it.
         if "?" in raw or "!" in raw:
             break
-        bare = raw.lower().strip(".,!?;:-–—'\"")
+        bare = raw.lower().strip(".,!?;:-\u2013\u2014'\"")
         if bare in _WEAK_OPENING_WORDS:
             weak_run_end = max(float(w["end"]), weak_run_end or 0.0)
             continue
@@ -460,13 +460,13 @@ def _clean_transcript_words(words: list[dict]) -> list[dict]:
     Remove filler words from transcript captions.
 
     - Strips obvious filler words (um, uh, hmm, etc.) so they don't appear in captions.
-    - Does NOT shift timestamps — word timing must match the actual audio exactly.
+    - Does NOT shift timestamps: word timing must match the actual audio exactly.
     """
     cleaned = []
     for w in words:
         text = w.get("word", "").strip()
         # Strip punctuation for matching, but keep original text
-        bare = text.lower().strip(".,!?;:-–—'\"")
+        bare = text.lower().strip(".,!?;:-\u2013\u2014'\"")
         if bare in _FILLER_WORDS:
             continue
         cleaned.append(w)
@@ -503,7 +503,7 @@ def _build_tight_segments(
 
     for i, w in enumerate(clip_words):
         text = w.get("word", "").strip()
-        bare = text.lower().strip(".,!?;:-–—'\"")
+        bare = text.lower().strip(".,!?;:-\u2013\u2014'\"")
         is_filler = bare in _FILLER_WORDS
 
         # Check gap before this word
@@ -511,12 +511,12 @@ def _build_tight_segments(
         gap = w["start"] - prev_end
 
         if gap >= silence_threshold:
-            # Long pause — end current segment, start new one
+            # Long pause: end current segment, start new one
             if prev_end > seg_start + 0.5:  # Don't create tiny segments
                 segments.append({"start": round(seg_start, 2), "end": round(prev_end, 2)})
             seg_start = w["start"]
         elif is_filler and gap >= 0.3:
-            # Isolated filler word with a gap before it — skip it
+            # Isolated filler word with a gap before it: skip it
             # End segment before the filler, start after it
             if w["start"] > seg_start + 0.5:
                 segments.append({"start": round(seg_start, 2), "end": round(w["start"], 2)})
@@ -536,13 +536,13 @@ def _build_tight_segments(
     saved = original_duration - kept_duration
 
     if saved < 0.8 or len(segments) < 2:
-        # Not worth the cuts — too little saved
+        # Not worth the cuts: too little saved
         return [{"start": start_second, "end": end_second}]
 
     return segments
 
 
-_remotion_available = None  # True/False/None — environment availability, not per-clip success
+_remotion_available = None  # True/False/None: environment availability, not per-clip success
 
 
 def _stop_process_tree(proc: subprocess.Popen) -> None:
@@ -750,6 +750,7 @@ def _render_with_remotion(
     # Extract face Y positions so captions can avoid overlapping faces
     # Probe video dimensions
     face_y_norm = None  # normalized 0-1 (0=top, 1=bottom)
+    cap = None
     try:
         probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0",
                      "-show_entries", "stream=height", "-of", "csv=p=0",
@@ -780,11 +781,13 @@ def _render_with_remotion(
                                 ys.append(f["cy"] / vid_h_actual)
                     if ys:
                         face_y_norm = sum(ys) / len(ys)
+        except Exception as exc:
+            log_warn("clip", "face-position sampling failed, captions use default placement", error=exc)
+        finally:
+            if cap is not None:
                 cap.release()
-        except Exception:
-            pass
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("clip", "video height probe failed, captions use default placement", error=exc)
 
     words_file = output_path + ".words.json"
     try:
@@ -882,8 +885,8 @@ def _render_with_remotion(
     finally:
         try:
             os.unlink(words_file)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("clip", "could not remove words file", error=exc)
 
 
 def generate_clip(
@@ -964,8 +967,8 @@ def generate_clip(
             from services.integrations.manager import IntegrationsManager
             if IntegrationsManager().is_enabled("davinci_resolve"):
                 keep_caption_overlay = True
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("clip", "could not check the DaVinci Resolve integration", error=exc)
 
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
@@ -1060,7 +1063,7 @@ def generate_clip(
         end_second = keep_segments[-1]["end"]
 
         # If Claude returned a single segment, still auto-trim pauses within it.
-        # Multiple segments means Claude made deliberate editorial cuts — trust those.
+        # Multiple segments means Claude made deliberate editorial cuts. Trust those.
         if len(keep_segments) == 1 and transcript_words and clean_fillers:
             auto_segments = _build_tight_segments(
                 transcript_words, start_second, end_second,

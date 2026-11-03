@@ -1,6 +1,6 @@
 /** Extract a human-readable message from an unknown thrown value. */
-export function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+export function errMsg(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 type McpTextResult = {
@@ -9,9 +9,9 @@ type McpTextResult = {
 };
 
 /** Standard MCP error result for a caught exception. */
-export function mcpError(err: unknown): McpTextResult {
+export function mcpError(cause: unknown): McpTextResult {
   return {
-    content: [{ type: "text", text: `Error: ${errMsg(err)}` }],
+    content: [{ type: "text", text: `Error: ${errMsg(cause)}` }],
     isError: true,
   };
 }

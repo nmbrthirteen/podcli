@@ -1,4 +1,4 @@
-"""Spike CLI — emit a Resolve FCPXML referencing one or more shorts on disk.
+"""Spike CLI: emit a Resolve FCPXML referencing one or more shorts on disk.
 
 Usage:
     python -m services.integrations.davinci_resolve.cli \
@@ -88,13 +88,13 @@ def main() -> int:
     if short.captions:
         print(f"  captions:  {short.captions.path}  ({short.captions.duration_frames}f)")
     else:
-        print("  captions:  (none — re-run with --captions for the layered spike)")
+        print("  captions:  (none: re-run with --captions for the layered spike)")
     print()
     print("To verify in DaVinci Resolve (free or Studio, 20.x):")
     print("  1. Open Resolve → New Project")
     print("  2. File → Import → Timeline → select the .fcpxml above")
     print("  3. Confirm one compound clip per short appears on the timeline")
-    print("  4. Double-click a compound clip — V1 source and V2 captions should be on separate tracks")
+    print("  4. Double-click a compound clip. V1 source and V2 captions should be on separate tracks")
     return 0
 
 

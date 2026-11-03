@@ -2,9 +2,9 @@
 
 `clips.json` is a flat JSON array of clip records, shared on disk by two writers:
 
-- **TypeScript** — `src/services/clips-history.ts` (`ClipsHistory`), writes one entry per render
+- **TypeScript**: `src/services/clips-history.ts` (`ClipsHistory`), writes one entry per render
   from the web server and MCP server.
-- **Python** — `backend/services/clips_history.py`, the CLI writer (`clips edit`/`reopen`) and the
+- **Python**: `backend/services/clips_history.py`, the CLI writer (`clips edit`/`reopen`) and the
   Phase 2 analytics writer.
 
 The TS type is `ClipHistoryEntry` in `src/models/index.ts`. Keep both languages in sync with this table.
@@ -25,13 +25,13 @@ The TS type is `ClipHistoryEntry` in `src/models/index.ts`. Keep both languages 
 | `duration` | number | TS render | |
 | `created_at` | string (ISO) | TS render | |
 | `content_type` | string? | TS render | Carried from the suggestion (`guest_story`, `hot_take`, …). Undefined when no suggestion was used. |
-| `transcript_slice` | string? | TS render | Plain text the clip says. The session transcript is overwritten, so this is the **only durable** copy — never reconstruct it later. |
+| `transcript_slice` | string? | TS render | Plain text the clip says. The session transcript is overwritten, so this is the **only durable** copy: never reconstruct it later. |
 | `payoff` | string? | TS render | Carried from the suggestion. The clip's payoff line; grounds thumbnail headline copy. |
 | `context_line` | string? | TS render | Carried from the suggestion. The question the clip answers, if any. |
 | `preview_text` | string? | TS render | Carried from the suggestion. The clip's verbatim opening line. |
 | `thumbnail_config` | object? | TS render / edit | Per-clip thumbnail settings (`line1`, `line2`, `image_path`, `timestamp`, `preview_path`, `variations`). |
 | `youtube_video_id` | string? | Phase 2 | Set when a published video is linked. |
-| `metrics` | object? | Phase 2 | `{ views?, retention?, ctr?, impressions?, fetched_at? }`. retention/ctr are 0–100. |
+| `metrics` | object? | Phase 2 | `{ views?, retention?, ctr?, impressions?, fetched_at? }`. retention/ctr are 0-100. |
 
 ## Writer contract
 
@@ -39,5 +39,5 @@ The TS type is `ClipHistoryEntry` in `src/models/index.ts`. Keep both languages 
 - **Read-modify-write, preserve unknown keys.** A writer in one language must never drop fields it
   doesn't know about (e.g. the CLI editing a title must not clobber a Phase 2 `metrics` block).
   `update_clip` applies only non-`None` fields onto the loaded entry.
-- **No file locking.** Single-user localhost tool; TS writes on render, Python writes on edit — not
+- **No file locking.** Single-user localhost tool; TS writes on render, Python writes on edit, not
   concurrent in practice. Do not add locking.

@@ -6,6 +6,7 @@ describe("demo fixtures", () => {
   it("exposes clips that light up the library and analytics", () => {
     const clips = demoClips();
     expect(clips.length).toBeGreaterThanOrEqual(6);
+
     for (const c of clips) {
       expect(c.id).toBeTruthy();
       expect(c.title).toBeTruthy();
@@ -25,6 +26,7 @@ describe("demo fixtures", () => {
     for (const c of demoClips()) {
       expect(existsSync(c.thumbnail_config!.preview_path!)).toBe(true);
     }
+
     expect(existsSync(DEMO_ASSETS_DIR)).toBe(true);
   });
 });
@@ -45,7 +47,7 @@ describe("ClipsHistory in demo mode", () => {
     const removed = await history.remove(first.id);
     expect(removed?.id).toBe(first.id);
     expect(existsSync(first.thumbnail_config!.preview_path!)).toBe(true);
-    // Still all there — the delete was a no-op against read-only fixtures.
+    // Still all there: the delete was a no-op against read-only fixtures.
     expect((await history.list(500)).length).toBe(demoClips().length);
   });
 });

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PageHeader } from "./Page";
-import { api, basename, fmt } from "./lib";
+import { api, basename, fmt, upload } from "./lib";
 import { useJob } from "./useJob";
 import AssetPicker from "./AssetPicker";
 import RecentSources from "./RecentSources";
@@ -43,14 +43,33 @@ interface SessionSummary {
 
 type Format = "vertical" | "horizontal" | "square";
 
+const FORMATS: readonly Format[] = ["vertical", "horizontal", "square"];
+
+interface ReelRequest {
+  action: string;
+  session_id?: string;
+  logo?: string;
+  index?: number;
+  op?: string;
+  seconds?: number;
+  video_path?: string;
+  video_paths?: string[];
+  profile?: string;
+  format?: Format;
+  auto?: boolean;
+  top_n?: number;
+  min_dur?: number;
+  max_dur?: number;
+}
+
 const download = (p: string) => `/api/reel-download?path=${encodeURIComponent(p)}`;
 const isHttpUrl = (v: string) => /^https?:\/\//i.test(v.trim());
 
-const FORMAT_LABEL: Record<Format, string> = {
-  horizontal: "16:9",
-  vertical: "9:16",
-  square: "1:1",
-};
+const FORMAT_LABEL = new Map<string, string>([
+  ["horizontal", "16:9"],
+  ["vertical", "9:16"],
+  ["square", "1:1"],
+]);
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -76,6 +95,7 @@ function DownloadRow({
   const fired = useRef(false);
   useEffect(() => {
     if (!job || fired.current) return;
+
     if (job.status === "done") {
       fired.current = true;
       onDone(jobId, job.result?.file_path);
@@ -84,6 +104,7 @@ function DownloadRow({
       onError(jobId, job.error);
     }
   }, [job?.status]);
+
   return (
     <div className="file-badge">
       <div className="spinner sm" />
@@ -120,6 +141,7 @@ export default function HighlightsPage() {
         method: "POST",
         body: JSON.stringify({ action: "list" }),
       });
+
       setSessions(r.sessions || []);
     } catch {
       /* list is best-effort */
@@ -133,9 +155,10 @@ export default function HighlightsPage() {
       .catch(() => {});
   }, []);
 
-  async function call(body: Record<string, unknown>, label: string) {
+  async function call(body: ReelRequest, label: string) {
     setBusy(true);
     setMsg(label);
+
     try {
       const r = await api<HighlightsResp>("/reel", { method: "POST", body: JSON.stringify(body) });
       setSession(r);
@@ -151,10 +174,12 @@ export default function HighlightsPage() {
 
   const addPath = (p: string) =>
     setVideoPaths((prev) => (p && !prev.includes(p) ? [...prev, p] : prev));
+
   const removePath = (i: number) => setVideoPaths((prev) => prev.filter((_, n) => n !== i));
 
   async function browse() {
     setBrowsing(true);
+
     try {
       const d = await api<{ file_path?: string; file_paths?: string[] }>("/browse-file?multiple=1");
       const picked = d.file_paths?.length ? d.file_paths : d.file_path ? [d.file_path] : [];
@@ -168,15 +193,16 @@ export default function HighlightsPage() {
 
   async function uploadDropped(files: File[]) {
     setBrowsing(true);
+
     try {
       for (const file of files) {
         setMsg(`Uploading ${file.name}…`);
         const fd = new FormData();
         fd.append("file", file);
-        const res = await fetch("/api/upload", { method: "POST", body: fd });
-        const d = (await res.json()) as { file_path?: string; error?: string };
+        const d = await upload<{ file_path?: string }>("/upload", fd);
+
         if (d.file_path) addPath(d.file_path);
-        else setMsg(d.error || "Upload failed");
+        else setMsg("Upload failed");
       }
     } catch {
       setMsg("Upload failed");
@@ -190,6 +216,7 @@ export default function HighlightsPage() {
     e.preventDefault();
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files || []);
+
     if (files.length) uploadDropped(files);
   }
 
@@ -199,6 +226,7 @@ export default function HighlightsPage() {
         method: "POST",
         body: JSON.stringify({ url }),
       });
+
       if (d.error) setMsg("Download failed: " + d.error);
       else if (d.job_id) setDownloads((prev) => [...prev, { jobId: d.job_id!, url }]);
     } catch (e) {
@@ -208,9 +236,11 @@ export default function HighlightsPage() {
 
   const onDownloadDone = (jobId: string, filePath?: string) => {
     setDownloads((prev) => prev.filter((d) => d.jobId !== jobId));
+
     if (filePath) addPath(filePath);
     else setMsg("Download finished without a video file.");
   };
+
   const onDownloadError = (jobId: string, error?: string) => {
     setDownloads((prev) => prev.filter((d) => d.jobId !== jobId));
     setMsg("Download failed: " + (error || "unknown error"));
@@ -218,10 +248,12 @@ export default function HighlightsPage() {
 
   function commitDraft() {
     const p = pathDraft.trim();
+
     if (p) {
       if (isHttpUrl(p)) startDownload(p);
       else addPath(p);
     }
+
     setPathDraft("");
   }
 
@@ -244,9 +276,10 @@ export default function HighlightsPage() {
   const detect = () => {
     const seed =
       videoPaths.length === 1 ? { video_path: videoPaths[0] } : { video_paths: videoPaths };
+
     const tuning = auto ? { auto: true } : { top_n: topN, min_dur: minDur, max_dur: maxDur };
     call(
-      { action: "new", ...seed, profile: "auto", format, ...tuning, ...(logoPath ? { logo: logoPath } : {}) },
+      { action: "new", ...seed, profile: "auto", format, ...tuning, ...(logoPath && { logo: logoPath }) },
       videoPaths.length > 1
         ? `Finding the best moments across ${videoPaths.length} videos (one-time)…`
         : "Finding the best moments (one-time, ~2 min)…",
@@ -263,11 +296,13 @@ export default function HighlightsPage() {
     if (!session) return;
     setSession({ ...session, moments: session.moments.map((m, i) => (i === index ? { ...m, start, end } : m)) });
     setSaving(true);
+
     try {
       const r = await api<HighlightsResp>("/reel", {
         method: "POST",
         body: JSON.stringify({ action: "edit", session_id: session.session_id, index: index + 1, op: "set", start, end }),
       });
+
       setSession(r);
     } finally {
       setSaving(false);
@@ -276,10 +311,13 @@ export default function HighlightsPage() {
 
   async function remove(e: React.MouseEvent, id: string) {
     e.stopPropagation();
+
     if (!window.confirm("Delete this highlights session?")) return;
     setBusy(true);
+
     try {
       await api("/reel", { method: "POST", body: JSON.stringify({ action: "delete", session_id: id }) });
+
       if (session?.session_id === id) setSession(null);
       refreshList();
     } finally {
@@ -356,7 +394,7 @@ export default function HighlightsPage() {
 
         <div className="row" style={{ marginTop: 14 }}>
           <Field label="Format">
-            <select value={format} onChange={(e) => setFormat(e.target.value as Format)}>
+            <select value={format} onChange={(e) => setFormat(FORMATS.find((f) => f === e.target.value) ?? format)}>
               <option value="horizontal">Horizontal 16:9</option>
               <option value="vertical">Vertical 9:16</option>
               <option value="square">Square 1:1</option>
@@ -502,7 +540,7 @@ export default function HighlightsPage() {
                   </div>
                   <div className="meta" style={{ gap: 8 }}>
                     <span className="pill pill-blue">{s.profile}</span>
-                    <span className="hint">{FORMAT_LABEL[s.format as Format] || s.format}</span>
+                    <span className="hint">{FORMAT_LABEL.get(s.format) || s.format}</span>
                     <span className="hint">·</span>
                     <span className="hint">{s.enabled_count}/{s.moment_count} moments</span>
                   </div>

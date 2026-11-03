@@ -14,10 +14,10 @@ import type { ProgressBarProps } from "./components/ProgressBar";
 import { Cards } from "./components/Cards";
 import type { Card } from "./cards";
 import type { Brand } from "./components/Cards";
-import { MOTION } from "./motion";
+import { MOTION, motionForVoice } from "./motion";
 import type { Motion } from "./motion";
 import {
-  brandCaptions, captionScale, captionZone, STYLES, LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET, safeFor,
+  brandCaptions, captionScale, captionZone, styleNamed, LOGO_CAPTION_GAP, LOGO_HEIGHT, LOGO_INSET, safeFor,
 } from "./types";
 import type { Word, CaptionStyle, CaptionPosition, LogoPosition } from "./types";
 import { resolveTheme } from "./style/theme";
@@ -79,14 +79,16 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   theme: themeInput,
 }) => {
   const theme = resolveTheme(withDefaultTextures(themeInput ?? null));
-  const preset = theme ? STYLES[theme.captions] : undefined;
+  const preset = theme ? styleNamed(theme.captions) : undefined;
+
   const voice: CaptionStyle = preset && preset.name !== style.name
     ? {
       ...preset,
       fontFamily: style.fontFamily,
-      fontSize: preset.fontSize * (style.fontSize / (STYLES[style.name]?.fontSize ?? style.fontSize)),
+      fontSize: preset.fontSize * (style.fontSize / (styleNamed(style.name)?.fontSize ?? style.fontSize)),
     }
     : style;
+
   const { fps, height, width } = useVideoConfig();
   const SAFE = safeFor(width, height);
   const frame = useCurrentFrame();
@@ -94,6 +96,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   const nameCardSeconds = nameCard?.title ? (nameCard.seconds ?? 3) : 0;
   const pastNameCard = frame / fps >= nameCardSeconds;
   const captionShrink = cards?.length ? CARDED : 1;
+
   /*
    * Captions used to drop toward the bottom edge while a card held the frame,
    * on the reasoning that there is no chin down there to clear. There is no
@@ -115,6 +118,7 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
     : captionPosition === "center" ? 820
       : captionPosition === "lower" ? SAFE.bottom
         : width < height ? voice.marginBottom : SAFE.bottom;
+
   const captionStyle: CaptionStyle = {
     ...brandCaptions(voice, brand),
     marginBottom: Math.max(placementMargin, SAFE.bottom),
@@ -144,14 +148,19 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
    * frame is told how much of the top is already spoken for.
    */
   const logoTop = Boolean(logoSrc) && logoPosition.startsWith("top-");
+
   const chipTop = Boolean(topic?.label)
     && (topic?.position ?? "top-left").startsWith("top-");
+
   const chipClashes = logoTop
     && chipTop
     && (topic?.position ?? "top-left").slice(4) === logoPosition.slice(4);
+
   const chipInset = LOGO_INSET
     + (chipClashes ? LOGO_HEIGHT * logoScale + LOGO_CAPTION_GAP : 0);
+
   const CHIP_HEIGHT = 48;
+
   const topTaken = Math.max(
     SAFE.top,
     logoTop ? LOGO_INSET + LOGO_HEIGHT * logoScale + LOGO_CAPTION_GAP : 0,
@@ -159,9 +168,11 @@ export const CaptionedClip: React.FC<CaptionedClipProps> = ({
   );
 
   const captionMotion: Motion = {
-    ...(MOTION[voice.name] ?? MOTION.subtle), ...(motion?.captions ?? {}),
+    ...motionForVoice(voice.name), ...motion?.captions,
   };
-  const cardMotion: Motion = { ...MOTION.nameCard, ...(motion?.nameCard ?? {}) };
+
+  const cardMotion: Motion = { ...MOTION.nameCard, ...motion?.nameCard };
+
   const CaptionComponent = {
     hormozi: HormoziCaptions,
     karaoke: KaraokeCaptions,

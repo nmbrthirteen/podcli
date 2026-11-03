@@ -18,6 +18,7 @@ export function DeliverActions({
   onExport: (format: "premiere" | "fcpxml") => void;
 }) {
   const why = exportable ? undefined : "Editor timelines can't carry call layouts yet. Render the MP4 instead.";
+
   return (
     <>
       <button className="btn btn-ghost btn-sm" disabled={locked || !exportable} title={why} onClick={() => onExport("premiere")}>Export for Premiere</button>
@@ -37,12 +38,14 @@ export default function MulticamResults({
   onMakeClips: () => void;
 }) {
   const { video, stems = [], premiere, fcpxml, duration } = session.outputs;
+
   const downloads = [
     ...(video ? [{ path: video, label: basename(video) }] : []),
     ...stems.map((path) => ({ path, label: basename(path) })),
     ...(premiere ? [{ path: premiere, label: "Premiere XML" }] : []),
     ...(fcpxml ? [{ path: fcpxml, label: "Final Cut XML" }] : []),
   ];
+
   if (!downloads.length) return null;
 
   return (

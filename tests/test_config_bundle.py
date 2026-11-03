@@ -86,9 +86,9 @@ class ConfigBundleTests(unittest.TestCase):
     def test_import_rewrites_preset_and_ui_state_asset_paths(self):
         # Regression: a preset/ui-state asset path stored as its literal (possibly
         # symlinked, e.g. macOS /var) value must be rewritten to the new home on
-        # import — otherwise it leaks the source machine's path and breaks once the
+        # import: otherwise it leaks the source machine's path and breaks once the
         # source is gone. self.asset_file is the literal src path (under a tmpdir,
-        # which is symlinked on macOS so raw != realpath — exactly the failure case).
+        # which is symlinked on macOS so raw != realpath, exactly the failure case).
         with open(os.path.join(self.src_home, "presets", "branded.json"), "w", encoding="utf-8") as f:
             json.dump({"caption_style": "branded", "logo_path": self.asset_file}, f)
         with open(os.path.join(self.src_home, "ui-state.json"), "w", encoding="utf-8") as f:

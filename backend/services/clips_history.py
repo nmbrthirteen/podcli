@@ -1,5 +1,5 @@
 """
-Clip history — read/write .podcli/history/clips.json.
+Clip history: read/write .podcli/history/clips.json.
 
 Shared on-disk contract with the TypeScript ClipsHistory service
 (src/services/clips-history.ts). Both languages read and write the same
@@ -92,7 +92,7 @@ def delete_clip(clip_id: str) -> Optional[dict]:
     """Remove a clip from history along with its rendered output and sidecars.
 
     Returns the removed entry, or None if no clip matched. The source video is
-    never touched — only artifacts podcli rendered for this clip.
+    never touched: only artifacts podcli rendered for this clip.
     """
     target = find_clip(clip_id)
     if target is None:

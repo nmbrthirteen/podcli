@@ -4,7 +4,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const tmp = mkdtempSync(join(tmpdir(), "podcli-kb-test-"));
+
 process.env.PODCLI_HOME = tmp;
+
 process.env.PODCLI_DATA = tmp;
 
 const { KnowledgeBase, isFilledIn } = await import("./knowledge-base.js");

@@ -17,6 +17,7 @@ export interface ChunkOptions {
 }
 
 const BREAK_GAP_SECONDS = 0.8;
+
 // Mirrors CAPTION_GAP_FILL_MAX in backend/services/caption_renderer.py: both
 // renderers must burn the same caption timings.
 const GAP_FILL_MAX_SECONDS = 0.4;
@@ -35,6 +36,7 @@ function hasBreakBetween(words: Word[], from: number, to: number): boolean {
   for (let i = from; i < to; i++) {
     if (breaksAfter(words[i], words[i + 1])) return true;
   }
+
   return false;
 }
 
@@ -48,11 +50,14 @@ export function buildChunks(words: Word[], opts: ChunkOptions): Chunk[] {
 
     while (end < words.length && end - i < opts.perChunk) {
       if (breaksAfter(words[end - 1], words[end])) break;
+
       if (opts.maxChars != null) {
         const nextChars = charCount + 1 + words[end].word.trim().length;
+
         if (nextChars > opts.maxChars) break;
         charCount = nextChars;
       }
+
       end += 1;
     }
 
@@ -64,6 +69,7 @@ export function buildChunks(words: Word[], opts: ChunkOptions): Chunk[] {
     ) {
       end = words.length;
     }
+
     if (opts.splitTail && words.length - end === 1 && end - i > 2) {
       end -= 1;
     }
@@ -85,9 +91,11 @@ export function buildChunks(words: Word[], opts: ChunkOptions): Chunk[] {
   // for the whole pause.
   for (let k = 0; k < chunks.length; k++) {
     const next = chunks[k + 1];
+
     const hold = next
       ? Math.min(next.start, chunks[k].end + GAP_FILL_MAX_SECONDS)
       : chunks[k].end + LAST_CHUNK_HOLD_SECONDS;
+
     const capped = opts.clipEnd != null ? Math.min(hold, opts.clipEnd) : hold;
     chunks[k].displayEnd = Math.max(chunks[k].end, capped);
   }
@@ -105,5 +113,6 @@ export function splitCaptionLines<T>(
   singleLine = false,
 ): [T[], T[]] {
   if (singleLine || items.length <= splitIndex) return [items, []];
+
   return [items.slice(0, splitIndex), items.slice(splitIndex)];
 }

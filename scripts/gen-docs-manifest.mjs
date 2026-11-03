@@ -9,9 +9,11 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 function tsSources(dir, acc = []) {
   for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
     const rel = join(dir, entry.name);
+
     if (entry.isDirectory()) tsSources(rel, acc);
     else if (entry.name.endsWith(".ts")) acc.push(read(rel));
   }
+
   return acc;
 }
 
@@ -19,34 +21,41 @@ function collectToolNames(sources) {
   const defs = new Map();
   const names = [];
   let registrations = 0;
+
   for (const src of sources) {
     for (const m of src.matchAll(/const\s+(\w+)\s*=\s*\{\s*name:\s*"([^"]+)"/g)) {
       defs.set(m[1], m[2]);
     }
   }
+
   for (const src of sources) {
     // server.registerTool (the non-deprecated API, needed for a strict
     // input schema that server.tool's raw-shape shorthand can't express)
     // takes its name the same way: as the first positional argument.
     for (const m of src.matchAll(/server\.(?:registerTool|tool)\(\s*(?:"([^"]+)"|(\w+)\.name)/g)) {
       registrations += 1;
+
       if (m[1]) names.push(m[1]);
       else if (defs.has(m[2])) names.push(defs.get(m[2]));
     }
   }
+
   if (names.length !== registrations) {
     console.error(`resolved ${names.length} tool names for ${registrations} server.tool(/server.registerTool( registrations`);
     process.exit(1);
   }
+
   return names.sort();
 }
 
 const mainTsx = read("src/ui/client/main.tsx");
-const studioRoutes = [...mainTsx.matchAll(/<Route\s+path="([^"]+)"\s+element=\{<(\w+)/g)]
-  .filter((m) => !/Navigate/.test(m[0]))
-  .map((m) => ({ path: m[1], component: m[2] }));
+
+const studioRoutes = [...mainTsx.matchAll(/<Route\s+path="([^"]+)"\s+element=\{<(\w+)/g)].flatMap((m) =>
+  /Navigate/.test(m[0]) ? [] : [{ path: m[1], component: m[2] }],
+);
 
 let version = "";
+
 try {
   version = execSync("git describe --tags --abbrev=0", { cwd: root }).toString().trim();
 } catch {
@@ -65,9 +74,11 @@ const manifest = {
 };
 
 writeFileSync(join(root, "docs-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+
 console.log("wrote docs-manifest.json:", JSON.stringify(manifest));
 
 const toolList = mcpToolNames.map((n) => `- ${n}`).join("\n");
+
 const llms = `# podcli
 
 Open-source AI podcast clipper. Turn a long episode into short clips with face tracking and burned-in captions. Drive it from the CLI, a web studio, or your coding agent.
@@ -91,7 +102,7 @@ Clip scoring uses Claude Code or Codex login, or an Anthropic API key; without t
 ## First run
 
 \`podcli process episode.mp4\` (or studio / transcribe / multicam) provisions the engine on first run.
-\`podcli mcp\` does not — stdout is JSON-RPC. Run \`podcli setup\` once before pointing an agent at it.
+\`podcli mcp\` does not: stdout is JSON-RPC. Run \`podcli setup\` once before pointing an agent at it.
 \`--help\` and \`--version\` never download anything.
 
 ## Agent CLI
@@ -118,5 +129,7 @@ ${toolList}
 
 Clips (9:16 / 16:9 / 1:1) and full-episode multicam edit. Knowledge base at .podcli/knowledge/. PodStack slash commands in .claude/commands/.
 `;
+
 writeFileSync(join(root, "llms.txt"), llms);
+
 console.log("wrote llms.txt");

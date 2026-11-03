@@ -9,6 +9,7 @@ export const fmt = (s: number) => {
   const seconds = Math.floor(t % 60);
   const mm = String(minutes).padStart(2, "0");
   const ss = String(seconds).padStart(2, "0");
+
   return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
 };
 
@@ -17,6 +18,7 @@ export function describePeople(people: ThumbnailPerson[]): string {
   return people
     .map((p) => {
       const who = p.role ?? `${p.side} person`;
+
       return p.source_time == null ? who : `${who} at ${fmt(p.source_time)}`;
     })
     .join(", ");
@@ -50,19 +52,23 @@ const CASELESS_SCRIPT_RANGES: Array<[number, number]> = [
 
 function isCaselessScriptChar(ch: string): boolean {
   const cp = ch.codePointAt(0) ?? 0;
+
   return CASELESS_SCRIPT_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi);
 }
 
 export function safeUpper(text: string): string {
   if (!text) return text;
   let hasCaseless = false;
+
   for (const ch of text) {
     if (isCaselessScriptChar(ch)) {
       hasCaseless = true;
       break;
     }
   }
+
   if (!hasCaseless) return text.toUpperCase();
+
   return Array.from(text)
     .map((ch) => (isCaselessScriptChar(ch) ? ch : ch.toUpperCase()))
     .join("");
@@ -82,27 +88,33 @@ async function request<T>(path: string, opts: RequestInit, jsonHeaders: boolean)
   const res = await fetch(`/api${path}`, {
     ...opts,
     headers: jsonHeaders
-      ? { "Content-Type": "application/json", ...(opts.headers || {}) }
+      ? { "Content-Type": "application/json", ...opts.headers }
       : opts.headers,
   });
 
   const text = await res.text();
-  let body: any = undefined;
+  let body: unknown;
+  let plainText: string | undefined;
+
   if (text) {
     try {
       body = JSON.parse(text);
     } catch {
+      plainText = text;
       body = text;
     }
   }
 
-  if (!res.ok || (body && typeof body === "object" && body.error)) {
-    const msg =
-      (typeof body === "string" && body) ||
-      (body && (body.error || body.message)) ||
-      `HTTP ${res.status}`;
+  const errorField = body instanceof Object && "error" in body ? body.error : undefined;
+  const messageField = body instanceof Object && "message" in body ? body.message : undefined;
+
+  if (!res.ok || errorField) {
+    const msg = plainText || errorField || messageField || `HTTP ${res.status}`;
+
     throw new ApiError(String(msg), res.status);
   }
+
+  // SAFETY: each caller names T as the JSON its /api route returns.
   return body as T;
 }
 
@@ -119,8 +131,11 @@ export function upload<T = any>(path: string, form: FormData): Promise<T> {
 export function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   const h = ms / 3_600_000;
+
   if (h < 1) return `${Math.max(1, Math.round(h * 60))}m ago`;
+
   if (h < 24) return `${Math.round(h)}h ago`;
+
   return new Date(iso).toLocaleDateString();
 }
 
@@ -143,6 +158,7 @@ export function resolveAssetName(
   type?: string,
 ): string | null {
   if (!reference) return null;
+
   return assets.find(
     (asset) =>
       (!type || asset.type === type) &&
@@ -165,39 +181,51 @@ interface TranscriptLike {
 
 export type TranscriptFormat = "readable" | "timestamped";
 
+function isFiniteSecond(value: number | undefined): value is number {
+  return Number.isFinite(value);
+}
+
 interface TranscriptParagraph {
   start: number;
   speaker: string | null;
   text: string;
 }
 
-const cleanTranscriptText = (value: unknown): string =>
-  typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+const cleanTranscriptText = (value: string | null | undefined): string =>
+  value ? value.replace(/\s+/g, " ").trim() : "";
 
 const endsSentence = (value: string): boolean => /[.!?…][\]})"']?$/.test(value);
 
 function friendlySpeaker(value: string | null | undefined): string | null {
   const speaker = cleanTranscriptText(value);
+
   if (!speaker) return null;
   const machineLabel = speaker.match(/^speaker[_-]+0*(\d+)$/i);
+
   if (machineLabel) return `Speaker ${Number(machineLabel[1]) + 1}`;
+
   return speaker.replace(/_/g, " ");
 }
 
 function paragraphsFromPlainText(value: string): TranscriptParagraph[] {
   const text = cleanTranscriptText(value);
+
   if (!text) return [];
   const sentences = text.split(/(?<=[.!?…])\s+/).filter(Boolean);
   const paragraphs: TranscriptParagraph[] = [];
   let buffer = "";
+
   for (const sentence of sentences) {
     buffer = buffer ? `${buffer} ${sentence}` : sentence;
+
     if (buffer.length >= 420 || sentences.length === 1) {
       paragraphs.push({ start: 0, speaker: null, text: buffer });
       buffer = "";
     }
   }
+
   if (buffer) paragraphs.push({ start: 0, speaker: null, text: buffer });
+
   return paragraphs;
 }
 
@@ -205,6 +233,7 @@ function transcriptParagraphs(transcript: TranscriptLike | null | undefined): Tr
   const segments = Array.isArray(transcript?.segments)
     ? transcript.segments.filter((segment) => cleanTranscriptText(segment?.text))
     : [];
+
   if (!segments.length) {
     return paragraphsFromPlainText(transcript?.transcript || transcript?.text || "");
   }
@@ -212,6 +241,7 @@ function transcriptParagraphs(transcript: TranscriptLike | null | undefined): Tr
   const paragraphs: TranscriptParagraph[] = [];
   let current: TranscriptParagraph | null = null;
   let previousEnd: number | null = null;
+
   const flush = () => {
     if (current?.text) paragraphs.push(current);
     current = null;
@@ -219,15 +249,15 @@ function transcriptParagraphs(transcript: TranscriptLike | null | undefined): Tr
 
   for (const segment of segments) {
     const text = cleanTranscriptText(segment.text);
-    const segmentStart: number = typeof segment.start === "number" && Number.isFinite(segment.start)
-      ? segment.start
-      : previousEnd ?? 0;
-    const segmentEnd: number = typeof segment.end === "number" && Number.isFinite(segment.end)
-      ? segment.end
-      : segmentStart;
+
+    const segmentStart: number = isFiniteSecond(segment.start) ? segment.start : previousEnd ?? 0;
+
+    const segmentEnd: number = isFiniteSecond(segment.end) ? segment.end : segmentStart;
+
     const speaker = friendlySpeaker(segment.speaker);
     const speakerChanged = current !== null && current.speaker !== speaker;
     const longPause = current !== null && previousEnd !== null && segmentStart - previousEnd >= 2.5;
+
     if (speakerChanged || longPause) flush();
 
     if (!current) current = { start: segmentStart, speaker, text };
@@ -238,7 +268,9 @@ function transcriptParagraphs(transcript: TranscriptLike | null | undefined): Tr
       flush();
     }
   }
+
   flush();
+
   return paragraphs;
 }
 
@@ -252,6 +284,7 @@ export function formatTranscriptText(
       const heading = format === "timestamped"
         ? `[${fmt(paragraph.start)}]${paragraph.speaker ? ` ${paragraph.speaker}` : ""}`
         : paragraph.speaker;
+
       return heading ? `${heading}\n${paragraph.text}` : paragraph.text;
     })
     .join("\n\n");
@@ -262,7 +295,7 @@ export function formatTranscriptText(
 // every row with the bounds of the clip it rendered; match a result to a clip on
 // those instead of on position.
 export const clipBoundsKey = (start?: number, end?: number): string | null =>
-  typeof start === "number" && typeof end === "number"
+  start !== undefined && end !== undefined
     ? `${start.toFixed(2)}:${end.toFixed(2)}`
     : null;
 
@@ -270,9 +303,10 @@ export const resultBoundsKey = (row?: ClipResultRow | null): string | null =>
   row ? clipBoundsKey(row.source_start_second, row.source_end_second) : null;
 
 interface ClipResultRow {
+  status?: string;
+  output_path?: string;
   source_start_second?: number;
   source_end_second?: number;
-  [key: string]: unknown;
 }
 
 interface ClipIdentity {
@@ -289,9 +323,14 @@ export const clipKey = (clip: ClipIdentity): string =>
   clip.clip_id || clipBoundsKey(clip.start_second, clip.end_second) || "";
 
 type EnergyLevel = "high" | "medium" | "low";
+
 interface EnergyEntry {
   score: number;
   level: EnergyLevel;
+}
+
+interface EnergyMap {
+  [clipKey: string]: EnergyEntry;
 }
 
 const energyLevel = (score: number): EnergyLevel =>
@@ -299,27 +338,29 @@ const energyLevel = (score: number): EnergyLevel =>
 
 /** Maps the backend's positional segment scores onto the clips they were measured for. */
 export function buildEnergyMap(
-  scores: unknown[],
+  scores: ReadonlyArray<number | null | undefined>,
   clips: ClipIdentity[],
-): Record<string, EnergyEntry> {
-  const map: Record<string, EnergyEntry> = {};
+): EnergyMap {
+  const map: EnergyMap = {};
   scores.forEach((score, i) => {
     const clip = clips[i];
-    if (!clip || typeof score !== "number") return;
+
+    if (!clip || score === null || score === undefined) return;
     const key = clipKey(clip);
+
     if (key) map[key] = { score, level: energyLevel(score) };
   });
+
   return map;
 }
 
-export function dropEnergy(
-  map: Record<string, EnergyEntry>,
-  clip: ClipIdentity,
-): Record<string, EnergyEntry> {
+export function dropEnergy(map: EnergyMap, clip: ClipIdentity): EnergyMap {
   const key = clipKey(clip);
+
   if (!key || !(key in map)) return map;
   const next = { ...map };
   delete next[key];
+
   return next;
 }
 
@@ -338,11 +379,15 @@ export function findClipResult<T extends ClipResultRow>(
   positionalIdx: number,
 ): T | undefined {
   const key = clipBoundsKey(clip.start_second, clip.end_second);
+
   if (key) {
     const keyed = results.find((row) => resultBoundsKey(row) === key);
+
     if (keyed) return keyed;
   }
+
   const row = results[positionalIdx];
+
   return row && !resultBoundsKey(row) ? row : undefined;
 }
 
@@ -356,12 +401,12 @@ export function findClipResult<T extends ClipResultRow>(
  * clears the transcript server-side as if it were stale. One request can't
  * race with itself.
  */
-export function buildUiStateSyncPayload(
-  syncable: Record<string, unknown>,
+export function buildUiStateSyncPayload<S extends object, X>(
+  syncable: S,
   filePath: string,
-  transcript: unknown,
+  transcript: X,
   transcriptChanged: boolean,
-): Record<string, unknown> {
+): { _source: "ui"; filePath: string } & S & { transcript?: X } {
   return {
     _source: "ui",
     filePath,

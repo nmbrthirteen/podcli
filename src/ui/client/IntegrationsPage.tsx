@@ -2,12 +2,12 @@ import React, { useEffect, useState } from "react";
 import { PageHeader } from "./Page";
 import { api } from "./lib";
 
-const CATEGORY: Record<string, string> = {
-  editor_export: "Editor export",
-  platform_upload: "Platform upload",
-  productivity: "Productivity",
-  ai_helper: "AI helper",
-};
+const CATEGORY = new Map([
+  ["editor_export", "Editor export"],
+  ["platform_upload", "Platform upload"],
+  ["productivity", "Productivity"],
+  ["ai_helper", "AI helper"],
+]);
 
 export default function IntegrationsPage() {
   const [integrations, setIntegrations] = useState<any[] | null>(null);
@@ -32,6 +32,7 @@ export default function IntegrationsPage() {
     const name = int.name;
     const next = !int.enabled;
     setBusy((b) => ({ ...b, [name]: true }));
+
     try {
       await api(`/integrations/${encodeURIComponent(name)}`, {
         method: "POST",
@@ -67,7 +68,7 @@ export default function IntegrationsPage() {
                 <div className="name">
                   {int.name}
                   <span className="pill pill-blue" style={{ marginLeft: 8, fontSize: 10 }}>
-                    {CATEGORY[int.category] || int.category}
+                    {CATEGORY.get(int.category) || int.category}
                   </span>
                 </div>
                 {int.description && <div className="desc">{int.description}</div>}

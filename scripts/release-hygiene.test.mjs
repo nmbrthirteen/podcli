@@ -31,11 +31,13 @@ describe("release-hygiene: trackedFiles", () => {
     execSync("git init -q", { cwd: dir });
     execSync('git config user.email "test@example.com"', { cwd: dir });
     execSync('git config user.name "Test"', { cwd: dir });
+
     return dir;
   }
 
   it("lists a file whose name has a non-ASCII character", () => {
     const dir = initRepo();
+
     try {
       const name = "文字.txt"; // CJK characters, non-ASCII bytes in the path
       writeFileSync(join(dir, name), "content");
@@ -51,6 +53,7 @@ describe("release-hygiene: trackedFiles", () => {
 
   it("lists plain-ASCII filenames alongside the non-ASCII one", () => {
     const dir = initRepo();
+
     try {
       writeFileSync(join(dir, "école.txt"), "content"); // accented e
       writeFileSync(join(dir, "plain.txt"), "content");

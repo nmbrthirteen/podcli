@@ -2,7 +2,7 @@
 # Build the Remotion render bundle: the remotion/ project plus a production
 # node_modules with only the render deps. Native bindings (@rspack, the Remotion
 # compositor) are per-platform, so this MUST run on each target platform/arch in
-# CI — the produced bundle is not portable across os/arch.
+# CI: the produced bundle is not portable across os/arch.
 #
 # Layout (extracted to the runtime dir): remotion/ + node_modules/ as siblings of
 # backend/, so render.mjs resolves node_modules and the Python backend resolves

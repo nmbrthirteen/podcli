@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { handleTranscribe, type TranscribeDeps } from "./transcribe.handler.js";
 
 const executeMock = vi.fn();
 const cacheGetMock = vi.fn();
@@ -6,29 +7,16 @@ const cacheSetMock = vi.fn();
 const cacheGetPackedMock = vi.fn();
 const cacheGetHashForEngineMock = vi.fn();
 
-vi.mock("../services/python-executor.js", () => ({
-  PythonExecutor: class {
-    execute = executeMock;
+const deps: TranscribeDeps = {
+  executor: { execute: executeMock },
+  cache: {
+    get: cacheGetMock,
+    set: cacheSetMock,
+    getPackedMarkdown: cacheGetPackedMock,
+    getFileHashForEngine: cacheGetHashForEngineMock,
   },
-}));
-
-vi.mock("../services/transcript-cache.js", () => ({
-  TranscriptCache: class {
-    get = cacheGetMock;
-    set = cacheSetMock;
-    getPackedMarkdown = cacheGetPackedMock;
-    getFileHashForEngine = cacheGetHashForEngineMock;
-  },
-  hasSpeakerLabels: () => true,
-  needsDiarizationRetry: () => false,
-}));
-
-vi.mock("../services/engine-resolve.js", () => ({
-  resolveTranscribeEngine: vi.fn().mockResolvedValue("whispercpp"),
-  engineCanDiarize: () => false,
-}));
-
-const { handleTranscribe } = await import("./transcribe.handler.js");
+  resolveEngine: async () => "whispercpp",
+};
 
 describe("handleTranscribe, sample mode", () => {
   beforeEach(() => {
@@ -47,7 +35,7 @@ describe("handleTranscribe, sample mode", () => {
       file_path: "/video.mp4",
       start_seconds: 120,
       duration_seconds: 40,
-    });
+    }, deps);
 
     expect(cacheGetMock).not.toHaveBeenCalled();
     const parsed = JSON.parse(result);
@@ -73,7 +61,7 @@ describe("handleTranscribe, sample mode", () => {
       file_path: "/video.mp4",
       start_seconds: 120,
       duration_seconds: 40,
-    });
+    }, deps);
 
     expect(cacheSetMock).not.toHaveBeenCalled();
     const parsed = JSON.parse(result);
@@ -86,7 +74,7 @@ describe("handleTranscribe, sample mode", () => {
       data: { transcript: "hi", segments: [], words: [], duration: 40, language: "ka", engine: "whispercpp" },
     });
 
-    await handleTranscribe({ file_path: "/video.mp4", start_seconds: 10, duration_seconds: 30 });
+    await handleTranscribe({ file_path: "/video.mp4", start_seconds: 10, duration_seconds: 30 }, deps);
 
     expect(executeMock).toHaveBeenCalledWith(
       "transcribe",
@@ -101,7 +89,7 @@ describe("handleTranscribe, sample mode", () => {
     });
     cacheGetPackedMock.mockResolvedValue("# packed");
 
-    const result = await handleTranscribe({ file_path: "/video.mp4", duration_seconds: 0 });
+    const result = await handleTranscribe({ file_path: "/video.mp4", duration_seconds: 0 }, deps);
 
     expect(cacheGetMock).toHaveBeenCalled();
     expect(cacheSetMock).toHaveBeenCalled();
@@ -116,7 +104,7 @@ describe("handleTranscribe, sample mode", () => {
     });
     cacheGetPackedMock.mockResolvedValue("# packed");
 
-    await handleTranscribe({ file_path: "/video.mp4" });
+    await handleTranscribe({ file_path: "/video.mp4" }, deps);
 
     expect(cacheGetMock).toHaveBeenCalled();
     expect(cacheSetMock).toHaveBeenCalled();

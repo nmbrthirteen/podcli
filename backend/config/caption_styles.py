@@ -6,6 +6,7 @@ supported caption types.
 """
 
 import subprocess
+from utils.log import warn as log_warn
 from utils.proc import run as proc_run
 import functools
 
@@ -42,8 +43,8 @@ def _detect_font() -> str:
             for candidate in candidates:
                 if candidate in available:
                     return candidate
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("captions", "fc-list font probe failed, using default font", error=exc)
 
     # If fc-list isn't available (macOS without fontconfig), try common ones
     # Arial is almost always available on macOS/Windows
@@ -61,7 +62,7 @@ STYLES = {
         "font_name": DETECTED_FONT,
         "font_size": 80,
         "primary_color": "&H00FFFFFF",       # White (inactive words)
-        "active_color": "&H0000FFFF",         # Yellow (active word) — BGR for yellow
+        "active_color": "&H0000FFFF",         # Yellow (active word), BGR for yellow
         "outline_color": "&H00000000",         # Black outline
         "back_color": "&H80000000",            # Semi-transparent black box
         "active_box_color": "&H00000000",      # Black box behind active word
@@ -133,7 +134,7 @@ STYLES = {
         "primary_color": "&H00FFFFFF",          # White (all words)
         "active_color": "&H00FFFFFF",           # White text on dark box
         "active_box_color": "&H00000000",       # Black pill bg
-        "active_box_alpha": "&H30",             # Pill opacity (00=solid, FF=invisible) — 30 ≈ 81% opaque
+        "active_box_alpha": "&H30",             # Pill opacity (00=solid, FF=invisible), 30 ≈ 81% opaque
         "active_box_padding_x": 10,             # Horizontal padding inside pill
         "active_box_padding_y": 10,             # Vertical padding inside pill
         "active_box_rounding": 15,              # Border rounding for pill shape
@@ -144,9 +145,9 @@ STYLES = {
         "shadow_depth": 1,                      # Subtle shadow for text edge smoothing
         "alignment": 2,                         # Bottom-center
         "margin_v": 500,                        # Position: ~72% from top (natural lower-third)
-        "words_per_chunk": 3,                   # Show 3 words at a time — readable on small screens
+        "words_per_chunk": 3,                   # Show 3 words at a time, readable on small screens
         "uppercase": False,                     # Mixed case, natural capitalization
-        "gradient_overlay": False,              # No gradient — clean direct-on-video
+        "gradient_overlay": False,              # No gradient, clean direct-on-video
         "gradient_opacity": 0.0,
         "logo_margin_x": 40,                    # Logo X offset from left
         "logo_margin_y": 60,                    # Logo Y offset from top

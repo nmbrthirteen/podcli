@@ -46,18 +46,22 @@ describe("computeSelectionHash", () => {
 
   it("changes when segments change", () => {
     const a = computeSelectionHash(clip(), words);
+
     const b = computeSelectionHash(
       clip({ segments: [{ start: 10, end: 15 }] }),
       words,
     );
+
     expect(a).not.toBe(b);
   });
 
   it("changes when the transcript words inside the range change", () => {
     const a = computeSelectionHash(clip(), words);
+
     const editedWords = words.map((w) =>
       w.word === "three" ? { ...w, word: "THREE-EDITED" } : w,
     );
+
     const b = computeSelectionHash(clip(), editedWords);
     expect(a).not.toBe(b);
   });
@@ -79,10 +83,12 @@ describe("computeSelectionHash", () => {
 
   it("changes when a hook is added", () => {
     const a = computeSelectionHash(clip(), words);
+
     const b = computeSelectionHash(
       { ...clip(), hook: { start: 10, end: 12, mode: "repeat" } },
       words,
     );
+
     expect(a).not.toBe(b);
   });
 

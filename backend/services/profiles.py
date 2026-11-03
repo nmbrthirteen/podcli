@@ -1,4 +1,4 @@
-"""Content profiles — which signals drive moment detection, per content type.
+"""Content profiles: which signals drive moment detection, per content type.
 
 A ContentProfile is orthogonal to FormatSpec: FormatSpec is a render-time aspect-ratio
 decision, a ContentProfile is a detection-time decision about which signal channels

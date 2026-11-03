@@ -2,6 +2,7 @@ import type { ClipHook } from "../utils/clip-hook.js";
 import type { ThumbnailLayout, ThumbnailPerson } from "../utils/thumbnail-layout.js";
 
 export type { ClipHook, HookMode } from "../utils/clip-hook.js";
+
 export type { ThumbnailLayout, ThumbnailPerson } from "../utils/thumbnail-layout.js";
 
 // === Task Communication Models ===
@@ -9,10 +10,10 @@ export type { ThumbnailLayout, ThumbnailPerson } from "../utils/thumbnail-layout
 export interface TaskRequest {
   task_id: string;
   task_type: "transcribe" | "resolve_transcribe_engine" | "compare_engines" | "parse_transcript" | "create_clip" | "batch_clips" | "analyze_energy" | "detect_highlights" | "manage_reel" | "pack_transcript" | "detect_encoder" | "presets" | "ping" | "suggest_clips" | "rank_candidates" | "process_episode" | "find_moment" | "generate_content" | "generate_custom" | "corrections" | "manage_integrations" | "run_integration_tool" | "manage_config" | "manage_env" | "ai_cli_status" | "ai_provider_status" | "analyze_silence" | "render_silence_removed" | "manage_multicam";
-  params: Record<string, unknown>;
+  params: object;
 }
 
-export interface TaskResult<T = Record<string, unknown>> {
+export interface TaskResult<T = object> {
   task_id: string;
   status: "success" | "error";
   data?: T;
@@ -25,7 +26,7 @@ export interface ProgressEvent {
   percent: number;
   message: string;
   clip_result?: BatchClipsResult["results"][number];
-  partial?: Record<string, unknown>;
+  partial?: object;
 }
 
 // === Transcript Models ===
@@ -87,7 +88,9 @@ export interface TranscriptResult {
 // === Clip Models ===
 
 export type CaptionStyle = "branded" | "hormozi" | "karaoke" | "subtle";
+
 export type CropStrategy = "center" | "face" | "speaker";
+
 export type Format = "vertical" | "horizontal" | "square";
 
 export interface ClipRequest {
@@ -150,7 +153,7 @@ export interface UIState {
   transcriptVideoIdentity?: { path: string; size: number; mtimeMs: number } | null;
   rawTranscriptText?: string;
   silenceOriginal?: { videoPath: string; transcript: TranscriptResult } | null;
-  silencePlan?: Record<string, unknown> | null;
+  silencePlan?: object | null;
   /** True when videoPath didn't exist at last check (e.g. an external drive
    * is unmounted). The session is kept, not wiped, while this is set. */
   videoMissing?: boolean;

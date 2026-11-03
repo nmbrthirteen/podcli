@@ -1,6 +1,6 @@
-import { readFileSync } from "fs";
 import { PythonExecutor } from "../services/python-executor.js";
 import { FileManager } from "../services/file-manager.js";
+import { readUIStateFile } from "../services/ui-state-file.js";
 import { paths } from "../config/paths.js";
 import type { ClipResult, CreateClipInput, SuggestedClip, UIState } from "../models/index.js";
 import { childLogger } from "../utils/logger.js";
@@ -16,9 +16,10 @@ const fileManager = new FileManager();
 /** Load UI state from disk. Returns null if unavailable. */
 function loadState(): UIState | null {
   try {
-    return JSON.parse(readFileSync(paths.uiState, "utf-8")) as UIState;
+    return readUIStateFile();
   } catch (err) {
     log.debug("UI state unavailable", { err: err instanceof Error ? err.message : err });
+
     return null;
   }
 }
@@ -26,8 +27,8 @@ function loadState(): UIState | null {
 export const createClipToolDef = {
   name: "create_clip",
   description:
-    "STEP 3 — Export a single clip as a finished vertical short (1080x1920, 9:16).\n\n" +
-    "EASIEST: just pass clip_number (e.g. 3) — everything else auto-loads from session state.\n" +
+    "STEP 3: Export a single clip as a finished vertical short (1080x1920, 9:16).\n\n" +
+    "EASIEST: just pass clip_number (e.g. 3); everything else auto-loads from session state.\n" +
     "Output: H.264 MP4 with burned-in captions, normalized audio (-14 LUFS).\n\n" +
     "For batch export, use batch_create_clips instead.\n" +
     "Caption styles: branded (professional), hormozi (bold/yellow), karaoke (progressive highlight), subtle (minimal).\n" +
@@ -164,13 +165,16 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
 
   // Resolve clip from suggestion number
   let suggestion: SuggestedClip | null = null;
+
   if (input.clip_number != null) {
     const idx = input.clip_number - 1;
+
     if (idx < 0 || idx >= suggestions.length) {
       return JSON.stringify({
         error: `Clip #${input.clip_number} not found. Available: 1-${suggestions.length}`,
       });
     }
+
     suggestion = suggestions[idx];
   }
 
@@ -179,11 +183,13 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
   const startSecond = input.start_second ?? suggestion?.start_second;
   const endSecond = input.end_second ?? suggestion?.end_second;
   const title = input.title || suggestion?.title || "clip";
+
   const captionStyle =
     input.caption_style ||
     suggestion?.suggested_caption_style ||
     settings.captionStyle ||
     "hormozi";
+
   const cropStrategy = input.crop_strategy || settings.cropStrategy || "speaker";
   const format = input.format || settings.format || "vertical";
   const logoPath = input.logo_path || settings.logoPath || null;
@@ -202,6 +208,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
   // still carry a mismatched one.
   if (input.transcript_words == null && transcript) {
     const mismatch = transcriptVideoMismatch(state?.transcriptVideoIdentity, videoPath);
+
     if (mismatch) {
       return JSON.stringify({ error: mismatch });
     }
@@ -211,16 +218,21 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
   if (!videoPath) {
     return JSON.stringify({ error: "video_path is required (no video in session state)" });
   }
+
   if (startSecond == null || endSecond == null) {
     return JSON.stringify({
       error: "start_second and end_second are required (use clip_number to reference a suggestion)",
     });
   }
+
   const rangeError = validateClipRange(startSecond, endSecond, format);
+
   if (rangeError) {
     return JSON.stringify({ error: rangeError });
   }
+
   const hookError = validateHook(hook, startSecond, endSecond, keepSegments);
+
   if (hookError) {
     return JSON.stringify({ error: hookError });
   }
@@ -242,8 +254,8 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     logo_path: logoPath,
     outro_path: outroPath,
     intro_path: introPath,
-    ...(input.name_card ? { name_card: input.name_card } : {}),
-    ...(input.motion ? { motion: input.motion } : {}),
+    ...(input.name_card && { name_card: input.name_card }),
+    ...(input.motion && { motion: input.motion }),
     ...(keepSegments && { keep_segments: keepSegments }),
     ...(hook && { hook }),
   });
@@ -251,6 +263,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
   if (!result.data) {
     throw new Error("Clip creation returned no data");
   }
+
   const data = result.data;
 
   return JSON.stringify({

@@ -1,4 +1,4 @@
-"""DaVinci Resolve integration — exposes the export_to_davinci_resolve MCP tool."""
+"""DaVinci Resolve integration: exposes the export_to_davinci_resolve MCP tool."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,7 +14,7 @@ class DaVinciResolveIntegration(IntegrationBase):
     name = "davinci_resolve"
     category = "editor_export"
     description = (
-        "Export podcli shorts as a DaVinci Resolve FCPXML — each short becomes an "
+        "Export podcli shorts as a DaVinci Resolve FCPXML: each short becomes an "
         "editable compound clip (source on V1, ProRes 4444 alpha captions on V2). "
         "Works in free + Studio Resolve 20.x."
     )

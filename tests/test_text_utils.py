@@ -58,7 +58,7 @@ def test_safe_filename_strips_characters_windows_rejects():
 
 
 def test_safe_filename_drops_smart_punctuation():
-    assert safe_filename("In the end — your “shit” has to work") == "In_the_end_your_shit_has_to_work"
+    assert safe_filename("In the end \u2014 your “shit” has to work") == "In_the_end_your_shit_has_to_work"
 
 
 def test_safe_filename_caps_length():
@@ -66,12 +66,12 @@ def test_safe_filename_caps_length():
 
 
 def test_safe_filename_has_no_leading_or_trailing_underscore():
-    out = safe_filename("  — hello —  ")
+    out = safe_filename("  \u2014 hello \u2014  ")
     assert out == "hello"
 
 
 def test_safe_filename_falls_back_when_nothing_survives():
-    assert safe_filename("———") == "clip"
+    assert safe_filename("\u2014\u2014\u2014") == "clip"
     assert safe_filename("") == "clip"
     assert safe_filename(None) == "clip"
 

@@ -360,6 +360,9 @@ func transcribeEngine(args []string) string {
 			sel = strings.ToLower(strings.TrimPrefix(a, "--engine="))
 		}
 	}
+	if sel == "" {
+		sel = config.DefaultEngine()
+	}
 	if sel == "" && engine.IsHermeticPython() {
 		sel = "whispercpp"
 	}
@@ -408,7 +411,7 @@ func setup(args []string) int {
 			return 1
 		}
 		backendDir = fallback
-		fmt.Fprintf(os.Stderr, "  backend: using fallback %s (may be stale — run `podcli doctor`)\n", backendDir)
+		fmt.Fprintf(os.Stderr, "  backend: using fallback %s (may be stale: run `podcli doctor`)\n", backendDir)
 	} else {
 		fmt.Printf("  backend: %s\n", backendDir)
 	}
@@ -449,7 +452,11 @@ func setup(args []string) int {
 			fmt.Fprintf(os.Stderr, "  speakers: failed (%v)\n", err)
 			return 1
 		}
-		fmt.Printf("  speakers: pyannote.audio installed (set HF_TOKEN to use)\n")
+		if err := config.Set("engine", "whisper-py"); err != nil {
+			fmt.Fprintf(os.Stderr, "  speakers: could not save engine setting (%v)\n", err)
+			return 1
+		}
+		fmt.Printf("  speakers: openai-whisper + pyannote.audio installed, default engine set to whisper-py (set HF_TOKEN to use; `podcli config set engine whispercpp` reverts)\n")
 	}
 	if wc, err := provision.EnsureWhisperCpp(); err != nil {
 		fmt.Fprintf(os.Stderr, "  whisper: skipped (%v) - backend will use PATH whisper-cli\n", err)
@@ -1200,7 +1207,7 @@ Launcher commands:
   update               Check for and apply a newer release
   uninstall            Remove podcli app files (keeps user data unless --purge)
   setup [--model base] [--vad] [--speakers]
-                       Provision runtimes + models (--speakers adds pyannote+torch, ~2GB)
+                       Provision runtimes + models (--speakers adds openai-whisper, pyannote, torch, ~2GB)
   setup --refresh      Re-provision runtimes for this launcher version, skipping models
   mcp                  Run the MCP server (stdio) for Claude/Codex
   mcp install          Register the MCP server with Claude Code and Codex
@@ -1209,7 +1216,7 @@ Launcher commands:
 
 process --json --yes writes one JSON object to stdout and skips prompts.
 --help and --version never download. First run of process, studio, transcribe,
-or multicam provisions the engine. podcli mcp does not — stdout is JSON-RPC —
+or multicam provisions the engine. podcli mcp does not, because stdout is JSON-RPC.
 so run podcli setup first.
 
 Exit codes: 0 success, 1 runtime or processing error, 2 usage, 130 interrupted.

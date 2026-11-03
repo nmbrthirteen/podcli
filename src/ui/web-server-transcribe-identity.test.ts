@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { stubPythonBackend } from "../test-support/stub-python-backend.js";
 
 // transcribe_start (POST /api/transcribe) used to update uiState.transcript
 // and uiState.videoPath without setting transcriptVideoIdentity. The next
@@ -13,7 +14,8 @@ import { join } from "path";
 // checks the persisted ui-state.json, not just the in-memory handler logic.
 
 const tmp = mkdtempSync(join(tmpdir(), "podcli-transcribe-identity-"));
-const savedEnv: Record<string, string | undefined> = {
+
+const savedEnv = {
   PODCLI_HOME: process.env.PODCLI_HOME,
   PODCLI_DATA: process.env.PODCLI_DATA,
   PODCLI_PORT: process.env.PODCLI_PORT,
@@ -21,24 +23,13 @@ const savedEnv: Record<string, string | undefined> = {
 
 const PORT = 18424;
 
-// The web server spawns the Python backend on startup (manage_config status
-// check) and per-transcribe-request (engine resolution). Stub it so the test
-// never depends on a real backend or network call, and resolves instantly.
-vi.mock("../services/python-executor.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../services/python-executor.js")>();
-  class StubExecutor {
-    async execute(taskType: string) {
-      if (taskType === "resolve_transcribe_engine") {
-        return { data: { engine: "whisper-py" } };
-      }
-      if (taskType === "transcribe") {
-        return { data: { engine: "whisper-py", words: [{ word: "hi", start: 0, end: 1 }] } };
-      }
-      return { data: {} };
-    }
-  }
-  return { ...original, PythonExecutor: StubExecutor };
-});
+interface PersistedUiState {
+  transcriptVideoIdentity?: { path?: string };
+}
+
+interface JobSnapshot {
+  status?: string;
+}
 
 let videoPath: string;
 let uiStatePath: string;
@@ -47,12 +38,15 @@ async function waitForServer(): Promise<void> {
   for (let i = 0; i < 50; i++) {
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/ui-state`);
+
       if (res.ok) return;
     } catch {
       // not up yet
     }
+
     await new Promise((r) => setTimeout(r, 100));
   }
+
   throw new Error("web server never came up");
 }
 
@@ -70,10 +64,28 @@ beforeAll(async () => {
   const cache = new TranscriptCache();
   await cache.set(
     videoPath,
-    { words: [{ word: "hi", start: 0, end: 1 }] } as never,
+    {
+      transcript: "hi",
+      segments: [],
+      words: [{ word: "hi", start: 0, end: 1, confidence: 1 }],
+      duration: 1,
+      language: "en",
+      speakers: { num_speakers: 0, speakers: {} },
+      speaker_segments: [],
+    },
     { engine: "whisper-py", model: "base", language: undefined },
   );
 
+  // The web server spawns the Python backend on startup (manage_config status
+  // check) and per-transcribe-request (engine resolution). Stub it so the test
+  // never depends on a real backend or network call, and resolves instantly.
+  await stubPythonBackend((taskType) => {
+    if (taskType === "resolve_transcribe_engine") return { engine: "whisper-py" };
+
+    if (taskType === "transcribe") return { engine: "whisper-py", words: [{ word: "hi", start: 0, end: 1 }] };
+
+    return {};
+  });
   await import("./web-server.js");
   await waitForServer();
 }, 20_000);
@@ -96,21 +108,26 @@ describe("POST /api/transcribe", () => {
         enable_diarization: false,
       }),
     });
+
     const body = await res.json();
     expect(body.cached).toBe(true);
 
     // /api/ui-state doesn't echo transcriptVideoIdentity, and persistState()
     // debounces its write to disk by 500ms, so poll the persisted file.
-    let uiState: { transcriptVideoIdentity?: { path?: string } } = {};
+    let uiState: PersistedUiState = {};
+
     for (let i = 0; i < 20; i++) {
       try {
         uiState = JSON.parse(readFileSync(uiStatePath, "utf-8"));
+
         if (uiState.transcriptVideoIdentity) break;
       } catch {
         // not written yet
       }
+
       await new Promise((r) => setTimeout(r, 100));
     }
+
     expect(uiState.transcriptVideoIdentity).toBeTruthy();
     expect(uiState.transcriptVideoIdentity?.path).toBe(videoPath);
   });
@@ -128,26 +145,34 @@ describe("POST /api/transcribe", () => {
         enable_diarization: false,
       }),
     });
+
     const { job_id } = await res.json();
 
-    let job: { status?: string } = {};
+    let job: JobSnapshot = {};
+
     for (let i = 0; i < 50; i++) {
       job = await (await fetch(`http://127.0.0.1:${PORT}/api/job/${job_id}`)).json();
+
       if (job.status === "done" || job.status === "error") break;
       await new Promise((r) => setTimeout(r, 100));
     }
+
     expect(job.status).toBe("done");
 
-    let uiState: { transcriptVideoIdentity?: { path?: string } } = {};
+    let uiState: PersistedUiState = {};
+
     for (let i = 0; i < 20; i++) {
       try {
         uiState = JSON.parse(readFileSync(uiStatePath, "utf-8"));
+
         if (uiState.transcriptVideoIdentity?.path === freshVideoPath) break;
       } catch {
         // not written yet
       }
+
       await new Promise((r) => setTimeout(r, 100));
     }
+
     expect(uiState.transcriptVideoIdentity?.path).toBe(freshVideoPath);
   });
 });

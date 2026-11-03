@@ -14,7 +14,7 @@ describe("validateClipRange", () => {
   });
 
   it("rejects non-numbers", () => {
-    expect(validateClipRange("10" as unknown, 40)).toMatch(/must be numbers/);
+    expect(validateClipRange("10", 40)).toMatch(/must be numbers/);
     expect(validateClipRange(10, NaN)).toMatch(/must be numbers/);
     expect(validateClipRange(undefined, undefined)).toMatch(/must be numbers/);
   });
@@ -128,6 +128,7 @@ describe("validateSuggestionContext", () => {
       standalone: "that the company had just been acquired",
       context_line: "Right after the acquisition:",
     };
+
     expect(validateSuggestionContext(needsSetup)).toMatch(/nothing renders it yet/);
 
     const orphan = {
@@ -135,6 +136,7 @@ describe("validateSuggestionContext", () => {
       preview_text: "Yeah, and that's exactly why we shut it down.",
       context_line: "Why did you kill the product?",
     };
+
     expect(validateSuggestionContext(orphan)).toMatch(/Move start_second back/);
   });
 

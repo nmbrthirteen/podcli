@@ -1,4 +1,4 @@
-import { PythonExecutor } from "./python-executor.js";
+import type { TaskExecutor } from "./python-executor.js";
 
 /**
  * Predicts which engine backend/services/transcription.py's transcribe_file
@@ -23,7 +23,7 @@ export function engineCanDiarize(engine: string | undefined): boolean {
 }
 
 export async function resolveTranscribeEngine(
-  executor: PythonExecutor,
+  executor: TaskExecutor,
   engine: string | undefined,
   modelSize: string
 ): Promise<string> {
@@ -32,6 +32,7 @@ export async function resolveTranscribeEngine(
       engine,
       model_size: modelSize,
     });
+
     return result.data?.engine ?? engine ?? "whisper-py";
   } catch {
     // Resolution is a best-effort cache-key optimization; a failure here

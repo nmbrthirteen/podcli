@@ -4,11 +4,11 @@ Everything downstream of the transcript JSON contract (the `{words, segments}`
 dict produced by transcribe_file / parse_speaker_transcript / JSON import /
 cache) is pure code that does NOT change when we swap the transcription engine
 or relocate the runtime. This test pins the most timestamp-sensitive part of
-that surface — caption (ASS) generation — against committed goldens.
+that surface: caption (ASS) generation, against committed goldens.
 
 If a future change (whisper.cpp swap, hermetic runtime, a refactor) alters
 caption output for a fixed transcript, this test fails. That is the whole point:
-the engine may change, the contract's consumers may not — silently.
+the engine may change; the contract's consumers may not, silently.
 
 Regenerate goldens intentionally with:  UPDATE_GOLDENS=1 pytest tests/parity/test_caption_parity.py
 Goldens use the .ass.expected extension because *.ass is gitignored.
@@ -42,7 +42,7 @@ def _deterministic_text_widths(texts, font_name, font_size, bold, spacing=2):
     so positions differ between macOS (Arial) and CI (DejaVu/Liberation) and the
     goldens can never match across machines. The parity harness exists to lock
     the engine-independent ASS pipeline (timing, styles, karaoke, position and
-    pill geometry derived from widths) — not the host's typography — so we pin a
+    pill geometry derived from widths), not the host's typography, so we pin a
     deterministic width model and the goldens become reproducible everywhere.
     """
     widths = []
@@ -78,7 +78,7 @@ def _hermetic_render(monkeypatch):
     """Pin the two host-dependent inputs so goldens are reproducible everywhere.
 
     1. Font name: caption_styles.DETECTED_FONT is resolved at import via fc-list,
-       so it's "Arial" on macOS and "Liberation Sans" on CI's Ubuntu — and that
+       so it's "Arial" on macOS and "Liberation Sans" on CI's Ubuntu, and that
        name is written into the ASS Style line.
     2. Text widths: see _deterministic_text_widths (affects the branded style's
        per-word positioning and pill geometry).

@@ -42,6 +42,7 @@ const StatBody: React.FC<Props<"stat">> = ({ card, theme, s, f, fps }) => {
   const eyebrowAt = card.eyebrow ? next("label") : 0;
   const figureAt = next("figure", card.value);
   const captionAt = next("strip");
+
   return (
     <>
       <Eyebrow theme={theme} s={s} f={f} fps={fps} at={eyebrowAt} text={card.eyebrow} />
@@ -62,6 +63,7 @@ const HeadlineBody: React.FC<Props<"headline">> = ({ card, theme, s, f, fps }) =
   const markAt = leadAt + roleFrames(theme, "title", card.lead) + 2;
   const subAt = next("strip");
   const mark = Array.isArray(card.emphasis) ? card.emphasis[0] : card.emphasis;
+
   return (
     <>
       <Eyebrow theme={theme} s={s} f={f} fps={fps} at={eyebrowAt} text={card.eyebrow} />
@@ -80,6 +82,7 @@ const EntityBody: React.FC<Props<"entity">> = ({ card, theme, s, f, fps }) => {
   const mediaAt = card.src ? next("media") : 0;
   const nameAt = next("figure", card.name);
   const noteAt = next("strip");
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 32 * s }}>
       {card.src && (
@@ -105,6 +108,7 @@ const BulletsBody: React.FC<Props<"bullets">> = ({ card, theme, s, f, fps }) => 
   const eyebrowAt = card.eyebrow ? next("title", card.eyebrow) : 0;
   const items = card.items.slice(0, 3);
   const ats = items.map(() => next("item"));
+
   return (
     <>
       <Eyebrow theme={theme} s={s} f={f} fps={fps} at={eyebrowAt} text={card.eyebrow} />
@@ -126,6 +130,7 @@ const QuoteBody: React.FC<Props<"quote">> = ({ card, theme, s, f, fps }) => {
   const next = planner(theme);
   const textAt = next("title", card.text);
   const byAt = next("label");
+
   return (
     <>
       <Reveal theme={theme} role="title" f={f} at={textAt} fps={fps} style={{ position: "relative" }}>
@@ -145,6 +150,7 @@ const CompareBody: React.FC<Props<"compare">> = ({ card, theme, s, f, fps }) => 
   const rows = card.rows.slice(0, 3);
   const ats = rows.map(() => next("item"));
   const top = Math.max(...rows.map((row) => row.value), 1);
+
   return (
     <>
       <Eyebrow theme={theme} s={s} f={f} fps={fps} at={eyebrowAt} text={card.eyebrow} />
@@ -169,6 +175,7 @@ const ChangeBody: React.FC<Props<"change">> = ({ card, theme, s, f, fps }) => {
   const eyebrowAt = title ? next("label") : 0;
   const fromAt = next("item");
   const toAt = next("figure", card.to.value) + 4;
+
   return (
     <>
       <Eyebrow theme={theme} s={s} f={f} fps={fps} at={eyebrowAt} text={title} />
@@ -199,6 +206,7 @@ const ShareBody: React.FC<Props<"share">> = ({ card, theme, s, f, fps }) => {
   const figureAt = next("figure", display);
   const barAt = next("item");
   const fill = progress(theme.motion, f, barAt, Math.max(12, theme.motion.frames * 2));
+
   return (
     <>
       <Eyebrow theme={theme} s={s} f={f} fps={fps} at={eyebrowAt} text={card.eyebrow} />
@@ -219,13 +227,21 @@ const ShareBody: React.FC<Props<"share">> = ({ card, theme, s, f, fps }) => {
 
 const Body: React.FC<{ card: Card; theme: Theme; s: number; f: number; fps: number }> = ({ card, ...rest }) => {
   if (card.kind === "stat") return <StatBody card={card} {...rest} />;
+
   if (card.kind === "headline") return <HeadlineBody card={card} {...rest} />;
+
   if (card.kind === "entity") return <EntityBody card={card} {...rest} />;
+
   if (card.kind === "bullets") return <BulletsBody card={card} {...rest} />;
+
   if (card.kind === "quote") return <QuoteBody card={card} {...rest} />;
+
   if (card.kind === "compare") return <CompareBody card={card} {...rest} />;
+
   if (card.kind === "change") return <ChangeBody card={card} {...rest} />;
+
   if (card.kind === "share") return <ShareBody card={card} {...rest} />;
+
   return null;
 };
 
@@ -236,16 +252,20 @@ export const OverlayCard: React.FC<{
   const k = tempo(fitted, card, length);
   const f = Math.floor((useCurrentFrame() - start) * k);
   const { fps } = useVideoConfig();
+
   const out = interpolate(f, [length * k - EXIT_FRAMES * k, length * k], [1, 0], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
   });
+
   const panelIn = progress(fitted.motion, f, 0, 6);
   const paper = fitted.surface === "paper";
+
   const inner = (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 16 * s, padding: `${34 * s}px ${44 * s}px ${40 * s}px` }}>
       <Body card={card} theme={fitted} s={s} f={f} fps={fps} />
     </div>
   );
+
   return (
     <div style={{
       position: "absolute", left: 48 * s, right: 48 * s, top, opacity: out * panelIn,

@@ -16,6 +16,7 @@ export interface VideoIdentity {
 export function computeVideoIdentity(path: string): VideoIdentity | null {
   try {
     const stat = statSync(path);
+
     return { path, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
     return null;
@@ -28,6 +29,7 @@ export function identitiesMatch(
   b: VideoIdentity | null | undefined,
 ): boolean {
   if (!a || !b) return false;
+
   return a.path === b.path && a.size === b.size && a.mtimeMs === b.mtimeMs;
 }
 
@@ -43,8 +45,11 @@ export function transcriptVideoMismatch(
 ): string | null {
   if (!transcriptVideoIdentity) return null;
   const current = computeVideoIdentity(videoPath);
+
   if (!current) return null;
+
   if (identitiesMatch(transcriptVideoIdentity, current)) return null;
+
   return (
     `Session transcript belongs to a different video than the one currently set ` +
     `(${transcriptVideoIdentity.path}). Re-transcribe or re-import a transcript for ` +

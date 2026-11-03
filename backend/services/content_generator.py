@@ -6,6 +6,7 @@ Single source of truth used by CLI, Web UI, and MCP.
 
 import json
 import os
+from utils.log import warn as log_warn
 import subprocess
 import sys
 import tempfile
@@ -172,8 +173,8 @@ def _stream_claude_content(
         try:
             proc.kill()
             proc.wait()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("content", "could not stop subprocess", error=exc)
         return None
     finally:
         watchdog.cancel()
@@ -300,7 +301,7 @@ TITLES (8 options, 50-70 chars, keyword-first, follow title spec):
 6. [title]
 7. [title]
 8. [title]
-TOP PICK: [number] — [why]
+TOP PICK: [number], [why]
 
 DESCRIPTION:
 [hook line under 100 chars]
@@ -336,7 +337,7 @@ TITLES (8 options, 40-60 chars, keyword-first, follow title spec):
 6. [title]
 7. [title]
 8. [title]
-TOP PICK: [number] — [why]
+TOP PICK: [number], [why]
 
 DESCRIPTION:
 [hook line under 100 chars]

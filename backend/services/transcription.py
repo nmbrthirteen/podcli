@@ -696,7 +696,7 @@ def transcribe_file(
     Transcribe a video/audio file with word-level timestamps and speaker detection.
 
     wav_path: optional pre-extracted 16 kHz mono WAV shared across analysis
-    stages — used by whisper.cpp and diarization instead of re-decoding.
+    stages: used by whisper.cpp and diarization instead of re-decoding.
 
     start_seconds/duration_seconds: sample mode, transcribe only a window of
     the source (e.g. to test a language on 40s before committing to a full
@@ -807,8 +807,8 @@ def _transcribe_file_inner(
         )
 
     # Native installs ship whisper.cpp, not openai-whisper. Fall back to it
-    # automatically — whether whisper is missing OR a broken install fails to
-    # load/run — unless the user explicitly asked for the whisper-py engine.
+    # automatically: whether whisper is missing OR a broken install fails to
+    # load/run: unless the user explicitly asked for the whisper-py engine.
     if not use_cpp:
         if progress_callback:
             progress_callback(5, "Loading Whisper model...")

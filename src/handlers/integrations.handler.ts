@@ -20,6 +20,7 @@ interface IntegrationDescriptor {
 }
 
 interface ListResult { integrations: IntegrationDescriptor[] }
+
 interface SetResult { name: string; enabled: boolean }
 
 export const manageIntegrationsToolDef = {
@@ -27,9 +28,9 @@ export const manageIntegrationsToolDef = {
   description:
     "List, enable, or disable podcli integrations (editor exporters, platform uploads, productivity tools, AI helpers).\n\n" +
     "Actions:\n" +
-    "  • list    — return all installed integrations with their enabled state (default)\n" +
-    "  • enable  — turn an integration on (its tools become callable)\n" +
-    "  • disable — turn an integration off (calls return a disabled error)\n\n" +
+    "  • list: return all installed integrations with their enabled state (default)\n" +
+    "  • enable: turn an integration on (its tools become callable)\n" +
+    "  • disable: turn an integration off (calls return a disabled error)\n\n" +
     "State persists at the active config home (integrations.json, gitignored).",
 };
 
@@ -38,11 +39,14 @@ export async function handleManageIntegrations(input: {
   name?: string;
 }): Promise<string> {
   const action = input.action ?? "list";
+
   const result = await executor.execute<ListResult | SetResult>("manage_integrations", {
     action,
     name: input.name ?? "",
   });
+
   if (!result.data) throw new Error(`manage_integrations returned no data (action=${action})`);
+
   return JSON.stringify(result.data, null, 2);
 }
 
@@ -66,18 +70,20 @@ export const exportToDaVinciResolveToolDef = {
   name: "export_to_davinci_resolve",
   description:
     "Export podcli shorts as a DaVinci Resolve FCPXML project.\n\n" +
-    "Each short becomes a compound clip with V1 source + V2 ProRes 4444 alpha caption overlay — " +
+    "Each short becomes a compound clip with V1 source + V2 ProRes 4444 alpha caption overlay, " +
     "fully editable in free or Studio Resolve 20.x.\n\n" +
     "Requires the davinci_resolve integration to be enabled (manage_integrations action=enable name=davinci_resolve).",
 };
 
 export async function handleExportToDaVinciResolve(input: DvExportInput): Promise<string> {
-  const result = await executor.execute<Record<string, unknown>>("run_integration_tool", {
+  const result = await executor.execute<object>("run_integration_tool", {
     integration: "davinci_resolve",
     tool: "export_to_davinci_resolve",
     params: input,
   });
+
   if (!result.data) throw new Error("export_to_davinci_resolve returned no data");
+
   return JSON.stringify(result.data, null, 2);
 }
 
@@ -86,11 +92,11 @@ export const manageConfigToolDef = {
   description:
     "Manage portable config profiles and legacy path migration.\n\n" +
     "Actions:\n" +
-    "  • status  — active config home, cache dir, migration state (default)\n" +
-    "  • migrate — move legacy project/.podcli/cache into data/cache (idempotent)\n" +
-    "  • export  — zip the active config home (knowledge, presets, assets, settings)\n" +
-    "  • import  — restore a bundle; backs up existing config before overwrite\n" +
-    "  • use     — activate a config home path (writes .podcli-home marker)",
+    "  • status: active config home, cache dir, migration state (default)\n" +
+    "  • migrate: move legacy project/.podcli/cache into data/cache (idempotent)\n" +
+    "  • export: zip the active config home (knowledge, presets, assets, settings)\n" +
+    "  • import: restore a bundle; backs up existing config before overwrite\n" +
+    "  • use: activate a config home path (writes .podcli-home marker)",
 };
 
 export async function handleManageConfig(input: {
@@ -101,14 +107,17 @@ export async function handleManageConfig(input: {
   dry_run?: boolean;
 }): Promise<string> {
   const action = input.action ?? "status";
-  const result = await executor.execute<Record<string, unknown>>("manage_config", {
+
+  const result = await executor.execute<object>("manage_config", {
     action,
     bundle_path: input.bundle_path,
     home: input.home,
     activate: input.activate,
     dry_run: input.dry_run,
   });
+
   if (!result.data) throw new Error(`manage_config returned no data (action=${action})`);
+
   return JSON.stringify(result.data, null, 2);
 }
 
@@ -134,13 +143,13 @@ export const manageEnvToolDef = {
   description:
     "List, set, or unset global podcli settings stored in .env.\n\n" +
     "Keys:\n" +
-    "  • HF_TOKEN — HuggingFace token for speaker detection\n" +
-    "  • PODCLI_CLAUDE_PATH — manual path to Claude Code CLI when auto-discovery fails\n" +
-    "  • PODCLI_CODEX_PATH — manual path to Codex CLI when auto-discovery fails\n\n" +
+    "  • HF_TOKEN: HuggingFace token for speaker detection\n" +
+    "  • PODCLI_CLAUDE_PATH: manual path to Claude Code CLI when auto-discovery fails\n" +
+    "  • PODCLI_CODEX_PATH: manual path to Codex CLI when auto-discovery fails\n\n" +
     "Actions:\n" +
-    "  • list  — show all settings, configured values, and AI CLI detection (default)\n" +
-    "  • set   — set a key (path must exist for PODCLI_*_PATH keys)\n" +
-    "  • unset — remove a key (falls back to auto-discovery)",
+    "  • list: show all settings, configured values, and AI CLI detection (default)\n" +
+    "  • set: set a key (path must exist for PODCLI_*_PATH keys)\n" +
+    "  • unset: remove a key (falls back to auto-discovery)",
 };
 
 export async function handleManageEnv(input: {
@@ -149,6 +158,7 @@ export async function handleManageEnv(input: {
   value?: string;
 }): Promise<string> {
   const action = input.action ?? "list";
+
   const result = await executor.execute<{
     settings?: EnvSettingRow[];
     path?: string;
@@ -160,7 +170,9 @@ export async function handleManageEnv(input: {
     key: input.key ?? "",
     value: input.value ?? "",
   });
+
   if (!result.data) throw new Error(`manage_env returned no data (action=${action})`);
+
   return JSON.stringify(result.data, null, 2);
 }
 
@@ -174,14 +186,16 @@ export const aiCliStatusToolDef = {
 
 export async function handleAiCliStatus(): Promise<string> {
   const result = await executor.execute<AiCliStatus>("ai_cli_status", {});
+
   if (!result.data) throw new Error("ai_cli_status returned no data");
+
   return JSON.stringify(result.data, null, 2);
 }
 
 function mcpText(text: string, isError = false) {
   return {
     content: [{ type: "text" as const, text }],
-    ...(isError ? { isError: true as const } : {}),
+    ...(isError && { isError: true as const }),
   };
 }
 
@@ -198,7 +212,9 @@ export function registerIntegrationMcpTools(server: McpServer): void {
         if ((action === "enable" || action === "disable") && !name?.trim()) {
           return mcpText("`name` is required when action is enable or disable.", true);
         }
+
         const text = await handleManageIntegrations({ action, name });
+
         return mcpText(text);
       } catch (err) {
         return mcpText(err instanceof Error ? err.message : String(err), true);
@@ -229,6 +245,7 @@ export function registerIntegrationMcpTools(server: McpServer): void {
     async (params) => {
       try {
         const text = await handleExportToDaVinciResolve(params);
+
         return mcpText(text);
       } catch (err) {
         return mcpText(err instanceof Error ? err.message : String(err), true);
@@ -252,6 +269,7 @@ export function registerIntegrationMcpTools(server: McpServer): void {
     async (params) => {
       try {
         const text = await handleManageConfig(params);
+
         return mcpText(text);
       } catch (err) {
         return mcpText(err instanceof Error ? err.message : String(err), true);
@@ -272,13 +290,17 @@ export function registerIntegrationMcpTools(server: McpServer): void {
         if (action === "set" && !key?.trim()) {
           return mcpText("`key` is required when action is set.", true);
         }
+
         if (action === "set" && !value?.trim()) {
           return mcpText("`value` is required when action is set.", true);
         }
+
         if (action === "unset" && !key?.trim()) {
           return mcpText("`key` is required when action is unset.", true);
         }
+
         const text = await handleManageEnv({ action, key, value });
+
         return mcpText(text);
       } catch (err) {
         return mcpText(err instanceof Error ? err.message : String(err), true);
@@ -293,6 +315,7 @@ export function registerIntegrationMcpTools(server: McpServer): void {
     async () => {
       try {
         const text = await handleAiCliStatus();
+
         return mcpText(text);
       } catch (err) {
         return mcpText(err instanceof Error ? err.message : String(err), true);

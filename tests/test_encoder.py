@@ -29,10 +29,6 @@ class GetEncoderFlagsTests(unittest.TestCase):
         flags = encoder._get_encoder_flags("h264_amf")
         self.assertIn("h264_amf", flags)
 
-        # vaapi (Linux Intel/AMD)
-        flags = encoder._get_encoder_flags("h264_vaapi")
-        self.assertIn("h264_vaapi", flags)
-
         # qsv (Intel QuickSync)
         flags = encoder._get_encoder_flags("h264_qsv")
         self.assertIn("h264_qsv", flags)
@@ -51,7 +47,7 @@ class GetEncoderFlagsTests(unittest.TestCase):
     def test_all_flag_lists_start_with_c_v(self):
         # Every encoder profile must specify -c:v as its first pair
         for name in ["h264_videotoolbox", "h264_nvenc", "h264_amf",
-                     "h264_vaapi", "h264_qsv", "libx264"]:
+                     "h264_qsv", "libx264"]:
             flags = encoder._get_encoder_flags(name)
             self.assertEqual(flags[0], "-c:v")
             self.assertTrue(flags[1].startswith("h264") or flags[1] == "libx264")
@@ -68,7 +64,7 @@ class GetVideoEncodeFlagsTests(unittest.TestCase):
     def test_falls_back_when_detect_encoders_raises(self):
         with mock.patch.object(encoder, "detect_encoders", side_effect=RuntimeError("boom")):
             flags = encoder.get_video_encode_flags()
-            # Absolute fallback — must always return something usable
+            # Absolute fallback: must always return something usable
             self.assertIn("libx264", flags)
             self.assertIn("-crf", flags)
 

@@ -1,4 +1,5 @@
 import { SAFE } from "./types";
+
 export type Tone = "ink" | "accent" | "muted" | "context";
 
 export type Size = "xs" | "sm" | "md" | "lg" | "xl" | "xxl";
@@ -105,6 +106,7 @@ export function emphasisRuns(text: string, emphasis?: string | string[]): Run[] 
   const phrases = (Array.isArray(emphasis) ? emphasis : emphasis ? [emphasis] : [])
     .map((phrase) => phrase.trim())
     .filter(Boolean);
+
   if (!phrases.length) return [{ text, mark: false }];
 
   const runs: Run[] = [{ text, mark: false }];
@@ -112,20 +114,26 @@ export function emphasisRuns(text: string, emphasis?: string | string[]): Run[] 
 
   for (const phrase of phrases) {
     let placed = false;
+
     for (let i = 0; i < runs.length && !placed; i++) {
       const run = runs[i]!;
+
       if (run.mark) continue;
       const at = run.text.toLowerCase().indexOf(phrase.toLowerCase());
+
       if (at < 0) continue;
       const before = run.text.slice(0, at);
       const after = run.text.slice(at + phrase.length);
       const parts: Run[] = [];
+
       if (before) parts.push({ text: before, mark: false });
       parts.push({ text: run.text.slice(at, at + phrase.length), mark: true });
+
       if (after) parts.push({ text: after, mark: false });
       runs.splice(i, 1, ...parts);
       placed = true;
     }
+
     /*
      * Appended only when the line does not contain it at all. A phrase that is
      * in the line but already sits inside another mark has been said: adding
@@ -139,6 +147,7 @@ export function emphasisRuns(text: string, emphasis?: string | string[]): Run[] 
   for (const phrase of appended) {
     runs.push({ text: " ", mark: false }, { text: phrase, mark: true });
   }
+
   return runs;
 }
 
@@ -163,6 +172,7 @@ const LINE = 1.25;
 
 const lines = (text: string, size: number, width: number, advance = ADVANCE) => {
   const perLine = Math.max(1, Math.floor(width / (size * advance)));
+
   return Math.max(1, Math.ceil(text.length / perLine));
 };
 
@@ -176,21 +186,28 @@ export const stepsStacked = (points: StepPoint[]) => points.length <= 3;
 
 export const stepType = (points: StepPoint[], width = SCENE_WIDTH) => {
   const stacked = stepsStacked(points);
+
   const slot = stacked
     ? width - 56
     : (width - Math.max(0, points.length - 1) * 120) / Math.max(1, points.length);
+
   const fits = (text: string | undefined, size: number) => !text || text.length * size * CHAR_WIDTH <= slot;
+
   const value = [TYPE_SIZE.xl, TYPE_SIZE.lg, TYPE_SIZE.md, TYPE_SIZE.sm]
     .find((size) => points.every((point) => fits(point.value, size))) ?? TYPE_SIZE.xs;
+
   const note = (stacked ? [TYPE_SIZE.md, TYPE_SIZE.sm, TYPE_SIZE.xs] : [TYPE_SIZE.sm, TYPE_SIZE.xs])
     .find((size) => points.every((point) => fits(point.note, size))) ?? TYPE_SIZE.xs;
+
   return { value, note };
 };
 
 const stepRow = (points: StepPoint[], width: number) => {
   const type = stepType(points, width);
+
   if (!stepsStacked(points)) return 26 + type.value + type.note * 2.6 + 24;
   const text = width - 56;
+
   return points.reduce((sum, point, i) =>
     sum + (i ? STEP_RISE : 0)
       + lines(point.value, type.value, text, CHAR_WIDTH) * type.value * 1.05
@@ -221,22 +238,28 @@ export function blockHeight(block: Block, width: number): number {
     case "text": {
       const size = TYPE_SIZE[sizeOf(block)];
       const text = emphasised(block.text, block.emphasis);
+
       return lines(text, size, width, block.caps ? CAPS_ADVANCE : ADVANCE) * size * LINE;
     }
+
     case "quote": {
       const size = TYPE_SIZE[sizeOf(block)];
       const body = lines(block.text, size, width) * size * LINE;
+
       return body + (block.attribution ? GAP_SIZE.group + TYPE_SIZE.xs * LINE : 0);
     }
+
     case "list": {
       const size = TYPE_SIZE[sizeOf(block)];
       const marker = 46;
+
       return block.items.reduce(
         (total, item, i) =>
           total + (i ? GAP_SIZE.tight : 0) + lines(item, size, width - marker) * size * LINE,
         0,
       );
     }
+
     case "bars":
       return block.rows.length * BAR_ROW + Math.max(0, block.rows.length - 1) * 30;
     case "meter":
@@ -262,6 +285,7 @@ function groupHeight(
   block: Extract<Block, { type: "group" }>, width: number,
 ): number {
   const kids = listOf(block);
+
   if (!kids.length) return 0;
   const gap = gapOf(block);
   const layout = block.layout ?? "stack";
@@ -275,6 +299,7 @@ function groupHeight(
 
   const columns = layout === "grid" ? 2 : kids.length;
   const share = Math.max(1, (width - gap * (columns - 1)) / columns);
+
   if (layout === "row") {
     return Math.max(...kids.map((kid) => blockHeight(kid, share)));
   }
@@ -283,11 +308,13 @@ function groupHeight(
   let total = 0;
   kids.forEach((kid, i) => {
     tallest = Math.max(tallest, blockHeight(kid, share));
+
     if (i % columns === columns - 1 || i === kids.length - 1) {
       total += (total ? gap : 0) + tallest;
       tallest = 0;
     }
   });
+
   return total;
 }
 
@@ -312,7 +339,9 @@ export function fitScale(
 ): number {
   if (!(room > 0)) return 1;
   const wanted = sceneHeight(blocks, layout, gap, width);
+
   if (wanted <= room) return 1;
+
   return Math.max(MIN_FIT, room / wanted);
 }
 

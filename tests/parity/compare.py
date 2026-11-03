@@ -3,7 +3,7 @@
 Layer-2 gate: bounds whisper.cpp (or any new engine) against openai-whisper
 ground truth on text accuracy and word-timestamp drift. The acceptance bar is
 deliberately forgiving because the caption pipeline already runs in production
-on evenly-spaced synthetic word timings (see transcript_parser.py) — absolute
+on evenly-spaced synthetic word timings (see transcript_parser.py), absolute
 timestamp fidelity is a quality nicety, not a correctness requirement.
 
 Usage:
@@ -11,7 +11,7 @@ Usage:
         compares baseline/<stem>/transcript.json vs candidate/<stem>/transcript.json
     venv/bin/python3 tests/parity/compare.py <baseline.json> <candidate.json>
 
-Exit code is nonzero if any threshold is exceeded — wire it into CI as the gate
+Exit code is nonzero if any threshold is exceeded. Wire it into CI as the gate
 for the whisper.cpp swap.
 """
 
@@ -21,7 +21,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# Thresholds — tune against real fixtures, then lock in CI.
+# Thresholds: tune against real fixtures, then lock in CI.
 MAX_WER = float(os.environ.get("PARITY_MAX_WER", "0.08"))           # 8% word error
 MAX_MEDIAN_DRIFT = float(os.environ.get("PARITY_MAX_MEDIAN_DRIFT", "0.10"))  # 100ms
 MAX_P95_DRIFT = float(os.environ.get("PARITY_MAX_P95_DRIFT", "0.30"))        # 300ms

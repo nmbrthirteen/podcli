@@ -15,6 +15,7 @@ const FONT = "'DM Sans', sans-serif";
 // --- Recognizable social glyphs as inline SVG (monochrome, fill=currentColor) ---
 const Glyph: React.FC<{ name: string; size: number; color: string }> = ({ name, size, color }) => {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: color } as const;
+
   switch (name) {
     case "tiktok":
       return (
@@ -45,12 +46,12 @@ const Glyph: React.FC<{ name: string; size: number; color: string }> = ({ name, 
   }
 };
 
-const PLATFORM_LABEL: Record<string, string> = {
-  tiktok: "TikTok",
-  instagram: "Instagram",
-  youtube: "YouTube",
-  x: "X",
-};
+const PLATFORM_LABEL = new Map([
+  ["tiktok", "TikTok"],
+  ["instagram", "Instagram"],
+  ["youtube", "YouTube"],
+  ["x", "X"],
+]);
 
 export const Bookend: React.FC<BookendProps> = ({
   mode,
@@ -142,6 +143,7 @@ export const Bookend: React.FC<BookendProps> = ({
             const pop = spring({ frame: Math.max(0, f), fps, config: { damping: 12, mass: 0.6 }, durationInFrames: Math.round(fps * 0.5) });
             const scale = interpolate(pop, [0, 1], [0.2, 1]);
             const op = interpolate(pop, [0, 1], [0, 1]);
+
             return (
               <div
                 key={p}
@@ -168,7 +170,7 @@ export const Bookend: React.FC<BookendProps> = ({
                   <Glyph name={p} size={iconSize} color="#FFFFFF" />
                 </div>
                 <div style={{ color: "rgba(255,255,255,0.7)", fontSize: width * 0.028, fontWeight: 700 }}>
-                  {PLATFORM_LABEL[p] || p}
+                  {PLATFORM_LABEL.get(p) || p}
                 </div>
               </div>
             );

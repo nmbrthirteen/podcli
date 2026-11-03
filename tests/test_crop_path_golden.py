@@ -2,11 +2,11 @@
 
 The helper tests next door check each piece of the tracking math in isolation.
 What they cannot catch is a change that leaves every helper correct but moves
-the camera anyway — a different sampling rate, a reordered pipeline, a changed
+the camera anyway: a different sampling rate, a reordered pipeline, a changed
 default. Those are exactly the changes a "pure speed optimization" makes.
 
 So these lock the composed output: fixed detections in, exact keyframes out.
-No cv2, ffmpeg, or video files — the fixtures stand in for decoded frames.
+No cv2, ffmpeg, or video files. The fixtures stand in for decoded frames.
 """
 
 import json
@@ -26,7 +26,7 @@ if BACKEND_ROOT not in sys.path:
 from services import video_processor as vp
 
 WIDTH, HEIGHT = 1920, 1080
-CROP_W = int(HEIGHT * (1080 / 1920))  # 607 — full-height 9:16 window
+CROP_W = int(HEIGHT * (1080 / 1920))  # 607, full-height 9:16 window
 
 
 def _face(cx, fw=180):
@@ -40,7 +40,7 @@ def _two_speaker_detections(n=40, step=0.1):
 
 class FaceSampleIndicesGoldenTests(unittest.TestCase):
     """The sampling schedule is the input to everything downstream. If a speed
-    change alters it, every keyframe below shifts — so pin the exact schedule."""
+    change alters it, every keyframe below shifts, so pin the exact schedule."""
 
     def test_30fps_schedule_is_exact(self):
         idx = vp._face_sample_indices(90, 30.0)
@@ -137,7 +137,7 @@ class FaceDetectWorkersTests(unittest.TestCase):
                 self.assertGreaterEqual(vp._face_detect_workers(10_000), 1)
 
     def test_short_clips_stay_serial(self):
-        # A ~2s clip samples ~40 frames — not enough to repay a second detector.
+        # A ~2s clip samples ~40 frames, not enough to repay a second detector.
         with mock.patch.dict(os.environ, {"PODCLI_FACE_WORKERS": ""}):
             self.assertEqual(vp._face_detect_workers(0), 1)
             self.assertEqual(vp._face_detect_workers(40), 1)
@@ -198,7 +198,7 @@ class DetectBatchTests(unittest.TestCase):
 
     def test_each_detector_is_used_by_exactly_one_stride(self):
         out = self._run(20, 4)
-        # Frame i must be handled by detector i % 4 — deterministic striding,
+        # Frame i must be handled by detector i % 4, deterministic striding,
         # so no detector is ever touched by two threads.
         for i, (_, faces) in enumerate(out):
             self.assertEqual(faces[0]["detector"], f"det{i % 4}")

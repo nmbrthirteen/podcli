@@ -1,4 +1,4 @@
-"""Studio port resolution — must stay identical to src/config/server.ts."""
+"""Studio port resolution: must stay identical to src/config/server.ts."""
 
 import os
 import re

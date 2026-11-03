@@ -10,7 +10,7 @@ curl -fsSL https://podcli.com/install.sh | sh
 # Windows: irm https://podcli.com/install.ps1 | iex
 ```
 
-Platforms: macOS arm64, Linux x64/arm64, Windows x64. (npm isn't used — the
+Platforms: macOS arm64, Linux x64/arm64, Windows x64. (npm isn't used because the
 unscoped name `podcli` is blocked by npm as too similar to `pod-cli`.)
 
 ## Cutting a release
@@ -31,7 +31,7 @@ unscoped name `podcli` is blocked by npm as too similar to `pod-cli`.)
    ```
 4. Watch the `release` workflow. It produces these assets (the names the
    installers, self-update, and provisioner expect):
-   - `podcli-{darwin,linux,windows}-{amd64,arm64}[.exe]` — static launchers
+   - `podcli-{darwin,linux,windows}-{amd64,arm64}[.exe]`, static launchers
    - `whisper-cli-<os>-<arch>[.exe]`
    - `studio-bundle.tar.gz`
    - `remotion-<os>-<arch>.tar.gz`

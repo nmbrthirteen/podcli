@@ -81,6 +81,6 @@
   "variation_offset_up": "3%",
   "variation_offset_down": "2%",
 
-  "_comment_pre_clip_thumbnail": "How long the still thumbnail plays at the start of the rendered short before the live video begins. 0.5–1.0s is the sweet spot.",
+  "_comment_pre_clip_thumbnail": "How long the still thumbnail plays at the start of the rendered short before the live video begins. 0.5-1.0s is the sweet spot.",
   "intro_duration": 0.8
 }

@@ -21,7 +21,7 @@ class ThumbnailHtmlTests(unittest.TestCase):
 
     def test_prepare_thumbnail_lines_compacts_long_sentence_title(self):
         line1, line2 = th._prepare_thumbnail_lines(
-            "We build 10 megawatt data centers in 200 days — everyone is shocked",
+            "We build 10 megawatt data centers in 200 days \u2014 everyone is shocked",
         )
 
         self.assertIn("10MW", f"{line1} {line2}")
@@ -34,7 +34,7 @@ class ThumbnailHtmlTests(unittest.TestCase):
         line1, line2 = th._prepare_thumbnail_lines(
             title="ignored",
             line1="WE BUILD 10 MEGAWATT DATA",
-            line2="CENTERS IN 200 DAYS — EVERYONE IS SHOCKED",
+            line2="CENTERS IN 200 DAYS \u2014 EVERYONE IS SHOCKED",
         )
 
         self.assertLessEqual(len(line1), 24)

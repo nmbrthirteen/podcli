@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { callTool, type ToolArgs } from "./test-support/mcp-client.js";
 
 // create_clip/batch_create_clips fill transcript_words from session state
 // when the caller omits it (e.g. clip_number-only calls). handleCreateClip
@@ -36,19 +37,16 @@ beforeAll(async () => {
 afterAll(() => {
   if (savedHome === undefined) delete process.env.PODCLI_HOME;
   else process.env.PODCLI_HOME = savedHome;
+
   if (savedData === undefined) delete process.env.PODCLI_DATA;
   else process.env.PODCLI_DATA = savedData;
+
   if (savedPort === undefined) delete process.env.PODCLI_PORT;
   else process.env.PODCLI_PORT = savedPort;
   rmSync(tmp, { recursive: true, force: true });
 });
 
-function getHandler(name: string) {
-  const server = createServer() as unknown as {
-    _registeredTools: Record<string, { handler: (args: unknown, extra: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }> }>;
-  };
-  return server._registeredTools[name].handler;
-}
+const callServerTool = (name: string, args: ToolArgs) => callTool(createServer(), name, args);
 
 function writeMismatchedState() {
   writeFileSync(
@@ -68,17 +66,15 @@ function writeMismatchedState() {
 describe("create_clip offline identity guard", () => {
   it("rejects clip_number-only calls when the session transcript doesn't match the video", async () => {
     writeMismatchedState();
-    const handler = getHandler("create_clip");
-    const result = await handler({ clip_number: 1 }, {});
-    expect(result.content[0].text).toContain("belongs to a different video");
+    const result = await callServerTool("create_clip", { clip_number: 1 });
+    expect(result.text).toContain("belongs to a different video");
   });
 });
 
 describe("batch_create_clips offline identity guard", () => {
   it("rejects export_selected calls when the session transcript doesn't match the video", async () => {
     writeMismatchedState();
-    const handler = getHandler("batch_create_clips");
-    const result = await handler({ export_selected: true }, {});
-    expect(result.content[0].text).toContain("belongs to a different video");
+    const result = await callServerTool("batch_create_clips", { export_selected: true });
+    expect(result.text).toContain("belongs to a different video");
   });
 });

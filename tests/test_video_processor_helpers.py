@@ -33,7 +33,7 @@ class SimplifyKeyframesTests(unittest.TestCase):
         self.assertEqual(out, [(0, 0), (10, 1000)])
 
     def test_non_collinear_points_preserved(self):
-        # (0,0), (5,800), (10,1000) — middle is far from the interpolated value
+        # (0,0), (5,800), (10,1000), middle is far from the interpolated value
         keyframes = [(0, 0), (5, 800), (10, 1000)]
         out = vp._simplify_keyframes(keyframes)
         self.assertEqual(out, keyframes)  # all preserved
@@ -58,7 +58,7 @@ class SimplifyKeyframesTests(unittest.TestCase):
 
 class ResolveSpeakerSidesTests(unittest.TestCase):
     def test_no_face_map_returns_empty(self):
-        # Without a face_map, we cannot infer sides — must return empty dict
+        # Without a face_map, we cannot infer sides; must return empty dict
         sides = vp._resolve_speaker_sides(
             segments=[(0.0, 5.0, "SPEAKER_00")],
             detections=[],

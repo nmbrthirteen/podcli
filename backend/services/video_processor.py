@@ -64,7 +64,7 @@ import sys
 
 def _manual_crop_x_expr(keyframes: list, crop_w: int, width: int) -> str:
     """Build an FFmpeg x-expression that HOLDS each manual keyframe's position
-    until the next keyframe, then snaps (step function — no glide).
+    until the next keyframe, then snaps (step function, no glide).
 
     keyframes: [(t_seconds, center_x_pct 0-100), ...] in clip-relative time.
     Returns crop x (top-left) as a function of t, clamped to the frame.
@@ -1200,7 +1200,7 @@ def _face_sample_indices(total_frames: int, fps: float) -> list[int]:
 
 
 # Memory ceiling for one batch of decoded frames awaiting detection. Sized so
-# a 1080p clip batches ~40 frames and a 4K clip ~10 — enough to keep the pool
+# a 1080p clip batches ~40 frames and a 4K clip ~10, enough to keep the pool
 # busy without holding a whole clip of decoded frames in RAM.
 _FACE_BATCH_BYTES = 256 * 1024 * 1024
 
@@ -1218,7 +1218,7 @@ def _face_detect_workers(sample_count: int = 0) -> int:
     PODCLI_FACE_WORKERS overrides and is taken literally; 1 disables the pool
     entirely, which is the first thing to try when bisecting a framing
     regression. Otherwise the count is capped both by cores and by how many
-    frames there are to share out — a 2s clip stays serial.
+    frames there are to share out, so a 2s clip stays serial.
     """
     raw = os.environ.get("PODCLI_FACE_WORKERS", "").strip()
     if raw:
@@ -1235,7 +1235,7 @@ def _detect_batch(batch: list, detectors: list, width: int, height: int, executo
     """Detect faces across a batch of (time, frame) pairs, input order preserved.
 
     Each worker owns one detector and walks its own stride of the batch, so no
-    cv2.FaceDetectorYN instance is ever touched by two threads — they carry
+    cv2.FaceDetectorYN instance is ever touched by two threads: they carry
     per-instance input-size state and are not thread-safe. Striding (rather
     than a shared work queue) also makes the assignment deterministic.
     """
@@ -1279,7 +1279,7 @@ def _dump_crop_path(
 
     No-op unless the env var is set, and never raises: this is diagnostics and
     must not be able to fail a render. Frame-level detections are summarised
-    rather than dumped whole — the camera path is what a regression would move.
+    rather than dumped whole: the camera path is what a regression would move.
     """
     dump_dir = os.environ.get("PODCLI_CROP_DUMP")
     if not dump_dir:
@@ -1295,7 +1295,7 @@ def _dump_crop_path(
             "detection_frames": len(detections),
             "frames_with_faces": sum(1 for _, faces in detections if faces),
             "segment_tracks": [
-                # (start, end, speaker, track_id, ...) — keep the framing-
+                # (start, end, speaker, track_id, ...): keep the framing-
                 # relevant fields, drop anything unhashable/verbose.
                 {"start": round(s[0], 3), "end": round(s[1], 3),
                  "speaker": s[2], "track_id": s[3]}
@@ -1391,7 +1391,7 @@ def _track_and_crop_inner(
         return None
 
     # ── Dense face sampling (~10 fps, 2× at clip start) ──────────
-    # grab() advances cheaply, retrieve() decodes only sampled frames — far
+    # grab() advances cheaply, retrieve() decodes only sampled frames, far
     # cheaper than a cap.set() seek (keyframe re-decode) per sample.
     sample_indices = _face_sample_indices(total_frames, fps)
     detections = []  # [(time, faces), ...]
@@ -1509,7 +1509,7 @@ def _track_and_crop_inner(
                 seg_start = t
         if cur_sp:
             segments.append((seg_start, duration, cur_sp))
-        # Merge short segments (<2s) — brief interjections ("yeah",
+        # Merge short segments (<2s): brief interjections ("yeah",
         # "right") shouldn't trigger camera moves.  Absorb them into
         # the previous speaker's turn so the camera holds steady.
         merged = []
@@ -1661,7 +1661,7 @@ def _track_and_crop_inner(
                 runs = merged_runs
 
             if len(runs) <= 1:
-                # Single layout — static crop, no transitions needed
+                # Single layout: static crop, no transitions needed
                 crop_x = _crop_for(runs[0][2]) if runs else max(0, (width - crop_w) // 2)
                 vf = f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={target_w}:{target_h}"
                 return _run_ffmpeg_with_fallback(
@@ -1729,7 +1729,7 @@ def _track_and_crop_inner(
                 log_event("crop", "fallback", reason="mixed_steps_failed",
                           to="dissolve")
 
-            # Multiple layouts — crop each segment separately, join
+            # Multiple layouts: crop each segment separately, join
             # with cross-dissolve so transitions feel editorial.
             work_dir = os.path.dirname(output_path) or "."
             xfade_dur = 0.18  # Short dissolve
@@ -1953,7 +1953,7 @@ def _track_and_crop_inner(
             # find the first real face detection and start there instead.
             # This catches cases where face_map anchors are stale or wrong.
             if segment_targets[0][0] > 0.5:
-                # First segment starts late — face detection failed at clip start.
+                # First segment starts late: face detection failed at clip start.
                 # Find the earliest actual face position to validate default_x.
                 first_face_cx = None
                 for _t, _faces in tracked_detections:
@@ -2044,7 +2044,7 @@ def _track_and_crop_inner(
             ):
                 target_x = float(speaker_anchor_x[speaker])
             else:
-                # Hold position — picking the largest random face often grabs the
+                # Hold position: picking the largest random face often grabs the
                 # wrong speaker and causes a jump.
                 target_x = None
 
@@ -2082,7 +2082,7 @@ def _track_and_crop_inner(
                 crop_right = kf_x + crop_w
                 margin = crop_w * 0.15  # face should be at least 15% inside
                 if face_cx < crop_left + margin or face_cx > crop_right - margin:
-                    # Face not in window — recompute crop to center on face
+                    # Face not in window: recompute crop to center on face
                     new_x = max(0, min(int(face_cx - crop_w // 2), max_crop_x))
                     validated.append((kf_t, new_x))
                     continue
@@ -2163,7 +2163,7 @@ def _crop_split_screen(
 ) -> Optional[str]:
     """
     Split-screen crop: cut each speaker segment with a static crop on their
-    camera half. No complex expressions — just separate FFmpeg calls + concat.
+    camera half. No complex expressions: just separate FFmpeg calls + concat.
 
     This is how production tools (Opus Clip, Descript, etc.) handle it:
     static crop per speaker, hard cut between segments.
@@ -2194,7 +2194,7 @@ def _crop_split_screen(
         # to distinguish split-screen frames from single-person frames
         left_faces = []   # (cx_in_half, cy)
         right_faces = []  # (cx_in_half, cy)
-        single_faces = []  # (cx_in_full, cy) — faces from single-person frames
+        single_faces = []  # (cx_in_full, cy): faces from single-person frames
 
         sample_count = min(40, max(10, int(duration * 2)))
         split_frame_count = 0
@@ -2239,7 +2239,7 @@ def _crop_split_screen(
         adj_h = int(height * 0.75)
         adj_w = int(adj_h * target_ratio)
         if adj_w > half_w:
-            # Zoomed crop wider than half — fall back to full height
+            # Zoomed crop wider than half: fall back to full height
             adj_h = height
             adj_w = int(height * target_ratio)
 
@@ -2291,7 +2291,7 @@ def _crop_split_screen(
         speakers = sorted(set(w.get("speaker") for w in transcript_words if w.get("speaker")))
 
         if len(speakers) < 2:
-            # Single speaker — if mixed layout, prefer fullscreen crop; else use best half
+            # Single speaker: if mixed layout, prefer fullscreen crop; else use best half
             if is_mixed and single_faces:
                 vf = f"crop={single_w}:{single_h}:{single_crop_x}:{single_crop_y},scale={target_w}:{target_h}"
             elif len(left_faces) >= len(right_faces):
@@ -2393,7 +2393,7 @@ def _crop_split_screen(
                     else:
                         cw, ch, cx, cy = right_w, right_h, right_crop_x, right_crop_y
                 else:
-                    # Single-person fullscreen — use full-frame crop (no vertical zoom)
+                    # Single-person fullscreen: use full-frame crop (no vertical zoom)
                     cw, ch, cx, cy = single_w, single_h, single_crop_x, single_crop_y
 
                 part_path = os.path.join(work_dir, f"_speaker_part_{i}.mp4")
@@ -2527,7 +2527,7 @@ def _use_face_map(
         return None
 
     if len(speakers_in_clip) < 2 or len(clusters) < 2:
-        # Single speaker — use their cluster or the dominant one
+        # Single speaker: use their cluster or the dominant one
         for sp in speakers_in_clip:
             ci = speaker_mappings.get(sp)
             if ci is not None and ci < len(clusters):
@@ -2575,7 +2575,7 @@ def _use_face_map(
     default_ci = speaker_mappings.get(dominant, 0)
     default_x = clusters[min(default_ci, len(clusters) - 1)]["crop_x"]
 
-    # Build keyframes — instant cut for split-screen/hard-cut, smooth pan otherwise
+    # Build keyframes: instant cut for split-screen/hard-cut, smooth pan otherwise
     pan_duration = 0.0 if hard_cut or is_split_screen else 0.4
     duration = segments[-1][1] if segments else 1.0
     keyframes = []
@@ -2590,7 +2590,7 @@ def _use_face_map(
                 keyframes.append((start_t, prev_x))
                 keyframes.append((start_t + pan_duration, target_x))
             else:
-                # Instant snap — single keyframe at new position, no transition frames
+                # Instant snap: single keyframe at new position, no transition frames
                 keyframes.append((start_t, target_x))
         prev_x = target_x
 
@@ -2717,7 +2717,7 @@ def _build_speaker_aware_crop(
         # TRUE split-screen requires presence on both halves AND a real
         # horizontal gap between the leftmost and rightmost face (median
         # gap > 20% of source width). This filters out in-person podcasts
-        # where two heads share one camera near the middle — applying the
+        # where two heads share one camera near the middle, because applying the
         # seam clamp there would push centered crops to the edge.
         true_split = False
         if has_split:
@@ -2748,7 +2748,7 @@ def _build_speaker_aware_crop(
             segments.append((seg_start, duration, current_speaker))
 
         if not segments:
-            # No speaker data — use median of all faces
+            # No speaker data: use median of all faces
             all_cx = [cx for _, faces in frame_data for cx, cy, fw, conf in faces]
             all_cy = [cy for _, faces in frame_data for cx, cy, fw, conf in faces]
             if all_cx:
@@ -2840,7 +2840,7 @@ def _build_speaker_aware_crop(
             """Compute crop_x and crop_y for a face at (cx, cy).
 
             On TRUE split-screen sources (faces on both halves with a real
-            gap between them — Riverside/Squadcast tiles, not in-person
+            gap between them: Riverside/Squadcast tiles, not in-person
             shots), clamp crop_x so the frame seam stays outside the 9:16
             window. Otherwise the other speaker bleeds into the crop and
             the median across frames can land on the gap.
@@ -2849,7 +2849,7 @@ def _build_speaker_aware_crop(
             than the winner's half, the clamp falls through (seam_limit < 0
             or seam_floor + adj_w > width) and the crop will still include
             the seam. That case requires shrinking adj_w upstream, which
-            this per-frame helper can't do — leave it to the thumbnail
+            this per-frame helper can't do: leave it to the thumbnail
             path, which can resize.
             """
             crop_x = cx - adj_w // 2
@@ -3295,7 +3295,7 @@ def concat_outro(
     # (keeps playback natural even when xfade is unavailable/fails).
     #
     # Both audio streams MUST be normalized to the same sample rate,
-    # channel layout, and sample format before `concat` — otherwise
+    # channel layout, and sample format before `concat`, otherwise
     # ffmpeg fails with rc=234 ("at least one of its streams received
     # no packets"), which the old code silently swallowed and then
     # cascaded into the pure-concat fallback.
@@ -3462,7 +3462,7 @@ def _detect_face_center(
     crop_h: int = None,
 ) -> Optional[tuple]:
     """
-    Simple static face detection — finds the dominant face and returns a
+    Simple static face detection: finds the dominant face and returns a
     STATIC crop position that centers the face horizontally. No tracking,
     no panning. The face stays centered for the entire clip.
 
@@ -3532,7 +3532,7 @@ def _detect_face_center(
         right_count = np.sum(positions >= mid_x)
 
         if left_count >= 3 and right_count >= 3:
-            # Split-screen — pick the side with the most detections,
+            # Split-screen: pick the side with the most detections,
             # clamp crop to that half with margin away from seam.
             seam_margin = 20
             if left_count >= right_count:
@@ -3565,7 +3565,7 @@ def _detect_face_offset(
     crop_h: int = None,
 ) -> Optional[tuple]:
     """
-    Continuous face tracking — detects face position over time and returns
+    Continuous face tracking: detects face position over time and returns
     an FFmpeg expression that smoothly follows the dominant face.
 
     Samples frames throughout the clip, picks the dominant face cluster,
@@ -3658,7 +3658,7 @@ def _detect_face_offset(
         # Filter to only dominant face detections
         tracked = [(t, cx) for i, (t, cx) in enumerate(timed_positions) if i in dominant_indices]
         if len(tracked) < 3:
-            # Too few points — use static median
+            # Too few points: use static median
             median_x = int(np.median([cx for _, cx in tracked]))
             crop_x = max(0, min(median_x - crop_w // 2, width - crop_w))
             return (str(crop_x), median_cy)
@@ -3674,7 +3674,7 @@ def _detect_face_offset(
         ], dtype=float)
 
         # 2) Fill gaps: if face wasn't detected for some frames, the tracked
-        #    array has gaps. That's fine — we interpolate between known points.
+        #    array has gaps. That's fine: we interpolate between known points.
 
         # 3) Heavy smoothing to prevent jitter. Use a 2.5-second rolling average
         #    so only sustained movement (leaning, shifting) affects the crop.
@@ -3694,7 +3694,7 @@ def _detect_face_offset(
 
         # --- Check if tracking is even needed ---
         # If the face barely moves (range < 20% of crop width), just use static.
-        # Most podcast clips have speakers sitting still — tracking should be rare.
+        # Most podcast clips have speakers sitting still. Tracking should be rare.
         movement_range = int(smoothed.max() - smoothed.min())
         if movement_range < crop_w * 0.20:
             return (str(int(np.median(smoothed))), median_cy)
@@ -3732,7 +3732,7 @@ def _detect_face_offset(
             t1, x1 = keyframes[i + 1]
             dt = max(0.01, t1 - t0)
             if x0 == x1:
-                # No movement in this segment — constant
+                # No movement in this segment: constant
                 expr_parts.append(f"if(lt(t\\,{t1:.2f})\\,{x0}\\,")
             else:
                 # Linear interpolation
@@ -3743,7 +3743,7 @@ def _detect_face_offset(
 
         # Cap nesting depth
         if len(expr_parts) > 40:
-            # Too many keyframes — subsample
+            # Too many keyframes: subsample
             step = len(keyframes) // 20
             keyframes = keyframes[::step] + [keyframes[-1]]
             # Rebuild (recursive call would be cleaner but let's just return static)

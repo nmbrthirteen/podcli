@@ -13,6 +13,8 @@ export const DEFAULT_PACK_TEXTURES: NonNullable<ThemeInput["textures"]> = {
 
 export const withDefaultTextures = (theme: ThemeInput | null): ThemeInput | null => {
   if (!theme) return null;
+
   if (theme.textures && Object.keys(theme.textures).length > 0) return theme;
+
   return { ...theme, textures: DEFAULT_PACK_TEXTURES };
 };

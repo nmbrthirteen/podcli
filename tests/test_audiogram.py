@@ -1,7 +1,7 @@
 """Tests for audio-only input detection.
 
 An episode that was never filmed used to reach `get_dimensions` and raise "No
-video stream found" — after transcription, so the expensive half of the run was
+video stream found" after transcription, so the expensive half of the run was
 already paid for. These cover knowing, from the header, that there is no picture
 in it, and being careful about when that is worth stopping a run over.
 """

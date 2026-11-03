@@ -32,14 +32,15 @@
     "remotion:prebundle": "node remotion/render.mjs --prebundle",
     "remotion:studio": "npx remotion studio remotion/src/index.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "oxlint"
   },
   "dependencies": {
     "@fontsource/dm-sans": "^5.3.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@remotion/bundler": "^4.0.508",
-    "@remotion/cli": "^4.0.508",
-    "@remotion/renderer": "^4.0.490",
+    "@remotion/bundler": "4.0.508",
+    "@remotion/cli": "4.0.508",
+    "@remotion/renderer": "4.0.508",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "lucide-react": "^1.31.0",
@@ -47,12 +48,13 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
-    "remotion": "^4.0.490",
+    "remotion": "4.0.508",
     "uuid": "^14.0.1",
     "winston": "^3.17.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.78.0",
     "@types/express": "^5.0.0",
     "@types/multer": "^2.2.0",
     "@types/node": "^26.2.0",
@@ -60,6 +62,7 @@
     "@types/react-dom": "^19.2.4",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.7.0",
+    "oxlint": "1.78.0",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
     "vite": "^5.4.21",

@@ -6,6 +6,7 @@ Supports styles: Hormozi, Karaoke, Subtle, and Branded.
 """
 
 import os
+from utils.log import warn as log_warn
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -208,7 +209,7 @@ def _hold_through_gap(chunks: list[list[dict]], idx: int, end: float, offset: fl
 def _render_hormozi(words: list[dict], style: dict, offset: float) -> str:
     """
     Hormozi style: Show 2-3 words at a time, smooth karaoke-fill highlight.
-    Uses \\kf tags for progressive word fill — 1 Dialogue per chunk, no flashing.
+    Uses \\kf tags for progressive word fill, 1 Dialogue per chunk, no flashing.
     """
     header = generate_ass_header(style)
     events = []
@@ -312,7 +313,7 @@ def _render_subtle(words: list[dict], style: dict, offset: float) -> str:
 
 def _normalize_case(text: str) -> str:
     """Lowercase a word unless it's an acronym or proper 'I'."""
-    stripped = text.strip(".,!?;:-–—'\"")
+    stripped = text.strip(".,!?;:-\u2013\u2014'\"")
     if stripped.isupper() and len(stripped) >= 2:
         return text  # Likely acronym (e.g. "AI", "CEO")
     if stripped == "I" or stripped == "I'm" or stripped.startswith("I'"):
@@ -430,12 +431,12 @@ def _calibrate_libass_y(
     finally:
         try:
             os.unlink(ass_file.name)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("captions", "could not remove temp ASS file", error=exc)
         try:
             os.unlink(png_file.name)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("captions", "could not remove temp PNG file", error=exc)
 
 
 def _measure_text_widths(texts: list[str], font_name: str, font_size: int, bold: bool, spacing: int = 2) -> list[int]:
@@ -461,8 +462,8 @@ def _measure_text_widths(texts: list[str], font_name: str, font_size: int, bold:
                 fc_path = result.stdout.strip()
                 if os.path.exists(fc_path):
                     font = ImageFont.truetype(fc_path, font_size)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("captions", "fontconfig font lookup failed", error=exc)
 
         # 2) Fallback: try common paths (macOS, Linux, Windows)
         if font is None:
@@ -523,7 +524,7 @@ def _rounded_rect_drawing(w: int, h: int, r: int) -> str:
 
 def _render_branded(words: list[dict], style: dict, offset: float) -> str:
     """
-    Branded style — large bold white text, dark rounded pill on active word only.
+    Branded style: large bold white text, dark rounded pill on active word only.
 
     Uses a two-layer approach:
     - Layer 0: \\p1 drawing of a rounded rectangle (pill) behind the active word
@@ -571,7 +572,7 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
             normalized.append(text)
 
         # Measure word widths for pill positioning.
-        # Use spacing=0 here — ASS Spacing is handled by libass internally,
+        # Use spacing=0 here: ASS Spacing is handled by libass internally,
         # but we position words ourselves with \pos so we need pure font metrics.
         word_widths = _measure_text_widths(normalized, font_name, font_size, is_bold, 0)
         space_width = _measure_text_widths([" "], font_name, font_size, is_bold, 0)[0]
@@ -602,7 +603,7 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
         # Line height and vertical layout
         line_height = int(font_size * 1.2)
         total_text_h = line_height * len(lines)
-        # Use explicit \pos for both text and pill — no reliance on libass layout.
+        # Use explicit \pos for both text and pill: no reliance on libass layout.
         # This gives us full control over line spacing and pill sizing.
         # Position text block from bottom: last line baseline at (PlayResY - MarginV)
         # Use generous line spacing so pills have room for proper padding.
@@ -618,7 +619,7 @@ def _render_branded(words: list[dict], style: dict, offset: float) -> str:
             y = block_bottom_y - (len(lines) - 1 - li) * line_spacing - font_size // 2
             line_center_ys.append(y)
 
-        # Pre-compute line geometry — measure space width directly with the font,
+        # Pre-compute line geometry: measure space width directly with the font,
         # use word widths without ASS Spacing inflation for tighter layout.
         raw_space_w = _measure_text_widths(["A A"], font_name, font_size, is_bold, 0)[0] - \
                       _measure_text_widths(["AA"], font_name, font_size, is_bold, 0)[0]

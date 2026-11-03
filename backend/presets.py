@@ -5,7 +5,7 @@ Save and load named configurations so you don't reconfigure settings
 for every episode. Stored as JSON in .podcli/presets/
 
 A preset is a complete show config: video path, rendering options,
-corrections, output dir — everything needed to run `podcli process --preset myshow`.
+corrections, output dir, and everything needed to run `podcli process --preset myshow`.
 """
 
 import os

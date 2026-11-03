@@ -24,15 +24,21 @@ function AudioPlayer({ src }: { src: string }) {
 
   const toggle = () => {
     const a = ref.current;
+
     if (!a) return;
-    a.paused ? a.play() : a.pause();
+
+    if (a.paused) void a.play();
+    else a.pause();
   };
+
   const seek = (clientX: number, el: HTMLDivElement) => {
     const a = ref.current;
+
     if (!a || !dur) return;
     const r = el.getBoundingClientRect();
     a.currentTime = Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * dur;
   };
+
   const pct = dur ? (t / dur) * 100 : 0;
 
   return (
@@ -63,20 +69,25 @@ function AudioPlayer({ src }: { src: string }) {
 
 function Preview({ asset, onOpen }: { asset: Asset; onOpen: () => void }) {
   const src = assetSrc(asset.name);
+
   if (asset.type === "logo" || asset.type === "image") {
     return <img className="asset-thumb clickable" src={src} alt={asset.name} loading="lazy" onClick={onOpen} />;
   }
+
   if (asset.type === "outro" || asset.type === "intro" || asset.type === "video") {
     return <video className="asset-thumb clickable" src={src} muted preload="metadata" onClick={onOpen} />;
   }
+
   if (asset.type === "music" || asset.type === "audio") {
     return <div className="asset-thumb asset-thumb-audio"><AudioPlayer src={src} /></div>;
   }
+
   return <div className="asset-thumb asset-thumb-file clickable" onClick={onOpen}>{extLabel(asset.path)}</div>;
 }
 
 function AssetLightbox({ asset, onClose }: { asset: Asset; onClose: () => void }) {
   const src = assetSrc(asset.name);
+
   return createPortal(
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-body" onClick={(e) => e.stopPropagation()}>
@@ -101,6 +112,7 @@ function AssetLightbox({ asset, onClose }: { asset: Asset; onClose: () => void }
 
 function extLabel(path: string): string {
   const ext = (path.split(".").pop() || "").toUpperCase();
+
   return ext.length <= 4 ? ext : "FILE";
 }
 
@@ -113,15 +125,18 @@ function OverflowMenu({ items }: { items: { label: string; onClick: () => void; 
 
   useEffect(() => {
     if (!open) return;
+
     // Skip the trigger so its onClick can toggle closed, not reopen.
     const onDocMouseDown = (e: MouseEvent) => {
-      if (btnRef.current?.contains(e.target as Node)) return;
+      if (e.target instanceof Node && btnRef.current?.contains(e.target)) return;
       setOpen(false);
     };
+
     const dismiss = () => setOpen(false);
     document.addEventListener("mousedown", onDocMouseDown);
     window.addEventListener("scroll", dismiss, true);
     window.addEventListener("resize", dismiss);
+
     return () => {
       document.removeEventListener("mousedown", onDocMouseDown);
       window.removeEventListener("scroll", dismiss, true);
@@ -131,13 +146,16 @@ function OverflowMenu({ items }: { items: { label: string; onClick: () => void; 
 
   function openMenu() {
     const r = btnRef.current?.getBoundingClientRect();
+
     if (r) {
       const menuHeight = items.length * 34 + 8;
       const left = Math.max(8, Math.min(r.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8));
       let top = r.bottom + 4;
+
       if (top + menuHeight > window.innerHeight - 8) top = Math.max(8, r.top - menuHeight - 4);
       setPos({ top, left });
     }
+
     setOpen((v) => !v);
   }
 
@@ -196,6 +214,7 @@ function AssetCard({
     if (!renaming) return;
     setRenaming(false);
     const next = draft.trim();
+
     if (next && next !== asset.name) onRename(next);
     else setDraft(asset.name);
   }
@@ -217,6 +236,7 @@ function AssetCard({
               onBlur={commitRename}
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitRename();
+
                 if (e.key === "Escape") { setDraft(asset.name); setRenaming(false); }
               }}
             />
@@ -274,7 +294,10 @@ export default function AssetsPage() {
   function toggleSelect(name: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(name) ? next.delete(name) : next.add(name);
+
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+
       return next;
     });
   }
@@ -284,6 +307,7 @@ export default function AssetsPage() {
     setSelected((p) => {
       const n = new Set(p);
       n.delete(name);
+
       return n;
     });
   }
@@ -351,6 +375,7 @@ export default function AssetsPage() {
             onToggleDefault={(a) => wrap(a.default ? clearDefault(a.name) : setDefault(a.name))}
             onUpload={async (file) => {
               setBusy(group.type);
+
               try {
                 await uploadFile(file, group.type);
               } catch (e) {
@@ -429,7 +454,9 @@ function BrandDefaults({ onError }: { onError: (m: string) => void }) {
 
 function matchesGroup(assetType: AssetType, groupType: AssetType): boolean {
   if (groupType === "outro") return assetType === "outro" || assetType === "video";
+
   if (groupType === "music") return assetType === "music" || assetType === "audio";
+
   return assetType === groupType;
 }
 
@@ -469,6 +496,7 @@ function AssetSection({
 
   useEffect(() => {
     if (job?.status === "done") setJobId(null);
+
     if (job?.status === "error") {
       setJobErr(job.error || "Download failed");
       setJobId(null);
@@ -477,10 +505,12 @@ function AssetSection({
 
   async function submitUrl() {
     const u = urlDraft.trim();
+
     if (!u) return;
     setUrlDraft("");
     setUrlOpen(false);
     setJobErr(null);
+
     try {
       setJobId(await onImportUrl(u));
     } catch (e) {
@@ -542,6 +572,7 @@ function AssetSection({
           style={{ display: "none" }}
           onChange={(e) => {
             const f = e.target.files?.[0];
+
             if (f) onUpload(f);
             e.target.value = "";
           }}

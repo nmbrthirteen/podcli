@@ -86,23 +86,6 @@ function Invoke-Install {
     Write-Host "  ok  $clipperHome (internal)"
     Write-Host "  ok  $dataDir (output & cache)"
 
-    $modelDir = Join-Path $ScriptDir "backend\models"
-    New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
-    $caffeModel = Join-Path $modelDir "res10_300x300_ssd_iter_140000.caffemodel"
-    if (-not (Test-Path $caffeModel)) {
-        Write-Host "  ..  Downloading face detection model..."
-        $oldProgress = $ProgressPreference
-        $ProgressPreference = "SilentlyContinue"
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt" `
-            -OutFile (Join-Path $modelDir "deploy.prototxt")
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel" `
-            -OutFile $caffeModel
-        $ProgressPreference = $oldProgress
-        Write-Host "  ok  Face detection model ready"
-    } else {
-        Write-Host "  ok  Face detection model exists"
-    }
-
     Write-Host ""
     Write-Host "--- [3/6] Python virtual environment ---"
     if (-not (Test-Path $VenvPython)) {

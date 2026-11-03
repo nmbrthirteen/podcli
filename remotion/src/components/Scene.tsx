@@ -85,6 +85,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
 
   if (block.type === "text") {
     const size = sizeOf(block);
+
     return (
       <div
         style={{
@@ -111,6 +112,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
 
   if (block.type === "quote") {
     const size = sizeOf(block);
+
     return (
       <>
         <div
@@ -154,6 +156,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
 
   if (block.type === "list") {
     const size = sizeOf(block);
+
     return (
       <>
         {block.items.map((item, i) => (
@@ -207,6 +210,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
 
   if (block.type === "bars") {
     const top = Math.max(...block.rows.map((row) => row.value)) || 1;
+
     return (
       <>
         {block.rows.map((row, i) => (
@@ -251,6 +255,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
 
   if (block.type === "meter") {
     const share = Math.max(0, Math.min(1, block.value));
+
     return (
       <>
         <div
@@ -284,6 +289,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
   if (block.type === "steps" && stepsStacked(block.points)) {
     const last = block.points.length - 1;
     const type = stepType(block.points, paint.width / unit);
+
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch" }}>
         {block.points.map((point, i) => (
@@ -330,6 +336,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
   if (block.type === "steps") {
     const last = block.points.length - 1;
     const type = stepType(block.points, paint.width / unit);
+
     return (
       <div style={{ display: "flex", alignItems: "center" }}>
         {block.points.map((point, i) => (
@@ -436,6 +443,7 @@ const Piece: React.FC<{ block: Block; paint: Paint }> = ({ block, paint }) => {
   if (!block.src) return null;
 
   const Frame = getRemotionEnvironment().isRendering ? OffthreadVideo : Video;
+
   return (
     <>
       {block.media === "video" ? (
@@ -487,10 +495,12 @@ const Stack: React.FC<{
   paint: Paint;
 }> = ({ blocks, layout = "stack", gap = "group", paint }) => {
   const drawn = blocks.filter((block) => block.type !== "group" || block.blocks.length);
+
   if (!drawn.length) return null;
 
   const gutter = GAP_SIZE[gap] * paint.unit;
   const columns = layout === "grid" ? 2 : drawn.length;
+
   const share = layout === "stack"
     ? paint.width
     : Math.max(1, (paint.width - gutter * (columns - 1)) / columns);
@@ -515,12 +525,10 @@ const Stack: React.FC<{
             flexDirection: "column",
             minWidth: 0,
             alignItems: block.align ? FLEX[block.align] : undefined,
-            ...(layout === "stack"
-              ? {}
-              : {
-                flexGrow: block.grow ?? 1,
-                flexBasis: layout === "grid" ? `calc(50% - ${gutter / 2}px)` : 0,
-              }),
+            ...(layout !== "stack" && {
+              flexGrow: block.grow ?? 1,
+              flexBasis: layout === "grid" ? `calc(50% - ${gutter / 2}px)` : 0,
+            }),
           }}
         >
           <Piece block={block} paint={{ ...paint, width: layout === "stack" ? paint.width : share }} />
@@ -539,21 +547,29 @@ const Stack: React.FC<{
  * So the media band gives up its room first, down to the height below which
  * it stops saying anything, and only then does the type scale.
  */
+interface SceneFit {
+  fit: number;
+  mediaHeight: number;
+}
+
 export function fitScene(
   blocks: Block[],
   { layout = "stack", gap = "group", room, width = SCENE_WIDTH }: {
     layout?: Layout; gap?: Gap; room: number; width?: number;
   },
-): { fit: number; mediaHeight: number } {
+): SceneFit {
   const asked = MEDIA_HEIGHT.max;
+
   const at = (height: number) =>
     sceneHeight(withMediaHeight(blocks, height), layout, gap, width);
 
   const wanted = at(asked);
+
   if (!(room > 0) || wanted <= room) return { fit: 1, mediaHeight: asked };
 
   const mediaHeight = Math.max(MEDIA_HEIGHT.min, asked - (wanted - room));
   const left = at(mediaHeight);
+
   return {
     fit: left <= room ? 1 : Math.max(MIN_FIT, room / left),
     mediaHeight,
@@ -563,9 +579,11 @@ export function fitScene(
 const withMediaHeight = (blocks: Block[], height: number): Block[] =>
   blocks.map((block) => {
     if (block.type === "media") return { ...block, height };
+
     if (block.type === "group") {
       return { ...block, blocks: withMediaHeight(block.blocks, height) };
     }
+
     return block;
   });
 

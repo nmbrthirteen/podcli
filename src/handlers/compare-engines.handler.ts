@@ -1,4 +1,4 @@
-import { PythonExecutor } from "../services/python-executor.js";
+import { PythonExecutor, type TaskExecutor } from "../services/python-executor.js";
 
 const executor = new PythonExecutor();
 
@@ -66,8 +66,11 @@ export const compareEnginesToolDef = {
   },
 };
 
-export async function handleCompareEngines(input: CompareEnginesInput): Promise<string> {
-  const result = await executor.execute<{
+export async function handleCompareEngines(
+  input: CompareEnginesInput,
+  taskExecutor: TaskExecutor = executor,
+): Promise<string> {
+  const result = await taskExecutor.execute<{
     overall_disagreement: number;
     both_empty_window_count: number;
     json_path?: string;

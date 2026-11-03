@@ -12,14 +12,15 @@ every platform, and that mess stops here.
 
 Selection is controlled by PODCLI_AI_PROVIDER (auto|cloud|cli|api). On `auto`
 the order above applies: a Pro subscriber gets what they paid for first, and the
-local CLI remains the fallback if the network or the subscription is unavailable
-— podcli never stops working because a server did.
+local CLI remains the fallback if the network or the subscription is unavailable.
+podcli never stops working because a server did.
 """
 
 from __future__ import annotations
 
 import json
 import os
+from utils.log import warn as log_warn
 import re
 import sys
 import urllib.error
@@ -168,8 +169,8 @@ def _run_api(key: str, prompt: str, timeout: int) -> AIResult:
         detail = ""
         try:
             detail = json.loads(exc.read().decode("utf-8")).get("error", {}).get("message", "")
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("ai", "could not parse API error body", error=exc)
         return AIResult(ok=False, provider="api", label="Claude API",
                         error=detail or f"Claude API returned HTTP {exc.code}")
     except Exception as exc:
@@ -261,14 +262,14 @@ def generate(
     on_attempt is called with a human label ("Claude", "podcli Pro") before each
     attempt so callers can drive progress UI without knowing the chain.
 
-    accept rejects a response the backend considers successful — an engine that
+    accept rejects a response the backend considers successful, an engine that
     answers with prose where JSON was asked for has failed, and the next one
     deserves a turn. Return True to accept, or False / a reason string to reject.
 
     adapt(engine, prompt) rewrites the prompt per backend, for engines that need
     a shorter one than the others.
 
-    stable_prefix is the large, unchanging half of the prompt — the transcript.
+    stable_prefix is the large, unchanging half of the prompt, the transcript.
     The cloud backend sends it as a separate cacheable block so it is read once
     per episode rather than once per pass, which is the difference between ~$0.41
     and ~$0.90 per episode.

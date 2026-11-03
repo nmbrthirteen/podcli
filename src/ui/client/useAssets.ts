@@ -51,10 +51,12 @@ export function useAssets({ live = true }: { live?: boolean } = {}) {
 
   useEffect(() => {
     refresh();
+
     if (!live) return;
     const es = new EventSource("/api/events");
     const onChange = () => refresh();
     es.addEventListener("assets-updated", onChange);
+
     return () => es.close();
   }, [refresh, live]);
 
@@ -63,9 +65,11 @@ export function useAssets({ live = true }: { live?: boolean } = {}) {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("type", type);
+
       if (name) fd.append("name", name);
       const asset = await upload<Asset>("/assets/upload", fd);
       await refresh();
+
       return asset;
     },
     [refresh],
@@ -77,6 +81,7 @@ export function useAssets({ live = true }: { live?: boolean } = {}) {
         method: "POST",
         body: JSON.stringify({ url, type, name }),
       });
+
       return res.job_id;
     },
     [],

@@ -8,10 +8,10 @@
     "@fontsource/dm-sans": "5.2.8",
     "@fontsource/noto-sans-georgian": "5.3.0",
     "@fontsource/playfair-display": "5.3.0",
-    "@remotion/bundler": "4.0.488",
-    "@remotion/renderer": "4.0.488",
+    "@remotion/bundler": "4.0.508",
+    "@remotion/renderer": "4.0.508",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "remotion": "4.0.488"
+    "remotion": "4.0.508"
   }
 }

@@ -4,15 +4,15 @@ import { existsSync } from "fs";
 import { mkdir, unlink } from "fs/promises";
 import { join, extname } from "path";
 import { v4 as uuidv4 } from "uuid";
-import type { PythonExecutor } from "../services/python-executor.js";
+import type { TaskExecutor } from "../services/python-executor.js";
 import { paths } from "../config/paths.js";
 
-function routeError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+function routeError(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 export interface ConfigIntegrationRouteDeps {
-  executor: PythonExecutor;
+  executor: TaskExecutor;
   uploadDir: string;
 }
 
@@ -25,7 +25,7 @@ export function registerConfigIntegrationRoutes(
 
   app.get("/api/config/status", async (_req, res) => {
     try {
-      const result = await executor.execute<Record<string, unknown>>("manage_config", { action: "status" });
+      const result = await executor.execute<object>("manage_config", { action: "status" });
       res.json(result.data ?? {});
     } catch (err) {
       res.status(500).json({ error: routeError(err) });
@@ -34,7 +34,7 @@ export function registerConfigIntegrationRoutes(
 
   app.post("/api/config/migrate", async (_req, res) => {
     try {
-      const result = await executor.execute<Record<string, unknown>>("manage_config", { action: "migrate" });
+      const result = await executor.execute<object>("manage_config", { action: "migrate" });
       res.json(result.data ?? {});
     } catch (err) {
       res.status(500).json({ error: routeError(err) });
@@ -45,15 +45,20 @@ export function registerConfigIntegrationRoutes(
     try {
       const bundlePath = join(paths.working, `profile-export-${uuidv4()}.zip`);
       await mkdir(paths.working, { recursive: true });
+
       const result = await executor.execute<{ bundle: string }>("manage_config", {
         action: "export",
         bundle_path: bundlePath,
       });
+
       const file = result.data?.bundle ?? bundlePath;
+
       if (!existsSync(file)) {
         res.status(500).json({ error: "Export failed: bundle not created" });
+
         return;
       }
+
       res.download(file, "podcli-profile.zip", () => {
         void unlink(file).catch(() => {});
       });
@@ -75,6 +80,7 @@ export function registerConfigIntegrationRoutes(
     limits: { fileSize: 512 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
       const ext = extname(file.originalname).toLowerCase();
+
       if (ext === ".zip") cb(null, true);
       else cb(new Error("Profile import must be a .zip file"));
     },
@@ -84,14 +90,18 @@ export function registerConfigIntegrationRoutes(
     try {
       if (!req.file?.path) {
         res.status(400).json({ error: "Missing bundle file" });
+
         return;
       }
+
       const activate = req.body?.activate === "1" || req.body?.activate === true;
-      const result = await executor.execute<Record<string, unknown>>("manage_config", {
+
+      const result = await executor.execute<object>("manage_config", {
         action: "import",
         bundle_path: req.file.path,
         activate,
       });
+
       res.json(result.data ?? {});
     } catch (err) {
       res.status(500).json({ error: routeError(err) });
@@ -105,6 +115,7 @@ export function registerConfigIntegrationRoutes(
       const result = await executor.execute<{ integrations: unknown[] }>("manage_integrations", {
         action: "list",
       });
+
       res.json(result.data ?? { integrations: [] });
     } catch (err) {
       res.status(500).json({ error: routeError(err) });
@@ -114,11 +125,13 @@ export function registerConfigIntegrationRoutes(
   app.post("/api/integrations/:name", async (req, res) => {
     const name = req.params.name;
     const enabled = !!req.body?.enabled;
+
     try {
       const result = await executor.execute<{ name: string; enabled: boolean }>("manage_integrations", {
         action: enabled ? "enable" : "disable",
         name,
       });
+
       res.json(result.data ?? { name, enabled });
     } catch (err) {
       res.status(500).json({ error: routeError(err) });
@@ -128,11 +141,13 @@ export function registerConfigIntegrationRoutes(
   app.get("/api/integration-info", (_req, res) => {
     const packagedMcpPath = join(projectRoot, "runtime", "studio", "mcp-server.mjs");
     const sourceMcpPath = join(projectRoot, "dist", "index.js");
+
     const mcpPath = process.env.PODCLI_STUDIO
       ? join(process.env.PODCLI_STUDIO, "mcp-server.mjs")
       : existsSync(packagedMcpPath)
         ? packagedMcpPath
         : sourceMcpPath;
+
     res.json({
       mcp_path: mcpPath,
       dist_path: mcpPath,

@@ -14,6 +14,7 @@ export function formatSrtTime(s: number): string {
   totalMs -= m * 60_000;
   const sec = Math.floor(totalMs / 1000);
   const ms = totalMs - sec * 1000;
+
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
 }
 

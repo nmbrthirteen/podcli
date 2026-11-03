@@ -4,12 +4,14 @@ Thumbnail generator using HTML/CSS + headless browser screenshot.
 Renders thumbnails via a headless browser for pixel-perfect CSS control
 over fonts, letter-spacing, line-height, and highlight styling.
 
-EVERY visual property is driven by config. The defaults here are generic —
+EVERY visual property is driven by config. The defaults here are generic;
 brand-specific values live in .podcli/thumbnail-config.json.
 """
 
 import json
 import os
+from html import escape as html_escape
+from utils.log import warn as log_warn
 from pathlib import Path
 import re
 import shutil
@@ -30,7 +32,7 @@ _THUMBNAIL_LINE_STOPWORDS = {
     "a", "an", "and", "as", "at", "for", "from", "in", "into", "of", "on",
     "or", "that", "the", "to", "with",
 }
-_THUMBNAIL_SPLIT_SEPARATORS = (" / ", " — ", " – ", " - ", ": ", "; ", ", ")
+_THUMBNAIL_SPLIT_SEPARATORS = (" / ", " \u2014 ", " \u2013 ", " - ", ": ", "; ", ", ")
 
 
 def _load_config() -> dict:
@@ -55,17 +57,17 @@ def _load_config() -> dict:
         "frame_border_color": None,  # None = accent
 
         # Text box
-        "box_x": "40px",        # CSS left — near edge with safe area
+        "box_x": "40px",        # CSS left, near edge with safe area
         "box_y": "73%",         # CSS top (no photo)
         "box_y_with_photo": "76%",
-        "box_width": "1000px",  # CSS width — max width with safe areas
+        "box_width": "1000px",  # CSS width, max width with safe areas
         "box_min_height": "180px",
         "box_border_width": 3,
         "box_border_color": None,  # None = accent
         "box_fill_color": "rgba(255,255,255,0.92)",
         "box_padding": "24px 32px",
 
-        # Line 1 (top line — typically white text)
+        # Line 1 (top line: typically white text)
         "line1_font_size": "56px",
         "line1_font_weight": "600",
         "line1_letter_spacing": "1px",
@@ -75,7 +77,7 @@ def _load_config() -> dict:
         "line1_color": "#000000",
         "line1_nowrap": True,
 
-        # Line 2 (bottom line — highlighted)
+        # Line 2 (bottom line: highlighted)
         "line2_font_size": "52px",
         "line2_font_weight": "400",
         "line2_font_style": "italic",
@@ -134,8 +136,8 @@ def _load_config() -> dict:
             with open(config_path, encoding="utf-8") as f:
                 user = json.load(f)
             defaults.update(user)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("thumbnail", "thumbnail config is corrupt, using defaults", error=exc)
     return defaults
 
 
@@ -256,9 +258,9 @@ def _compact_thumbnail_title(title: str, max_words: int = 7, max_chars: int = 42
     if len(words) > max_words:
         words = words[:max_words]
 
-    compact = " ".join(words).strip(" -—–,:;.!?")
+    compact = " ".join(words).strip(" -\u2014\u2013,:;.!?")
     if len(compact) > max_chars:
-        compact = compact[:max_chars].rsplit(" ", 1)[0].strip(" -—–,:;.!?")
+        compact = compact[:max_chars].rsplit(" ", 1)[0].strip(" -\u2014\u2013,:;.!?")
     return compact
 
 
@@ -498,7 +500,7 @@ def _build_html(
     face_info: Optional[dict] = None,
     people: Optional[list[dict]] = None,
 ) -> str:
-    """Build the HTML for a single thumbnail — all values from config.
+    """Build the HTML for a single thumbnail: all values from config.
 
     Args:
         face_info: Dict with face_y_pct, face_h_pct etc. from frame extraction.
@@ -585,7 +587,7 @@ def _build_html(
     box_fill = cfg.get("box_fill_color", f"rgba(26,26,46,0.90)")
     box_padding = cfg.get("box_padding", "28px 36px")
 
-    # Base font sizes from config — extract int from "64px", "1.5rem", or bare "64"
+    # Base font sizes from config: extract int from "64px", "1.5rem", or bare "64"
     def _px(val, default):
         import re
         m = re.search(r"(\d+)", str(val))
@@ -760,8 +762,8 @@ body {{
     <div class="gradient-top"></div>
     <div class="gradient-bottom"></div>
     <div class="text-box">
-        <div class="line1">{l1}</div>
-        <div class="line2"><span>{l2}</span></div>
+        <div class="line1">{html_escape(l1)}</div>
+        <div class="line2"><span>{html_escape(l2)}</span></div>
     </div>
     {logo_html}
     {layers_html}
@@ -883,8 +885,8 @@ def generate_variations(
             if result:
                 photo_path = result["path"]
                 face_info = result
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("thumbnail", "face frame extraction failed", error=exc)
 
     line1, line2 = _prepare_thumbnail_lines(title)
 
@@ -909,7 +911,7 @@ def thumbnail_to_video_frame(
     """Convert thumbnail PNG to a short video clip for appending.
 
     Includes a silent audio track so concat_outro's acrossfade filter
-    works correctly. No baked-in fades — the crossfade transition
+    works correctly. No baked-in fades: the crossfade transition
     handles the visual blend.
     """
     cmd = [

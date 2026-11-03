@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-podcli — CLI entry point.
+podcli: CLI entry point.
 
 One-command processing:
     python cli.py process video.mp4 --top 5 --transcript transcript.txt
@@ -13,7 +13,9 @@ One-command processing:
 import argparse
 import json
 import os
+from utils.log import warn as log_warn
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -280,8 +282,8 @@ def _save_suggestions_session(cache_hash: str, top_n: int, engine: str | None, c
                  "engine": engine, "clips": clips},
                 f,
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "could not save suggestions session", error=exc)
 
 
 def _clear_suggestions_session(cache_hash: str) -> None:
@@ -291,8 +293,8 @@ def _clear_suggestions_session(cache_hash: str) -> None:
     try:
         if os.path.exists(path):
             os.unlink(path)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "could not clear suggestions session", error=exc)
 
 
 def _should_auto_migrate_cli(args) -> bool:
@@ -368,15 +370,15 @@ def _ensure_ssl_certs():
     """Fix SSL certificate issues automatically (macOS + corporate proxies)."""
     import ssl
 
-    # Quick test — if HTTPS works, we're fine
+    # Quick test: if HTTPS works, we're fine
     try:
         import urllib.request
         urllib.request.urlopen("https://huggingface.co", timeout=5)
         return
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "HTTPS probe to huggingface.co failed", error=exc)
 
-    print("  ⚠ SSL issue detected — fixing automatically...")
+    print("  ⚠ SSL issue detected: fixing automatically...")
 
     # Method 1: Set certifi certs (works for most cases including corporate proxies)
     try:
@@ -403,8 +405,8 @@ def _ensure_ssl_certs():
             ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
             print("  ✓ SSL configured (installed certifi)")
             return
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("cli", "certifi install failed", error=exc)
 
     # Method 3: macOS Install Certificates command
     if sys.platform == "darwin":
@@ -416,19 +418,17 @@ def _ensure_ssl_certs():
         if cert_scripts:
             try:
                 sp.run(["bash", cert_scripts[0]], capture_output=True, timeout=30)
-                # Force reload ssl context
-                ssl._create_default_https_context = ssl._create_unverified_context
                 print("  ✓ SSL certificates installed (restart may be needed)")
                 return
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warn("cli", "macOS certificate install failed", error=exc)
 
-    # Method 4: disable SSL verification only on explicit opt-in — silently
+    # Method 4: disable SSL verification only on explicit opt-in: silently
     # turning off TLS verification is a downgrade risk.
     if os.environ.get("PODCLI_INSECURE_SSL", "").strip().lower() in ("1", "true", "yes", "on"):
         ssl._create_default_https_context = ssl._create_unverified_context
         os.environ["PYTHONHTTPSVERIFY"] = "0"
-        print("  ⚠ SSL verification DISABLED (PODCLI_INSECURE_SSL set) — model downloads only")
+        print("  ⚠ SSL verification DISABLED (PODCLI_INSECURE_SSL set), model downloads only")
     else:
         print(
             "  ✗ Could not configure SSL certificates. Install certifi "
@@ -575,7 +575,7 @@ def cmd_studio(args):
     ]
     # Where the faces are, and where somebody put the frame by hand. Both are
     # what the crop needs and neither could be handed to it before, so a caller
-    # that already knew — the cloud worker scans the window before it renders —
+    # that already knew: the cloud worker scans the window before it renders,
     # had no way to say so and watched `speaker` fall through to a letterbox.
     # A path is made absolute because the script runs from elsewhere; JSON
     # given inline is handed straight through.
@@ -656,7 +656,7 @@ def cmd_studio(args):
 
 
 def cmd_reel(args):
-    """Create and iterate on a highlights reel — detect once, then edit moments fast."""
+    """Create and iterate on a highlights reel: detect once, then edit moments fast."""
     from services.reel import (
         ReelSession, seed_session, edit_moment, build_reel, list_sessions, delete_session,
     )
@@ -1416,7 +1416,7 @@ def cmd_process(args):
         return
 
     enc_info = get_encoder_info()
-    print(f"\n  podcli — processing")
+    print(f"\n  podcli: processing")
     print(f"  Encoder: {enc_info['best']} ({enc_info['system']})")
     print(f"  Quality: {quality}")
     if config.get("fast_mode"):
@@ -1431,7 +1431,7 @@ def cmd_process(args):
         print(f"  {yellow}  Run: podcli knowledge init{reset}")
         print()
 
-    # Cache hash for resume — keyed by video size+mtime. Disabled when a custom
+    # Cache hash for resume: keyed by video size+mtime. Disabled when a custom
     # transcript is supplied, since the hash ignores transcript contents and
     # would otherwise resume suggestions made from a different transcript.
     cache_hash = ""
@@ -1451,7 +1451,7 @@ def cmd_process(args):
     shared_wav = _SharedWav(video_path)
 
     # Saliency profiles (party/action) select on audio/visual signals, not dialogue,
-    # so transcribing a long video would be wasted work — skip it entirely.
+    # so transcribing a long video would be wasted work: skip it entirely.
     from services.profiles import get_profile
 
     content_profile = get_profile(config.get("profile"))
@@ -1528,10 +1528,13 @@ def cmd_process(args):
             result = cached
             print(f"         {len(segments)} segments, {len(words)} words")
         else:
-            from services.engines import is_assemblyai_engine
+            from services.engines import is_assemblyai_engine, normalize_engine
             engine_label = "AssemblyAI" if is_assemblyai_engine(os.environ.get("PODCLI_ENGINE", "")) else "Whisper"
             print(f"  [1/4] Transcribing with {engine_label}...")
-            _ensure_ssl_certs()
+            # Only whisper-py downloads weights at run time. The other engines
+            # run offline or use their own HTTP client, so the probe is wasted.
+            if normalize_engine(os.environ.get("PODCLI_ENGINE")) == "whisper-py":
+                _ensure_ssl_certs()
             import warnings
             warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
             from services.transcription import transcribe_file
@@ -1753,7 +1756,12 @@ def cmd_process(args):
     # Try an AI CLI first (uses PodStack knowledge base for intelligent selection)
     from services import ai_provider
     from services.ai_cli import _engine_label
-    from services.claude_suggest import ClipBounds, select_clips_with_signal_scores, suggest_initial_with_claude
+    from services.claude_suggest import (
+        ClipBounds,
+        drop_published,
+        select_clips_with_signal_scores,
+        suggest_initial_with_claude,
+    )
 
     providers = ai_provider.status()["providers"]
     if clips:
@@ -1787,7 +1795,7 @@ def cmd_process(args):
         print(f"  [3/4] Scoring clips (fast heuristic mode)...")
     else:
         print(f"  [3/4] Scoring clips (heuristic mode)...")
-        print(f"         ℹ Install Claude Code or Codex for smarter selection")
+        print(f"         ℹ Sign in with `podcli login`, install Claude Code or Codex, or set ANTHROPIC_API_KEY for smarter selection")
 
     # Fallback to heuristic algorithm
     if not clips:
@@ -1801,6 +1809,8 @@ def cmd_process(args):
         )
         if clips and not resumed_from_session:
             _save_suggestions_session(cache_hash, top_n, "heuristic", clips, selection_sig)
+
+    clips = drop_published(clips)
 
     if not clips:
         print("  No clips found. Try a longer transcript or lower --min-duration.", file=sys.stderr)
@@ -1842,8 +1852,8 @@ def cmd_process(args):
                 _thumb_intro_duration = float(
                     _thumb_cfg.get("intro_duration", _thumb_cfg.get("clip_start_duration", _thumb_intro_duration))
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("cli", "thumbnail config unreadable, using defaults", error=exc)
     if config.get("thumbnail_seconds"):
         _thumb_intro_duration = float(config["thumbnail_seconds"])
     _thumb_intro_duration = max(0.5, min(_thumb_intro_duration, 1.0))
@@ -1970,7 +1980,7 @@ def cmd_process(args):
                         from services.video_processor import concat_outro
                         from services.media_probe import align_av_duration as _align_av_duration
                         final_with_thumb = result["output_path"].replace(".mp4", "_with_thumb.mp4")
-                        # Hard cut — thumbnail uses the frame just before content,
+                        # Hard cut: thumbnail uses the frame just before content,
                         # so playback feels like the clip has started.
                         concat_outro(thumb_video, result["output_path"], final_with_thumb, crossfade_duration=0.0)
                         _align_av_duration(final_with_thumb)
@@ -2037,7 +2047,7 @@ def cmd_process(args):
                     _raction = _rq.select(
                         f"Clip {i+1}/{len(clips)}: {clip['title'][:40]}",
                         choices=[
-                            _rq.Choice("Looks good — next clip", value="next"),
+                            _rq.Choice("Looks good: next clip", value="next"),
                             _rq.Choice("Change caption style", value="style"),
                             _rq.Choice("Make shorter (trim 5s from end)", value="shorter"),
                             _rq.Choice("Make longer (extend 5s)", value="longer"),
@@ -2175,7 +2185,7 @@ def cmd_process(args):
                             break
     except KeyboardInterrupt:
         interrupted = True
-        print(f"\n         ⚠ Render interrupted — keeping completed clips")
+        print(f"\n         ⚠ Render interrupted: keeping completed clips")
 
     elapsed = time.time() - t0
     success = sum(1 for r in results if "output_path" in r)
@@ -2298,12 +2308,12 @@ def _find_moment_with_claude(description: str, segments: list, existing_clips: l
 
 
 def _review_clips(clips: list, segments: list, energy_scores: list | None, config: dict) -> list:
-    """Interactive clip review — user can select/deselect, ask for more, or find specific moments."""
+    """Interactive clip review: user can select/deselect, ask for more, or find specific moments."""
     # Non-interactive (piped/scripted/no TTY): skip the picker and render all
     # suggested clips. The picker uses prompt_toolkit, which raises
     # OSError [Errno 22] when stdin isn't a real terminal.
     if config.get("non_interactive") or not sys.stdin.isatty():
-        print(f"\n         Non-interactive run — rendering all {len(clips)} suggested clips.")
+        print(f"\n         Non-interactive run: rendering all {len(clips)} suggested clips.")
         return clips
 
     import questionary
@@ -2467,7 +2477,7 @@ def _post_render_loop(
     clips: list, results: list, segments: list, words: list,
     config: dict, video_path: str, output_dir: str, face_map, energy_scores,
 ):
-    """Post-render iteration — user can re-render clips with changes or add new ones."""
+    """Post-render iteration: user can re-render clips with changes or add new ones."""
     import questionary
     from questionary import Style
     from services.clip_generator import generate_clip
@@ -2533,7 +2543,7 @@ def _post_render_loop(
             print(f"         ✓ {new_result['file_size_mb']}MB")
         return ok
 
-    # Review each clip one by one — open for preview, ask for feedback
+    # Review each clip one by one: open for preview, ask for feedback
     print(f"\n  {'─' * 45}")
     print(f"  {bold}Review clips{reset}")
 
@@ -2546,7 +2556,7 @@ def _post_render_loop(
             action = questionary.select(
                 "",
                 choices=[
-                    questionary.Choice("Looks good — next", value="next"),
+                    questionary.Choice("Looks good: next", value="next"),
                     questionary.Choice("Change caption style", value="style"),
                     questionary.Choice("Make shorter (trim end)", value="shorter"),
                     questionary.Choice("Make longer (extend end)", value="longer"),
@@ -2572,10 +2582,10 @@ def _post_render_loop(
 
             if action == "style":
                 new_style = questionary.select("Style:", choices=[
-                    questionary.Choice("hormozi — bold uppercase, yellow highlight", value="hormozi"),
-                    questionary.Choice("branded — dark pill on active word + logo", value="branded"),
-                    questionary.Choice("karaoke — sentence visible, words light up", value="karaoke"),
-                    questionary.Choice("subtle — clean small text at bottom", value="subtle"),
+                    questionary.Choice("hormozi: bold uppercase, yellow highlight", value="hormozi"),
+                    questionary.Choice("branded: dark pill on active word + logo", value="branded"),
+                    questionary.Choice("karaoke: sentence visible, words light up", value="karaoke"),
+                    questionary.Choice("subtle: clean small text at bottom", value="subtle"),
                 ], style=qstyle).ask()
                 if new_style:
                     config["caption_style"] = new_style
@@ -2602,7 +2612,7 @@ def _post_render_loop(
     while True:
         print(f"\n  {'─' * 45}")
         choices = [
-            questionary.Choice("Done — open output folder", value="done"),
+            questionary.Choice("Done: open output folder", value="done"),
             questionary.Choice("Re-review a clip", value="rerender"),
             questionary.Choice("Find another moment to clip", value="find"),
             questionary.Choice("Find additional clips beyond current picks", value="more"),
@@ -2798,18 +2808,18 @@ def _suggest_clips(
     Score and rank transcript segments into viral clip suggestions.
 
     Scoring dimensions:
-    1. Hook strength — does it open with something that grabs attention?
-    2. Standalone value — does it make sense without context?
-    3. Completeness — does it start and end on sentence boundaries?
-    4. Content signals — keywords, questions, stories, bold claims
-    5. Speaker dynamics — speaker changes make clips more engaging
-    6. Audio energy — louder/more passionate = more engaging
-    7. Density — information per second (too sparse = boring)
+    1. Hook strength: does it open with something that grabs attention?
+    2. Standalone value: does it make sense without context?
+    3. Completeness: does it start and end on sentence boundaries?
+    4. Content signals: keywords, questions, stories, bold claims
+    5. Speaker dynamics: speaker changes make clips more engaging
+    6. Audio energy: louder/more passionate = more engaging
+    7. Density: information per second (too sparse = boring)
     """
 
     # ── Signal keywords by category (weighted differently) ──
 
-    # Strong hooks — things people say right before a great moment
+    # Strong hooks: things people say right before a great moment
     HOOK_PHRASES = [
         "here's the thing", "let me tell you", "the truth is",
         "what people don't realize", "nobody talks about",
@@ -2819,7 +2829,7 @@ def _suggest_clips(
         "the one thing", "if i'm being honest", "the hard truth",
     ]
 
-    # Insight signals — content that teaches or reveals
+    # Insight signals: content that teaches or reveals
     INSIGHT_WORDS = [
         "because", "actually", "specifically", "the problem is",
         "most people", "counterintuitive", "the data shows",
@@ -2827,20 +2837,16 @@ def _suggest_clips(
         "in practice", "the trick", "fundamentally",
     ]
 
-    # Story signals — narrative elements that pull people in
+    # Story signals: narrative elements that pull people in
     STORY_SIGNALS = [
         "when i", "when we", "i remember", "years ago", "at that point",
         "we decided", "we were", "i was", "the first time",
         "that morning", "one day", "back then", "suddenly",
     ]
 
-    # Numbers/specifics — concrete details increase credibility
-    NUMBER_PATTERN = None
-    try:
-        import re
-        NUMBER_PATTERN = re.compile(r'\$[\d,.]+[mkb]?|\d+%|\d+\.\d+[x×]|\d{2,}', re.IGNORECASE)
-    except Exception:
-        pass
+    # Numbers/specifics: concrete details increase credibility
+    import re
+    NUMBER_PATTERN = re.compile(r'\$[\d,.]+[mkb]?|\d+%|\d+\.\d+[x×]|\d{2,}', re.IGNORECASE)
 
     # Sentence boundary detection
     def _is_sentence_start(text):
@@ -2948,7 +2954,7 @@ def _suggest_clips(
             if exclaim_count >= 1:
                 score += min(exclaim_count, 3)
 
-            # ── 4. Specificity — numbers, dollars, percentages (0-4 pts) ──
+            # ── 4. Specificity: numbers, dollars, percentages (0-4 pts) ──
             if NUMBER_PATTERN:
                 numbers = NUMBER_PATTERN.findall(text)
                 if numbers:
@@ -2996,14 +3002,14 @@ def _suggest_clips(
                     if max_r > 3:
                         reasons.append("laughter")
 
-            # ── 7. Density check — penalize sparse/rambling segments ──
+            # ── 7. Density check: penalize sparse/rambling segments ──
             words_per_sec = len(text.split()) / max(dur, 1)
             if words_per_sec < 1.5:
                 score *= 0.7  # Too sparse, probably silence or filler
             elif words_per_sec > 2.5:
                 score *= 1.1  # Dense = packed with info
 
-            # ── 8. Anti-patterns — penalize weak clips ──
+            # ── 8. Anti-patterns: penalize weak clips ──
             # Clips that reference other parts of the conversation
             if any(ref in text_lower for ref in [
                 "as i said", "like i mentioned", "going back to",
@@ -3374,7 +3380,7 @@ def cmd_thumbnail_config(args):
     if action == "reset":
         if os.path.exists(target):
             os.remove(target)
-        print("Reset thumbnail config — using the generic default template.")
+        print("Reset thumbnail config: using the generic default template.")
         return
 
     raise ValueError(f"unknown thumbnail-config action: {action}")
@@ -3670,7 +3676,7 @@ def cmd_swap_thumbnail(args):
     thumb_duration = getattr(args, "thumb_duration", 1.5)
     title = getattr(args, "title", None) or os.path.splitext(os.path.basename(clip_path))[0].replace("_", " ")
 
-    # Source video for extracting a new face frame — required to avoid
+    # Source video for extracting a new face frame: required to avoid
     # pulling frames from rendered clips (which have captions burned in)
     source_video = getattr(args, "source_video", None)
     if not source_video:
@@ -3694,99 +3700,97 @@ def cmd_swap_thumbnail(args):
 
     import tempfile
     work_dir = tempfile.mkdtemp(prefix="swap_thumb_")
-
-    # Trim off old thumbnail
-    trimmed_path = os.path.join(work_dir, "trimmed.mp4")
-    from utils.proc import run as proc_run
-    trim_cmd = [
-        "ffmpeg", "-y", "-i", clip_path,
-        "-t", str(content_duration),
-        "-c", "copy", "-movflags", "+faststart",
-        trimmed_path,
-    ]
-    result = proc_run(trim_cmd, timeout=60, check=False)
-    if result.returncode != 0:
-        print(f"  Failed to trim: {result.stderr[-200:]}", file=sys.stderr)
-        sys.exit(1)
-
-    # Step 2: Generate new thumbnail
-    thumb_dir = os.path.join(work_dir, "thumbnails")
-    print(f"  {bold}Generating new thumbnails...{reset}")
-
-    timestamp = getattr(args, "timestamp", None)
-    start_sec = getattr(args, "start", None)
-    end_sec = getattr(args, "end", None)
-
-    # A user-supplied image wins over any frame extraction.
-    frame_path = None
-    custom_image = getattr(args, "image", None)
-    if custom_image:
-        if not os.path.exists(custom_image):
-            print(f"  ✗ Image not found: {custom_image}", file=sys.stderr)
+    try:
+        # Trim off old thumbnail
+        trimmed_path = os.path.join(work_dir, "trimmed.mp4")
+        from utils.proc import run as proc_run
+        trim_cmd = [
+            "ffmpeg", "-y", "-i", clip_path,
+            "-t", str(content_duration),
+            "-c", "copy", "-movflags", "+faststart",
+            trimmed_path,
+        ]
+        result = proc_run(trim_cmd, timeout=60, check=False)
+        if result.returncode != 0:
+            print(f"  Failed to trim: {result.stderr[-200:]}", file=sys.stderr)
             sys.exit(1)
-        frame_path = custom_image
-        print(f"  {green}✓{reset} Using uploaded image")
-    if frame_path is None and timestamp is not None:
-        import cv2
-        cap = cv2.VideoCapture(source_video)
-        cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
-        ret, frame = cap.read()
-        cap.release()
-        if ret:
-            frame_path = os.path.join(thumb_dir, "_manual_frame.png")
-            os.makedirs(thumb_dir, exist_ok=True)
-            cv2.imwrite(frame_path, frame)
-            print(f"  {green}✓{reset} Using frame at {timestamp}s")
-        else:
-            print(f"  ⚠ Could not read frame at {timestamp}s, falling back to auto", file=sys.stderr)
 
-    paths = generate_variations(
-        title=title,
-        output_dir=thumb_dir,
-        photo_path=frame_path,
-        video_path=source_video,
-        start_second=start_sec,
-        end_second=end_sec,
-        logo_path=logo,
-        config={"variations": getattr(args, "variations", 3)},
-    )
+        # Step 2: Generate new thumbnail
+        thumb_dir = os.path.join(work_dir, "thumbnails")
+        print(f"  {bold}Generating new thumbnails...{reset}")
 
-    if not paths:
-        print(f"  Failed to generate thumbnails", file=sys.stderr)
-        sys.exit(1)
+        timestamp = getattr(args, "timestamp", None)
+        start_sec = getattr(args, "start", None)
+        end_sec = getattr(args, "end", None)
 
-    # Show variations
-    for i, p in enumerate(paths):
-        print(f"  {green}✓{reset} Variation {i+1}: {p}")
+        # A user-supplied image wins over any frame extraction.
+        frame_path = None
+        custom_image = getattr(args, "image", None)
+        if custom_image:
+            if not os.path.exists(custom_image):
+                print(f"  ✗ Image not found: {custom_image}", file=sys.stderr)
+                sys.exit(1)
+            frame_path = custom_image
+            print(f"  {green}✓{reset} Using uploaded image")
+        if frame_path is None and timestamp is not None:
+            import cv2
+            cap = cv2.VideoCapture(source_video)
+            cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
+            ret, frame = cap.read()
+            cap.release()
+            if ret:
+                frame_path = os.path.join(thumb_dir, "_manual_frame.png")
+                os.makedirs(thumb_dir, exist_ok=True)
+                cv2.imwrite(frame_path, frame)
+                print(f"  {green}✓{reset} Using frame at {timestamp}s")
+            else:
+                print(f"  ⚠ Could not read frame at {timestamp}s, falling back to auto", file=sys.stderr)
 
-    # Use first variation (or user-specified)
-    pick = getattr(args, "pick", 1) - 1
-    pick = max(0, min(pick, len(paths) - 1))
-    chosen = paths[pick]
-    print(f"  {accent}Using variation {pick + 1}{reset}")
+        paths = generate_variations(
+            title=title,
+            output_dir=thumb_dir,
+            photo_path=frame_path,
+            video_path=source_video,
+            start_second=start_sec,
+            end_second=end_sec,
+            logo_path=logo,
+            config={"variations": getattr(args, "variations", 3)},
+        )
 
-    # Step 3: Convert to video frame and append
-    thumb_video = os.path.join(work_dir, "thumb_frame.mp4")
-    thumbnail_to_video_frame(chosen, thumb_video, duration=thumb_duration)
+        if not paths:
+            print(f"  Failed to generate thumbnails", file=sys.stderr)
+            sys.exit(1)
 
-    final_path = os.path.join(work_dir, "final.mp4")
-    concat_outro(trimmed_path, thumb_video, final_path, crossfade_duration=0.0, transition="fade")
+        # Show variations
+        for i, p in enumerate(paths):
+            print(f"  {green}✓{reset} Variation {i+1}: {p}")
 
-    # Step 4: Replace original
-    import shutil
-    shutil.move(final_path, clip_path)
+        # Use first variation (or user-specified)
+        pick = getattr(args, "pick", 1) - 1
+        pick = max(0, min(pick, len(paths) - 1))
+        chosen = paths[pick]
+        print(f"  {accent}Using variation {pick + 1}{reset}")
 
-    # Copy thumbnail PNGs next to the clip
-    clip_dir = os.path.dirname(clip_path)
-    for p in paths:
-        dest = os.path.join(clip_dir, os.path.basename(p))
-        shutil.copy2(p, dest)
+        # Step 3: Convert to video frame and append
+        thumb_video = os.path.join(work_dir, "thumb_frame.mp4")
+        thumbnail_to_video_frame(chosen, thumb_video, duration=thumb_duration)
 
-    # Cleanup
-    shutil.rmtree(work_dir, ignore_errors=True)
+        final_path = os.path.join(work_dir, "final.mp4")
+        concat_outro(trimmed_path, thumb_video, final_path, crossfade_duration=0.0, transition="fade")
 
-    print(f"  {green}✓ Thumbnail swapped!{reset}")
-    print(f"  {gray}Variations saved next to clip for future swaps.{reset}\n")
+        # Step 4: Replace original
+        shutil.move(final_path, clip_path)
+
+        # Copy thumbnail PNGs next to the clip
+        clip_dir = os.path.dirname(clip_path)
+        for p in paths:
+            dest = os.path.join(clip_dir, os.path.basename(p))
+            shutil.copy2(p, dest)
+
+        print(f"  {green}✓ Thumbnail swapped!{reset}")
+        print(f"  {gray}Variations saved next to clip for future swaps.{reset}\n")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def cmd_corrections(args):
@@ -3876,7 +3880,7 @@ def cmd_knowledge(args):
     elif action == "list":
         print(f"\n  {bold}Knowledge Base{reset}")
         print(f"  {'─' * 45}")
-        empty_hint = f"  {gray}Empty — run{reset} podcli knowledge init {gray}to create the starter templates{reset}\n"
+        empty_hint = f"  {gray}Empty: run{reset} podcli knowledge init {gray}to create the starter templates{reset}\n"
         files = kb_files(kb_dir)
         if not files:
             print(empty_hint)
@@ -3893,8 +3897,8 @@ def cmd_knowledge(args):
                         if line and not line.startswith("#") and not line.startswith("---"):
                             preview = line[:60]
                             break
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warn("cli", "could not read knowledge file preview", error=exc)
             print(f"  {accent}•{reset} {bold}{fname}{reset}  {gray}({size/1024:.1f}KB){reset}")
             if preview:
                 print(f"    {dim}{preview}{'…' if len(preview) >= 60 else ''}{reset}")
@@ -3932,7 +3936,7 @@ def cmd_knowledge(args):
         else:
             # Open in $EDITOR
             editor = os.environ.get("EDITOR", "nano")
-            os.system(f'{editor} "{fpath}"')
+            subprocess.run([*shlex.split(editor), fpath])
 
     elif action == "delete":
         name = getattr(args, "filename", None)
@@ -3965,11 +3969,11 @@ def _print_config_result(action: str, data: dict) -> None:
         print(f"    {gray}→ transcripts, remotion bundle (override with PODCLI_DATA){reset}")
         print(f"  {gray}profile marker{reset}: {data.get('profile_marker')}")
         if data.get("legacy_cache_pending"):
-            print(f"  {yellow}legacy cache{reset}: project/.podcli/cache still has files — run Migrate below")
+            print(f"  {yellow}legacy cache{reset}: project/.podcli/cache still has files. Run Migrate below")
         else:
             print(f"  {green}✓{reset} legacy cache: nothing pending under project/.podcli/cache")
         if data.get("legacy_presets_pending"):
-            print(f"  {yellow}legacy presets{reset}: project/presets/ still has files — run Migrate below")
+            print(f"  {yellow}legacy presets{reset}: project/presets/ still has files. Run Migrate below")
         else:
             print(f"  {green}✓{reset} legacy presets: nothing pending under project/presets/")
         print()
@@ -4060,7 +4064,7 @@ def cmd_clips(args):
         limit = getattr(args, "limit", 50)
         clips = get_clips_by_source(source)[:limit] if source else list_clips(limit)
         if not clips:
-            print(f"\n  {gray}No clips yet — render one with{reset} {accent}podcli process{reset}\n")
+            print(f"\n  {gray}No clips yet: render one with{reset} {accent}podcli process{reset}\n")
             return
         print(f"\n  {bold}Recent clips ({len(clips)}){reset}\n")
         for c in clips:
@@ -4164,7 +4168,7 @@ def cmd_clips(args):
 
         print(f"\n  {green}✓{reset} Reopened {accent}{str(clip.get('id'))[:8]}{reset}  {bold}{clip.get('title')}{reset}")
         if not transcript:
-            print(f"      {gray}Transcript not loaded — re-transcribe in the studio to edit captions.{reset}")
+            print(f"      {gray}Transcript not loaded: re-transcribe in the studio to edit captions.{reset}")
         print(f"      {gray}Open the studio:{reset} {accent}{web_server_url()}/clip/{clip.get('id')}{reset}\n")
         return
 
@@ -4188,7 +4192,7 @@ def cmd_youtube(args):
         from services.integrations.youtube import client
         try:
             client.authorize()
-            print(f"\n  {green}✓{reset} Authorized — token cached.\n")
+            print(f"\n  {green}✓{reset} Authorized: token cached.\n")
         except Exception as e:
             fail(e)
         return
@@ -4232,7 +4236,7 @@ def cmd_youtube(args):
         if not proposals:
             print(f"\n  {gray}No link proposals (all clips linked, or no uploads matched).{reset}\n")
             return
-        print(f"\n  {bold}Proposed links ({len(proposals)}){reset}  {gray}— confirm with: youtube link <clip_id> <video_id>{reset}\n")
+        print(f"\n  {bold}Proposed links ({len(proposals)}){reset}  {gray}confirm with: youtube link <clip_id> <video_id>{reset}\n")
         for p in proposals:
             print(f"    {accent}{p['clip_id'][:8]}{reset} {p['clip_title']}")
             print(f"      {gray}→ {p['video_id']}  {p['video_title']}  (score {p['score']}){reset}")
@@ -4251,7 +4255,7 @@ def cmd_youtube(args):
                     print(f"    {tone}{link['score']}{reset}  \"{link['clip_title']}\"  ←  \"{link['row_title']}\"")
                 if res["unmatched"]:
                     print(f"  {gray}Unmatched: {len(res['unmatched'])}{reset}")
-                print(f"  {gray}Low scores are fuzzy title matches — verify them.{reset}\n")
+                print(f"  {gray}Low scores are fuzzy title matches. Verify them.{reset}\n")
             else:
                 n = sync.sync_metrics()
                 print(f"\n  {green}✓{reset} Synced metrics onto {n} linked clip(s).\n")
@@ -4298,7 +4302,7 @@ def cmd_env(args):
             for s in data["settings"]:
                 mark = f"{green}set{reset}" if s["set"] else f"{gray}auto{reset}" if not s["secret"] else f"{gray}not set{reset}"
                 val = f" {gray}{s['preview']}{reset}" if s["set"] else ""
-                print(f"  {accent}{s['key']}{reset} — {s['label']}  [{mark}]{val}")
+                print(f"  {accent}{s['key']}{reset}: {s['label']}  [{mark}]{val}")
                 print(f"    {gray}{s['help']}{reset}")
                 if s.get("url"):
                     print(f"    {gray}{s['url']}{reset}")
@@ -4377,7 +4381,7 @@ def cmd_cache(args):
     print(f"  {'─' * 35}")
 
     if not os.path.exists(cache_dir):
-        print(f"  {gray}Empty — no cached transcriptions{reset}\n")
+        print(f"  {gray}Empty: no cached transcriptions{reset}\n")
         return
 
     files = [f for f in os.listdir(cache_dir) if f.endswith(".json")]
@@ -4389,7 +4393,7 @@ def cmd_cache(args):
             if f.endswith(".json")
         )
     if not files:
-        print(f"  {gray}Empty — no cached transcriptions{reset}\n")
+        print(f"  {gray}Empty: no cached transcriptions{reset}\n")
         return
 
     total_size = 0
@@ -4481,8 +4485,8 @@ def cmd_info(args):
                         if line.strip().startswith("HF_TOKEN=") and line.strip().split("=", 1)[1].strip():
                             hf_token = line.strip().split("=", 1)[1].strip()
                             break
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warn("cli", "could not read HF_TOKEN from env file", error=exc)
 
     print(f"\n  podcli system info\n")
     print(f"    Platform:     {info['system']}")
@@ -4494,11 +4498,11 @@ def cmd_info(args):
     except (ImportError, ValueError):
         diarization_available = False
     if not diarization_available:
-        speakers_status = f"{yellow}✗ not installed — run: podcli setup --speakers (pyannote + torch, ~2GB)"
+        speakers_status = f"{yellow}✗ not installed. Run: podcli setup --speakers (openai-whisper + pyannote + torch, ~2GB)"
     elif hf_token:
         speakers_status = f"{green}✓ configured"
     else:
-        speakers_status = f"{yellow}✗ set a token — run: podcli env set HF_TOKEN <token>"
+        speakers_status = f"{yellow}✗ set a token with: podcli env set HF_TOKEN <token>"
 
     if candidates:
         c0 = candidates[0]
@@ -4592,7 +4596,7 @@ def print_banner():
     if os.path.isdir(cache_dir):
         cache_count = len([f for f in os.listdir(cache_dir) if f.endswith(".json")])
 
-    # Status — one line
+    # Status: one line
     ai_label = _providers[0]["label"] if _providers else "AI"
     ai_tag = f"{green}✓ {ai_label}{reset}" if _providers else f"{yellow}✗{reset}"
     speaker_tag = f"{green}✓{reset}" if speakers_ok else f"{yellow}✗{reset}"
@@ -4600,7 +4604,7 @@ def print_banner():
     kb_tag = f"{green}{kb_count}{reset}" if kb_count else f"{yellow}0{reset}"
     print(f"  {gray}Encoder {green}{encoder_label}{reset} {gray}· {ai_tag} {gray}· Speakers {speaker_tag} {gray}· Cache {cache_tag} {gray}· Knowledge {kb_tag}{reset}")
 
-    # Assets — one line if any
+    # Assets: one line if any
     try:
         from services.asset_store import list_assets
         assets = list_assets()
@@ -4612,8 +4616,8 @@ def print_banner():
                 else:
                     parts.append(f"{red}✗{reset} {a['name']}")
             print(f"  {gray}Assets{reset}  {'  '.join(parts)}")
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "could not list assets", error=exc)
 
     # Presets
     try:
@@ -4627,8 +4631,8 @@ def print_banner():
                     tag += f" {dim}({os.path.basename(p['video_path'])}){reset}{gray}"
                 names.append(tag)
             print(f"  {gray}Presets{reset} {gray}{' · '.join(names)}{reset}")
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "could not list presets", error=exc)
 
     # Corrections count
     try:
@@ -4636,16 +4640,16 @@ def print_banner():
         corr = get_corrections()
         if corr:
             print(f"  {gray}Corrections{reset} {green}{len(corr)}{reset} {gray}words{reset}")
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "could not read corrections", error=exc)
 
     print()
 
     if not speakers_ok:
         if not _diarization_ok:
-            print(f"  {yellow}⚠ Speaker detection not installed — run: podcli setup --speakers{reset}")
+            print(f"  {yellow}⚠ Speaker detection not installed. Run: podcli setup --speakers{reset}")
         else:
-            print(f"  {yellow}⚠ Speaker detection needs a token — run: podcli env set HF_TOKEN <token>{reset}")
+            print(f"  {yellow}⚠ Speaker detection needs a token. Run: podcli env set HF_TOKEN <token>{reset}")
 
     if not kb_count:
         print(f"  {yellow}⚠ Knowledge base empty, clips get scored without your show context. Run: podcli knowledge init{reset}")
@@ -4664,7 +4668,7 @@ def print_help():
     ul = "\033[4m"
 
     print(BANNER)
-    print(f"  {bold}podcli{reset} v{VERSION} — AI-powered podcast clip generator")
+    print(f"  {bold}podcli{reset} v{VERSION}: AI-powered podcast clip generator")
     print()
     print(f"  {bold}Usage:{reset}  podcli {accent}<command>{reset} [options]")
     print(f"          podcli {dim}(interactive mode){reset}")
@@ -4773,7 +4777,7 @@ def _apply_template(config: dict, name_or_id: str) -> None:
 
     Templates live with the account rather than on a machine, so the same name
     means the same look on a laptop and in the studio. Everything a template
-    sets is something this CLI already takes as a flag — the template is a name
+    sets is something this CLI already takes as a flag. The template is a name
     for a set of them, not a second way to render.
     """
     from services import podcli_cloud
@@ -4868,8 +4872,8 @@ def cmd_login(args):
     if not args.no_browser:
         try:
             webbrowser.open(url)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("cli", "could not open a browser", error=exc)
 
     interval = max(1, int(start.get("interval") or 3))
     deadline = time.monotonic() + int(start.get("expiresIn") or 600)
@@ -4902,7 +4906,7 @@ def cmd_login(args):
     print(f"  Signed in to {workspace.get('name', 'your workspace')} "
           f"({account.get('plan', 'free')} plan, {account.get('role', 'member')}).")
     if account.get("plan") == "free":
-        print("  This workspace has no active subscription — podcli will keep using "
+        print("  This workspace has no active subscription, so podcli will keep using "
               "your local AI CLI until one starts.")
 
     # Everything already rendered on this machine belongs in the workspace too,
@@ -4914,7 +4918,7 @@ def cmd_login(args):
     if synced:
         print(f"  Synced {synced} existing clip{'s' if synced != 1 else ''} to your workspace.")
     if failed:
-        print(f"  {failed} could not be synced — `podcli whoami` will retry later.")
+        print(f"  {failed} could not be synced. `podcli whoami` will retry later.")
 
 
 def cmd_logout(args):
@@ -5617,7 +5621,7 @@ def main():
     st.add_argument("clip", help="Path to rendered clip (.mp4)")
     st.add_argument("--title", help="Title text (defaults to filename)")
     st.add_argument("--image", help="Use this image as the thumbnail background instead of a video frame")
-    st.add_argument("--source-video", required=True, help="Original source video (required — rendered clips have captions burned in)")
+    st.add_argument("--source-video", required=True, help="Original source video (required: rendered clips have captions burned in)")
     st.add_argument("--start", type=float, help="Clip start time in source video (seconds)")
     st.add_argument("--end", type=float, help="Clip end time in source video (seconds)")
     st.add_argument("--timestamp", type=float, help="Exact second in source video to use as frame (skips auto-detection)")
@@ -5871,7 +5875,7 @@ def launch_webui():
             "PODCLI_BACKEND": backend_dir,
             "PYTHON_PATH": sys.executable,
             "PODCLI_HOME": paths["home"],
-            # data_dir is the cache's parent — output is now decoupled
+            # data_dir is the cache's parent: output is now decoupled
             # (clips render to the working dir), so don't derive it from output.
             "PODCLI_DATA": os.path.dirname(paths["cache"]),
             "PODCLI_OUTPUT": paths["output"],
@@ -5889,7 +5893,7 @@ def launch_webui():
             print(f"\n  {gray}Building the studio (first run)…{reset}\n")
             ok = sp.run(["npm", "run", "build"], cwd=repo, shell=_npm_shell).returncode == 0
             if not ok:
-                print(f"\n  {yellow}Build failed — run 'npm install' then try again.{reset}\n")
+                print(f"\n  {yellow}Build failed: run 'npm install' then try again.{reset}\n")
         if ok:
             print(f"\n  {gray}Studio:{reset} {accent}http://localhost:{port}{reset}   {dim}(Ctrl+C to stop){reset}\n")
             sp.run(["npm", "run", "ui:prod"], cwd=repo, shell=_npm_shell)
@@ -5899,7 +5903,7 @@ def launch_webui():
 
 
 def interactive_menu():
-    """Interactive startup — show banner then let user pick what to do."""
+    """Interactive startup: show banner then let user pick what to do."""
 
     accent = "\033[38;2;212;135;74m"
     gray = "\033[38;5;245m"
@@ -5911,11 +5915,8 @@ def interactive_menu():
 
     print_banner()
 
-    # Reset terminal to sane state — fixes ^M echo from corrupted tty settings
-    try:
-        os.system("stty sane 2>/dev/null")
-    except Exception:
-        pass
+    # Reset terminal to sane state: fixes ^M echo from corrupted tty settings
+    os.system("stty sane 2>/dev/null")
 
     import questionary
     from questionary import Style
@@ -6004,8 +6005,8 @@ def _flush_stdin():
     try:
         while select.select([sys.stdin], [], [], 0.0)[0]:
             sys.stdin.readline()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "could not flush stdin", error=exc)
 
 
 def _ask(prompt, default=None, validate=None, required=False, is_path=False):
@@ -6148,7 +6149,7 @@ def _interactive_auto():
     if preset_choices:
         options = [
             questionary.Choice(
-                f"{p['name']} — {os.path.basename(p['video_path'])}",
+                f"{p['name']}: {os.path.basename(p['video_path'])}",
                 value=p["name"],
             )
             for p in preset_choices
@@ -6184,7 +6185,7 @@ def _interactive_auto():
         video_path = _clean_path(val)
 
     brief = questionary.text(
-        "Brief (optional — e.g. '5 clips' or 'focus on investor pitch'):",
+        "Brief (optional: e.g. '5 clips' or 'focus on investor pitch'):",
         style=qstyle,
         default="",
     ).ask()
@@ -6208,9 +6209,9 @@ def _interactive_auto():
         tag = f"preset '{preset_name}'"
         if hints:
             tag += f" ({', '.join(hints)})"
-        prompt_parts.append(f"— {tag}")
+        prompt_parts.append(f"- {tag}")
     if brief.strip():
-        prompt_parts.append(f"— {brief.strip()}")
+        prompt_parts.append(f"- {brief.strip()}")
     prompt = " ".join(prompt_parts)
 
     code = _launch_podstack_auto(prompt, os.environ.get("PODCLI_AI", "auto"))
@@ -6247,7 +6248,7 @@ def _interactive_process():
     if preset_choices:
         preset_options = [
             questionary.Choice(
-                f"{p['name']} — {os.path.basename(p['video_path'])}",
+                f"{p['name']}: {os.path.basename(p['video_path'])}",
                 value=p["name"]
             ) for p in preset_choices
         ]
@@ -6302,10 +6303,10 @@ def _interactive_process():
     caption_style = questionary.select(
         "Caption style:",
         choices=[
-            questionary.Choice("branded — dark pill on active word + logo", value="branded"),
-            questionary.Choice("hormozi — bold uppercase, yellow highlight", value="hormozi"),
-            questionary.Choice("karaoke — sentence visible, words light up", value="karaoke"),
-            questionary.Choice("subtle — clean small text at bottom", value="subtle"),
+            questionary.Choice("branded: dark pill on active word + logo", value="branded"),
+            questionary.Choice("hormozi: bold uppercase, yellow highlight", value="hormozi"),
+            questionary.Choice("karaoke: sentence visible, words light up", value="karaoke"),
+            questionary.Choice("subtle: clean small text at bottom", value="subtle"),
         ],
         default="branded",
         style=qstyle,
@@ -6341,8 +6342,8 @@ def _interactive_process():
             logo_choices = [questionary.Choice(f"{a['name']} ({os.path.basename(a['path'])})", value=a["path"]) for a in logos]
             logo_choices.append(questionary.Choice("None", value=None))
             logo = questionary.select("Logo:", choices=logo_choices, default=logo_choices[0], style=qstyle).ask()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "logo prompt skipped", error=exc)
 
     # Outro
     outro = None
@@ -6353,8 +6354,8 @@ def _interactive_process():
             outro_choices = [questionary.Choice("None", value=None)]
             outro_choices += [questionary.Choice(f"{a['name']} ({os.path.basename(a['path'])})", value=a["path"]) for a in outros]
             outro = questionary.select("Outro:", choices=outro_choices, style=qstyle).ask()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "outro prompt skipped", error=exc)
 
     # Confirm
     print(f"\n  {'─' * 45}")
@@ -6622,7 +6623,7 @@ def _interactive_presets():
         for p in presets:
             label = p["name"]
             if p.get("video_path"):
-                label += f" — {os.path.basename(p['video_path'])}"
+                label += f": {os.path.basename(p['video_path'])}"
             actions.append(questionary.Choice(f"Edit: {label}", value=f"edit:{p['name']}"))
         for p in presets:
             actions.append(questionary.Choice(f"Delete: {p['name']}", value=f"del:{p['name']}"))
@@ -6697,8 +6698,8 @@ def _interactive_presets():
             logo = questionary.select("Logo:", choices=logo_choices, default=current_logo or logo_choices[0], style=qstyle).ask()
             if logo is not None:
                 config["logo_path"] = logo
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "logo prompt skipped", error=exc)
 
     # Outro from assets
     try:
@@ -6711,8 +6712,8 @@ def _interactive_presets():
             outro = questionary.select("Outro:", choices=outro_choices, default=current_outro or outro_choices[0], style=qstyle).ask()
             if outro is not None:
                 config["outro_path"] = outro
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cli", "outro prompt skipped", error=exc)
 
     # Quality
     quality = questionary.select(
@@ -6795,7 +6796,7 @@ def _interactive_knowledge():
 
     elif action == "edit":
         if not files:
-            print(f"  {gray}No files to edit — create one first{reset}")
+            print(f"  {gray}No files to edit: create one first{reset}")
             return
         choice = questionary.select("Which file?", choices=files, style=qstyle).ask()
         if choice:

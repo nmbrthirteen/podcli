@@ -33,21 +33,25 @@ describe("fitting a scene into the room it was given", () => {
 
   it("measures a wrapped line as taller than one that fits across", () => {
     const short = blockHeight(text("Short"), 888);
+
     const long = blockHeight(
       text("A sentence long enough to wrap across more than one line of this frame"),
       888,
     );
+
     expect(long).toBeGreaterThan(short);
   });
 
   it("gives a row the width it actually has rather than the whole frame", () => {
     const words = "A sentence long enough to wrap when it only has half the frame";
     const alone = sceneHeight([text(words)], "stack", "group");
+
     const beside = sceneHeight(
       [{ type: "group", layout: "row", blocks: [text(words), text(words)] }],
       "stack",
       "group",
     );
+
     expect(beside).toBeGreaterThan(alone);
   });
 });
@@ -75,6 +79,7 @@ describe("the card in front at a moment", () => {
       { kind: "quote", start: 0, end: 3, text: "first" },
       { kind: "scene", start: 3, end: 6, blocks: [text("second")] },
     ];
+
     expect(cardAt(cards, 1)?.kind).toBe("quote");
     expect(cardAt(cards, 4)?.kind).toBe("scene");
     // Half-open, so a card ending where the next begins is a cut.
@@ -85,7 +90,9 @@ describe("the card in front at a moment", () => {
 
 
 describe("a stacked timeline of steps", () => {
-  const steps = (note: string) => [{ type: "steps", points: [{ value: "Product", note }, { value: "Distribution", note }] }] as Block[];
+  const steps = (note: string): Block[] => [
+    { type: "steps", points: [{ value: "Product", note }, { value: "Distribution", note }] },
+  ];
 
   it("grows when a note wraps", () => {
     const short = sceneHeight(steps("First-time founders"), "stack", "group");

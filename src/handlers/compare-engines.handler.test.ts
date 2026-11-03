@@ -1,14 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { handleCompareEngines } from "./compare-engines.handler.js";
 
 const executeMock = vi.fn();
 
-vi.mock("../services/python-executor.js", () => ({
-  PythonExecutor: class {
-    execute = executeMock;
-  },
-}));
-
-const { handleCompareEngines } = await import("./compare-engines.handler.js");
+const executor = { execute: executeMock };
 
 describe("handleCompareEngines", () => {
   beforeEach(() => {
@@ -30,7 +25,7 @@ describe("handleCompareEngines", () => {
       model_size: "base",
       language: "ka",
       output_dir: "/tmp/cmp",
-    });
+    }, executor);
 
     expect(executeMock).toHaveBeenCalledWith("compare_engines", {
       file_path: "/video.mp4",
@@ -54,7 +49,8 @@ describe("handleCompareEngines", () => {
       file_path: "/video.mp4",
       engine_a: "whispercpp",
       engine_b: "whisper-py",
-    });
+    }, executor);
+
     const parsed = JSON.parse(text);
 
     expect(parsed.overall_disagreement).toBe(0.35);
@@ -65,7 +61,7 @@ describe("handleCompareEngines", () => {
   it("throws when the backend returns no data", async () => {
     executeMock.mockResolvedValue({ data: undefined });
     await expect(
-      handleCompareEngines({ file_path: "/video.mp4", engine_a: "whispercpp", engine_b: "whisper-py" }),
+      handleCompareEngines({ file_path: "/video.mp4", engine_a: "whispercpp", engine_b: "whisper-py" }, executor),
     ).rejects.toThrow(/no data/i);
   });
 });

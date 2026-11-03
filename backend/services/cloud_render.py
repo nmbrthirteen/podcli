@@ -42,10 +42,10 @@ def run(video_path: str, config: dict, output_dir: str, args) -> None:
     """Render one episode in the cloud and download the clips it produced."""
     if not podcli_cloud.signed_in():
         raise CloudRenderError(
-            "cloud rendering needs a podcli Pro session — run `podcli login`")
+            "cloud rendering needs a podcli Pro session: run `podcli login`")
 
     size = os.path.getsize(video_path)
-    print(f"\n  podcli — rendering in the cloud")
+    print(f"\n  podcli: rendering in the cloud")
     print(f"  Video:   {os.path.basename(video_path)} ({_megabytes(size)})")
     print(f"  Output:  {output_dir}/\n")
 
@@ -67,7 +67,7 @@ def run(video_path: str, config: dict, output_dir: str, args) -> None:
     if downloaded:
         print(f"  Saved {downloaded} file{'' if downloaded == 1 else 's'} to {output_dir}/")
     else:
-        print(f"  {GRAY}Nothing to download yet — see them at podcli.com/app{RESET}")
+        print(f"  {GRAY}Nothing to download yet: see them at podcli.com/app{RESET}")
 
 
 def _params(config: dict, args) -> dict:
@@ -173,7 +173,7 @@ def _follow(job_id: str) -> dict:
 
         line = (f"  {ACCENT}{job.get('progress', 0)}%{RESET} "
                 f"{job.get('stage') or status}"
-                f"{' — ' + job['detail'] if job.get('detail') else ''}")
+                f"{': ' + job['detail'] if job.get('detail') else ''}")
         print("\r" + " " * len(last) + "\r" + line, end="", flush=True)
         last = line
 

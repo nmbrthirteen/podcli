@@ -50,6 +50,7 @@ export interface CaptionStyle {
 }
 
 export type CaptionPosition = "auto" | "upper" | "center" | "lower";
+
 export type LogoPosition =
   | "top-left"
   | "top-center"
@@ -177,7 +178,7 @@ export const CAPTION_LINES = 3;
 export const captionZone = (style: CaptionStyle) =>
   style.marginBottom + style.fontSize * CAPTION_LINES * 1.2 + 36;
 
-export const STYLES: Record<string, CaptionStyle> = {
+export const STYLES = {
   hormozi: {
     name: "hormozi",
     fontSize: 90,
@@ -242,7 +243,10 @@ export const STYLES: Record<string, CaptionStyle> = {
     wordsPerChunk: 7,
     marginBottom: 460,
   },
-};
+} satisfies Record<string, CaptionStyle>;
+
+export const styleNamed = (name: string): CaptionStyle | undefined =>
+  new Map<string, CaptionStyle>(Object.entries(STYLES)).get(name);
 
 /**
  * The caption styles, in the show's own colours.
@@ -263,6 +267,7 @@ export const brandCaptions = (
   brand?: { accent: string; ink: string; surface: string } | null,
 ): CaptionStyle => {
   if (!brand) return style;
+
   return {
     ...style,
     color: style.name === "karaoke"
@@ -272,6 +277,6 @@ export const brandCaptions = (
     emphasisColor: brand.accent,
     background: `color-mix(in oklab, ${brand.surface} 85%, transparent)`,
     // Opaque, unlike the pill: a stroke at 85% is a grey halo, not an edge.
-    ...(style.stroke ? { stroke: brand.surface } : {}),
+    ...(style.stroke && { stroke: brand.surface }),
   };
 };

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from utils.log import warn as log_warn
 import re
 import shutil
 import tempfile
@@ -275,7 +276,7 @@ def _safe_extract_zip(zf: zipfile.ZipFile, target: Path) -> None:
         name = info.filename
         if name.startswith("/") or name.startswith("\\"):
             raise ValueError(f"Unsafe absolute path in bundle: {name}")
-        # Reject symlink entries — extraction would follow them outside `root`.
+        # Reject symlink entries: extraction would follow them outside `root`.
         if (info.external_attr >> 28) & 0xF == _ZIP_SYMLINK_TYPE:
             raise ValueError(f"Symlink entries not allowed in bundle: {name}")
         # Validate directory entries too: extractall creates them, so a "../x/"
@@ -388,7 +389,7 @@ def migrate_legacy_presets(*, dry_run: bool = False) -> dict[str, Any]:
 
 
 def migrate_legacy_home(*, dry_run: bool = False) -> dict[str, Any]:
-    """Import a project-local .podcli into the global home — only when the global
+    """Import a project-local .podcli into the global home, but only when the global
     home is empty, so it never clobbers an existing profile."""
     legacy = _legacy_home_dir()
     home = _global_home()
@@ -590,8 +591,8 @@ def import_config(bundle_path: str, target_home: str | None = None, activate: bo
         with zipfile.ZipFile(bundle, "r") as zf:
             try:
                 manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warn("config-bundle", "manifest.json unreadable in bundle", error=exc)
 
             backup_dir = _backup_managed_paths(target)
             _cleanup_managed_paths(target)

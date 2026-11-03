@@ -62,6 +62,7 @@ describe("reconcileSegmentsForRange", () => {
       { start: 0, end: 5 },
       { start: 20, end: 25 },
     ];
+
     expect(reconcileSegmentsForRange(segments, 0, 25, 20, 25)).toBeUndefined();
   });
 
@@ -70,6 +71,7 @@ describe("reconcileSegmentsForRange", () => {
       { start: 0, end: 10 },
       { start: 15, end: 25 },
     ];
+
     expect(reconcileSegmentsForRange(segments, 0, 25, 5, 20)).toEqual([
       { start: 5, end: 10 },
       { start: 15, end: 20 },
@@ -89,6 +91,7 @@ describe("reconcileSegmentsForRange", () => {
       { start: 2, end: 8 },
       { start: 12, end: 18 },
     ];
+
     expect(reconcileSegmentsForRange(segments, 2, 18, 0, 20)).toEqual([
       { start: 0, end: 8 },
       { start: 12, end: 20 },
@@ -101,6 +104,7 @@ describe("reconcileSegmentsForRange", () => {
       { start: 12, end: 18 },
       { start: 50, end: 60 }, // entirely outside the new range
     ];
+
     expect(reconcileSegmentsForRange(segments, 2, 60, 0, 20)).toEqual([
       { start: 0, end: 8 },
       { start: 12, end: 20 },

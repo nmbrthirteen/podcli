@@ -19,7 +19,7 @@ MIN_FACE_RATIO = 0.04
 # source 16:9 video scores higher than processed 9:16 clips)
 CONFIDENCE_THRESHOLD = 0.5
 
-# Max dimension for detection input — keeps inference fast.
+# Max dimension for detection input: keeps inference fast.
 # Coordinates are scaled back to original frame size.
 _MAX_DIM = 640
 

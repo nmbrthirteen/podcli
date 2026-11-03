@@ -26,18 +26,21 @@ import { spawnSync } from "child_process";
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = {};
+
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith("--") && i + 1 < args.length) {
       opts[args[i].replace(/^--/, "")] = args[i + 1];
       i++;
     }
   }
+
   return opts;
 }
 
 
 async function main() {
   const opts = parseArgs();
+
   if (!opts.mode || !opts.output) {
     console.error("Usage: render-bookend.mjs --mode intro|outro --title <t> --output <path> [--handle --platforms --seconds --bg --accent]");
     process.exit(1);
@@ -48,6 +51,7 @@ async function main() {
   const height = parseInt(opts.height || "1920", 10);
   const seconds = parseFloat(opts.seconds || "3");
   const durationInFrames = Math.round(seconds * fps);
+
   const platforms = (opts.platforms || "tiktok,instagram,youtube,x")
     .split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -63,6 +67,7 @@ async function main() {
   const bundleLocation = await getCachedBundle({
     onBundle: () => console.log("  Remotion: bundling (first run, or src/config changed)..."),
   });
+
   const composition = await selectComposition({ serveUrl: bundleLocation, id: "Bookend", inputProps });
 
   const seed = `${path.resolve(opts.output)}:${process.pid}`;
@@ -101,9 +106,11 @@ async function main() {
     ],
     { stdio: "ignore", timeout: 60000 }
   );
+
   if (mux.status !== 0) {
     throw new Error(`ffmpeg failed to add silent audio track (exit ${mux.status})`);
   }
+
   try { fs.unlinkSync(silentVideo); } catch {}
 
   console.log(`OK ${opts.output}`);

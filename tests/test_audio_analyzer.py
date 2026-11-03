@@ -68,17 +68,17 @@ class ComputeEnergyScoresTests(unittest.TestCase):
         # A segment with loud + silent samples should only score off the loud ones
         energy = [
             {"time": 0.0, "rms_db": -20.0},
-            {"time": 1.0, "rms_db": -80.0},  # silence — should be ignored
+            {"time": 1.0, "rms_db": -80.0},  # silence, should be ignored
             {"time": 2.0, "rms_db": -20.0},
             {"time": 3.0, "rms_db": -40.0},  # baseline context
             {"time": 4.0, "rms_db": -40.0},
         ]
         scores = aa.compute_energy_scores(energy, [{"start": 0, "end": 2}])
-        # Only 2 samples contribute — -20 is above the -40 baseline → score > 0
+        # Only 2 samples contribute: -20 is above the -40 baseline → score > 0
         self.assertGreater(scores[0], 0)
 
     def test_zero_variance_energy_is_handled(self):
-        # All-same energy level would cause std=0 — function must avoid div-by-zero
+        # All-same energy level would cause std=0; function must avoid div-by-zero
         energy = [{"time": float(t), "rms_db": -25.0} for t in range(0, 20)]
         segments = [{"start": 5, "end": 10}]
         # Should not raise

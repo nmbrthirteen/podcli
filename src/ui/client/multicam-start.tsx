@@ -26,9 +26,11 @@ export default function MulticamStart({
 
   async function browse(query: string, seed: (d: { folder?: string; file_paths?: string[] }) => { folder?: string; files?: string[] } | null) {
     setBrowsing(true);
+
     try {
       const d = await api<{ folder?: string; file_paths?: string[] }>(`/browse-file?${query}`);
       const picked = seed(d);
+
       if (picked) await onStart(picked);
     } catch {
       /* dialog cancelled */
@@ -39,6 +41,7 @@ export default function MulticamStart({
 
   async function commitPath() {
     const folder = pathDraft.trim();
+
     if (folder && (await onStart({ folder }))) setPathDraft("");
   }
 

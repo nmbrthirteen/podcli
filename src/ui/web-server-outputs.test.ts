@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { z } from "zod";
+import { stubPythonBackend } from "../test-support/stub-python-backend.js";
 
 // A re-render reuses its output path, so a "_clean.mp4" variant from a
 // previous render that this pass doesn't produce could sit next to the new
@@ -9,7 +11,8 @@ import { join } from "path";
 // unrelated-looking clip instead of folding it into the main clip's entry.
 
 const tmp = mkdtempSync(join(tmpdir(), "podcli-outputs-"));
-const savedEnv: Record<string, string | undefined> = {
+
+const savedEnv = {
   PODCLI_HOME: process.env.PODCLI_HOME,
   PODCLI_DATA: process.env.PODCLI_DATA,
   PODCLI_OUTPUT: process.env.PODCLI_OUTPUT,
@@ -18,15 +21,7 @@ const savedEnv: Record<string, string | undefined> = {
 
 const PORT = 18426;
 
-vi.mock("../services/python-executor.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../services/python-executor.js")>();
-  class StubExecutor {
-    async execute() {
-      return { data: {} };
-    }
-  }
-  return { ...original, PythonExecutor: StubExecutor };
-});
+const outputClipsSchema = z.array(z.object({ filename: z.string(), clean_output_path: z.string().optional() }));
 
 let outputDir: string;
 
@@ -34,12 +29,15 @@ async function waitForServer(): Promise<void> {
   for (let i = 0; i < 50; i++) {
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/ui-state`);
+
       if (res.ok) return;
     } catch {
       // not up yet
     }
+
     await new Promise((r) => setTimeout(r, 100));
   }
+
   throw new Error("web server never came up");
 }
 
@@ -56,6 +54,9 @@ beforeAll(async () => {
   writeFileSync(join(outputDir, "clip-a_clean.mp4"), "clean variant bytes");
   writeFileSync(join(outputDir, "clip-b.mp4"), "a second clip with no clean variant");
 
+  // The web server spawns the Python backend on startup (manage_config status
+  // check) and per request. Stub it so the test never depends on a real backend.
+  await stubPythonBackend();
   await import("./web-server.js");
   await waitForServer();
 }, 20_000);
@@ -65,13 +66,14 @@ afterAll(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+
   rmSync(tmp, { recursive: true, force: true });
 });
 
 describe("GET /api/outputs", () => {
   it("folds a clip's _clean.mp4 variant into its own entry instead of listing it separately", async () => {
     const res = await fetch(`http://127.0.0.1:${PORT}/api/outputs`);
-    const clips = (await res.json()) as Array<{ filename: string; clean_output_path?: string }>;
+    const clips = outputClipsSchema.parse(await res.json());
 
     const filenames = clips.map((c) => c.filename);
     expect(filenames).toContain("clip-a.mp4");

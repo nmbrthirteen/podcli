@@ -26,10 +26,12 @@ interface Episode {
 
 function groupEpisodes(clips: Clip[]): Episode[] {
   const map = new Map<string, Clip[]>();
+
   for (const c of clips) {
     const key = basename(c.source_video) || "unknown";
     (map.get(key) ?? map.set(key, []).get(key)!).push(c);
   }
+
   return Array.from(map.entries())
     .map(([source, list]) => ({
       source,
@@ -56,19 +58,30 @@ export default function StudioHome() {
     loadHistory();
     const events = new EventSource("/api/events");
     events.addEventListener("history-updated", loadHistory);
-    const onStart = (e: MessageEvent) => { try { setExporting(JSON.parse(e.data).clipCount || 0); } catch { setExporting(1); } };
+
+    const onStart = (e: Event) => {
+      try {
+        setExporting(e instanceof MessageEvent ? JSON.parse(e.data).clipCount || 0 : 1);
+      } catch {
+        setExporting(1);
+      }
+    };
+
     const onEnd = () => setExporting(0);
-    events.addEventListener("export-started", onStart as EventListener);
-    events.addEventListener("job-complete", onEnd as EventListener);
-    events.addEventListener("job-error", onEnd as EventListener);
+    events.addEventListener("export-started", onStart);
+    events.addEventListener("job-complete", onEnd);
+    events.addEventListener("job-error", onEnd);
+
     return () => events.close();
   }, []);
 
   const remove = async (e: React.MouseEvent, c: Clip) => {
     e.preventDefault();
     e.stopPropagation();
+
     if (deleting || !window.confirm(`Delete "${c.title}"? This removes the rendered file too.`)) return;
     setDeleting(c.id);
+
     try {
       await api(`/clips/${c.id}`, { method: "DELETE" });
       setClips((prev) => prev.filter((x) => x.id !== c.id));
@@ -118,6 +131,7 @@ export default function StudioHome() {
                 {ep.clips.map((c) => {
                   const file = basename(c.output_path);
                   const thumb = c.thumbnail_config?.preview_path;
+
                   return (
                     <Link key={c.id} to={`/clip/${c.id}`} className="clip-card">
                       <button

@@ -1,29 +1,42 @@
 import type React from "react";
 
 export type EdgeKind = "straight" | "torn";
+
 export type Layout = "takeover";
+
 export type Placement = "page" | "overlay";
+
 export const PLACEMENTS: Placement[] = ["page", "overlay"];
+
 export type Role = "title" | "figure" | "item" | "media" | "label" | "strip" | "caption" | "name";
+
 export type Entrance =
   | "type" | "scramble" | "wipe" | "wipe-up" | "pop" | "rise" | "fade" | "spring"
   | "slide" | "scale" | "blur" | "mask-circle" | "mask-diagonal" | "mask-split"
   | "count" | "slam" | "drop" | "register" | "typed";
+
 export type Side = "left" | "right" | "top" | "bottom";
+
 export type TextUnit = "char" | "word";
+
 export type Ease = "out" | "in-out" | "linear";
+
 export type CameraMove = "none" | "track" | "push" | "punch";
+
 export type Exit = "cut" | "fade";
+
 export type CaptionChoice = "pack" | "template" | "hormozi" | "karaoke" | "subtle" | "branded" | "outline";
 
 export const CAPTION_CHOICES: CaptionChoice[] = ["pack", "template", "hormozi", "karaoke", "subtle", "branded", "outline"];
 
 export const ROLES: Role[] = ["title", "figure", "item", "media", "label", "strip", "caption", "name"];
+
 export const ENTRANCES: Entrance[] = [
   "type", "scramble", "wipe", "wipe-up", "pop", "rise", "fade", "spring",
   "slide", "scale", "blur", "mask-circle", "mask-diagonal", "mask-split",
   "count", "slam", "drop", "register", "typed",
 ];
+
 export const SIDES: Side[] = ["left", "right", "top", "bottom"];
 
 export interface Face {
@@ -221,10 +234,10 @@ const face = (family: string, weight: number, extra: Partial<Face> = {}): Face =
   ...extra,
 });
 
-const TAKEOVER: Record<string, Layout> = {
+const TAKEOVER = {
   stat: "takeover", headline: "takeover", entity: "takeover", bullets: "takeover", quote: "takeover",
   compare: "takeover", change: "takeover", share: "takeover", image: "takeover", video: "takeover", scene: "takeover",
-};
+} satisfies Record<string, Layout>;
 
 const collage: Theme = {
   pack: "collage",
@@ -434,19 +447,24 @@ export const PACKS = { clean, collage, editorial, swiss, poster, terminal, riso 
 
 export type PackId = keyof typeof PACKS;
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
+/** A string primitive. String(value) only equals value when value is already that string. */
+export const isString = <V>(value: V): value is V & string => String(value) === value;
+
+const isPlainObject = <V>(value: V): value is V & object => value instanceof Object && !Array.isArray(value);
 
 const FORBIDDEN = /gradient|url\(|image-set|filter/i;
 
-const deepMerge = <T>(base: T, patch: unknown): T => {
-  if (!isObject(base) || !isObject(patch)) return (patch ?? base) as T;
-  const out: Record<string, unknown> = { ...base };
+const deepMerge = <T extends object>(base: T, patch: DeepPartial<T>): T => {
+  const out = new Map(Object.entries(base));
+
   for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined || (typeof value === "string" && FORBIDDEN.test(value))) continue;
-    out[key] = isObject(value) && isObject(out[key]) ? deepMerge(out[key], value) : value;
+    if (value === undefined || (isString(value) && FORBIDDEN.test(value))) continue;
+    const current = out.get(key);
+    out.set(key, isPlainObject(value) && isPlainObject(current) ? deepMerge(current, value) : value);
   }
-  return out as T;
+
+  // SAFETY: out holds every key of base, each replaced only by a patch value of the same DeepPartial shape.
+  return Object.fromEntries(out) as T;
 };
 
 const FONTS: Record<FontId, { display: Face; label: Face }> = {
@@ -471,8 +489,10 @@ const FONTS: Record<FontId, { display: Face; label: Face }> = {
 const withFonts = (theme: Theme, fonts: ThemeInput["fonts"]): Theme => {
   const display = fonts?.display && FONTS[fonts.display]?.display;
   const label = fonts?.label && FONTS[fonts.label]?.label;
+
   if (!display && !label) return theme;
-  return { ...theme, type: { ...theme.type, ...(display ? { display } : {}), ...(label ? { label } : {}) } };
+
+  return { ...theme, type: { ...theme.type, ...(display && { display }), ...(label && { label }) } };
 };
 
 export const resolveTheme = (input?: ThemeInput | null): Theme | null => {
@@ -482,7 +502,8 @@ export const resolveTheme = (input?: ThemeInput | null): Theme | null => {
   const overridden = deepMerge(base, input.overrides ?? {});
   const wanted = input.placement ?? overridden.placement;
   const merged = { ...overridden, placement: PLACEMENTS.includes(wanted) ? wanted : base.placement };
-  return { ...merged, textures: { ...merged.textures, ...(input.textures ?? {}) } };
+
+  return { ...merged, textures: { ...merged.textures, ...input.textures } };
 };
 
 export const fontOf = (f: Face, size: number): React.CSSProperties => ({

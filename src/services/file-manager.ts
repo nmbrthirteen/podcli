@@ -7,6 +7,11 @@ import { paths } from "../config/paths.js";
 /**
  * Manages working directories and output files.
  */
+interface TaskDir {
+  taskId: string;
+  taskDir: string;
+}
+
 export class FileManager {
   async ensureDirectories() {
     const dirs = [
@@ -20,6 +25,7 @@ export class FileManager {
       paths.history,
       paths.knowledge,
     ];
+
     for (const dir of dirs) {
       if (!existsSync(dir)) {
         await mkdir(dir, { recursive: true });
@@ -27,28 +33,33 @@ export class FileManager {
     }
   }
 
-  createTaskDir(): { taskId: string; taskDir: string } {
+  createTaskDir(): TaskDir {
     const taskId = uuidv4();
     const taskDir = join(paths.working, taskId);
+
     return { taskId, taskDir };
   }
 
   async ensureTaskDir(taskId: string): Promise<string> {
     const taskDir = join(paths.working, taskId);
+
     if (!existsSync(taskDir)) {
       await mkdir(taskDir, { recursive: true });
     }
+
     return taskDir;
   }
 
   async moveToOutput(sourcePath: string, filename: string): Promise<string> {
     const destPath = join(paths.output, filename);
     await rename(sourcePath, destPath);
+
     return destPath;
   }
 
   async cleanupTask(taskId: string): Promise<void> {
     const taskDir = join(paths.working, taskId);
+
     if (existsSync(taskDir)) {
       await rm(taskDir, { recursive: true, force: true });
     }
@@ -66,9 +77,11 @@ export class FileManager {
 
     for (const entry of entries) {
       const fullPath = join(paths.working, entry);
+
       try {
         const s = await stat(fullPath);
         const ageHours = (now - s.mtimeMs) / (1000 * 60 * 60);
+
         if (ageHours > maxAgeHours) {
           await rm(fullPath, { recursive: true, force: true });
           cleaned++;

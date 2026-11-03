@@ -21,6 +21,7 @@ export default function RecentSources({
   }, []);
 
   const options = items.filter((s) => !exclude.includes(s.path));
+
   if (options.length === 0) return null;
 
   return (

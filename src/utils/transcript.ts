@@ -11,22 +11,25 @@ export function sliceTranscript(
   end: number,
 ): string | undefined {
   if (!words || words.length === 0) return undefined;
+
   const text = words
     .filter((w) => w.start >= start && w.start < end)
     .map((w) => w.word)
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
+
   return text || undefined;
 }
 
-/** Word objects spoken within [start, end] — used to re-burn captions on re-render. */
+/** Word objects spoken within [start, end]; used to re-burn captions on re-render. */
 export function sliceWords(
   words: WordTimestamp[] | undefined | null,
   start: number,
   end: number,
 ): WordTimestamp[] {
   if (!words) return [];
+
   return words.filter((w) => w.start >= start && w.start < end);
 }
 
@@ -37,9 +40,11 @@ export function findContentType(
   end: number,
 ): string | undefined {
   if (!suggestions || suggestions.length === 0) return undefined;
+
   const match = suggestions.find(
     (s) => Math.abs(s.start_second - start) <= 2 && Math.abs(s.end_second - end) <= 2,
   );
+
   return match?.content_type;
 }
 
@@ -64,10 +69,13 @@ export function findGroundingText(
   end: number,
 ): { payoff?: string; context_line?: string; preview_text?: string } | undefined {
   if (!suggestions || suggestions.length === 0) return undefined;
+
   const match = suggestions.find(
     (s) => Math.abs(s.start_second - start) <= 2 && Math.abs(s.end_second - end) <= 2,
   );
+
   if (!match) return undefined;
+
   return { payoff: match.payoff, context_line: match.context_line, preview_text: match.preview_text };
 }
 
@@ -110,11 +118,13 @@ export function reconcileSegmentsForRange(
   const clamped = segments
     .map((s) => ({ start: Math.max(s.start, nextStart), end: Math.min(s.end, nextEnd) }))
     .filter((s) => s.end > s.start);
+
   if (clamped.length === 0) return undefined;
 
   if (clamped.length > 1) {
     clamped[0] = { ...clamped[0], start: nextStart };
     clamped[clamped.length - 1] = { ...clamped[clamped.length - 1], end: nextEnd };
+
     return clamped;
   }
 
@@ -124,6 +134,7 @@ export function reconcileSegmentsForRange(
   ) {
     return undefined;
   }
+
   return clamped;
 }
 

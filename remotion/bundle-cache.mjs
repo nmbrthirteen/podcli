@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
+
 const CACHE_ROOT = process.env.PODCLI_CACHE_DIR
   ? path.resolve(process.env.PODCLI_CACHE_DIR)
   : path.join(PROJECT_ROOT, "data", "cache");
@@ -34,17 +35,20 @@ function currentHash() {
   function walk(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
+
       if (entry.isDirectory()) walk(full);
       else if (entry.isFile()) hash.update(fs.readFileSync(full));
     }
   }
 
   walk(path.join(__dirname, "src"));
+
   if (fs.existsSync(PUBLIC_DIR)) walk(PUBLIC_DIR);
   hash.update(fs.readFileSync(path.join(__dirname, "webpack-override.mjs")));
   hash.update(fs.readFileSync(fileURLToPath(import.meta.url)));
   hash.update(`remotion@${require("remotion/package.json").version}`);
   hash.update(`@remotion/bundler@${require("@remotion/bundler/package.json").version}`);
+
   return hash.digest("hex");
 }
 
@@ -64,22 +68,28 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function removeStaleLock() {
   try {
     const entries = fs.readdirSync(LOCK_DIR, { withFileTypes: true });
+
     if (entries.length === 0) {
       if (Date.now() - fs.statSync(LOCK_DIR).mtimeMs > LOCK_STALE_MS) {
         fs.rmdirSync(LOCK_DIR);
+
         return true;
       }
+
       return false;
     }
 
     for (const entry of entries) {
       if (!entry.isFile()) continue;
       const tokenPath = path.join(LOCK_DIR, entry.name);
+
       if (Date.now() - fs.statSync(tokenPath).mtimeMs > LOCK_STALE_MS) {
         fs.rmSync(tokenPath, { force: true });
       }
     }
+
     fs.rmdirSync(LOCK_DIR);
+
     return true;
   } catch {
     return false;
@@ -88,18 +98,22 @@ function removeStaleLock() {
 
 async function acquireLock() {
   const token = `${process.pid}-${crypto.randomUUID()}`;
+
   for (;;) {
     try {
       fs.mkdirSync(LOCK_DIR);
       const tokenPath = path.join(LOCK_DIR, token);
+
       try {
         fs.writeFileSync(tokenPath, token, { flag: "wx" });
       } catch (err) {
         try {
           fs.rmdirSync(LOCK_DIR);
         } catch {}
+
         throw err;
       }
+
       const lock = { token, tokenPath, heartbeat: undefined };
       lock.heartbeat = setInterval(() => {
         try {
@@ -110,10 +124,12 @@ async function acquireLock() {
         }
       }, LOCK_HEARTBEAT_MS);
       lock.heartbeat.unref();
+
       return lock;
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
     }
+
     if (removeStaleLock()) continue;
     await sleep(500);
   }
@@ -121,9 +137,11 @@ async function acquireLock() {
 
 function releaseLock(lock) {
   clearInterval(lock.heartbeat);
+
   try {
     fs.rmSync(lock.tokenPath, { force: true });
   } catch {}
+
   try {
     fs.rmdirSync(LOCK_DIR);
   } catch {}
@@ -133,12 +151,14 @@ function ownsLock(lock) {
   return fs.existsSync(lock.tokenPath);
 }
 
-export async function getCachedBundle({ onBundle } = {}) {
+export async function getCachedBundle({ onBundle, bundler = bundle } = {}) {
   const want = currentHash();
+
   if (cacheIsValid(want)) return CACHE_DIR;
 
   fs.mkdirSync(CACHE_ROOT, { recursive: true });
   const lock = await acquireLock();
+
   try {
     if (cacheIsValid(want)) return CACHE_DIR;
 
@@ -147,22 +167,26 @@ export async function getCachedBundle({ onBundle } = {}) {
     // never leaves CACHE_DIR half-written.
     const staging = `${CACHE_DIR}.tmp-${lock.token}`;
     fs.rmSync(staging, { recursive: true, force: true });
+
     try {
-      await bundle({
+      await bundler({
         entryPoint: ENTRY_POINT,
         outDir: staging,
         publicDir: PUBLIC_DIR,
         webpackOverride,
       });
+
       if (!ownsLock(lock)) {
         throw new Error("Bundle cache lock ownership lost");
       }
+
       fs.writeFileSync(path.join(staging, ".hash"), want);
       fs.rmSync(CACHE_DIR, { recursive: true, force: true });
       fs.renameSync(staging, CACHE_DIR);
     } finally {
       fs.rmSync(staging, { recursive: true, force: true });
     }
+
     return CACHE_DIR;
   } finally {
     releaseLock(lock);

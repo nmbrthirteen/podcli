@@ -649,7 +649,7 @@ func downloadOnce(url, tmp, label string, client *http.Client) (bool, error) {
 	case http.StatusRequestedRangeNotSatisfiable:
 		return true, nil // already complete on disk
 	case http.StatusOK:
-		if start > 0 { // server ignored Range or the file changed — restart cleanly
+		if start > 0 { // server ignored Range or the file changed: restart cleanly
 			os.Truncate(tmp, 0)
 			start = 0
 		}
@@ -716,7 +716,7 @@ func (g *stallGuard) stop() { g.timer.Stop() }
 
 // symlinkTargetInside reports whether a symlink at linkPath pointing to linkname
 // resolves within root (root has a trailing separator). Absolute targets and
-// any path that escapes via .. are rejected — this is the symlink half of the
+// any path that escapes via .. are rejected. This is the symlink half of the
 // zip-slip defense, since the path guard alone only validates the link's own
 // location, not where it points.
 func symlinkTargetInside(linkPath, linkname, root string) bool {
@@ -783,21 +783,9 @@ type ffArchive struct {
 }
 
 // Pinned, versioned upstream archives, verified by SHA-256 before extraction.
-// darwin/arm64 is absent on purpose: evermeet.cx only builds x86_64, so Apple
-// Silicon is served by our own release asset (see releaseFFmpeg).
+// darwin is absent on purpose: Intel Macs are unsupported and Apple Silicon is
+// served by our own release asset (see releaseFFmpeg).
 var ffmpegSpecs = map[string][]ffArchive{
-	"darwin/amd64": {
-		{
-			URL:    "https://evermeet.cx/ffmpeg/ffmpeg-8.1.2.zip",
-			SHA256: "e91df72a1ee7c26606f90dd2dd4dcccc6a75140ff9ea6fdd50faae828b82ba69",
-			Bins:   []string{"ffmpeg"},
-		},
-		{
-			URL:    "https://evermeet.cx/ffmpeg/ffprobe-8.1.2.zip",
-			SHA256: "399b93f0b9862f69767afa343e90c2f48d7e7958cadbb6deb76a012d0e3b7ce3",
-			Bins:   []string{"ffprobe"},
-		},
-	},
 	"linux/amd64": {
 		{
 			URL:    "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz",
@@ -1274,9 +1262,12 @@ func pythonRoot(bin string) string {
 }
 
 // pythonAssetURL resolves a python-build-standalone install_only tarball for
-// this platform via the GitHub latest-release API, so it tracks upstream
-// without a hardcoded version that rots.
-var pythonReleasesAPI = "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
+// this platform from one pinned release tag, so every install gets the same
+// interpreter. Bump pythonReleaseTag deliberately; its SHA256SUMS asset
+// supplies the checksum.
+const pythonReleaseTag = "20261026"
+
+var pythonReleasesAPI = "https://api.github.com/repos/astral-sh/python-build-standalone/releases/tags/" + pythonReleaseTag
 
 func pythonAssetURL() (url, name, sumsURL string, err error) {
 	triple, ok := pyTriples[runtime.GOOS+"/"+runtime.GOARCH]
@@ -1416,15 +1407,16 @@ func ensurePip(pybin string) error {
 }
 
 // EnsureSpeakerDeps installs the speaker-diarization stack (pyannote.audio pulls
-// torch) into the hermetic Python. Opt-in because it's a large download (~2GB)
-// most users don't need.
+// torch) plus openai-whisper into the hermetic Python. whisper.cpp skips
+// diarization, so the openai-whisper engine has to come with it. Opt-in
+// because it's a large download (~2GB) most users don't need.
 func EnsureSpeakerDeps() error {
 	bin := PythonBin()
 	if !have(bin) {
 		return fmt.Errorf("python not provisioned - run `podcli setup` first")
 	}
-	fmt.Fprintln(os.Stderr, "  installing speaker deps (pyannote.audio + torch) - large download (~2GB), several minutes")
-	cmd := exec.Command(bin, "-m", "pip", "install", "--disable-pip-version-check", "--progress-bar=on", "pyannote.audio>=3.1.0", "speechbrain")
+	fmt.Fprintln(os.Stderr, "  installing speaker deps (openai-whisper + pyannote.audio + torch) - large download (~2GB), several minutes")
+	cmd := exec.Command(bin, "-m", "pip", "install", "--disable-pip-version-check", "--progress-bar=on", "openai-whisper", "pyannote.audio>=3.1.0", "speechbrain")
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	return cmd.Run()

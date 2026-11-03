@@ -63,14 +63,19 @@ export class EpisodeState {
 
   async keyFor(videoPath: string): Promise<string | null> {
     const identity = computeVideoIdentity(resolve(videoPath));
+
     if (!identity) return null; // video not found on disk, nothing to key against
+
     return this.keyForIdentity(identity);
   }
 
   private async readAll(): Promise<DecisionsFile> {
     if (!existsSync(this.filePath)) return {};
+
     try {
       const raw = await readFile(this.filePath, "utf-8");
+
+      // SAFETY: episode-decisions.json is written only by writeAll() below, which serializes a DecisionsFile.
       return JSON.parse(raw) as DecisionsFile;
     } catch (err) {
       // A corrupt file must never silently wipe every episode's decisions.
@@ -82,6 +87,7 @@ export class EpisodeState {
         err: err instanceof Error ? err.message : String(err),
         quarantined,
       });
+
       return {};
     }
   }
@@ -95,13 +101,16 @@ export class EpisodeState {
   private enqueue<T>(step: () => Promise<T>): Promise<T> {
     const result = this.queue.then(step, step);
     this.queue = result.catch(() => {});
+
     return result;
   }
 
   async get(videoPath: string): Promise<EpisodeDecisions | null> {
     const key = await this.keyFor(videoPath);
+
     if (!key) return null;
     const all = await this.readAll();
+
     return all[key] ?? null;
   }
 
@@ -111,13 +120,16 @@ export class EpisodeState {
     decisions: Partial<Omit<EpisodeDecisions, "videoPath" | "fileSize" | "updatedAt">>,
   ): Promise<EpisodeDecisions> {
     const abs = resolve(videoPath);
+
     return this.enqueue(async () => {
       const identity = computeVideoIdentity(abs);
+
       if (!identity) throw new Error(`Video not found: ${abs}`); // nothing to key against
       const key = this.keyForIdentity(identity);
 
       const all = await this.readAll();
       const existing = all[key];
+
       const merged: EpisodeDecisions = {
         ...existing,
         ...decisions,
@@ -125,8 +137,10 @@ export class EpisodeState {
         fileSize: identity.size,
         updatedAt: Date.now(),
       };
+
       all[key] = merged;
       await this.writeAll(all);
+
       return merged;
     });
   }
@@ -134,6 +148,7 @@ export class EpisodeState {
   /** Decisions relevant to the next step that have no answer recorded yet. */
   async openQuestions(videoPath: string): Promise<OpenQuestion[]> {
     const current = await this.get(videoPath);
+
     return QUESTIONS.filter(({ field }) => current?.[field] === undefined);
   }
 }

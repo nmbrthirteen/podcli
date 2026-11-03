@@ -28,47 +28,71 @@ const MIN_REMNANT_SECONDS = 0.1;
 
 function bodyRanges(start: number, end: number, segments?: TimeRange[] | null): TimeRange[] {
   const body = (segments ?? []).filter((s) => s.end > s.start);
+
   return body.length ? body : [{ start, end }];
 }
 
 function coveringSpans(ranges: TimeRange[]): TimeRange[] {
   const spans: TimeRange[] = [];
+
   for (const r of [...ranges].sort((a, b) => a.start - b.start)) {
     const last = spans[spans.length - 1];
+
     if (last && r.start <= last.end + EDGE_TOLERANCE) last.end = Math.max(last.end, r.end);
     else spans.push({ ...r });
   }
+
   return spans;
+}
+
+/** A hook as it arrives from a request body, before any field is checked. */
+export type HookInput =
+  | { start?: number | string; end?: number | string; mode?: string }
+  | string
+  | null
+  | undefined;
+
+function isFiniteNumber(value: number | string | undefined): value is number {
+  return Number.isFinite(value);
 }
 
 /** Returns an error message, or null when the hook is renderable (or absent). */
 export function validateHook(
-  hook: unknown,
+  hook: HookInput,
   start: number,
   end: number,
   segments?: TimeRange[] | null,
 ): string | null {
   if (hook === undefined || hook === null) return null;
-  if (typeof hook !== "object") return "hook must be an object with start, end and mode";
-  const { start: hs, end: he, mode } = hook as Record<string, unknown>;
-  if (typeof hs !== "number" || !Number.isFinite(hs) || typeof he !== "number" || !Number.isFinite(he)) {
+
+  if (!(hook instanceof Object)) return "hook must be an object with start, end and mode";
+  const { start: hs, end: he, mode } = hook;
+
+  if (!isFiniteNumber(hs) || !isFiniteNumber(he)) {
     return "hook start and end must be numbers of seconds";
   }
+
   if (mode !== "repeat" && mode !== "move") return 'hook mode must be "repeat" or "move"';
+
   if (he <= hs) return "hook end must be greater than hook start";
   const length = he - hs;
+
   if (length < MIN_HOOK_SECONDS || length > MAX_HOOK_SECONDS) {
     return `hook runs ${length.toFixed(1)}s. It must run between ${MIN_HOOK_SECONDS} and ${MAX_HOOK_SECONDS} seconds.`;
   }
+
   const inside = coveringSpans(bodyRanges(start, end, segments)).some(
     (s) => s.start - EDGE_TOLERANCE <= hs && he <= s.end + EDGE_TOLERANCE,
   );
+
   if (!inside) {
     return `hook ${hs.toFixed(2)}-${he.toFixed(2)}s is not inside the clip body. Pick a passage the clip already plays.`;
   }
+
   if (mode === "move" && playbackRanges(start, end, segments, { start: hs, end: he, mode }).length < 2) {
     return "A move hook cannot take the whole clip. Use repeat, or widen the clip.";
   }
+
   return null;
 }
 
@@ -84,10 +108,13 @@ export function playbackRanges(
   hook?: ClipHook | null,
 ): TimeRange[] {
   const body = bodyRanges(start, end, segments).map((s) => ({ start: s.start, end: s.end }));
+
   if (!hook) return body;
   const head = { start: hook.start, end: hook.end };
+
   if (hook.mode === "repeat") return [head, ...body];
   const rest: TimeRange[] = [];
+
   for (const s of body) {
     for (const [a, b] of [
       [s.start, Math.min(s.end, hook.start)],
@@ -96,6 +123,7 @@ export function playbackRanges(
       if (b - a >= MIN_REMNANT_SECONDS) rest.push({ start: a, end: b });
     }
   }
+
   return [head, ...rest];
 }
 

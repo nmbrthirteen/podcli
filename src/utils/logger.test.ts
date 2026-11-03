@@ -3,16 +3,16 @@ import { logger, childLogger } from "./logger.js";
 
 describe("logger", () => {
   it("exposes winston-compatible levels", () => {
-    expect(typeof logger.info).toBe("function");
-    expect(typeof logger.warn).toBe("function");
-    expect(typeof logger.error).toBe("function");
-    expect(typeof logger.debug).toBe("function");
+    expect(logger.info).toBeInstanceOf(Function);
+    expect(logger.warn).toBeInstanceOf(Function);
+    expect(logger.error).toBeInstanceOf(Function);
+    expect(logger.debug).toBeInstanceOf(Function);
   });
 
   it("childLogger tags messages with the module name", () => {
     const child = childLogger("test-mod");
     expect(child).toBeDefined();
-    expect(typeof child.info).toBe("function");
+    expect(child.info).toBeInstanceOf(Function);
   });
 
   it("respects PODCLI_LOG_LEVEL default (debug in dev)", () => {

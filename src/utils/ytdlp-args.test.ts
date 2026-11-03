@@ -53,6 +53,7 @@ describe("buildYtDlpArgs", () => {
       cookiesFromBrowser: "firefox",
       extractorArgs: "youtube:player_client=android",
     });
+
     expect(args[args.indexOf("--cookies-from-browser") + 1]).toBe("firefox");
     expect(args[args.indexOf("--extractor-args") + 1]).toBe("youtube:player_client=android");
   });

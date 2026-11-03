@@ -12,13 +12,14 @@ Copy `.env.example` to `.env`, or export these in your shell. `setup.sh` copies 
 | `PODCLI_QUALITY` | `high` | Render quality profile |
 | `PODCLI_NO_UPDATE` | unset | Set to `1` to skip the update check. Same as `podcli config set update.auto off` |
 | `PODCLI_LOG_LEVEL` | `info` | Logging verbosity |
+| `PODCLI_CLOUD_SYNC` | unset (off) | Set to `1` to upload each rendered clip video and transcript slice to your podcli Pro workspace. Applies only when signed in |
 | `PODCLI_PORT` | `3847` | Web studio port. `PORT` also works. Set it in the MCP client's env too, or the MCP tools render without live studio progress |
 | `HF_TOKEN` | unset | Hugging Face token, required for speaker diarization |
 | `PODCLI_ENV_FILE` | `./.env` | Path to an alternate `.env` |
 | `PODCLI_BACKEND` | resolved | Override the Python backend directory |
 | `PODCLI_PYTHON` | resolved | Override the Python interpreter. The launcher exports the resolved path as `PYTHON_PATH` for internal use |
 | `PODCLI_TRANSITION_AUTOFIX_PASSES` | auto | Transition QA/autofix passes. Runs only on reframes that can produce hard cuts. Set a number to force it, `0` disables; the renderer caps it at 2 |
-| `PODCLI_FACE_WORKERS` | auto | Threads used for face detection during reframing. Auto sizes by core count (max 12) and by clip length, so short clips stay serial rather than paying to build detectors they cannot amortize. Set `1` to force serial — the first thing to try when bisecting a framing regression, since it changes speed only, never the result |
+| `PODCLI_FACE_WORKERS` | auto | Threads used for face detection during reframing. Auto sizes by core count (max 12) and by clip length, so short clips stay serial rather than paying to build detectors they cannot amortize. Set `1` to force serial, the first thing to try when bisecting a framing regression, since it changes speed only, never the result |
 | `PODCLI_CROP_DUMP` | unset | Directory to write each clip's computed camera path to as `<clip>.crop.json`. Diagnostics only; use it to diff framing decisions before and after a change |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | Override the FFmpeg binaries |
 

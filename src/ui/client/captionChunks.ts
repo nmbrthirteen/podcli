@@ -75,6 +75,7 @@ function hasBreakBetween(words: PreviewWord[], from: number, to: number): boolea
   for (let i = from; i < to; i++) {
     if (breaksAfter(words[i], words[i + 1])) return true;
   }
+
   return false;
 }
 
@@ -92,11 +93,14 @@ export function buildPreviewChunks(
 
     while (end < words.length && end - i < cfg.wordsPerChunk) {
       if (breaksAfter(words[end - 1], words[end])) break;
+
       if (cfg.maxCharsPerChunk != null) {
         const nextChars = charCount + 1 + words[end].text.trim().length;
+
         if (nextChars > cfg.maxCharsPerChunk) break;
         charCount = nextChars;
       }
+
       end += 1;
     }
 
@@ -108,6 +112,7 @@ export function buildPreviewChunks(
     ) {
       end = words.length;
     }
+
     if (cfg.splitTail && words.length - end === 1 && end - i > 2) {
       end -= 1;
     }
@@ -120,9 +125,11 @@ export function buildPreviewChunks(
 
   for (let k = 0; k < chunks.length; k++) {
     const next = chunks[k + 1];
+
     const hold = next
       ? Math.min(next.start, chunks[k].end + GAP_FILL_MAX_SECONDS)
       : chunks[k].end + LAST_CHUNK_HOLD_SECONDS;
+
     const capped = clipEnd != null ? Math.min(hold, clipEnd) : hold;
     chunks[k].displayEnd = Math.max(chunks[k].end, capped);
   }
@@ -140,6 +147,7 @@ export function activePreviewChunk(
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
     const chunk = chunks[middle];
+
     if (time < chunk.start) {
       high = middle - 1;
     } else if (time >= chunk.displayEnd) {

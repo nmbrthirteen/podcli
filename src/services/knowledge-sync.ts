@@ -20,7 +20,7 @@ const STATE_FILE = "knowledge-sync.json";
  * Version of each file as of the last successful sync.
  *
  * Without this there is no way to tell "I edited this" from "they edited this"
- * — both just look like a difference — and every sync would either clobber
+ * because both just look like a difference, and every sync would either clobber
  * someone or refuse to do anything.
  */
 type SyncState = Record<string, number>;
@@ -45,6 +45,7 @@ async function saveState(state: SyncState): Promise<void> {
 function insideKnowledge(path: string): string | null {
   const root = resolve(paths.knowledge);
   const target = resolve(root, path);
+
   return target.startsWith(root + sep) ? target : null;
 }
 
@@ -62,10 +63,13 @@ async function localFiles(): Promise<string[]> {
   if (!existsSync(paths.knowledge)) return [];
 
   const found: string[] = [];
+
   const walk = async (dir: string): Promise<void> => {
     const entries = await readdir(dir, { withFileTypes: true });
+
     for (const entry of entries) {
       const full = join(dir, entry.name);
+
       if (entry.isDirectory()) await walk(full);
       else if (entry.isFile() && entry.name.endsWith(".md")) {
         found.push(relative(paths.knowledge, full).split(sep).join("/"));
@@ -74,6 +78,7 @@ async function localFiles(): Promise<string[]> {
   };
 
   await walk(paths.knowledge);
+
   return found.sort();
 }
 
@@ -85,33 +90,40 @@ export type KnowledgeSyncReport = {
   failed: Array<{ path: string; reason: string }>;
 };
 
-export async function sync(): Promise<KnowledgeSyncReport> {
+/** The workspace calls knowledge sync makes. Tests pass a stand-in instead of the hosted API. */
+export type KnowledgeCloud = Pick<typeof cloud, "signedIn" | "listKnowledge" | "getKnowledge" | "putKnowledge">;
+
+export async function sync(client: KnowledgeCloud = cloud): Promise<KnowledgeSyncReport> {
   const report: KnowledgeSyncReport = {
     pushed: [], pulled: [], unchanged: [], conflicts: [], failed: [],
   };
-  if (!(await cloud.signedIn())) return report;
+
+  if (!(await client.signedIn())) return report;
 
   const state = await loadState();
-  const remote = new Map((await cloud.listKnowledge()).map((f) => [f.path, f]));
+  const remote = new Map((await client.listKnowledge()).map((f) => [f.path, f]));
   const local = await localFiles();
   const localSet = new Set(local);
 
   // Reconciled before anything is pushed. podcli ships default knowledge files,
   // so a machine that has never synced has a full set of boilerplate that would
-  // otherwise be pushed straight over the workspace's real one — the server
+  // otherwise be pushed straight over the workspace's real one: the server
   // skips its conflict check when no expectedVersion is sent.
   const unresolved = new Set<string>();
+
   for (const [path, meta] of remote) {
     const target = insideKnowledge(path);
+
     if (!target) {
       report.failed.push({ path, reason: "path escapes the knowledge folder" });
       unresolved.add(path);
       continue;
     }
+
     if (state[path] !== undefined) continue;
 
     try {
-      const file = await cloud.getKnowledge(path);
+      const file = await client.getKnowledge(path);
       const version = file.version ?? meta.version;
 
       if (!localSet.has(path)) {
@@ -126,6 +138,7 @@ export async function sync(): Promise<KnowledgeSyncReport> {
       // content is simply adopted; otherwise the workspace copy lands beside
       // the local one and a human decides.
       const mine = await readFile(target, "utf-8");
+
       if (mine === file.content) {
         state[path] = version;
         report.unchanged.push(path);
@@ -134,6 +147,7 @@ export async function sync(): Promise<KnowledgeSyncReport> {
           file.content, "utf-8");
         report.conflicts.push({ path, theirVersion: version });
       }
+
       unresolved.add(path);
     } catch (err) {
       report.failed.push({ path, reason: err instanceof Error ? err.message : String(err) });
@@ -145,8 +159,10 @@ export async function sync(): Promise<KnowledgeSyncReport> {
     if (unresolved.has(path)) continue;
     const content = await readFile(join(paths.knowledge, path), "utf-8");
     const known = state[path];
+
     try {
-      const result = await cloud.putKnowledge(path, content, known);
+      const result = await client.putKnowledge(path, content, known);
+
       if (result.conflict) {
         // Neither copy is discarded. The workspace version is written beside
         // the local one so a human can compare and merge; nobody's work is
@@ -158,7 +174,9 @@ export async function sync(): Promise<KnowledgeSyncReport> {
         report.conflicts.push({ path, theirVersion: version });
         continue;
       }
+
       state[path] = result.version;
+
       if (result.unchanged) report.unchanged.push(path);
       else report.pushed.push(path);
     } catch (err) {
@@ -168,5 +186,6 @@ export async function sync(): Promise<KnowledgeSyncReport> {
 
 
   await saveState(state);
+
   return report;
 }

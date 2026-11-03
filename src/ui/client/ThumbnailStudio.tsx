@@ -31,8 +31,10 @@ export default function ThumbnailStudio() {
 
   const browse = async () => {
     setBusy("browse"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await api("/browse-file");
+
       if (r.file_path) setVideo({ path: r.file_path, name: r.filename || basename(r.file_path) });
     } catch (e: any) {
       if (e.message !== "cancelled") { setMsg(`Browse failed: ${e.message}`); setMsgErr(true); }
@@ -41,11 +43,14 @@ export default function ThumbnailStudio() {
 
   const uploadFile = async (f: File) => {
     setBusy("upload"); setMsg(null); setMsgErr(false);
+
     try {
       const fd = new FormData();
       fd.append("file", f);
       const r = await upload<any>("/upload", fd);
+
       if (!r.file_path) throw new Error("upload failed");
+
       if (isImage(f.name)) {
         setSelFrame({ path: r.file_path });
         setPreview(null);
@@ -57,8 +62,14 @@ export default function ThumbnailStudio() {
   };
 
   const loadOptions = async () => {
-    if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); setMsgErr(true); return; }
+    if (!title.trim()) {
+      setMsg("Enter a title first, headlines are written from it"); setMsgErr(true);
+
+      return;
+    }
+
     setBusy("options"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await api("/thumbnail-studio/options", {
         method: "POST",
@@ -69,18 +80,27 @@ export default function ThumbnailStudio() {
           end: endS !== "" ? Number(endS) : undefined,
         }),
       });
+
       setTextOpts(r.texts || []);
       setFrameOpts(r.frames || []);
       setBust(Date.now());
+
       if ((r.frames || []).length) setSelFrame({ path: r.frames[0].path, info: r.frames[0] });
+
       if (!(r.texts || []).length && !(r.frames || []).length) { setMsg("No options. Is the AI CLI installed? Pick a video for frame options."); setMsgErr(true); }
       else if (r.warning) { setMsg(r.warning); setMsgErr(true); }
     } catch (e: any) { setMsg(`Options failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const render = async () => {
-    if (!selFrame) { setMsg("Select a frame or upload an image first"); setMsgErr(true); return; }
+    if (!selFrame) {
+      setMsg("Select a frame or upload an image first"); setMsgErr(true);
+
+      return;
+    }
+
     setBusy("render"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await api("/thumbnail-studio/render", {
         method: "POST",
@@ -92,6 +112,7 @@ export default function ThumbnailStudio() {
           frame_info: selFrame.info,
         }),
       });
+
       if (!r.path) throw new Error("no thumbnail produced");
       setPreview(r.path);
       setBust(Date.now());
@@ -100,13 +121,20 @@ export default function ThumbnailStudio() {
   };
 
   // Pull a different frame from the source (cycles the ranked candidates) and
-  // re-render — same one-click flow as Regenerate, but swaps the background frame.
+  // re-render: same one-click flow as Regenerate, but swaps the background frame.
   const newFrame = async () => {
     setBusy("newframe"); setMsg(null); setMsgErr(false);
+
     try {
       let frames = frameOpts;
+
       if (!frames.length) {
-        if (!title.trim()) { setMsg("Enter a title first, headlines are written from it"); setMsgErr(true); return; }
+        if (!title.trim()) {
+          setMsg("Enter a title first, headlines are written from it"); setMsgErr(true);
+
+          return;
+        }
+
         const r = await api("/thumbnail-studio/options", {
           method: "POST",
           body: JSON.stringify({
@@ -116,20 +144,30 @@ export default function ThumbnailStudio() {
             end: endS !== "" ? Number(endS) : undefined,
           }),
         });
+
         frames = r.frames || [];
         setFrameOpts(frames);
+
         if ((r.texts || []).length) setTextOpts(r.texts);
       }
-      if (!frames.length) { setMsg("No frames found. Pick a video source first."); setMsgErr(true); return; }
+
+      if (!frames.length) {
+        setMsg("No frames found. Pick a video source first."); setMsgErr(true);
+
+        return;
+      }
+
       const curIdx = frames.findIndex((f: any) => f.path === selFrame?.path);
       const next = ((curIdx < 0 ? frameIdx : curIdx) + 1) % frames.length;
       setFrameIdx(next);
       const frame = frames[next];
       setSelFrame({ path: frame.path, info: frame });
+
       const r = await api("/thumbnail-studio/render", {
         method: "POST",
         body: JSON.stringify({ title, line1: line1 || undefined, line2: line2 || undefined, frame_path: frame.path, frame_info: frame }),
       });
+
       if (!r.path) throw new Error("no thumbnail produced");
       setPreview(r.path);
       setBust(Date.now());

@@ -1,18 +1,20 @@
 # Hermetic native-CLI runtime deps. Transcription is whisper.cpp (a native
-# binary), so openai-whisper/torch are intentionally absent — that is the ~2GB
+# binary), so openai-whisper/torch are intentionally absent. That is the ~2GB
 # the native install saves. --engine whisper-py remains a dev/source-only option
 # via backend/requirements.txt.
-opencv-python-headless>=4.8.1.78
-numpy>=2.5.2
-# Audio-event detection (YAMNet laughter/reaction channel) runs on ONNX Runtime —
+# Direct dependencies are pinned to the versions the previous ranges resolved
+# to on 2026-11-03. Transitive dependencies still float. Bump deliberately.
+opencv-python-headless==5.0.0.93
+numpy==2.5.4
+# Audio-event detection (YAMNet laughter/reaction channel) runs on ONNX Runtime,
 # no torch/TF, so it stays on the hermetic native path.
-onnxruntime>=1.28.0
+onnxruntime==1.31.1
 # --engine omnilingual: Meta's Omnilingual ASR CTC model via sherpa-onnx, for
 # languages whisper.cpp handles poorly. No torch, stays on the hermetic path.
-sherpa-onnx>=1.13.8
-Pillow>=12.3.0
-questionary>=2.1.1
-python-dotenv>=1.2.2
-yt-dlp>=2026.7.4
-google-api-python-client>=2.198.0
-google-auth-oauthlib>=1.4.0
+sherpa-onnx==2.0.1
+Pillow==13.0.0
+questionary==2.1.1
+python-dotenv==1.2.4
+yt-dlp==2026.10.26
+google-api-python-client==2.201.0
+google-auth-oauthlib==1.5.0

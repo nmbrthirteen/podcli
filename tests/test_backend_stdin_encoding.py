@@ -15,7 +15,7 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parent.parent / "backend"
 MAIN = BACKEND / "main.py"
 
-TITLE = "In the end — your “shit” has to work"
+TITLE = "In the end \u2014 your “shit” has to work"
 
 
 def _run_with_locale_encoding(payload: str) -> subprocess.CompletedProcess:

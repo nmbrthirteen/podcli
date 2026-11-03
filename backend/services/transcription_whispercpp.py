@@ -2,7 +2,7 @@
 
 Tokens carry a leading-space convention (" and", continuations have none); we
 merge on that boundary and strip word text. The strip must match the rest of the
-pipeline exactly — apply_corrections() and caption spacing key on stripped text.
+pipeline exactly: apply_corrections() and caption spacing key on stripped text.
 """
 
 import json

@@ -83,7 +83,7 @@ class TranscriptionEngineTests(unittest.TestCase):
 
     def test_whispercpp_skips_diarization_by_default(self):
         # Regression: the cpp path must not attempt torch-backed diarization even
-        # with the default enable_diarization=True — importing a broken torch in a
+        # with the default enable_diarization=True: importing a broken torch in a
         # native runtime hard-crashes the process. Face analysis still runs.
         os.environ["PODCLI_ENGINE"] = "whispercpp"
         result = tr.transcribe_file(self._tmp.name, model_size="base")

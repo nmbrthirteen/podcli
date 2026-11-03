@@ -1,4 +1,4 @@
-"""Tests for backend.main batch clip rendering — worker pool sizing, result
+"""Tests for backend.main batch clip rendering, worker pool sizing, result
 ordering, and clip_complete events for both outcomes."""
 
 import os
