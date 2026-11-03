@@ -80,6 +80,7 @@ export const SubtleCaptions: React.FC<Props> = ({
     absorbTail: 2,
     clipEnd: durationInFrames / fps,
   });
+
   const activeChunk = activeChunkAt(chunks, currentTime);
 
   if (!activeChunk) return null;
@@ -97,6 +98,7 @@ export const SubtleCaptions: React.FC<Props> = ({
     Math.ceil(activeChunk.words.length / 2),
     singleLine,
   );
+
   return (
     <div
       style={{

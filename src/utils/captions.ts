@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { WordTimestamp } from "../models/index.js";
 
 export interface CaptionCue {
@@ -35,14 +36,18 @@ export function selectBestCaptionTrack(
   ): SelectedCaptionTrack | null => {
     if (!dict) return null;
     const langs = Object.keys(dict);
+
     if (langs.length === 0) return null;
     const lang = langs.find((l) => l.endsWith("-orig")) ?? langs[0];
     const tracks = dict[lang];
+
     if (!tracks?.length) return null;
     // json3 carries a start time per word; vtt only per cue.
     const best = tracks.find((t) => t.ext === "json3") ?? tracks.find((t) => t.ext === "vtt") ?? tracks[0];
+
     return { lang, kind, ext: best.ext, url: best.url };
   };
+
   return pick(subtitles, "manual") ?? pick(automaticCaptions, "auto");
 }
 
@@ -55,25 +60,32 @@ export function selectBestCaptionTrack(
 export function parseVtt(vtt: string): CaptionCue[] {
   const timeToSeconds = (t: string): number => {
     const m = t.trim().match(/(?:(\d+):)?(\d+):(\d+)\.(\d+)/);
+
     if (!m) return 0;
     const [, h, mm, ss, ms] = m;
+
     return (Number(h) || 0) * 3600 + Number(mm) * 60 + Number(ss) + Number(ms) / 1000;
   };
+
   const stripTags = (s: string): string => s.replace(/<[^>]*>/g, "").trim();
 
   const blocks = vtt.replace(/\r\n/g, "\n").split(/\n\n+/);
   const cues: CaptionCue[] = [];
+
   for (const block of blocks) {
     const lines = block.split("\n").filter((l) => l.trim().length > 0);
     const timeLineIdx = lines.findIndex((l) => l.includes("-->"));
+
     if (timeLineIdx === -1) continue;
     const [startRaw, endRaw] = lines[timeLineIdx].split("-->");
     const start = timeToSeconds(startRaw);
     const end = timeToSeconds(endRaw.trim().split(/\s+/)[0] ?? endRaw);
     const text = stripTags(lines.slice(timeLineIdx + 1).join(" "));
+
     if (!text) continue;
     cues.push({ start, end, text });
   }
+
   return cues;
 }
 
@@ -85,8 +97,10 @@ export function parseVtt(vtt: string): CaptionCue[] {
  */
 function cueToWords(cue: CaptionCue): WordTimestamp[] {
   const words = captionTokens(cue.text);
+
   if (words.length === 0) return [];
   const step = (cue.end - cue.start) / words.length;
+
   return words.map((word, i) => ({
     word,
     start: cue.start + i * step,
@@ -109,22 +123,37 @@ function cueToWords(cue: CaptionCue): WordTimestamp[] {
 export function cuesToWords(cues: CaptionCue[]): WordTimestamp[] {
   const kept: CaptionCue[] = [];
   let tail: string[] = [];
+
   for (const cue of cues) {
     if (cue.end - cue.start < 0.05) continue;
     const words = captionTokens(cue.text);
     let overlap = Math.min(words.length, tail.length);
+
     while (overlap > 0 && tail.slice(-overlap).join(" ") !== words.slice(0, overlap).join(" ")) overlap--;
     const fresh = words.slice(overlap);
     tail = [...tail, ...fresh].slice(-64);
+
     if (fresh.length) kept.push({ ...cue, text: fresh.join(" ") });
   }
+
   return kept.flatMap(cueToWords);
 }
 
-interface Json3Event {
-  tStartMs?: number;
-  dDurationMs?: number;
-  segs?: Array<{ utf8?: string; tOffsetMs?: number }>;
+const json3Schema = z.looseObject({
+  events: z
+    .array(
+      z.looseObject({
+        tStartMs: z.number().optional(),
+        dDurationMs: z.number().optional(),
+        segs: z.array(z.looseObject({ utf8: z.string().optional(), tOffsetMs: z.number().optional() })).optional(),
+      }),
+    )
+    .optional(),
+});
+
+export interface ParsedCaptions {
+  words: WordTimestamp[];
+  segments: CaptionCue[];
 }
 
 /**
@@ -149,17 +178,20 @@ export function captionTokens(text: string): string[] {
  * event before the old one closes), so words are ordered by start and each
  * ends where the next begins.
  */
-export function parseJson3(raw: string): { words: WordTimestamp[]; segments: CaptionCue[] } {
-  const events = (JSON.parse(raw) as { events?: Json3Event[] }).events ?? [];
+export function parseJson3(raw: string): ParsedCaptions {
+  const events = json3Schema.parse(JSON.parse(raw)).events ?? [];
   const words: WordTimestamp[] = [];
   const segments: CaptionCue[] = [];
+
   for (const ev of events) {
     const evStart = (ev.tStartMs ?? 0) / 1000;
     const evEnd = evStart + (ev.dDurationMs ?? 0) / 1000;
+
     const segs = (ev.segs ?? []).map((seg) => ({
       tokens: captionTokens(seg.utf8 ?? ""),
       start: evStart + (seg.tOffsetMs ?? 0) / 1000,
     }));
+
     const evWords: WordTimestamp[] = [];
     segs.forEach((seg, i) => {
       const segEnd = Math.max(seg.start, Math.min(segs[i + 1]?.start ?? evEnd, evEnd));
@@ -168,15 +200,19 @@ export function parseJson3(raw: string): { words: WordTimestamp[]; segments: Cap
         evWords.push({ word, start: seg.start + k * step, end: seg.start + (k + 1) * step, confidence: 1 }),
       );
     });
+
     if (!evWords.length) continue;
     words.push(...evWords);
     segments.push({ start: evStart, end: evEnd, text: evWords.map((w) => w.word).join(" ") });
   }
+
   words.sort((a, b) => a.start - b.start);
   words.forEach((w, i) => {
     const next = words[i + 1];
+
     if (next && w.end > next.start) w.end = next.start;
   });
   segments.sort((a, b) => a.start - b.start);
+
   return { words, segments };
 }

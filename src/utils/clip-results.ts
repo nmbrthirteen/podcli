@@ -1,6 +1,7 @@
 import type { BatchClipsResult } from "../models/index.js";
 
 type ClipResultRow = BatchClipsResult["results"][number];
+
 export type ClipBounds = { start_second: number; end_second: number };
 
 // Python numbers its result rows by position in the clips array it was handed,
@@ -13,9 +14,10 @@ export function tagSubmittedClip(
   row: ClipResultRow,
   clipSpecs?: ClipBounds[],
 ): ClipResultRow {
-  const spec =
-    typeof row.clip_index === "number" ? clipSpecs?.[row.clip_index] : undefined;
+  const spec = row.clip_index !== undefined ? clipSpecs?.[row.clip_index] : undefined;
+
   if (!spec) return row;
+
   return {
     ...row,
     source_start_second: spec.start_second,
@@ -28,6 +30,7 @@ export function tagSubmittedClips(
   clipSpecs?: ClipBounds[],
 ): BatchClipsResult | undefined {
   if (!data?.results) return data;
+
   return {
     ...data,
     results: data.results.map((row) => tagSubmittedClip(row, clipSpecs)),
@@ -37,6 +40,7 @@ export function tagSubmittedClips(
 // Clips render in parallel, so each worker reports its own share of the batch and
 // the percentages arrive out of order. Only ever move the bar forward.
 export function advanceProgress(job: { progress: number }, percent: number): number {
-  if (typeof percent === "number" && percent > job.progress) job.progress = percent;
+  if (percent > job.progress) job.progress = percent;
+
   return job.progress;
 }

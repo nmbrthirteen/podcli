@@ -32,6 +32,7 @@ describe("webpackOverride", () => {
   it("pins tsconfigRaw on every esbuild-loader rule", () => {
     const entries = esbuildEntries(webpackOverride(remotionLikeConfig()));
     expect(entries).toHaveLength(1);
+
     for (const entry of entries) {
       expect(entry.options.tsconfigRaw).toBeDefined();
     }
@@ -63,6 +64,7 @@ describe("webpackOverride", () => {
         ],
       },
     });
+
     expect(config.module.rules[0].type).toBe("asset/inline");
     expect(config.module.rules[1].type).toBe("asset/resource");
   });

@@ -181,10 +181,12 @@ export type Card =
  */
 export const cardAt = (cards: Card[], seconds: number): Card | null => {
   let found: Card | null = null;
+
   for (const card of cards) {
     if (seconds >= card.start && seconds < card.end) {
       if (!found || card.start >= found.start) found = card;
     }
   }
+
   return found;
 };

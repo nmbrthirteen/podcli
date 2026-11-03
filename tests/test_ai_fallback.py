@@ -253,7 +253,7 @@ class AIFallbackTests(unittest.TestCase):
         codex_text = """TITLES (8 options, 40-60 chars, keyword-first, follow title spec):
 1. Power Demand Is Exploding Fast
 2. Data Centers Need Much More Energy
-TOP PICK: 1 — strongest hook
+TOP PICK: 1 \u2014 strongest hook
 
 DESCRIPTION:
 Power demand is exploding.
@@ -469,6 +469,8 @@ class AICliDiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             prompt_file = os.path.join(tmp, "prompt.txt")
             cli = os.path.join(tmp, "codex")
+            with open(prompt_file, "w", encoding="utf-8") as fh:
+                fh.write("find clips")
 
             with mock.patch("services.ai_cli.subprocess.run") as run_mock:
                 run_mock.return_value = subprocess.CompletedProcess(
@@ -494,9 +496,10 @@ class AICliDiscoveryTests(unittest.TestCase):
                     "--sandbox", "read-only",
                     "--skip-git-repo-check",
                     "-o", prompt_file + ".out",
-                    "find clips",
+                    "-",
                 ],
             )
+            self.assertIn("stdin", kwargs)
             self.assertNotIn("--full-auto", args[0])
             self.assertEqual(kwargs["cwd"], tmp)
 

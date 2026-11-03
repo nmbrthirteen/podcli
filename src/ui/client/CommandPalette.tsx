@@ -52,9 +52,11 @@ export default function CommandPalette() {
         setOpen((v) => !v);
       }
     };
+
     const onTrigger = () => setOpen(true);
     window.addEventListener("keydown", onKey);
     window.addEventListener("open-command-palette", onTrigger);
+
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("open-command-palette", onTrigger);
@@ -64,6 +66,7 @@ export default function CommandPalette() {
   useEffect(() => {
     if (!open) return;
     inputRef.current?.focus();
+
     if (loaded.current) return;
     Promise.allSettled([
       api<{ id: string; title: string }[]>("/history?limit=100").then((h) => setClips(h || [])),
@@ -78,32 +81,42 @@ export default function CommandPalette() {
 
   const results = useMemo<Cmd[]>(() => {
     const q = query.trim().toLowerCase();
+
     const pageCmds: Cmd[] = PAGES.map((p) => ({
       id: `p:${p.path}`, label: p.label, group: "Pages", keywords: p.kw,
       run: () => navigate(p.path),
     }));
+
     const clipCmds: Cmd[] = clips.map((c) => ({
       id: `c:${c.id}`, label: c.title || "Untitled clip", sub: "Clip", group: "Clips",
       run: () => navigate(`/clip/${c.id}`),
     }));
+
     const assetCmds: Cmd[] = assets.map((a) => ({
       id: `a:${a.name}`, label: a.name, sub: a.type, group: "Assets",
       run: () => navigate("/assets"),
     }));
+
     const all = [...pageCmds, ...clipCmds, ...assetCmds];
+
     if (!q) return pageCmds;
+
     const match = (c: Cmd) =>
       c.label.toLowerCase().includes(q) ||
       (c.sub?.toLowerCase().includes(q) ?? false) ||
       (c.keywords?.includes(q) ?? false);
+
     return all.filter(match).slice(0, 24);
   }, [query, clips, assets, navigate]);
 
   const groups = useMemo(() => {
     const order: Cmd["group"][] = ["Pages", "Clips", "Assets"];
-    return order
-      .map((g) => ({ group: g, items: results.filter((r) => r.group === g) }))
-      .filter((g) => g.items.length > 0);
+
+    return order.flatMap((g) => {
+      const items = results.filter((r) => r.group === g);
+
+      return items.length > 0 ? [{ group: g, items }] : [];
+    });
   }, [results]);
 
   const flat = results;
@@ -138,6 +151,7 @@ export default function CommandPalette() {
               <div className="cmdk-group-label">{g.group}</div>
               {g.items.map((c) => {
                 const idx = flat.indexOf(c);
+
                 return (
                   <button
                     key={c.id}

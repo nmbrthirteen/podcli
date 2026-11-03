@@ -1,4 +1,4 @@
-"""Tests for backend.presets — named show configurations."""
+"""Tests for backend.presets: named show configurations."""
 
 import json
 import os
@@ -50,7 +50,7 @@ class PresetsTests(unittest.TestCase):
         self.assertEqual(loaded["whisper_model"], presets.DEFAULT_PRESET["whisper_model"])
 
     def test_get_preset_default_returns_copy(self):
-        # "default" is special — returns a fresh copy of DEFAULT_PRESET
+        # "default" is special: returns a fresh copy of DEFAULT_PRESET
         d = presets.get_preset("default")
         self.assertEqual(d, presets.DEFAULT_PRESET)
         # Mutating the returned dict must not affect subsequent calls

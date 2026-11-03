@@ -6,7 +6,7 @@ Resolve quirks the emitter routes around:
   - Composite-mode / blend-mode attributes are silently dropped. Alpha is carried
     by the asset itself (ProRes 4444); Resolve auto-detects and composites normal.
   - PNG image sequences import as one-frame-per-clip. Use single video files.
-  - Avoid any Studio-only effect node — Resolve 20.2 watermarks the timeline
+  - Avoid any Studio-only effect node: Resolve 20.2 watermarks the timeline
     if it sees one, even if unused.
   - Pin to FCPXML 1.10; 1.11+ have intermittent import failures.
 """
@@ -35,7 +35,7 @@ def emit(project: Project, out_path: Path) -> Path:
         next_asset += 1
         resources.append(fx.make_asset(
             asset_id=src_id,
-            name=f"{short.title} — source",
+            name=f"{short.title}: source",
             media_path=short.source.path,
             frames=short.source.duration_frames,
             fps=short.source.fps,
@@ -51,7 +51,7 @@ def emit(project: Project, out_path: Path) -> Path:
             next_asset += 1
             resources.append(fx.make_asset(
                 asset_id=cid,
-                name=f"{short.title} — captions",
+                name=f"{short.title}: captions",
                 media_path=short.captions.path,
                 frames=short.captions.duration_frames,
                 fps=short.captions.fps,
@@ -67,7 +67,7 @@ def emit(project: Project, out_path: Path) -> Path:
             next_asset += 1
             resources.append(fx.make_asset(
                 asset_id=lid,
-                name=f"{short.title} — logo",
+                name=f"{short.title}: logo",
                 media_path=short.logo.path,
                 frames=short.logo.duration_frames,
                 fps=short.logo.fps,

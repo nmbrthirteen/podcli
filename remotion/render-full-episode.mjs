@@ -20,11 +20,14 @@ import path from "node:path";
 
 const parseArgs = () => {
   const out = {};
+
   for (let i = 2; i < process.argv.length; i += 2) {
     const key = process.argv[i]?.replace(/^--/, "");
     const value = process.argv[i + 1];
+
     if (key && value) out[key] = value;
   }
+
   return out;
 };
 
@@ -39,17 +42,22 @@ const run = (command, args) => {
     stdio: ["ignore", "pipe", "pipe"],
     timeout: STEP_TIMEOUT_MS,
   });
+
   const name = path.basename(command);
+
   if (result.error) {
     const reason = result.error.code === "ETIMEDOUT"
       ? `timed out after ${STEP_TIMEOUT_MS / 60000} minutes`
       : result.error.message;
+
     throw new Error(`${name} failed: ${reason}`);
   }
+
   if (result.status !== 0) {
     const detail = (result.stderr || result.stdout || "unknown error").trim().slice(-3000);
     throw new Error(`${name} failed (${result.status}): ${detail}`);
   }
+
   return (result.stdout || "").trim();
 };
 
@@ -59,10 +67,12 @@ const progress = (percent, message) => {
 
 const quoteConcatPath = (filePath) => {
   const normalized = filePath.replaceAll("\\", "/");
+
   return `'${normalized.replaceAll("'", "'\\''")}'`;
 };
 
 const args = parseArgs();
+
 for (const required of ["video", "words", "output", "ffmpeg", "ffprobe"]) {
   if (!args[required]) throw new Error(`Missing --${required}`);
 }
@@ -74,49 +84,66 @@ const partialOutput = `${output}.partial.mp4`;
 const logo = args.logo ? path.resolve(args.logo) : null;
 const styleName = args.style || "branded";
 const captionPosition = args["caption-position"] || "auto";
+
 // Mirrors the 60-160 clamp in backend/services/caption_renderer.py so the ASS
 // and Remotion caption paths render the same size for a given request.
 const rawFontScale = Number(args["caption-font-scale"]);
+
 const captionFontScale = Number.isFinite(rawFontScale)
   ? Math.min(160, Math.max(60, rawFontScale))
   : 100;
+
 const logoPosition = args["logo-position"] || "top-left";
 const fps = Number(args.fps || 30);
 const chunkSeconds = Number(args["chunk-seconds"] || 15);
 
 if (fs.existsSync(output)) throw new Error(`Refusing to overwrite existing output: ${output}`);
+
 if (!fs.existsSync(video)) throw new Error(`Video not found: ${video}`);
+
 if (!fs.existsSync(wordsPath)) throw new Error(`Words JSON not found: ${wordsPath}`);
+
 if (logo && !fs.existsSync(logo)) throw new Error(`Logo not found: ${logo}`);
+
 if (!(fps > 0) || !(chunkSeconds > 0)) throw new Error("fps and chunk-seconds must be positive");
 
 const wordsData = JSON.parse(fs.readFileSync(wordsPath, "utf8"));
 const words = Array.isArray(wordsData) ? wordsData : wordsData.words || [];
 const faceY = Array.isArray(wordsData) ? null : wordsData.faceY ?? null;
+
 const dimensions = run(args.ffprobe, [
   "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
   "-of", "csv=s=x:p=0", video,
 ]);
+
 const [width, height] = dimensions.split("x").map(Number);
+
 const duration = Number(run(args.ffprobe, [
   "-v", "error", "-show_entries", "format=duration",
   "-of", "default=noprint_wrappers=1:nokey=1", video,
 ]));
+
 if (!(width > 0 && height > 0 && duration > 0)) throw new Error("Could not probe video");
 
 const durationInFrames = Math.ceil(duration * fps);
 const framesPerChunk = Math.max(1, Math.round(chunkSeconds * fps));
 const outputDir = path.dirname(output);
+
 fs.mkdirSync(outputDir, { recursive: true });
+
 const workDir = fs.mkdtempSync(path.join(outputDir, ".podcli-full-caption-work-"));
 let server;
 
 const cleanup = () => {
   try { server?.close(); } catch {}
+
   try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+
   try { fs.rmSync(partialOutput, { force: true }); } catch {}
 };
+
 process.on("SIGINT", () => { cleanup(); process.exit(130); });
+
 process.on("SIGTERM", () => { cleanup(); process.exit(143); });
 
 try {
@@ -124,8 +151,10 @@ try {
     if (request.url !== "/logo.png" || !logo) {
       response.writeHead(404);
       response.end();
+
       return;
     }
+
     const stat = fs.statSync(logo);
     response.writeHead(200, {
       "Content-Type": "image/png",
@@ -139,6 +168,7 @@ try {
 
   progress(2, "Preparing caption renderer");
   const bundle = await getCachedBundle({ onBundle: () => progress(3, "Preparing caption renderer") });
+
   const inputProps = {
     videoSrc: "",
     words,
@@ -152,16 +182,19 @@ try {
     logoPosition,
     singleLine: true,
   };
+
   const composition = await selectComposition({
     serveUrl: bundle,
     id: "CaptionedClip",
     inputProps,
     timeoutInMilliseconds: 120000,
   });
+
   const renderComposition = { ...composition, durationInFrames, fps, width, height };
   const chunks = [];
   const chunkCount = Math.ceil(durationInFrames / framesPerChunk);
   const requestedConcurrency = Number.parseInt(process.env.PODCLI_REMOTION_CONCURRENCY || "", 10);
+
   const concurrency = Number.isFinite(requestedConcurrency)
     ? Math.max(1, Math.min(os.cpus().length, requestedConcurrency))
     : Math.max(2, Math.min(os.cpus().length, 8));
@@ -190,6 +223,7 @@ try {
       timeoutInMilliseconds: 120000,
       onProgress: ({ progress: chunkProgress }) => {
         const percent = Math.floor(chunkProgress * 100);
+
         if (percent >= lastPercent + 10) {
           lastPercent = percent;
           const overall = 5 + ((index + chunkProgress) / chunkCount) * 80;

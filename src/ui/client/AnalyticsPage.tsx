@@ -6,6 +6,7 @@ import { api, upload, fmt } from "./lib";
 import WorkspaceInsights from "./WorkspaceInsights";
 
 interface Row { key: string; count: number; avgViews: number; avgRetention: number; avgCtr: number }
+
 interface Data {
   published: number; total: number;
   byContentType: Row[]; byCaptionStyle: Row[]; byLength: Row[];
@@ -16,12 +17,16 @@ const fmtViews = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : Strin
 
 function weighted(rows: Row[], metric: "avgRetention" | "avgCtr") {
   const total = rows.reduce((s, r) => s + r.count, 0);
+
   if (!total) return 0;
+
   return Math.round(rows.reduce((s, r) => s + r[metric] * r.count, 0) / total);
 }
+
 function totalViews(rows: Row[]) {
   return rows.reduce((s, r) => s + r.avgViews * r.count, 0);
 }
+
 function best(rows: Row[], metric: "avgRetention" | "avgCtr" | "avgViews") {
   return rows.length ? rows.reduce((a, b) => (b[metric] > a[metric] ? b : a)) : null;
 }
@@ -40,6 +45,7 @@ function StatTile({ icon, label, value, sub }: { icon: React.ReactNode; label: s
 function BarGroup({ title, hint, rows, metric }: { title: string; hint: string; rows: Row[]; metric: "avgRetention" | "avgCtr" | "avgViews" }) {
   const max = Math.max(1, ...rows.map((r) => r[metric]));
   const unit = metric === "avgViews" ? "" : "%";
+
   return (
     <div className="section card">
       <div className="section-label" style={{ marginBottom: 2 }}>{title}</div>
@@ -77,12 +83,15 @@ export default function AnalyticsPage() {
     api("/youtube/status").then(setStatus).catch(() => {});
     api("/youtube/config").then((c) => { setClientId(c.client_id || ""); setHasSecret(!!c.has_secret); }).catch(() => {});
   };
+
   useEffect(load, []);
 
   const saveConfig = async () => {
     setBusy(true); setMsg(null);
+
     try {
-      const r = await api("/youtube/config", { method: "PUT", body: JSON.stringify({ client_id: clientId, ...(clientSecret ? { client_secret: clientSecret } : {}) }) });
+      const r = await api("/youtube/config", { method: "PUT", body: JSON.stringify({ client_id: clientId, ...(clientSecret && { client_secret: clientSecret }) }) });
+
       if (r.error) throw new Error(r.error);
       setClientSecret(""); setHasSecret(true);
       setMsg("Saved. Run  podcli youtube auth  in your terminal to authorize");
@@ -91,8 +100,10 @@ export default function AnalyticsPage() {
 
   const sync = async (csvPath?: string) => {
     setBusy(true); setMsg(null);
+
     try {
       const r = await api("/youtube/sync", { method: "POST", body: JSON.stringify(csvPath ? { csv_path: csvPath } : {}) });
+
       if (r.error) throw new Error(r.error);
       setMsg("Synced"); load();
     } catch (e: any) { setMsg(`Sync failed: ${e.message}`); } finally { setBusy(false); }
@@ -100,6 +111,7 @@ export default function AnalyticsPage() {
 
   const loadProposals = async () => {
     setBusy(true); setMsg(null); setProposals(null);
+
     try {
       const r = await api<any>("/youtube/links");
       setProposals(r.proposals || []);
@@ -108,6 +120,7 @@ export default function AnalyticsPage() {
 
   const linkClip = async (clipId: string, videoId: string) => {
     setLinkBusy(clipId);
+
     try {
       await api("/youtube/link", { method: "POST", body: JSON.stringify({ clip_id: clipId, video_id: videoId }) });
       setProposals((ps) => (ps || []).filter((p) => p.clip_id !== clipId));
@@ -117,8 +130,10 @@ export default function AnalyticsPage() {
 
   const analyze = async () => {
     setBusy(true); setMsg("Analyzing top performers vs underperformers…");
+
     try {
       const r = await api("/youtube/learn", { method: "POST", body: "{}" });
+
       if (r.error) throw new Error(r.error);
       setMsg("Analysis written to the knowledge base. Claude will use it when picking shorts");
     } catch (e: any) { setMsg(`Analysis failed: ${e.message}`); } finally { setBusy(false); }
@@ -126,9 +141,11 @@ export default function AnalyticsPage() {
 
   const importCsv = async (f: File) => {
     setBusy(true); setMsg(null);
+
     try {
       const fd = new FormData(); fd.append("file", f);
       const up = await upload<any>("/upload", fd);
+
       if (!up.file_path) throw new Error("upload failed");
       await sync(up.file_path);
     } catch (e: any) { setMsg(`Import failed: ${e.message}`); setBusy(false); }
@@ -138,11 +155,14 @@ export default function AnalyticsPage() {
   const bestRetention = data ? best(data.byContentType, "avgRetention") : null;
   const bestCtr = data ? best(data.byCaptionStyle, "avgCtr") : null;
   const bestLength = data ? best(data.byLength, "avgRetention") : null;
-  const insights = [
-    bestRetention && { label: "Holds viewers best", value: bestRetention.key, metric: `${bestRetention.avgRetention}% retention` },
-    bestCtr && { label: "Best packaging", value: `${bestCtr.key} captions`, metric: `${bestCtr.avgCtr}% CTR` },
-    bestLength && { label: "Ideal length", value: bestLength.key, metric: `${bestLength.avgRetention}% retention` },
-  ].filter(Boolean) as { label: string; value: string; metric: string }[];
+
+  const insights: { label: string; value: string; metric: string }[] = [];
+
+  if (bestRetention) insights.push({ label: "Holds viewers best", value: bestRetention.key, metric: `${bestRetention.avgRetention}% retention` });
+
+  if (bestCtr) insights.push({ label: "Best packaging", value: `${bestCtr.key} captions`, metric: `${bestCtr.avgCtr}% CTR` });
+
+  if (bestLength) insights.push({ label: "Ideal length", value: bestLength.key, metric: `${bestLength.avgRetention}% retention` });
 
   return (
     <div className="app">

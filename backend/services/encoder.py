@@ -4,7 +4,7 @@ Hardware-accelerated encoder detection and configuration.
 Probes system for available encoders:
 - macOS: h264_videotoolbox (M-series / Intel GPU)
 - NVIDIA: h264_nvenc
-- AMD: h264_amf (Windows) / h264_vaapi (Linux)
+- AMD: h264_amf (Windows)
 - Fallback: libx264 (CPU, always available)
 
 Returns optimal FFmpeg encoder flags for the current system.
@@ -33,7 +33,7 @@ def detect_encoders() -> dict:
     if system == "Darwin":
         candidates = ["h264_videotoolbox"]
     elif system == "Linux":
-        candidates = ["h264_nvenc", "h264_vaapi"]
+        candidates = ["h264_nvenc"]
     elif system == "Windows":
         candidates = ["h264_nvenc", "h264_amf", "h264_qsv"]
 
@@ -45,7 +45,6 @@ def detect_encoders() -> dict:
         "h264_videotoolbox",
         "h264_nvenc",
         "h264_amf",
-        "h264_vaapi",
         "h264_qsv",
         "libx264",
     ]
@@ -113,7 +112,7 @@ def _get_encoder_flags(encoder: str) -> list[str]:
     flags = {
         "h264_videotoolbox": [
             "-c:v", "h264_videotoolbox",
-            "-b:v", "6M",              # 6 Mbps — plenty for 1080x1920 vertical
+            "-b:v", "6M",              # 6 Mbps, plenty for 1080x1920 vertical
             "-profile:v", "high",
             "-pix_fmt", "yuv420p",
             "-allow_sw", "1",          # Allow software fallback
@@ -130,10 +129,6 @@ def _get_encoder_flags(encoder: str) -> list[str]:
             "-quality", "quality",     # Prioritize quality over speed
             "-rc", "cqp",
             "-qp_i", "18", "-qp_p", "18",
-        ],
-        "h264_vaapi": [
-            "-c:v", "h264_vaapi",
-            "-qp", "18",
         ],
         "h264_qsv": [
             "-c:v", "h264_qsv",
@@ -157,7 +152,7 @@ def get_video_encode_flags() -> list[str]:
         info = detect_encoders()
         return info["best_flags"]
     except Exception:
-        # Absolute fallback — never let encoder detection break the pipeline
+        # Absolute fallback: never let encoder detection break the pipeline
         print("Warning: encoder detection failed, using libx264", file=sys.stderr)
         return ["-c:v", "libx264", "-crf", "18", "-preset", "slow",
                 "-profile:v", "high", "-pix_fmt", "yuv420p"]
@@ -182,7 +177,7 @@ def get_encoder_info() -> dict:
     """Get full encoder detection info (for UI/logging).
 
     Cached under paths["cache"]/encoder.json keyed by ffmpeg binary fingerprint.
-    Encoder probing runs ffmpeg twice (~1.6s on macOS) — huge startup win.
+    Encoder probing runs ffmpeg twice (~1.6s on macOS), huge startup win.
     """
     import json
     cache_path = _encoder_cache_path()

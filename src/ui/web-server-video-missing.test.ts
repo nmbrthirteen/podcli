@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { stubPythonBackend } from "../test-support/stub-python-backend.js";
 
 // Loading persisted state at startup used to wipe the transcript and
 // suggestions whenever the saved videoPath didn't exist on disk (e.g. an
@@ -10,7 +11,8 @@ import { join } from "path";
 // video as missing instead.
 
 const tmp = mkdtempSync(join(tmpdir(), "podcli-video-missing-"));
-const savedEnv: Record<string, string | undefined> = {
+
+const savedEnv = {
   PODCLI_HOME: process.env.PODCLI_HOME,
   PODCLI_DATA: process.env.PODCLI_DATA,
   PODCLI_PORT: process.env.PODCLI_PORT,
@@ -18,26 +20,19 @@ const savedEnv: Record<string, string | undefined> = {
 
 const PORT = 18428;
 
-vi.mock("../services/python-executor.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../services/python-executor.js")>();
-  class StubExecutor {
-    async execute() {
-      return { data: {} };
-    }
-  }
-  return { ...original, PythonExecutor: StubExecutor };
-});
-
 async function waitForServer(): Promise<void> {
   for (let i = 0; i < 50; i++) {
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/ui-state`);
+
       if (res.ok) return;
     } catch {
       // not up yet
     }
+
     await new Promise((r) => setTimeout(r, 100));
   }
+
   throw new Error("web server never came up");
 }
 
@@ -62,6 +57,9 @@ beforeAll(async () => {
     }),
   );
 
+  // The web server spawns the Python backend on startup (manage_config status
+  // check) and per request. Stub it so the test never depends on a real backend.
+  await stubPythonBackend();
   await import("./web-server.js");
   await waitForServer();
 }, 20_000);
@@ -71,6 +69,7 @@ afterAll(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+
   rmSync(tmp, { recursive: true, force: true });
 });
 

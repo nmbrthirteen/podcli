@@ -30,7 +30,7 @@
 podcli process episode.mp4
 ```
 
-That one command transcribes the episode, picks the moments worth clipping, crops to whoever is speaking, and burns the captions in. Transcription and rendering run on your machine. Clip scoring uses Claude Code or Codex login, or an Anthropic API key; without those it falls back to heuristics.
+That one command transcribes the episode, picks the moments worth clipping, crops to the visible face, and burns the captions in. Transcription and rendering run on your machine. Clip scoring uses Claude Code or Codex login, or an Anthropic API key; without those it falls back to heuristics.
 
 ## Install
 
@@ -65,11 +65,11 @@ Clips land in `podcli-clips/` in the directory you ran it from, so each show kee
 **Clips**
 
 - 9:16, 16:9, or 1:1, with captions sized for each canvas
-- Face tracking that follows the speaker, split-screen layouts included
+- Face tracking that follows the visible face, split-screen layouts included. Following the active speaker needs AssemblyAI, or a source install with openai-whisper and `HF_TOKEN`
 - Multi-segment cuts that drop filler, long pauses, and tangents
 - Four caption styles: branded, hormozi, karaoke, subtle
 - Logos, intros, outros, and background music from a reusable asset library
-- Loudness-normalized audio and hardware encoding on VideoToolbox, NVENC, and VAAPI, with a CPU fallback
+- Loudness-normalized audio and hardware encoding on VideoToolbox and NVENC, with a CPU fallback
 
 **Editing the full episode**
 
@@ -78,11 +78,11 @@ Clips land in `podcli-clips/` in the directory you ran it from, so each show kee
 - Remote shows too: one file per person becomes a split screen, and a single gallery recording is split into a camera per tile. Questions stay on the split and the guest goes full frame on long answers
 - Render the episode as an MP4 with one WAV per person. Studio shoots can also go to Premiere or Final Cut as a timeline that points at your original files
 - Same edit from the studio (Multicam edit), the CLI (`podcli multicam <folder>`), or an agent (`manage_multicam`). Re-running reuses the sync and the cut, so only the step you changed runs again
-- With podcli Pro, steer the cut in the cloud editor: `podcli multicam <folder> --cloud` sends small previews and the transcript (your camera files stay on your computer), and `--pull` renders the cut you made there
+- With podcli Pro, steer the cut in the cloud editor: `podcli multicam <folder> --cloud` uploads per-camera proxies, a mic mix (about 550 MB for a two-hour, three-camera episode), and the transcript. Your original camera files stay on your computer, and `--pull` renders the cut you made there
 
 **Finding the moments**
 
-- Whisper transcription with speaker diarization, or bring your own transcript as `.txt`, `.srt`, or `.vtt`
+- Whisper transcription (speaker diarization on AssemblyAI, or openai-whisper from a source install or `podcli setup --speakers`), or bring your own transcript as `.txt`, `.srt`, or `.vtt`
 - AssemblyAI as an alternative engine, and yt-dlp to pull an episode straight from a URL
 - AI scoring against your knowledge base, checked against your episode database so it stops resuggesting moments you already published
 - Audio energy and laughter detection to build highlight reels
@@ -97,8 +97,8 @@ Clips land in `podcli-clips/` in the directory you ran it from, so each show kee
 
 **Shipping it**
 
-- 32 MCP tools, so an agent can transcribe, score, render, and publish through conversation
-- YouTube publishing plus performance analytics to see which clips landed
+- 32 MCP tools, so an agent can transcribe, score, and render through conversation
+- YouTube analytics to see which clips landed
 - DaVinci Resolve export as FCPXML when you want to finish by hand
 - Presets, clip history with duplicate detection, and a transcript cache
 
@@ -106,9 +106,14 @@ Clips land in `podcli-clips/` in the directory you ran it from, so each show kee
 
 If you are weighing podcli against the cloud clippers, this is the difference:
 
-- Runs locally. Transcription and rendering happen on your machine by default, so episodes stay there. Only the optional cloud engine (AssemblyAI) and publishing to YouTube send anything out.
+- Runs locally. Transcription and rendering happen on your machine by default, so episodes stay there. Data leaves your machine only through these destinations:
+  - AssemblyAI, if you pick that engine: the episode audio.
+  - AI scoring and titles: the transcript goes to podcli Pro when you are signed in, to Anthropic when you set `ANTHROPIC_API_KEY`, and to the provider behind your Claude Code or Codex login.
+  - podcli Pro, when signed in: knowledge and asset sync, plus rendered clips and transcript slices if you turn on `PODCLI_CLOUD_SYNC=1` (off by default).
+  - YouTube, if you link it: read-only analytics requests.
+  - podcli multicam cloud, if you run `podcli multicam --cloud`: per-camera proxies, a mic mix, and the transcript.
 - Free and open source under AGPL-3.0. Exports are unlimited, full quality, and watermark-free.
-- Agent-native. 32 MCP tools let Claude Code or Codex drive the whole flow, transcription through publishing.
+- Agent-native. 32 MCP tools let Claude Code or Codex drive the whole flow, from transcription to rendered clips and publish-ready titles.
 - A knowledge base keeps titles, captions, and descriptions in your show's voice, and stops the engine from resuggesting moments you already published.
 - DaVinci Resolve handoff. Export any clip as FCPXML when you want to finish the edit yourself.
 
@@ -120,7 +125,7 @@ podcli is an [MCP](https://modelcontextprotocol.io) server, so an agent can tran
 podcli mcp install    # registers it with Claude Code and Codex, whichever CLI is on PATH
 ```
 
-`--help` and `--version` never download anything. First run of `process`, `studio`, `transcribe`, or `multicam` provisions the engine. `podcli mcp` does not — stdout is JSON-RPC — so run `podcli setup` once before you point an agent at it.
+`--help` and `--version` never download anything. First run of `process`, `studio`, `transcribe`, or `multicam` provisions the engine. `podcli mcp` does not, because stdout is JSON-RPC. Run `podcli setup` once before you point an agent at it.
 
 ```bash
 podcli process episode.mp4 --json --yes

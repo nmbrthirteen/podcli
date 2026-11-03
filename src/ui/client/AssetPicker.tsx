@@ -6,12 +6,15 @@ import { useAssets, assetSrc, ASSET_GROUPS, type Asset, type AssetType } from ".
 
 function Thumb({ asset }: { asset: Asset }) {
   const src = assetSrc(asset.name);
+
   if (asset.type === "logo" || asset.type === "image") {
     return <img className="picker-thumb" src={src} alt="" />;
   }
+
   if (asset.type === "outro" || asset.type === "intro" || asset.type === "video") {
     return <video className="picker-thumb" src={src} muted preload="metadata" />;
   }
+
   return <div className="picker-thumb picker-thumb-file" />;
 }
 
@@ -41,15 +44,19 @@ export default function AssetPicker({
 
   useEffect(() => {
     if (!open) return;
+
     const close = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !(e.target instanceof Node && ref.current.contains(e.target))) setOpen(false);
     };
+
     document.addEventListener("mousedown", close);
+
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
   async function onUpload(f: File) {
     setUploading(true);
+
     try {
       const asset = await uploadFile(f, type);
       onChange(asset.path);
@@ -95,7 +102,9 @@ export default function AssetPicker({
             type="file"
             accept={ASSET_GROUPS.find((g) => g.type === type)?.accept ?? "*/*"}
             style={{ display: "none" }}
-            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onUpload(f); }}
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = "";
+
+ if (f) onUpload(f); }}
           />
           <div className="asset-picker-foot">
             <button className="asset-picker-opt" disabled={uploading} onClick={() => fileRef.current?.click()}>
@@ -112,6 +121,8 @@ export default function AssetPicker({
 
 function matchesGroup(assetType: AssetType, groupType: AssetType): boolean {
   if (groupType === "outro") return assetType === "outro" || assetType === "video";
+
   if (groupType === "music") return assetType === "music" || assetType === "audio";
+
   return assetType === groupType;
 }

@@ -5,10 +5,12 @@ import type { Theme } from "./theme";
 
 const random = (seed: number) => {
   let t = (seed * 2654435761) >>> 0;
+
   return () => {
     t = (t + 0x6d2b79f5) >>> 0;
     let r = Math.imul(t ^ (t >>> 15), 1 | t);
     r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+
     return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
   };
 };
@@ -19,15 +21,19 @@ export const fibrous = (seed: number, wave: number, fiber: number, sides: Sides 
   const r = random(seed);
   const { top = true, right = true, bottom = true, left = true } = sides;
   const points: string[] = [];
+
   const edge = (on: boolean, point: (t: number, d: number) => string) => {
     if (!on) {
       points.push(point(0, 0));
+
       return;
     }
+
     const p1 = r() * 6.28;
     const p2 = r() * 6.28;
     const f1 = 2 + r() * 2.5;
     const f2 = 9 + r() * 6;
+
     for (let i = 0; i < steps; i++) {
       const t = (i / steps) * 100;
       const u = i / steps;
@@ -36,10 +42,12 @@ export const fibrous = (seed: number, wave: number, fiber: number, sides: Sides 
       points.push(point(t, 1 + wave * smooth + fiber * r() + spike));
     }
   };
+
   edge(top, (t, d) => `${t.toFixed(2)}% ${d.toFixed(1)}px`);
   edge(right, (t, d) => `calc(100% - ${d.toFixed(1)}px) ${t.toFixed(2)}%`);
   edge(bottom, (t, d) => `${(100 - t).toFixed(2)}% calc(100% - ${d.toFixed(1)}px)`);
   edge(left, (t, d) => `${d.toFixed(1)}px ${(100 - t).toFixed(2)}%`);
+
   return `polygon(${points.join(",")})`;
 };
 
@@ -120,6 +128,7 @@ export const Label: React.FC<{
   children: React.ReactNode;
 }> = ({ theme, seed, scale: s, size: base, color, ink, pad = 0.28, style, children }) => {
   const size = base * (theme.type.label.size ?? 1);
+
   if (theme.surface === "none") {
     return (
       <div style={{ display: "inline-block", ...fontOf({ ...theme.type.label, size: 1 }, size), fontWeight: 700, lineHeight: 1,
@@ -128,6 +137,7 @@ export const Label: React.FC<{
       </div>
     );
   }
+
   return (
     <Paper
       theme={theme}
@@ -157,7 +167,9 @@ export const Tape: React.FC<{
   style?: React.CSSProperties;
 }> = ({ theme, seed, scale: s, width, style }) => {
   const tapes = theme.textures.tape ?? [];
+
   if (!theme.tape || !tapes.length) return null;
+
   return (
     <Img
       src={tapes[seed % tapes.length]}

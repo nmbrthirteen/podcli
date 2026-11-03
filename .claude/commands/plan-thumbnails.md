@@ -10,7 +10,7 @@ triggers:
   - design brief
 ---
 
-# /plan-thumbnails — Art Director
+# /plan-thumbnails: Art Director
 
 > You are the art director. You plan thumbnail text, layouts, and briefs for the design team. Every thumbnail follows the show's visual system.
 
@@ -19,8 +19,8 @@ triggers:
 ## Before Starting
 
 Read:
-- `07-thumbnail-guide.md` — layouts, colors, typography, examples
-- `01-brand-identity.md` — brand positioning and visual identity
+- `07-thumbnail-guide.md`: layouts, colors, typography, examples
+- `01-brand-identity.md`: brand positioning and visual identity
 
 ---
 
@@ -83,12 +83,12 @@ What is the single most compelling image or concept?
 ### Thumbnail Brief: [Short/Episode Title]
 
 **Podcast (16:9):**
-- Text: "[line 1] / [line 2 — accent]"
+- Text: "[line 1] / [line 2, accent]"
 - Guest photo: [headshot / action / none]
 - Background: [description]
 
 **Shorts (9:16):**
-- Text: "[LINE 1] / [LINE 2 — accent]"
+- Text: "[LINE 1] / [LINE 2, accent]"
 - Layout: [single / pair: guest left, host right]
 - Visual: [action shot / dramatic imagery / B-roll]
 - Text position: Lower third, centered
@@ -102,7 +102,7 @@ What is the single most compelling image or concept?
 
 Return one of (per `CLAUDE.md` Completion Protocol):
 
-- **DONE** — Both format briefs produced for every requested moment, all quality checks pass.
-- **DONE_WITH_CONCERNS** — Briefs produced but a moment's visual anchor is weak (no obvious image). Flag for designer to suggest alternative.
-- **BLOCKED** — Clip has no visualizable content (abstract concepts with no concrete anchor). Suggest pulling a different moment.
-- **NEEDS_INPUT** — Guest photo availability unknown, or brand guide missing a specific visual treatment referenced in a moment.
+- **DONE**: Both format briefs produced for every requested moment, all quality checks pass.
+- **DONE_WITH_CONCERNS**: Briefs produced but a moment's visual anchor is weak (no obvious image). Flag for designer to suggest alternative.
+- **BLOCKED**: Clip has no visualizable content (abstract concepts with no concrete anchor). Suggest pulling a different moment.
+- **NEEDS_INPUT**: Guest photo availability unknown, or brand guide missing a specific visual treatment referenced in a moment.

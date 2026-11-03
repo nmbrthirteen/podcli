@@ -16,14 +16,17 @@ export const StyledCards: React.FC<{ cards: Card[]; theme: Theme; topInset?: num
   const frame = useCurrentFrame();
   const { fps, height } = useVideoConfig();
   const card = cardAt(cards.filter((c) => theme.layout[c.kind] === "takeover"), frame / fps);
+
   if (!card) return null;
   const start = Math.round(card.start * fps);
+
   if (theme.placement === "overlay" && OVERLAY_KINDS.has(card.kind)) {
     return (
       <OverlayCard card={card} theme={theme} s={captionScale(height)} start={start}
         length={Math.round(card.end * fps) - start} top={(topInset + 12) * captionScale(height)} />
     );
   }
+
   return (
     <TakeoverPage card={card} theme={theme} s={captionScale(height)} start={start}
       length={Math.round(card.end * fps) - start} inset={topInset} />
@@ -42,7 +45,9 @@ export const StyledNameCard: React.FC<{
   const s = captionScale(height);
   const end = Math.round(seconds * fps);
   const out = progress(theme.motion, frame, end - 6, 6);
+
   if (frame < 8 || out >= 1) return null;
+
   return (
     <Reveal theme={theme} role="name" f={frame} at={8} fps={fps} style={{
       left: 60 * s, top, display: "flex", flexDirection: "column",
@@ -75,10 +80,13 @@ export const StyledCaptions: React.FC<{
   const { fps, height, durationInFrames } = useVideoConfig();
   const s = captionScale(height);
   const now = frame / fps;
+
   const chunks = buildChunks(words, {
     perChunk: style.wordsPerChunk, absorbTail: 1, clipEnd: durationInFrames / fps,
   });
+
   const chunk = activeChunkAt(chunks, now);
+
   if (!chunk) return null;
   const seed = Math.round(chunk.start * 31);
   const size = theme.type.caption * s;
@@ -95,6 +103,7 @@ export const StyledCaptions: React.FC<{
           textShadow: bare ? `0 ${2 * s}px ${12 * s}px rgba(0,0,0,0.85), 0 0 ${3 * s}px rgba(0,0,0,0.6)` : undefined }}>
           {chunk.words.map((w, i) => {
             const on = now >= w.start && now < w.end;
+
             return (
               <React.Fragment key={i}>
                 {i > 0 ? " " : ""}

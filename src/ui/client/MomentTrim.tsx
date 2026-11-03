@@ -39,14 +39,17 @@ export default function MomentTrim({
   useEffect(() => {
     setDraft(null);
     const v = video.current;
+
     if (v) v.currentTime = startProp;
     setCur(startProp);
   }, [startProp, endProp, src]);
 
   const timeAt = (clientX: number) => {
     const el = trackRef.current;
+
     if (!el) return winA;
     const r = el.getBoundingClientRect();
+
     return winA + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * span;
   };
 
@@ -55,9 +58,12 @@ export default function MomentTrim({
     const t = timeAt(e.clientX);
     setDraft((d) => {
       const base = d ?? { start: startProp, end: endProp };
+
       if (drag.current === "in") return { start: Math.min(t, base.end - 0.5), end: base.end };
+
       return { start: base.start, end: Math.max(t, base.start + 0.5) };
     });
+
     if (video.current) {
       video.current.currentTime = t;
       setCur(t);
@@ -68,12 +74,15 @@ export default function MomentTrim({
     if (!drag.current) return;
     e.currentTarget.releasePointerCapture(e.pointerId);
     drag.current = null;
+
     if (draft) onCommit(round1(draft.start), round1(draft.end));
   };
 
   const toggle = () => {
     const v = video.current;
+
     if (!v) return;
+
     if (v.paused) {
       if (v.currentTime < start || v.currentTime >= end) v.currentTime = start;
       v.play();
@@ -82,6 +91,7 @@ export default function MomentTrim({
 
   const onTime = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const t = e.currentTarget.currentTime;
+
     if (playing && t >= end) {
       e.currentTarget.currentTime = start;
       setCur(start);

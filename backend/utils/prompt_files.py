@@ -4,7 +4,7 @@ The Claude/Codex CLIs need a file they can read for the prompt. Writing
 these to the repo root (as several call sites used to do via
 `tempfile.NamedTemporaryFile(dir=project_dir)`) litters the working
 directory with `tmp*.txt` files whenever a process crashes before the
-cleanup block runs — which is how we accumulated 150+ stale files.
+cleanup block runs: which is how we accumulated 150+ stale files.
 
 Route them through `<podcli_home>/tmp/` instead:
 - Under the gitignored config home, so no risk of accidental commits.

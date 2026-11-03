@@ -14,6 +14,7 @@ export const progress = (motion: Motion, frame: number, at: number, frames = mot
 
 export const wipe = (p: number, from: "left" | "bottom" = "left") => {
   const hidden = `${(1 - p) * 100}%`;
+
   return from === "bottom" ? `inset(${hidden} 0 0 0)` : `inset(-20% ${hidden} -20% -5%)`;
 };
 
@@ -21,6 +22,7 @@ export const TEXT_ENTRANCES = new Set<Entrance>(["type", "typed", "scramble", "c
 
 export const settle = (t: number, bounces: number) => {
   const k = Math.min(1, Math.max(0, t));
+
   return 1 - (1 - k) ** 2 * Math.cos((Math.PI * (2 * bounces + 1) * k) / 2);
 };
 
@@ -32,25 +34,34 @@ const unitCount = (text: string, unit: Motion["textUnit"]) =>
 
 export const entranceFrames = (motion: Motion, entrance: Entrance, text?: string) => {
   if (entrance === "pop") return 1;
+
   if (entrance === "count") return Math.round(motion.frames * 1.8);
+
   if (TEXT_ENTRANCES.has(entrance) && text) {
     const perPose = motion.textUnit === "word" ? 1 : motion.charsPerPose;
+
     return Math.ceil(unitCount(text, motion.textUnit) / perPose) * Math.max(1, motion.holdEvery);
   }
+
   return motion.frames;
 };
 
 const offset = (from: Side, distance: number) => {
   if (from === "left") return `translateX(${-distance}px)`;
+
   if (from === "right") return `translateX(${distance}px)`;
+
   if (from === "top") return `translateY(${-distance}px)`;
+
   return `translateY(${distance}px)`;
 };
 
 const mask = (entrance: Entrance, p: number) => {
   if (entrance === "mask-circle") return `circle(${p * 75}% at 50% 50%)`;
+
   if (entrance === "mask-split") return `inset(-10% ${(1 - p) * 50}% -10% ${(1 - p) * 50}%)`;
   const x = p * 220 - 10;
+
   return `polygon(-10% -10%, ${x}% -10%, ${x - 100}% 110%, -10% 110%)`;
 };
 
@@ -63,6 +74,7 @@ const DIGITS = "0123456789";
 
 const scrambled = (char: string, n: number) => {
   const pool = /[A-Z]/.test(char) ? UPPER : /[a-z]/.test(char) ? LOWER : /[0-9]/.test(char) ? DIGITS : "";
+
   return pool ? pool[n % pool.length] : char;
 };
 
@@ -71,6 +83,7 @@ const NUMBER = /^(.*?)([-−]?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(.*)$/s;
 export const countedTo = (text: string, p: number) => {
   if (p >= 1) return text;
   const found = NUMBER.exec(text);
+
   if (!found) return text;
   const [, before, sign, whole, decimals = "", after] = found;
   const target = Number(`${whole.replace(/,/g, "")}.${decimals || "0"}`);
@@ -78,6 +91,7 @@ export const countedTo = (text: string, p: number) => {
   const fixed = now.toFixed(decimals.length);
   const [int, frac] = fixed.split(".");
   const grouped = whole.includes(",") ? int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : int;
+
   return `${before}${sign}${grouped}${frac ? `.${frac}` : ""}${after}`;
 };
 
@@ -93,11 +107,14 @@ export const Reveal: React.FC<{
   const { motion } = theme;
   const entrance = motion.roles[role];
   const base: React.CSSProperties = { position: "absolute", ...style };
+
   if (f < at) return null;
+
   if (entrance === "pop" || TEXT_ENTRANCES.has(entrance)) return <div style={base}>{children}</div>;
 
   if (entrance === "wipe" || entrance === "wipe-up") {
     const p = progress(motion, f, at);
+
     return <div style={{ ...base, clipPath: p < 1 ? wipe(p, entrance === "wipe-up" ? "bottom" : "left") : undefined }}>{children}</div>;
   }
 
@@ -107,7 +124,9 @@ export const Reveal: React.FC<{
       config: { damping: 10 + (1 - motion.overshoot) * 30, stiffness: 180, mass: 0.6 },
       durationInFrames: motion.frames * 2,
     });
+
     const opacity = interpolate(held(motion, f) - at, [0, 2], [0, 1], { extrapolateRight: "clamp" });
+
     return (
       <div style={{ ...base, opacity, transform: `${base.transform ?? ""} scale(${0.82 + 0.18 * k})` }}>{children}</div>
     );
@@ -119,7 +138,9 @@ export const Reveal: React.FC<{
       config: { stiffness: 220, damping: 14, mass: 0.6 },
       durationInFrames: motion.frames * 2,
     });
+
     const opacity = interpolate(held(motion, f) - at, [0, 1], [0, 1], { extrapolateRight: "clamp" });
+
     return (
       <div style={{ ...base, opacity, transform: `${base.transform ?? ""} scale(${1.35 - 0.35 * k})` }}>{children}</div>
     );
@@ -128,6 +149,7 @@ export const Reveal: React.FC<{
   if (entrance === "drop") {
     const p = progress(motion, f, at);
     const turn = (at % 2 ? 4 : -4) * (1 - p);
+
     return (
       <div style={{ ...base, opacity: Math.min(1, p * 3), transform: `${base.transform ?? ""} rotate(${turn}deg) scale(${1 + 0.08 * (1 - p)})` }}>
         {children}
@@ -139,6 +161,7 @@ export const Reveal: React.FC<{
     const p = progress(motion, f, at);
     const dx = 4 + 10 * (1 - p);
     const dy = -(3 + 6 * (1 - p));
+
     return (
       <div style={{ ...base, opacity: p, filter: `drop-shadow(${dx}px ${dy}px 0 ${theme.color.accent})` }}>{children}</div>
     );
@@ -147,6 +170,7 @@ export const Reveal: React.FC<{
   const t = interpolate(held(motion, f), [at, at + Math.max(1, motion.frames)], [0, 1], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
   });
+
   const moved = motion.bounces > 0 ? settle(t, motion.bounces) : progress(motion, f, at);
   const shown = interpolate(held(motion, f) - at, [0, 3], [0, 1], { extrapolateRight: "clamp" });
 
@@ -166,16 +190,19 @@ export const Reveal: React.FC<{
 
   if (entrance === "blur") {
     const p = progress(motion, f, at);
+
     return <div style={{ ...base, opacity: p, filter: p < 1 ? `blur(${(1 - p) * 18}px)` : undefined }}>{children}</div>;
   }
 
   if (entrance === "mask-circle" || entrance === "mask-diagonal" || entrance === "mask-split") {
     const p = progress(motion, f, at);
+
     return <div style={{ ...base, clipPath: p < 1 ? mask(entrance, p) : undefined }}>{children}</div>;
   }
 
   const p = progress(motion, f, at);
   const rise = entrance === "rise" ? offset("bottom", (1 - (motion.bounces > 0 ? moved : p)) * 40) : "";
+
   return <div style={{ ...base, opacity: p, transform: `${base.transform ?? ""} ${rise}` }}>{children}</div>;
 };
 
@@ -191,10 +218,13 @@ export const RevealText: React.FC<{
 }> = ({ theme, role, f, at, text, mark, markAt, s }) => {
   const { motion } = theme;
   const entrance = motion.roles[role];
+
   if (entrance === "count") {
     const p = progress(motion, f, at, entranceFrames(motion, "count"));
+
     return <span style={{ fontVariantNumeric: "tabular-nums" }}>{countedTo(text, p)}</span>;
   }
+
   const typing = TEXT_ENTRANCES.has(entrance);
   const pieces = units(text, motion.textUnit);
   const perPose = motion.textUnit === "word" ? 1 : motion.charsPerPose;
@@ -210,8 +240,10 @@ export const RevealText: React.FC<{
   let cursor = 0;
   const finished = at + entranceFrames(motion, entrance, text);
   const since = held(motion, f) - finished;
+
   const caretOn = entrance === "typed"
     && (count < total || (since < 30 && Math.floor(since / 15) % 2 === 0));
+
   const spans: { text: string; from: number; visible: boolean; fresh: boolean; cover?: string; caret?: boolean }[] = pieces.map((piece) => {
     const word = piece.trim().length > 0;
     const index = word ? seen++ : seen - 1;
@@ -219,9 +251,11 @@ export const RevealText: React.FC<{
     cursor += piece.length;
     const settled = index < count;
     const shown = entrance === "scramble" ? f >= at : settled || (!word && index < count);
+
     const cover = entrance === "scramble" && !settled && word
       ? Array.from(piece).map((char, i) => scrambled(char, (from + i) * 7 + seed * 13)).join("")
       : undefined;
+
     return {
       text: piece, from, visible: shown, cover,
       fresh: entrance === "type" && word && index === count - 1 && count < total,
@@ -230,7 +264,7 @@ export const RevealText: React.FC<{
   });
 
   const render = (lo: number, hi: number) => spans
-    .filter((span) => span.from >= lo && span.from < hi)
+    .flatMap((span) => (span.from >= lo && span.from < hi ? [span] : []))
     .map((span) => (
       span.cover ? (
         <span key={span.from} style={{ opacity: span.visible ? 1 : 0 }}>
@@ -262,6 +296,7 @@ export const RevealText: React.FC<{
   if (markStart < 0 || motion.textUnit === "word" && !spans.some((span) => span.from === markStart)) {
     return <>{render(0, text.length)}</>;
   }
+
   if (theme.mark === "color") {
     return (
       <>
@@ -271,6 +306,7 @@ export const RevealText: React.FC<{
       </>
     );
   }
+
   return (
     <>
       {render(0, markStart)}
@@ -302,18 +338,21 @@ export const camera = (
   let zoom = 1;
   let x = width / 2;
   let y = height / 2;
+
   if (motion.camera === "push") {
     zoom = 1 + 0.045 * Math.min(1, h / Math.max(1, length));
   } else if (motion.camera === "punch" && punch) {
     const k = interpolate(h, [punch.at, punch.at + 1, punch.at + 14], [0, 1, 0.35], {
       extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.out(Easing.cubic),
     });
+
     zoom = 1 + (punch.zoom - 1) * k;
     x = width / 2 + (punch.x - width / 2) * k;
     y = height / 2 + (punch.y - height / 2) * k;
   } else if (motion.camera === "track" && shots.length) {
     const next = shots.findIndex((shot) => shot.at > h);
     const last = shots[shots.length - 1];
+
     if (next === -1) {
       zoom = last.zoom * (1 + 0.02 * Math.min(1, (h - last.at) / 120));
       ({ x, y } = last);
@@ -328,8 +367,10 @@ export const camera = (
       y = a.y + (b.y - a.y) * k;
     }
   }
+
   if (zoom === 1) return "none";
   const tx = Math.min(0, Math.max(width - width * zoom, width / 2 - x * zoom));
   const ty = Math.min(0, Math.max(height - height * zoom, height / 2 - y * zoom));
+
   return `translate(${tx}px, ${ty}px) scale(${zoom})`;
 };

@@ -4,7 +4,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const tmp = mkdtempSync(join(tmpdir(), "podcli-fm-test-"));
+
 process.env.PODCLI_HOME = tmp;
+
 process.env.PODCLI_DATA = tmp;
 
 const { FileManager } = await import("./file-manager.js");
@@ -21,6 +23,7 @@ describe("FileManager", () => {
 
   it("ensureDirectories creates all required directories", async () => {
     await fm.ensureDirectories();
+
     for (const name of ["cache", "working", "output", "history"]) {
       expect(existsSync(join(tmp, name))).toBe(true);
     }
@@ -78,11 +81,11 @@ describe("FileManager", () => {
     await fm.ensureDirectories();
     const working = join(tmp, "working");
 
-    // Fresh dir — should survive
+    // Fresh dir: should survive
     const fresh = join(working, "fresh");
     mkdirSync(fresh);
 
-    // Old dir — backdated to 5 days ago
+    // Old dir: backdated to 5 days ago
     const old = join(working, "old");
     mkdirSync(old);
     const ago = new Date(Date.now() - 5 * 24 * 3600 * 1000);

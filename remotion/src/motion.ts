@@ -26,8 +26,8 @@ const FEEL: Record<Motion["feel"], { damping: number; stiffness: number; mass: n
   linear: { damping: 200, stiffness: 100, mass: 1 },
 };
 
-export const MOTION: Record<string, Motion> = {
-  /** Word-by-word: springs up to size, no exit — the cut is the style. */
+export const MOTION = {
+  /** Word-by-word: springs up to size, no exit; the cut is the style. */
   hormozi: { enter: "pop", exit: "none", duration: 3, feel: "snap" },
   /** A line that is meant to be read, so it arrives and leaves quietly. */
   subtle: { enter: "rise", exit: "fade", duration: 5, feel: "soft" },
@@ -52,7 +52,18 @@ export const MOTION: Record<string, Motion> = {
   card: { enter: "fade", exit: "fade", duration: 6, feel: "soft" },
   /** Always there, so it neither arrives nor leaves. */
   watermark: { enter: "none", exit: "none", duration: 0, feel: "linear" },
-};
+} satisfies Record<string, Motion>;
+
+/** The motion a caption voice ships with, or the subtle one for a voice with none of its own. */
+export const motionForVoice = (name: string): Motion =>
+  new Map<string, Motion>(Object.entries(MOTION)).get(name) ?? MOTION.subtle;
+
+export interface MotionFrame {
+  opacity: number;
+  scale: number;
+  shift: number;
+  slide: number;
+}
 
 /**
  * Fade a thing in when it arrives and out before it leaves.
@@ -87,6 +98,7 @@ export function fadeInOut({
     : 1;
 
   const held = endFrame - startFrame;
+
   if (!outFrames || held < inFrames + outFrames + 2) return rising;
 
   const falling = interpolate(frame, [endFrame - outFrames, endFrame], [1, 0], {
@@ -113,7 +125,7 @@ export function motionAt({
   motion: Motion;
   /** How far a rise or a sink travels, already scaled to the canvas. */
   scale?: number;
-}): { opacity: number; scale: number; shift: number; slide: number } {
+}): MotionFrame {
   const startFrame = Math.round(start * fps);
   const since = frame - startFrame;
 
@@ -135,6 +147,7 @@ export function motionAt({
     : 0;
 
   const endFrame = Math.round(end * fps);
+
   const leaving = motion.exit === "sink"
     ? interpolate(frame, [endFrame - motion.duration, endFrame], [0, rise], {
         extrapolateLeft: "clamp",

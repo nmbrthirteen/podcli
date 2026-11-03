@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { fmt } from "./lib";
-import type { McCutSettings, McSession, McStyle } from "./multicam-types";
+import type { McCutSettings, McCutSettingChanges, McEditBody, McSession } from "./multicam-types";
+import { mcStyle } from "./multicam-types";
 
 // Mirrors the clamps in multicam.update_mapping so the inputs never show a value the server won't use.
 const LIMITS = {
@@ -19,7 +20,7 @@ export default function MulticamAutoCut({
 }: {
   session: McSession;
   locked: boolean;
-  onRecut: (extra: Record<string, unknown>) => void;
+  onRecut: (extra: McEditBody) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [range, setRange] = useState({ range_start: session.range_start ?? 0, range_end: session.range_end ?? session.timeline_duration });
@@ -54,7 +55,7 @@ export default function MulticamAutoCut({
               Style
               <select
                 value={settings.style}
-                onChange={(e) => setSettings({ ...settings, style: e.target.value as McStyle })}
+                onChange={(e) => setSettings({ ...settings, style: mcStyle(e.target.value) ?? settings.style })}
                 style={{ width: "auto", padding: "4px 28px 4px 10px", fontSize: 12 }}
               >
                 <option value="auto">Automatic ({session.auto_style === "remote" ? "remote call" : "studio"})</option>
@@ -77,11 +78,14 @@ export default function MulticamAutoCut({
               disabled={locked}
               onClick={() => {
                 // Only what was changed is sent: anything else follows the style's own defaults.
-                const changed = Object.fromEntries(
-                  Object.entries(settings).filter(([k, v]) => v !== session.cut_settings[k as keyof McCutSettings]),
+                const current = new Map<string, McCutSettings[keyof McCutSettings]>(Object.entries(session.cut_settings));
+
+                const changed: McCutSettingChanges = Object.fromEntries(
+                  Object.entries(settings).filter(([k, v]) => v !== current.get(k)),
                 );
+
                 const rangeChanged = range.range_start !== (session.range_start ?? 0) || range.range_end !== (session.range_end ?? session.timeline_duration);
-                onRecut({ ...(rangeChanged ? range : {}), cut_settings: changed });
+                onRecut({ ...(rangeChanged && range), cut_settings: changed });
               }}
             >
               Cut again

@@ -1,7 +1,7 @@
-"""Editable highlight-reel sessions — the shared core behind the CLI, MCP, and UI.
+"""Editable highlight-reel sessions: the shared core behind the CLI, MCP, and UI.
 
 Detection (the slow signal analysis) runs once into a persisted session of moments.
-Every later edit — longer, shorter, shift, drop, reorder — mutates that session and
+Every later edit (longer, shorter, shift, drop, reorder) mutates that session and
 re-cuts only the changed moment straight from the source (~seconds), then rebuilds the
 reel. No re-detection, no heavy render. All three surfaces operate on the same session
 so an edit made in one shows up in the others.
@@ -251,7 +251,7 @@ def build_reel(session: ReelSession, progress_callback: Optional[Callable] = Non
     lst = os.path.join(session.out_dir, "_concat.txt")
     with open(lst, "w", encoding="utf-8") as f:
         for x in files:
-            p = os.path.abspath(x).replace("\\", "/")
+            p = os.path.abspath(x).replace("\\", "/").replace("'", "'\\''")
             f.write(f"file '{p}'\n")
     r = proc_run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lst,
                   "-c", "copy", reel, "-loglevel", "error"], timeout=300, check=False)

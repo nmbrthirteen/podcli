@@ -168,7 +168,7 @@ func SyncScript() string {
 func RunSync() (int, error) {
 	node, script := Node(), SyncScript()
 	if node == "" || script == "" {
-		return 1, fmt.Errorf("sync not provisioned — run `podcli setup`")
+		return 1, fmt.Errorf("sync not provisioned: run `podcli setup`")
 	}
 	cmd := exec.Command(node, script)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
@@ -209,7 +209,7 @@ func nodeEnv() []string {
 func RunMCP() (int, error) {
 	node, server := Node(), MCPServer()
 	if node == "" || server == "" {
-		return 1, fmt.Errorf("MCP server not provisioned — run `podcli setup`")
+		return 1, fmt.Errorf("MCP server not provisioned: run `podcli setup`")
 	}
 	cmd := exec.Command(node, server)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
@@ -254,7 +254,7 @@ func DataEnv() []string {
 func Run(args []string) (int, error) {
 	root, ok := BackendRoot()
 	if !ok {
-		return 1, fmt.Errorf("python backend not found — set PODCLI_BACKEND or run inside the repo")
+		return 1, fmt.Errorf("python backend not found: set PODCLI_BACKEND or run inside the repo")
 	}
 	cli := filepath.Join(root, "cli.py")
 	full := append([]string{"-W", "ignore::UserWarning", cli}, args...)

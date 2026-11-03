@@ -1,7 +1,7 @@
 """Tests for pure helper functions in backend.services.claude_suggest.
 
 These are deterministic, side-effect-free helpers that back the AI
-clip-suggestion pipeline — safe to test without mocking subprocess
+clip-suggestion pipeline: safe to test without mocking subprocess
 or any external tools.
 """
 
@@ -96,7 +96,7 @@ class ShouldBucketTests(unittest.TestCase):
         self.assertFalse(cs._should_bucket_initial_selection(segments))
 
     def test_long_duration_buckets(self):
-        # 50 minutes — over the 45 min threshold
+        # 50 minutes: over the 45 min threshold
         segments = [{"start": 0, "end": 3000, "text": "x" * 100}]
         self.assertTrue(cs._should_bucket_initial_selection(segments))
 
@@ -295,7 +295,7 @@ class ExistingShortsTests(unittest.TestCase):
         )
 
     def test_the_older_numbered_shape_still_reads(self):
-        path = self._write("1. An older entry — hot take\n2. Another one — story\n")
+        path = self._write("1. An older entry \u2014 hot take\n2. Another one \u2014 story\n")
         self.assertEqual(cs._load_existing_shorts(path), ["An older entry", "Another one"])
 
     def test_a_dropped_moment_stays_available(self):
@@ -307,6 +307,24 @@ class ExistingShortsTests(unittest.TestCase):
             "| 3 | [02:00-02:30] | Queued one | TikTok | scheduled |\n"
         )
         self.assertEqual(cs._load_existing_shorts(path), ["Shipped one", "Queued one"])
+
+    def test_drop_published_removes_matching_titles_only(self):
+        path = self._write(
+            "| # | Moment | Title | Platform | Status |\n"
+            "|---|--------|-------|----------|--------|\n"
+            "| 1 | [00:01-00:30] | The pricing mistake | YouTube Shorts | published |\n"
+        )
+        clips = [
+            {"title": "The Pricing Mistake!", "start_second": 1, "end_second": 30},
+            {"title": "A different moment", "start_second": 60, "end_second": 90},
+        ]
+        kept = cs.drop_published(clips, path)
+        self.assertEqual([c["title"] for c in kept], ["A different moment"])
+
+    def test_drop_published_keeps_everything_without_a_database(self):
+        clips = [{"title": "Anything"}]
+        missing = os.path.join(self.tmp.name, "nope.md")
+        self.assertEqual(cs.drop_published(clips, missing), clips)
 
     def test_unfilled_cells_are_not_titles(self):
         path = self._write(

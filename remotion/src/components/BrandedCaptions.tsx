@@ -54,7 +54,7 @@ const WordWithPill: React.FC<{
 
   return (
     <span style={{ position: "relative", display: "inline" }}>
-      {/* Pill background — absolutely positioned, doesn't affect layout */}
+      {/* Pill background: absolutely positioned, doesn't affect layout */}
       <span
         style={{
           position: "absolute",
@@ -69,12 +69,12 @@ const WordWithPill: React.FC<{
           pointerEvents: "none",
         }}
       />
-      {/* Word text — always inline, never shifts */}
+      {/* Word text: always inline, never shifts */}
       <span
         style={{
           position: "relative",
           zIndex: 1,
-          ...(word.emphasis && emphasisColor ? { color: emphasisColor } : {}),
+          ...(word.emphasis && emphasisColor && { color: emphasisColor }),
         }}
       >
         {word.word}
@@ -151,6 +151,7 @@ export const BrandedCaptions: React.FC<Props> = ({
     splitTail: true,
     clipEnd: durationInFrames / fps,
   });
+
   const activeChunk = activeChunkAt(chunks, currentTime);
 
   // Dynamic margin: if face is in the lower portion, push captions further down
@@ -158,13 +159,15 @@ export const BrandedCaptions: React.FC<Props> = ({
   // Default margin is style.marginBottom. If face center is below 0.55, reduce margin.
   const baseMargin = style.marginBottom * s;
   let dynamicMargin = baseMargin;
+
   if (captionPosition === "auto" && faceY != null && faceY > 0.55) {
-    // Face is low — push captions to the very bottom
+    // Face is low: push captions to the very bottom
     dynamicMargin = Math.max(80 * s, baseMargin - Math.round((faceY - 0.55) * height * 0.6));
   } else if (captionPosition === "auto" && faceY != null && faceY < 0.35) {
-    // Face is high — can bring captions up a bit
+    // Face is high: can bring captions up a bit
     dynamicMargin = baseMargin + 60 * s;
   }
+
   // A bottom-anchored logo spans 180-306 scaled units. Captions sitting inside
   // that band (captionPosition "lower" starts at 220) would render over it.
   if (hasLogo && logoPosition.startsWith("bottom-")) {

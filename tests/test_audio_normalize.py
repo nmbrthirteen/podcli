@@ -41,7 +41,7 @@ class ParseLoudnormStatsTests(unittest.TestCase):
         self.assertEqual(data["input_tp"], "-2.0")
 
     def test_rejects_negative_infinity_input(self):
-        # -inf means silence / too-short clip — two-pass isn't meaningful
+        # -inf means silence / too-short clip; two-pass isn't meaningful
         stderr = '{"input_i": "-inf", "input_tp": "-inf"}'
         self.assertIsNone(an._parse_loudnorm_stats(stderr))
 
@@ -90,7 +90,7 @@ class NormalizeAudioTests(unittest.TestCase):
             self.assertEqual(result, "/out.mp4")
             apply_cmd = mocked.call_args_list[1].args[0]
             joined = " ".join(apply_cmd)
-            # No measured_* values — single-pass filter
+            # No measured_* values: single-pass filter
             self.assertNotIn("measured_I", joined)
             self.assertIn("loudnorm=I=-14.0", joined)
 

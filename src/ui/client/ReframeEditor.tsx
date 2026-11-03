@@ -40,10 +40,12 @@ export default function ReframeEditor({
   const clampCenter = (p: number) => Math.max(half, Math.min(100 - half, p));
 
   useEffect(() => {
-    api(`/clips/${clipId}/reframe`).then((r) => {
-      if (Array.isArray(r?.keyframes)) setKeyframes(r.keyframes);
-      if (typeof r?.inSec === "number") setInSec(r.inSec);
-      if (typeof r?.outSec === "number") setOutSec(r.outSec);
+    api<{ keyframes?: Keyframe[]; inSec?: number; outSec?: number }>(`/clips/${clipId}/reframe`).then((r) => {
+      if (r.keyframes) setKeyframes(r.keyframes);
+
+      if (r.inSec !== undefined) setInSec(r.inSec);
+
+      if (r.outSec !== undefined) setOutSec(r.outSec);
     }).catch(() => {});
     api(`/clips/${clipId}/cuts`)
       .then((r) => setCuts(Array.isArray(r?.cuts) ? r.cuts : []))
@@ -53,20 +55,25 @@ export default function ReframeEditor({
 
   const onMeta = () => {
     const v = videoRef.current;
+
     if (!v) return;
+
     if (v.videoWidth) setBoxPct(Math.min(100, ((v.videoHeight * 9) / 16 / v.videoWidth) * 100));
+
     if (v.duration && Number.isFinite(v.duration)) setSrcDur(v.duration);
     v.currentTime = start;
   };
 
   const reflectKeyframe = (absT: number) => {
     const at = keyframes.slice().sort((a, b) => a.tAbs - b.tAbs).filter((k) => k.tAbs <= absT).pop();
+
     if (at) setCenterPct(at.x_pct);
   };
 
   const seek = (absT: number) => {
     const v = videoRef.current;
     const clamped = Math.max(bufStart, Math.min(bufEnd, absT));
+
     if (v) v.currentTime = clamped;
     setTAbs(clamped);
     reflectKeyframe(clamped);
@@ -74,14 +81,19 @@ export default function ReframeEditor({
 
   const togglePlay = () => {
     const v = videoRef.current;
+
     if (!v) return;
+
     if (v.paused) { if (v.currentTime >= bufEnd) v.currentTime = bufStart; v.play(); } else v.pause();
   };
 
   const onTimeUpdate = () => {
     const v = videoRef.current;
+
     if (!v) return;
+
     if (v.currentTime >= bufEnd) { v.pause(); v.currentTime = bufEnd; }
+
     setTAbs(v.currentTime);
     reflectKeyframe(v.currentTime);
   };
@@ -100,19 +112,24 @@ export default function ReframeEditor({
 
   const jumpCut = (dir: 1 | -1) => {
     const next = dir > 0 ? cuts.find((c) => c > tAbs + 0.05) : [...cuts].reverse().find((c) => c < tAbs - 0.05);
+
     if (next != null) seek(next);
   };
 
   const xToTime = (clientX: number) => {
     const r = trackRef.current!.getBoundingClientRect();
+
     return bufStart + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * win;
   };
+
   const applyDrag = (clientX: number) => {
     const tt = xToTime(clientX);
+
     if (dragMode.current === "in") { setInSec(Math.min(tt, outSec - 0.2)); seek(tt); }
     else if (dragMode.current === "out") { setOutSec(Math.max(tt, inSec + 0.2)); seek(tt); }
     else seek(tt);
   };
+
   const onTrackDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     const tt = xToTime(e.clientX);
@@ -124,6 +141,7 @@ export default function ReframeEditor({
   const apply = async () => {
     const kf = keyframes.length ? keyframes : [{ tAbs: inSec, x_pct: +centerPct.toFixed(1) }];
     setBusy(true); setErr(null);
+
     try {
       const r = await api(`/clips/${clipId}/rerender`, {
         method: "POST",
@@ -131,6 +149,7 @@ export default function ReframeEditor({
           ? { caption_style, trim: { inSec: +inSec.toFixed(3), outSec: +outSec.toFixed(3) } }
           : { caption_style, reframe: { keyframes: kf, inSec: +inSec.toFixed(3), outSec: +outSec.toFixed(3) } }),
       });
+
       if (r.error) throw new Error(r.error);
       onDone();
     } catch (e: any) { setErr(e.message); setBusy(false); }

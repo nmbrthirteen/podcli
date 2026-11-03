@@ -11,7 +11,7 @@ triggers:
   - run the full thing
 ---
 
-# /produce-shorts — Producer
+# /produce-shorts: Producer
 
 > You are the head producer. You run the full content pipeline from raw transcript to publish-ready package. This is the master orchestrator.
 
@@ -20,14 +20,14 @@ triggers:
 ## Before Starting
 
 Read the full knowledge base with the `knowledge_base` MCP tool:
-- `01-brand-identity.md` — who the show is
-- `02-voice-and-tone.md` — voice, banned words
-- `03-episodes-database.md` — existing content (dedup)
-- `04-shorts-creation-guide.md` — moment criteria
-- `05-title-formulas.md` — title spec
-- `06-descriptions-template.md` — description templates
-- `07-thumbnail-guide.md` — visual specs
-- `13-learnings.md` — past retro patterns (what worked, what didn't)
+- `01-brand-identity.md`: who the show is
+- `02-voice-and-tone.md`: voice, banned words
+- `03-episodes-database.md`: existing content (dedup)
+- `04-shorts-creation-guide.md`: moment criteria
+- `05-title-formulas.md`: title spec
+- `06-descriptions-template.md`: description templates
+- `07-thumbnail-guide.md`: visual specs
+- `13-learnings.md`: past retro patterns (what worked, what didn't)
 
 If a video is already set (`get_ui_state`), check its `OPEN QUESTIONS` block for unanswered episode decisions (clip count, duration range, captions, language, thumbnails, delivery target). Ask whichever are relevant to this run, batched into one NEEDS_INPUT prompt rather than one per field, then call `record_decisions(video_path, ...)` so the next run against this video doesn't ask again.
 
@@ -72,7 +72,7 @@ Shorts descriptions (hook + attribution + link + hashtags) and full episode long
 Two-line text for both podcast and shorts formats per moment.
 
 ### Phase 5: Quality Review
-*Runs `/review-content` logic — Fix-First + specialist dispatch*
+*Runs `/review-content` logic (Fix-First + specialist dispatch)*
 
 Parallel specialists: voice, banned words, title, standalone, clickbait, SEO, dedup. Auto-fix mechanical issues. Batch ASK items for user.
 
@@ -94,13 +94,13 @@ Partial output preserved at: [path if any]
 Needed to unblock: [specific ask]
 ```
 
-Do not proceed to downstream phases when an upstream phase is BLOCKED — downstream output would be corrupt.
+Do not proceed to downstream phases when an upstream phase is BLOCKED. Downstream output would be corrupt.
 
 ---
 
 ## Phase Handoff
 
-Each phase consumes upstream output and passes structured state downstream. Phase 1's moment list is the contract — if it's empty, Phase 2 has nothing to do.
+Each phase consumes upstream output and passes structured state downstream. Phase 1's moment list is the contract. If it's empty, Phase 2 has nothing to do.
 
 | Phase | Consumes | Produces |
 |-------|----------|----------|
@@ -116,7 +116,7 @@ Each phase consumes upstream output and passes structured state downstream. Phas
 ## Output Format
 
 ```markdown
-# Episode [X]: [Guest] — [Company]
+# Episode [X]: [Guest], [Company]
 ## Complete Content Package
 
 **Prepared:** [Date]
@@ -152,7 +152,7 @@ Each phase consumes upstream output and passes structured state downstream. Phas
 
 ### Short 1: [Best Title]
 
-**Timestamp:** [XX:XX — XX:XX]
+**Timestamp:** [XX:XX-XX:XX]
 **Duration:** ~[XX]s
 **Category:** [Type]
 **Score:** [X/20]
@@ -228,7 +228,7 @@ Each phase consumes upstream output and passes structured state downstream. Phas
 
 The Producer emits a rollup status based on the 6 phases:
 
-- **DONE** — All 6 phases DONE, zero BLOCKING issues after review.
-- **DONE_WITH_CONCERNS** — All phases completed, but review surfaced WARNING items that need user call, or one phase was DONE_WITH_CONCERNS.
-- **BLOCKED** — Any phase hit the Three-Strike Rule or returned BLOCKED. Pipeline halted. Partial output preserved.
-- **NEEDS_INPUT** — A phase needs missing input (episode number, guest name, banned-words file, etc.). Ask once, batched, then resume.
+- **DONE**: All 6 phases DONE, zero BLOCKING issues after review.
+- **DONE_WITH_CONCERNS**: All phases completed, but review surfaced WARNING items that need user call, or one phase was DONE_WITH_CONCERNS.
+- **BLOCKED**: Any phase hit the Three-Strike Rule or returned BLOCKED. Pipeline halted. Partial output preserved.
+- **NEEDS_INPUT**: A phase needs missing input (episode number, guest name, banned-words file, etc.). Ask once, batched, then resume.

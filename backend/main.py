@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-podcli — Python Backend Entry Point
+podcli: Python Backend Entry Point
 
 Reads a JSON task request from stdin, dispatches to the appropriate service,
 and writes a JSON result to stdout. Progress events go to stderr.
@@ -8,6 +8,7 @@ and writes a JSON result to stdout. Progress events go to stderr.
 
 import json
 import os
+from utils.log import warn as log_warn
 import sys
 
 # Windows streams default to cp1252; IPC is UTF-8. stdin matters as much as the
@@ -425,14 +426,14 @@ def handle_pack_transcript(task_id: str, params: dict):
             try:
                 from services.audio_analyzer import extract_audio_energy
                 energy_data = extract_audio_energy(params["file_path"])
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warn("main", "audio energy extraction failed", error=exc)
         if events_data is None:
             try:
                 from services.audio_events import extract_audio_events
                 events_data = extract_audio_events(params["file_path"])
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warn("main", "audio event extraction failed", error=exc)
 
     path, md = write_packed(
         transcript,
@@ -498,7 +499,7 @@ def handle_detect_highlights(task_id: str, params: dict):
 
 
 def handle_manage_reel(task_id: str, params: dict):
-    """Create and iterate on a highlights reel — the MCP surface over the reel service.
+    """Create and iterate on a highlights reel: the MCP surface over the reel service.
 
     Actions: new (detect + build), list, show, edit (adjust one moment + rebuild),
     build, delete.
@@ -748,6 +749,7 @@ def handle_suggest_clips(task_id: str, params: dict):
     from services import ai_provider
     from services.claude_suggest import (
         ClipBounds,
+        drop_published,
         select_clips_with_signal_scores,
         suggest_initial_with_claude,
     )
@@ -803,7 +805,7 @@ def handle_suggest_clips(task_id: str, params: dict):
         events_data=events_data,
         progress_callback=lambda pct, msg: emit_progress(task_id, "suggesting", pct, msg),
     )
-    emit_result(task_id, "success", data={"clips": clips})
+    emit_result(task_id, "success", data={"clips": drop_published(clips)})
 
 
 def handle_rank_candidates(task_id: str, params: dict):
@@ -960,7 +962,7 @@ def handle_ai_cli_status(task_id: str, params: dict):
 
 
 def handle_ai_provider_status(task_id: str, params: dict):
-    """Everything podcli can use for AI, not just local binaries — so the studio
+    """Everything podcli can use for AI, not just local binaries, so the studio
     can tell "nothing installed" apart from "signed in, nothing needed"."""
     from services import ai_provider
 
@@ -1032,7 +1034,7 @@ def handle_generate_content(task_id: str, params: dict):
         emit_result(
             task_id,
             "error",
-            error="Content generation failed — check that your AI provider is reachable and try again",
+            error="Content generation failed: check that your AI provider is reachable and try again",
         )
         return
 
@@ -1059,7 +1061,7 @@ def handle_generate_custom(task_id: str, params: dict):
         # The gate above admits a workspace session or an API key as well as a
         # local binary, so naming only the binary sends cloud users to install
         # something they will never use.
-        emit_result(task_id, "error", error="No AI provider available — sign in to podcli Pro, install Claude Code or Codex, or set ANTHROPIC_API_KEY")
+        emit_result(task_id, "error", error="No AI provider available: sign in to podcli Pro, install Claude Code or Codex, or set ANTHROPIC_API_KEY")
         return
 
     emit_result(task_id, "success", data=result)
@@ -1384,8 +1386,8 @@ def main():
         task_id = "unknown"
         try:
             task_id = json.loads(raw).get("task_id", "unknown")
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("main", "could not read task_id from request", error=exc)
         emit_result(task_id, "error", error=f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
         sys.exit(1)
 

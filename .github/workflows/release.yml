@@ -4,7 +4,7 @@
 # self-update and the provisioner expect). Distribution is the install script
 # plus these assets; there is no npm publish (the name is blocked, see RELEASE.md).
 #
-# The whisper.cpp matrix below is unverified until the first tagged run — the
+# The whisper.cpp matrix below is unverified until the first tagged run, so the
 # binary name / cmake flags may need adjustment for the pinned whisper.cpp ref.
 name: release
 
@@ -136,7 +136,7 @@ jobs:
           # --disable-autodetect, then opt in by name. Without it configure absorbs
           # whatever happens to sit on the build machine: the runner has Homebrew
           # X11/xcb, so ffmpeg linked /opt/homebrew dylibs and would not have run
-          # on a user's Mac. VideoToolbox has to come back explicitly — encoder.py
+          # on a user's Mac. VideoToolbox has to come back explicitly: encoder.py
           # picks h264_videotoolbox on macOS, and losing it would cost more than
           # Rosetta ever did.
           PKG_CONFIG_PATH="$deps/lib/pkgconfig" ./configure \

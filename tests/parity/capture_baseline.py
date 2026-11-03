@@ -6,7 +6,7 @@ whisper.cpp, `compare.py` measures the candidate against this baseline with
 explicit tolerances.
 
 The baseline is the transcript JSON contract (`words` + `segments`) plus a
-metrics summary and the captions rendered from those real words — i.e. exactly
+metrics summary and the captions rendered from those real words, i.e. exactly
 the things whisper.cpp must reproduce.
 
 Usage:
@@ -18,7 +18,7 @@ Outputs (gitignored) under tests/parity/baseline/<stem>/:
     metrics.json         n_words, n_segments, duration, language, engine, model
     captions_<style>.ass captions rendered from the real transcript words
 
-Capture this WHILE the current system still works — it is the frozen reference
+Capture this WHILE the current system still works: it is the frozen reference
 everything else is measured against.
 """
 
@@ -93,7 +93,7 @@ def main(argv):
         print(
             "No fixtures. Pass media paths, or drop clips into tests/parity/local/ .\n"
             "Use short representative clips (single speaker, two speakers, music-heavy, "
-            "fast speech). They stay local — never committed.",
+            "fast speech). They stay local: never committed.",
             file=sys.stderr,
         )
         return 1

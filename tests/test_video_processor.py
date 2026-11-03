@@ -31,7 +31,7 @@ class VideoProcessorTests(unittest.TestCase):
 
     def test_concat_outro_uses_soft_audio_fallback_before_hard_concat(self):
         # xfade attempt returns non-zero so concat_outro falls through to
-        # the hardcut_soft_audio path. Patch proc_run directly — the old
+        # the hardcut_soft_audio path. Patch proc_run directly: the old
         # subprocess.run mock was a no-op since the code path migrated to
         # utils.proc.run.
         run_fail = mock.Mock(returncode=1, stdout="", stderr="xfade unavailable")

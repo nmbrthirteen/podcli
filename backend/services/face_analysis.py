@@ -1,5 +1,5 @@
 """
-Face analysis service — runs once during transcription, caches results.
+Face analysis service: runs once during transcription, caches results.
 
 Detects face positions throughout the video and maps them to speakers.
 Clip generation uses this pre-computed data instead of re-scanning every time.
@@ -104,7 +104,7 @@ def analyze_faces(
         roi = frame[y0:y1, x0:x1]
         if roi.size == 0:
             return None
-        # 16x16 downsample + grayscale — cheap to diff and robust to
+        # 16x16 downsample + grayscale: cheap to diff and robust to
         # sub-pixel jitter.
         small = cv2.resize(roi, (16, 16))
         return cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.int16)
@@ -114,7 +114,7 @@ def analyze_faces(
     reported_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     est_frames = int(duration * fps) if duration and fps else 0
     total_frames = max(reported_frames, est_frames, 1)
-    # grab() advances cheaply, retrieve() decodes only the sampled frames — far
+    # grab() advances cheaply, retrieve() decodes only the sampled frames, far
     # cheaper than a cap.set() seek (keyframe re-decode) per sample.
     step = max(1, total_frames // sample_count)
     frame_idx = -1
@@ -245,7 +245,7 @@ def analyze_faces(
         # Pure face-position counting is symmetric on true split-screens
         # (both faces are visible every frame), so presence votes alone
         # can't tell which face is actually speaking. We use the
-        # per-observation `activity` signal — the mouth-ROI frame-to-
+        # per-observation `activity` signal: the mouth-ROI frame-to-
         # frame pixel difference computed above. During a speaker's
         # turn, THEIR face has high activity (mouth moving) and the
         # listener's face has near-zero activity.

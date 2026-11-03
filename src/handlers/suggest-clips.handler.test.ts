@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { handleSuggestClips, hookSchema, suggestClipsInputShape } from "./suggest-clips.handler.js";
+import { handleSuggestClips, hookSchema, suggestClipsInputFields } from "./suggest-clips.handler.js";
 
 const base = {
   title: "Why the seed round cost them pricing",
@@ -14,7 +14,7 @@ const base = {
 
 describe("suggest_clips hook", () => {
   it("accepts a hook in the tool schema and rejects an unknown mode", () => {
-    const schema = z.object(suggestClipsInputShape);
+    const schema = z.object(suggestClipsInputFields);
     expect(
       schema.safeParse({ suggestions: [{ ...base, hook: { start: 110, end: 113, mode: "move" } }] }).success,
     ).toBe(true);
@@ -28,6 +28,7 @@ describe("suggest_clips hook", () => {
         suggestions: [{ ...base, hook: { start: 110, end: 113, mode: "repeat" } }],
       }),
     );
+
     expect(out.clips[0].hook).toEqual({ start: 110, end: 113, mode: "repeat" });
     expect(out.clips[0].duration).toBe(33);
   });

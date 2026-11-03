@@ -1,4 +1,4 @@
-# podcli Studio — Phase 1 Implementation Plan
+# podcli Studio: Phase 1 Implementation Plan
 
 > Major release groundwork. Full design (13 decisions) lives in the session memory file
 > `project_studio_dashboard_design.md`. This plan covers **Phase 1 only**: the studio
@@ -12,20 +12,20 @@ shared on-disk contract; Python is the engine + history writer, web/MCP are thin
 
 ---
 
-## Phase 0 — Discovery (DONE — facts to build on)
+## Phase 0: Discovery (DONE, facts to build on)
 
 **UI / build**
 - No bundler today. `src/ui/public/index.html` (~1880 lines) loads React 18.2 + ReactDOM + babel-standalone via CDN, all app code in one `<script type="text/babel">`. CSS: `public/css/styles.css`. Other pages: `config.html`, `integrations.html`, `knowledge.html`.
-- Express serves statics: `app.use(express.static(join(__dirname, "public")))` — `src/ui/web-server.ts:197`. Port **3847** (`web-server.ts:52`). **No SPA fallback route today.**
+- Express serves statics: `app.use(express.static(join(__dirname, "public")))`, `src/ui/web-server.ts:197`. Port **3847** (`web-server.ts:52`). **No SPA fallback route today.**
 - Build: `"build": "tsc && cp -r src/ui/public dist/ui/"` (`package.json`). `"type":"module"`, target ES2022, module ESNext, `rootDir ./src`, `outDir ./dist`, **no `jsx` configured** (public/ is not part of tsc build).
-- Stable API surface the new UI consumes: `/api/history`, `/api/outputs`, `/api/ui-state` (GET/POST — MCP↔UI bridge), `/api/events` (SSE), `/api/preview/:f`, `/api/stream-source`, plus the full upload→transcribe→suggest→create/batch flow.
+- Stable API surface the new UI consumes: `/api/history`, `/api/outputs`, `/api/ui-state` (GET/POST, MCP↔UI bridge), `/api/events` (SSE), `/api/preview/:f`, `/api/stream-source`, plus the full upload→transcribe→suggest→create/batch flow.
 
 **Data layer**
 - `ClipHistoryEntry` (`src/models/index.ts:200-213`): `id, source_video, start_second, end_second, caption_style, crop_strategy, logo_path?, title, output_path, file_size_mb, duration, created_at`. **No** `content_type`, `score`, transcript, or youtube fields.
 - `src/services/clips-history.ts`: `load / save / record / findDuplicate / list / getBySource`. `record(entry: Omit<ClipHistoryEntry,"id"|"created_at">)`. Writes `paths.clipsHistory` = `${home}/history/clips.json`.
 - **5 `record()` call sites**: `web-server.ts:600` (create-clip), `:729` (batch-clips), `:1804` (davinci export); `server.ts:666` (MCP create_clip), `:908` (MCP batch_create_clips).
-- `content_type` originates in `suggest-clips.handler.ts:123`; the suggestion (with `content_type`) is resolved at `create-clip.handler.ts:128-137`; transcript words available at `create-clip.handler.ts:152` — but neither is threaded into `record()`.
-- **Python does NOT read/write clips.json today** — `backend/config/paths.py:59` knows the path; nothing uses it. No Python history module exists.
+- `content_type` originates in `suggest-clips.handler.ts:123`; the suggestion (with `content_type`) is resolved at `create-clip.handler.ts:128-137`; transcript words available at `create-clip.handler.ts:152`, but neither is threaded into `record()`.
+- **Python does NOT read/write clips.json today.** `backend/config/paths.py:59` knows the path; nothing uses it. No Python history module exists.
 - Paths agree across `src/config/paths.ts` and `backend/config/paths.py`.
 
 **CLI / Python**
@@ -35,11 +35,11 @@ shared on-disk contract; Python is the engine + history writer, web/MCP are thin
 - **CLI = human ANSI text, no `--json`.** The JSON task-runner is separate (`backend/main.py` `emit_result` + `TASK_HANDLERS`), used by `PythonExecutor`. The `clips` CLI commands use the ANSI/human contract.
 - `PythonExecutor.execute(taskType, params)` (`src/services/python-executor.ts`) spawns `backend/main.py`, JSON over stdin/stdout. (Relevant to Phase 2; Phase 1 CLI runs cli.py directly.)
 
-**Concurrency note (accepted constraint):** clips.json has no file locking. Single-user localhost tool; TS writes on render, Python writes on `clips edit` — not concurrent in practice. Do **not** add locking (over-engineering). Both writers must preserve unknown fields on rewrite (read-modify-write, never reconstruct).
+**Concurrency note (accepted constraint):** clips.json has no file locking. Single-user localhost tool; TS writes on render, Python writes on `clips edit`, not concurrent in practice. Do **not** add locking (over-engineering). Both writers must preserve unknown fields on rewrite (read-modify-write, never reconstruct).
 
 ---
 
-## Phase 1A — Data foundation (schema + Python history writer)
+## Phase 1A: Data foundation (schema + Python history writer)
 
 Lowest risk, no UI. Establishes the shared contract everything else builds on.
 
@@ -48,8 +48,8 @@ Lowest risk, no UI. Establishes the shared contract everything else builds on.
    ```ts
    content_type?: string;        // carried from SuggestedClip at record time
    transcript_slice?: string;    // packed/plain text of the clip's words, captured at render time
-   youtube_video_id?: string;    // Phase 2 — declared now so the schema is stable
-   metrics?: {                   // Phase 2 — declared now, never written in Phase 1
+   youtube_video_id?: string;    // Phase 2, declared now so the schema is stable
+   metrics?: {                   // Phase 2: declared now, never written in Phase 1
      views?: number;
      retention?: number;         // averageViewPercentage 0-100
      ctr?: number;               // impressionsClickThroughRate 0-100
@@ -59,7 +59,7 @@ Lowest risk, no UI. Establishes the shared contract everything else builds on.
    ```
 2. **Thread `content_type` + `transcript_slice` into the TS record calls** where they are in scope:
    - In `create-clip.handler.ts`, the resolved `suggestion` (has `content_type`) and `transcriptWords` (line 152) are both available. Build a `transcript_slice` string (join the words whose timestamps fall in `[start_second, end_second]`) and surface both on the handler's return so the web/MCP record sites can pass them.
-   - Update the **5 record() sites** to pass `content_type` and `transcript_slice` when available (omit otherwise — they're optional). Batch/davinci sites: thread per-clip `content_type` if the batch spec carries it; otherwise leave undefined. **Do not invent data** — only pass what is genuinely in scope.
+   - Update the **5 record() sites** to pass `content_type` and `transcript_slice` when available (omit otherwise; they're optional). Batch/davinci sites: thread per-clip `content_type` if the batch spec carries it; otherwise leave undefined. **Do not invent data**: only pass what is genuinely in scope.
 3. **Create `backend/services/clips_history.py`** mirroring `corrections.py` structure. Functions:
    ```python
    load_clips_history() -> list[dict]      # read paths["clipsHistory"], [] if missing/bad
@@ -85,14 +85,14 @@ Lowest risk, no UI. Establishes the shared contract everything else builds on.
 - [ ] Python `update_clip` then TS `load()` → unknown fields survive both round-trips (write a `metrics` stub by hand, edit title in Python, confirm `metrics` still present).
 
 ### Anti-pattern guards
-- ❌ No new entities/tables, no migration script — fields are optional, old entries stay valid.
+- ❌ No new entities/tables, no migration script. Fields are optional, so old entries stay valid.
 - ❌ Do not rewrite clips.json by reconstructing objects field-by-field (drops unknown keys). Read-modify-write only.
 - ❌ Do not add file locking.
-- ❌ Do not fabricate `content_type`/`transcript_slice` where the source data isn't actually in scope — leave undefined.
+- ❌ Do not fabricate `content_type`/`transcript_slice` where the source data isn't actually in scope: leave undefined.
 
 ---
 
-## Phase 1B — CLI `clips` subcommands
+## Phase 1B: CLI `clips` subcommands
 
 Delivers CLI parity for history + re-iteration entry point. Depends on 1A's Python service.
 
@@ -100,13 +100,13 @@ Delivers CLI parity for history + re-iteration entry point. Depends on 1A's Pyth
 1. **Register the `clips` subparser** in `cli.py main()` (beside `knowledge`), following the existing `add_parser`/`add_subparsers` pattern:
    - `clips list [-n/--limit N]`
    - `clips edit <clip_id> [--title T] [--caption-style S] [--notes ...]` (metadata-only edits per design: edit → save → latest)
-   - `clips reopen <clip_id>` — hydrate `.podcli/ui-state.json` from the history entry so the web Workspace opens with that clip loaded (see below).
+   - `clips reopen <clip_id>`: hydrate `.podcli/ui-state.json` from the history entry so the web Workspace opens with that clip loaded (see below).
    - Add `elif args.command == "clips": cmd_clips(args)` to dispatch.
 2. **Implement `cmd_clips(args)`** using the `cmd_assets`/`cmd_knowledge` ANSI template:
    - `list`: print id (8-char), title, source basename, created_at, duration; show `content_type` if present.
    - `edit`: `find_clip` → apply provided fields → `update_clip`. Error + `sys.exit(1)` if not found.
-   - `reopen`: read the entry; write a single-suggestion `ui-state.json` — `videoPath = source_video`, a one-item `suggestions` array reconstructed from the entry (`title, start_second, end_second, duration, content_type, preview_text = transcript_slice`), `phase = "reviewing"`. This is the CLI→UI bridge over the shared `.podcli/` contract. Print confirmation + the URL `http://localhost:3847/episode?...` (or instruct to open the studio).
-3. **`reopen` semantics are metadata-only in Phase 1** — it loads the clip back into the editing surface; it does not auto-re-render. (Re-render is a save action in the UI / a future flag.)
+   - `reopen`: read the entry; write a single-suggestion `ui-state.json`, `videoPath = source_video`, a one-item `suggestions` array reconstructed from the entry (`title, start_second, end_second, duration, content_type, preview_text = transcript_slice`), `phase = "reviewing"`. This is the CLI→UI bridge over the shared `.podcli/` contract. Print confirmation + the URL `http://localhost:3847/episode?...` (or instruct to open the studio).
+3. **`reopen` semantics are metadata-only in Phase 1**: it loads the clip back into the editing surface; it does not auto-re-render. (Re-render is a save action in the UI / a future flag.)
 
 ### Documentation references
 - Subparser + dispatch: `cli.py main()` (~2862-3044).
@@ -120,13 +120,13 @@ Delivers CLI parity for history + re-iteration entry point. Depends on 1A's Pyth
 - [ ] Editing a clip in Python preserves its `metrics`/unknown fields (re-run the 1A round-trip check).
 
 ### Anti-pattern guards
-- ❌ Don't emit JSON from the CLI (human ANSI contract) — match existing subcommands.
+- ❌ Don't emit JSON from the CLI (human ANSI contract), match existing subcommands.
 - ❌ Don't reach into TS to record; write clips.json via the Python service from 1A.
 - ❌ `reopen` must not trigger a render in Phase 1.
 
 ---
 
-## Phase 1C — Vite + React Router scaffold (parity with current UI)
+## Phase 1C: Vite + React Router scaffold (parity with current UI)
 
 Stand up the build app and **port the existing editor** into a route, preserving all working functionality before adding new pages.
 
@@ -140,7 +140,7 @@ Stand up the build app and **port the existing editor** into a route, preserving
    - `/episode` (and `/episode/:source?`) → `EpisodeWorkspace` (the ported existing editor)
    - `/clip/:id` → `ClipDetail` (Phase 1D)
 6. **Port the existing editor** from `public/index.html` into `routes/EpisodeWorkspace.tsx` + extracted components (`LivePhonePreview`, `TikTokWireframe`, `PhoneCaptionBody`, `SpecRecap`, `McpHints`). Mostly mechanical: move JSX out of the babel `<script>`, replace CDN globals (`const {useState}=React`) with real imports, keep the `api()` fetch helper and the `STYLE_CONFIGS` map. Reuse `public/css/styles.css` (import it).
-7. **Express: serve the built SPA + add a fallback route.** Keep `express.static` at `web-server.ts:197` (now serving Vite output in `dist/ui/public`). After all `/api` routes, add an SPA fallback: `app.get("*", (req,res)=> res.sendFile(join(__dirname,"public","index.html")))` — guard so it never shadows `/api/*` or static assets.
+7. **Express: serve the built SPA + add a fallback route.** Keep `express.static` at `web-server.ts:197` (now serving Vite output in `dist/ui/public`). After all `/api` routes, add an SPA fallback: `app.get("*", (req,res)=> res.sendFile(join(__dirname,"public","index.html")))`, guard so it never shadows `/api/*` or static assets.
 8. **Update build/dev scripts** in `package.json`:
    - `"build": "vite build --config src/ui/client/vite.config.ts && tsc && cp -r src/ui/public/css dist/ui/public/css && cp src/ui/public/*.png dist/ui/public/"` (Vite emits HTML/JS to `dist/ui/public`; still copy non-bundled css/images, or import CSS through Vite and drop the copy).
    - `"ui:dev": "vite --config src/ui/client/vite.config.ts"` (client) alongside existing `"ui": "tsx src/ui/web-server.ts"` (server). Document running both in dev.
@@ -158,23 +158,23 @@ Stand up the build app and **port the existing editor** into a route, preserving
 - [ ] `git grep babel-standalone` returns nothing in the new client.
 
 ### Anti-pattern guards
-- ❌ Don't rewrite editor logic — **port** it (move + swap imports). Behavior parity first, cleanup later.
+- ❌ Don't rewrite editor logic: **port** it (move + swap imports). Behavior parity first, cleanup later.
 - ❌ Don't let `tsc` try to compile the client (must be in root tsconfig `exclude`).
 - ❌ SPA fallback must be registered AFTER api routes and must not intercept `/api/*`.
-- ❌ Don't break the `/api/ui-state` MCP↔UI bridge — the Workspace must still read/write it (this is how `clips reopen` hands off).
+- ❌ Don't break the `/api/ui-state` MCP↔UI bridge: the Workspace must still read/write it (this is how `clips reopen` hands off).
 
 ---
 
-## Phase 1D — Studio Home (library) + Clip Detail (edit page)
+## Phase 1D: Studio Home (library) + Clip Detail (edit page)
 
 The new surfaces. Depends on 1A (fields), 1B (edit path), 1C (router/shell).
 
 ### What to implement
-1. **`StudioHome` (`/`)** — the library:
-   - Fetch `/api/history` (and `/api/outputs` for file existence). Group into **episodes by `source_video` basename** (mirror `getBySource` logic client-side, or add a thin `/api/episodes` endpoint that calls `clips-history.getBySource` grouping — prefer reusing existing `/api/history` to keep code minimal).
-   - Episode cards: source name, clip count, created range, status. Recent-clips rail. An **action rail** up top driven by clip state ("N clips rendered", "Episode X in review") — derive from existing data, no new backend.
+1. **`StudioHome` (`/`)**: the library:
+   - Fetch `/api/history` (and `/api/outputs` for file existence). Group into **episodes by `source_video` basename** (mirror `getBySource` logic client-side, or add a thin `/api/episodes` endpoint that calls `clips-history.getBySource` grouping; prefer reusing existing `/api/history` to keep code minimal).
+   - Episode cards: source name, clip count, created range, status. Recent-clips rail. An **action rail** up top driven by clip state ("N clips rendered", "Episode X in review"), derive from existing data with no new backend.
    - "+ New Episode" → `/episode` (fresh editor).
-2. **`ClipDetail` (`/clip/:id`)** — the per-clip edit page (design decision: edit → save → latest, no version stacks):
+2. **`ClipDetail` (`/clip/:id`)**: the per-clip edit page (design decision: edit → save → latest, no version stacks):
    - Load the clip (from `/api/history` by id, or a small `/api/clip/:id` that calls `find_clip`). Show preview (`/api/preview/:filename` from `output_path`), transcript_slice, content_type, settings.
    - Editable fields: **title, caption style, thumbnail, cut timing**. Save:
      - Metadata-only edits (title) → POST to a thin endpoint that calls the **same Python `update_clip`** (via `PythonExecutor` or a small route) so TS and CLI share one writer. (Minimal: add `update_clip` task to `backend/main.py` TASK_HANDLERS reusing 1A's service, exposed as `/api/clip/:id` PATCH.)
@@ -196,13 +196,13 @@ The new surfaces. Depends on 1A (fields), 1B (edit path), 1C (router/shell).
 - [ ] "Reopen in editor" loads the clip into the Workspace (same result as `clips reopen`).
 
 ### Anti-pattern guards
-- ❌ No version stacks/trays — one current state per clip.
-- ❌ Don't add a second history writer in TS for edits — route edits through the Python `update_clip` so there is one source of truth.
-- ❌ No YouTube/metrics UI (Phase 2) — `metrics`/`youtube_video_id` exist in the schema but are not surfaced or written here.
+- ❌ No version stacks/trays: one current state per clip.
+- ❌ Don't add a second history writer in TS for edits: route edits through the Python `update_clip` so there is one source of truth.
+- ❌ No YouTube/metrics UI (Phase 2), `metrics`/`youtube_video_id` exist in the schema but are not surfaced or written here.
 
 ---
 
-## Final Phase — Verification
+## Final Phase: Verification
 
 1. **Build & run:** `npm run build` clean (tsc + vite); `npm run ui:prod` serves the SPA on 3847; deep links + refresh work.
 2. **Parity:** full upload→transcribe→suggest→create/batch flow works in the new UI identically to the removed `index.html`.

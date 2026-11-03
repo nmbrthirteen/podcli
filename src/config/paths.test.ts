@@ -18,6 +18,7 @@ beforeAll(async () => {
 afterAll(() => {
   if (savedHome === undefined) delete process.env.PODCLI_HOME;
   else process.env.PODCLI_HOME = savedHome;
+
   if (savedData === undefined) delete process.env.PODCLI_DATA;
   else process.env.PODCLI_DATA = savedData;
   rmSync(tmp, { recursive: true, force: true });

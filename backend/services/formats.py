@@ -1,4 +1,4 @@
-"""Output format specifications — the single source of truth for clip dimensions.
+"""Output format specifications: the single source of truth for clip dimensions.
 
 Every aspect-ratio decision (crop target, caption geometry, duration bounds,
 which scoring profile applies) derives from a FormatSpec so the render pipeline

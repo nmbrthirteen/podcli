@@ -50,14 +50,17 @@ function depsReturning(opts: {
 describe("listChannelUploads", () => {
   it("normalizes a bare channel root to the /videos tab before calling yt-dlp", async () => {
     const seenArgs: string[][] = [];
+
     const deps: MineChannelDeps = {
       runYtDlp: async (args) => {
         seenArgs.push(args);
+
         return { stdout: FLAT_PLAYLIST_STDOUT, stderr: "", code: 0 };
       },
       fetchText: async () => "",
       minedVideoIds: async () => new Set(),
     };
+
     await listChannelUploads(deps, { channel_url: "https://www.youtube.com/@deeptechdecodedai" });
     expect(seenArgs[0].at(-1)).toBe("https://www.youtube.com/@deeptechdecodedai/videos");
   });
@@ -67,9 +70,11 @@ describe("listChannelUploads", () => {
       JSON.stringify({ title: "Shorts", _type: "playlist" }),
       JSON.stringify({ id: "vid1", title: "Episode 1", duration: 3600 }),
     ].join("\n");
+
     const uploads = await listChannelUploads(depsReturning({ stdout }), {
       channel_url: "https://www.youtube.com/@example/videos",
     });
+
     expect(uploads).toHaveLength(1);
     expect(uploads[0].video_id).toBe("vid1");
   });
@@ -78,6 +83,7 @@ describe("listChannelUploads", () => {
     const uploads = await listChannelUploads(depsReturning({ stdout: FLAT_PLAYLIST_STDOUT }), {
       channel_url: "https://www.youtube.com/@example/videos",
     });
+
     expect(uploads).toHaveLength(2);
     expect(uploads[0]).toMatchObject({ video_id: "vid1", title: "Episode 1", duration: 3600 });
   });
@@ -86,6 +92,7 @@ describe("listChannelUploads", () => {
     const uploads = await listChannelUploads(depsReturning({ stdout: FLAT_PLAYLIST_STDOUT }), {
       channel_url: "https://www.youtube.com/@example/videos",
     });
+
     expect(uploads[1].url).toBe("https://www.youtube.com/watch?v=vid2");
   });
 
@@ -93,6 +100,7 @@ describe("listChannelUploads", () => {
     const uploads = await listChannelUploads(depsReturning({ stdout: FLAT_PLAYLIST_STDOUT, minedIds: ["vid1"] }), {
       channel_url: "https://www.youtube.com/@example/videos",
     });
+
     expect(uploads.find((u) => u.video_id === "vid1")?.already_mined).toBe(true);
     expect(uploads.find((u) => u.video_id === "vid2")?.already_mined).toBe(false);
   });
@@ -112,6 +120,7 @@ describe("mineVideoCaptions", () => {
       depsReturning({ stdout: VIDEO_INFO_WITH_ORIGINAL_TRACK, captionText: FIXTURE_VTT }),
       { video_url: "https://youtu.be/vid1" },
     );
+
     expect(result.track).toEqual({ lang: "ka-orig", kind: "auto" });
     expect(result.transcript?.language).toBe("ka");
   });
@@ -121,6 +130,7 @@ describe("mineVideoCaptions", () => {
       depsReturning({ stdout: VIDEO_INFO_WITH_ORIGINAL_TRACK, captionText: FIXTURE_VTT }),
       { video_url: "https://youtu.be/vid1" },
     );
+
     expect(result.transcript?.words.map((w) => w.word)).toEqual(["Hello", "and", "welcome", "to", "the", "show"]);
     expect(result.transcript?.text).toBe("Hello and welcome to the show");
   });
@@ -129,6 +139,7 @@ describe("mineVideoCaptions", () => {
     const result = await mineVideoCaptions(depsReturning({ stdout: VIDEO_INFO_NO_CAPTIONS }), {
       video_url: "https://youtu.be/vid3",
     });
+
     expect(result.transcript).toBeNull();
     expect(result.track).toBeNull();
     expect(result.message).toMatch(/no captions/i);
@@ -139,6 +150,7 @@ describe("mineVideoCaptions", () => {
       depsReturning({ stdout: VIDEO_INFO_WITH_ORIGINAL_TRACK, captionText: FIXTURE_VTT, minedIds: ["vid1"] }),
       { video_url: "https://youtu.be/vid1" },
     );
+
     expect(result.already_mined).toBe(true);
     expect(result.message).toMatch(/already/i);
   });

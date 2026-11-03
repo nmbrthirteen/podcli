@@ -6,6 +6,7 @@ provider layer above can treat "run this prompt" as one call.
 """
 
 import os
+from utils.log import warn as log_warn
 import subprocess
 import sys
 from functools import lru_cache
@@ -46,8 +47,8 @@ def _npmrc_prefix_dirs() -> list[str]:
     try:
         from services.env_settings import _env_path
         npmrc_paths.append(os.path.join(os.path.dirname(_env_path()), ".npmrc"))
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("ai-cli", "could not locate .npmrc beside the env file", error=exc)
     for npmrc in npmrc_paths:
         if not os.path.isfile(npmrc):
             continue
@@ -61,8 +62,8 @@ def _npmrc_prefix_dirs() -> list[str]:
                         prefix = stripped.split("=", 1)[1].strip()
                         if prefix:
                             dirs.append(prefix if sys.platform == "win32" else os.path.join(prefix, "bin"))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("ai-cli", "could not read .npmrc", error=exc)
     return dirs
 
 
@@ -127,8 +128,8 @@ def _version_manager_bin_dirs() -> list[str]:
         dirs.extend(sorted(glob.glob(os.path.join(nvm_dir, "versions", "node", "*", "bin")), reverse=True))
         dirs.extend(glob.glob(os.path.join(home, ".fnm", "node-versions", "*", "installation", "bin")))
         dirs.extend(glob.glob(os.path.join(home, ".local", "share", "fnm", "node-versions", "*", "installation", "bin")))
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("ai-cli", "node version manager scan failed", error=exc)
 
     fnm_bin = os.path.join(home, ".local", "share", "fnm", "current", "bin")
     dirs.append(fnm_bin)
@@ -269,8 +270,8 @@ def _glob_cli_paths(name: str) -> list[str]:
     for pattern in patterns:
         try:
             found.extend(glob.glob(pattern))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("ai-cli", "glob failed", error=exc)
     return found
 
 
@@ -281,8 +282,8 @@ def _configured_cli_path(engine: str) -> Optional[str]:
         try:
             from services.env_settings import _read_pairs
             raw = (_read_pairs().get(env_key) or "").strip()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("ai-cli", "could not read CLI path from env settings", error=exc)
     if not raw:
         return None
     return _resolve_cli_path(raw) or (raw if os.path.isfile(raw) else None)
@@ -438,21 +439,25 @@ def _run_ai_command(
     """Execute one AI CLI prompt and return the completed process."""
     if engine == "codex":
         output_file = prompt_file + ".out"
-        result = subprocess.run(
-            [
-                cli_path, "exec",
-                "--sandbox", "read-only",
-                "--skip-git-repo-check",
-                "-o", output_file,
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=project_dir,
-            timeout=timeout,
-        )
+        # "-" makes codex read the prompt from stdin, keeping the transcript out
+        # of argv (length limits, visible in `ps`).
+        with open(prompt_file, encoding="utf-8") as prompt_fh:
+            result = subprocess.run(
+                [
+                    cli_path, "exec",
+                    "--sandbox", "read-only",
+                    "--skip-git-repo-check",
+                    "-o", output_file,
+                    "-",
+                ],
+                stdin=prompt_fh,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=project_dir,
+                timeout=timeout,
+            )
         if os.path.exists(output_file):
             with open(output_file, encoding="utf-8") as f:
                 result = subprocess.CompletedProcess(
@@ -463,8 +468,8 @@ def _run_ai_command(
                 )
             try:
                 os.unlink(output_file)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warn("ai-cli", "could not remove codex output file", error=exc)
         return result
 
     shell = sys.platform == "win32" and cli_path.lower().endswith((".cmd", ".bat"))

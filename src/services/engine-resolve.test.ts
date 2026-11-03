@@ -1,9 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import type { PythonExecutor } from "./python-executor.js";
+import type { TaskExecutor } from "./python-executor.js";
 import { resolveTranscribeEngine, engineCanDiarize } from "./engine-resolve.js";
 
-function fakeExecutor(response: unknown): PythonExecutor {
-  return { execute: vi.fn().mockResolvedValue(response) } as unknown as PythonExecutor;
+function fakeExecutor(response: { data: { engine: string } }): TaskExecutor {
+  return { execute: vi.fn().mockResolvedValue(response) };
+}
+
+function failingExecutor(): TaskExecutor {
+  return { execute: vi.fn().mockRejectedValue(new Error("boom")) };
 }
 
 describe("resolveTranscribeEngine", () => {
@@ -24,13 +28,13 @@ describe("resolveTranscribeEngine", () => {
   });
 
   it("falls back to the raw request if resolution itself fails", async () => {
-    const executor = { execute: vi.fn().mockRejectedValue(new Error("boom")) } as unknown as PythonExecutor;
+    const executor = failingExecutor();
     const engine = await resolveTranscribeEngine(executor, "whisper-py", "base");
     expect(engine).toBe("whisper-py");
   });
 
   it("falls back to whisper-py when both the request and the resolution are empty", async () => {
-    const executor = { execute: vi.fn().mockRejectedValue(new Error("boom")) } as unknown as PythonExecutor;
+    const executor = failingExecutor();
     const engine = await resolveTranscribeEngine(executor, undefined, "base");
     expect(engine).toBe("whisper-py");
   });

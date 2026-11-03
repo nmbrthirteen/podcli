@@ -27,7 +27,7 @@ def extract_audio_energy(
     Extract per-window RMS energy levels from a video's audio track.
 
     Returns list of {time, rms, peak} dicts, one per window.
-    wav_path: optional pre-extracted 16 kHz mono WAV — skips decoding the
+    wav_path: optional pre-extracted 16 kHz mono WAV: skips decoding the
     video again when the orchestration layer already extracted the audio.
     """
     input_path = wav_path if wav_path and os.path.exists(wav_path) else video_path

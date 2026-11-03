@@ -11,22 +11,22 @@ triggers:
   - new episode plan
 ---
 
-# /plan-episode — Episode Architect
+# /plan-episode: Episode Architect
 
-> You are an episode architect. You work BACKWARDS from the ideal output — viral shorts, compelling titles, a story that holds attention — to design questions, story arcs, and moments BEFORE the recording happens.
+> You are an episode architect. You work BACKWARDS from the ideal output (viral shorts, compelling titles, a story that holds attention) to design questions, story arcs, and moments BEFORE the recording happens.
 
 ---
 
 ## Before Starting
 
 Read the knowledge base with the `knowledge_base` MCP tool:
-- `01-brand-identity.md` — show positioning, what makes it unique
-- `02-voice-and-tone.md` — voice fingerprint, what resonates with the audience
-- `03-episodes-database.md` — past episodes (avoid repetition, find gaps)
-- `05-title-formulas.md` — title patterns (design questions that produce title-worthy answers)
-- `08-topics-themes.md` — core topics, audience interests
-- `11-inspiration-channels.md` — reference channels and what they do well
-- `13-learnings.md` — what consistently works / doesn't across past episodes
+- `01-brand-identity.md`: show positioning, what makes it unique
+- `02-voice-and-tone.md`: voice fingerprint, what resonates with the audience
+- `03-episodes-database.md`: past episodes (avoid repetition, find gaps)
+- `05-title-formulas.md`: title patterns (design questions that produce title-worthy answers)
+- `08-topics-themes.md`: core topics, audience interests
+- `11-inspiration-channels.md`: reference channels and what they do well
+- `13-learnings.md`: what consistently works / doesn't across past episodes
 
 ---
 
@@ -58,24 +58,24 @@ For each potential short, draft:
 - The content type (Guest Story / Technical Insight / Market / Business / Hot Take)
 - The one sentence the guest would need to say
 
-This gives you a "moment map" — the specific things you need the guest to say or reveal.
+This gives you a "moment map": the specific things you need the guest to say or reveal.
 
 ### Step 2: Design the Story Arc
 
 Every great podcast episode follows an arc. Design one:
 
 ```
-ACT 1 — ORIGIN (10-15 min)
+ACT 1: ORIGIN (10-15 min)
   Hook: The surprising thing about this guest/company
   Setup: How they got here (the non-obvious path)
   Tension: The moment everything almost failed
 
-ACT 2 — INSIGHT (20-30 min)
+ACT 2: INSIGHT (20-30 min)
   The core idea: What they know that most people don't
   The proof: Specific numbers, results, examples
   The contrarian take: Where they disagree with consensus
 
-ACT 3 — FUTURE (10-15 min)
+ACT 3: FUTURE (10-15 min)
   The vision: Where this is going
   The advice: What they'd tell someone starting today
   The hot take: The bold prediction or unpopular opinion
@@ -91,7 +91,7 @@ For each moment in the moment map, write the question that will produce it.
 |------|---------|---------|-----------------|
 | **The Origin Question** | "Take me back to the moment when..." | "Take me back to when you first realized [X] was broken" | Founder Story clips |
 | **The Contrarian Probe** | "Most people think [X]. You disagree. Why?" | "Everyone says AI needs more GPUs. You think it needs more electricians. Why?" | Hot Take clips |
-| **The Specific Number** | "What's the actual number?" | "What did that actually cost? Not the round number — the real one." | Business/Strategy clips with ugly numbers |
+| **The Specific Number** | "What's the actual number?" | "What did that actually cost? Not the round number: the real one." | Business/Strategy clips with ugly numbers |
 | **The Failure Question** | "What's the biggest mistake you made?" | "What's the decision you'd reverse if you could?" | Emotional, shareable clips |
 | **The Insider Knowledge** | "What does everyone get wrong about [X]?" | "What does everyone get wrong about raising a seed round?" | Market/Insight clips |
 | **The Future Bet** | "If you had to bet on one thing..." | "If you had to bet your company on one trend for the next 5 years..." | Vision/Prediction clips |
@@ -121,7 +121,7 @@ Adapt the best patterns from each.
 
 ### Step 6: Pre-Title Draft
 
-For each planned moment, draft 2-3 title options BEFORE recording. This gives the host a "target" — they know which answers will become shorts.
+For each planned moment, draft 2-3 title options BEFORE recording. This gives the host a "target" so they know which answers will become shorts.
 
 ### Step 7: Apply Learnings
 
@@ -135,7 +135,7 @@ Read `13-learnings.md` and adjust:
 ## Output Format
 
 ```markdown
-# Episode Plan: [Guest Name] — [Company]
+# Episode Plan: [Guest Name], [Company]
 
 **Episode:** [Number]
 **Topic:** [Main topic]
@@ -146,26 +146,26 @@ Read `13-learnings.md` and adjust:
 ## Guest Profile
 - **Name:** [Full name]
 - **Role:** [Title at Company]
-- **Background:** [2-3 sentences — what they've built, why they're interesting]
+- **Background:** [2-3 sentences: what they've built, why they're interesting]
 - **Unique angle:** [The one thing about this guest that's different from past episodes]
 
 ---
 
 ## Story Arc
 
-### Act 1: Origin (0:00 — ~15:00)
+### Act 1: Origin (0:00 to ~15:00)
 **Goal:** [What the audience should feel/know after this section]
 - Opening hook: [The surprising thing to lead with]
 - Key question: [The question that unlocks the origin story]
 - Target moment: [The clip you want from this section]
 
-### Act 2: Insight (~15:00 — ~40:00)
+### Act 2: Insight (~15:00 to ~40:00)
 **Goal:** [The core insight or knowledge transfer]
 - Key questions: [2-3 questions for this section]
 - Target moments: [2-3 clips you want]
 - The contrarian angle: [Where to push back or probe deeper]
 
-### Act 3: Future (~40:00 — ~55:00)
+### Act 3: Future (~40:00 to ~55:00)
 **Goal:** [The vision, advice, or bold prediction]
 - Key questions: [2-3 questions]
 - Target moments: [2-3 clips]
@@ -244,7 +244,7 @@ Before delivering the plan:
 
 Return one of (per `CLAUDE.md` Completion Protocol):
 
-- **DONE** — Plan saved, all quality gates pass, moment map covers 5 content types, learnings applied.
-- **DONE_WITH_CONCERNS** — Plan saved but one or more gates borderline (e.g., only 4 content types covered because guest's scope is narrow). Flag which.
-- **BLOCKED** — Not enough guest context to write sharp, specific questions. Ask for background (links, bio, prior interviews).
-- **NEEDS_INPUT** — Missing guest role, topic focus, or episode number.
+- **DONE**: Plan saved, all quality gates pass, moment map covers 5 content types, learnings applied.
+- **DONE_WITH_CONCERNS**: Plan saved but one or more gates borderline (e.g., only 4 content types covered because guest's scope is narrow). Flag which.
+- **BLOCKED**: Not enough guest context to write sharp, specific questions. Ask for background (links, bio, prior interviews).
+- **NEEDS_INPUT**: Missing guest role, topic focus, or episode number.

@@ -5,6 +5,7 @@ async function copyText(value: string): Promise<void> {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(value);
+
       return;
     }
   } catch {
@@ -17,11 +18,14 @@ async function copyText(value: string): Promise<void> {
   field.style.position = "fixed";
   field.style.opacity = "0";
   field.style.pointerEvents = "none";
+
   const activeElement = document.activeElement instanceof HTMLElement
     ? document.activeElement
     : null;
+
   document.body.appendChild(field);
   let copied = false;
+
   try {
     field.select();
     copied = document.execCommand("copy");
@@ -29,6 +33,7 @@ async function copyText(value: string): Promise<void> {
     field.remove();
     activeElement?.focus({ preventScroll: true });
   }
+
   if (!copied) throw new Error("Clipboard unavailable");
 }
 
@@ -76,9 +81,11 @@ export default function CopyButton({
   const handleCopy = async (event: React.MouseEvent<HTMLButtonElement>) => {
     if (stopPropagation) event.stopPropagation();
     const value = getText ? getText() : text;
+
     if (!value) return;
 
     if (timerRef.current) window.clearTimeout(timerRef.current);
+
     try {
       await copyText(value);
       setFailed(false);

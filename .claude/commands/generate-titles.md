@@ -10,7 +10,7 @@ triggers:
   - need titles
 ---
 
-# /generate-titles — Title Writer
+# /generate-titles: Title Writer
 
 > You are the title writer for this podcast. You follow the show's title spec exactly. Every title must pass all quality gates before output. Zero exceptions.
 
@@ -19,10 +19,10 @@ triggers:
 ## Before Starting
 
 Read the knowledge base with the `knowledge_base` MCP tool:
-- `05-title-formulas.md` — title patterns, shapes, rules, banned words
-- `02-voice-and-tone.md` — voice fingerprint, The Coffee Test
-- `01-brand-identity.md` — show positioning
-- `13-learnings.md` — past title patterns that worked / didn't
+- `05-title-formulas.md`: title patterns, shapes, rules, banned words
+- `02-voice-and-tone.md`: voice fingerprint, The Coffee Test
+- `01-brand-identity.md`: show positioning
+- `13-learnings.md`: past title patterns that worked / didn't
 
 ---
 
@@ -30,9 +30,9 @@ Read the knowledge base with the `knowledge_base` MCP tool:
 
 | Input Type | How to Handle |
 |-----------|--------------|
-| Raw transcript clip | Scan for anchor — the single most non-obvious thing |
+| Raw transcript clip | Scan for anchor: the single most non-obvious thing |
 | Summary/brief | Take at face value, push for the non-obvious insight |
-| Topic only | Generate directional titles, flag: "No clip content — titles are directional only" |
+| Topic only | Generate directional titles, flag: "No clip content: titles are directional only" |
 
 ---
 
@@ -54,7 +54,7 @@ Is this a raw transcript, a summary, or topic-only?
 ### Step 3: Extract the Anchor
 Pull the single most interesting or non-obvious thing from the clip. State it in one sentence. The anchor must appear in at least 3 of the 8 titles.
 
-Ask: *"What is the one thing that would make someone say — wait, really?"*
+Ask: *"What is the one thing that would make someone say, wait, really?"*
 
 ### Step 4: Decide on Guest Name
 - If the name is recognizable → use it
@@ -117,8 +117,8 @@ A title can create curiosity but must NEVER promise more than the clip delivers.
 
 ```markdown
 **Content Type:** [Detected type]
-**Anchor:** [One sentence — the core non-obvious insight]
-**Guest Name Decision:** [Using name / Leading with insight] — [reason]
+**Anchor:** [One sentence: the core non-obvious insight]
+**Guest Name Decision:** [Using name / Leading with insight], [reason]
 
 ---
 
@@ -134,8 +134,8 @@ A title can create curiosity but must NEVER promise more than the clip delivers.
 ---
 
 **Top picks:**
-- **#[X]** — [One-line reason]
-- **#[X]** — [One-line reason]
+- **#[X]**: [One-line reason]
+- **#[X]**: [One-line reason]
 ```
 
 ---
@@ -144,7 +144,7 @@ A title can create curiosity but must NEVER promise more than the clip delivers.
 
 Return one of (per `CLAUDE.md` Completion Protocol):
 
-- **DONE** — 8 titles produced, all pass the 6-point checklist, top 2 flagged.
-- **DONE_WITH_CONCERNS** — 8 titles produced but one or more only barely cleared the Coffee Test or Payoff Check. Flag which.
-- **BLOCKED** — Clip content too thin to produce 8 distinct angles without repetition. Suggest what more context would help.
-- **NEEDS_INPUT** — Clip scope ambiguous (summary vs. transcript unclear, missing guest name for name-lead titles).
+- **DONE**: 8 titles produced, all pass the 6-point checklist, top 2 flagged.
+- **DONE_WITH_CONCERNS**: 8 titles produced but one or more only barely cleared the Coffee Test or Payoff Check. Flag which.
+- **BLOCKED**: Clip content too thin to produce 8 distinct angles without repetition. Suggest what more context would help.
+- **NEEDS_INPUT**: Clip scope ambiguous (summary vs. transcript unclear, missing guest name for name-lead titles).

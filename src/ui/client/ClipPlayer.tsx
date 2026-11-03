@@ -17,13 +17,16 @@ export default function ClipPlayer({ src, poster, onTime }: { src: string; poste
 
   const toggle = () => {
     const v = ref.current;
+
     if (!v) return;
+
     if (v.paused) v.play();
     else v.pause();
   };
 
   const seekAt = (clientX: number, el: HTMLDivElement) => {
     const v = ref.current;
+
     if (!v || !dur) return;
     const rect = el.getBoundingClientRect();
     v.currentTime = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * dur;

@@ -4,7 +4,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const tmp = mkdtempSync(join(tmpdir(), "podcli-assets-test-"));
+
 process.env.PODCLI_HOME = tmp;
+
 process.env.PODCLI_DATA = tmp;
 
 const { AssetManager } = await import("./asset-manager.js");
@@ -12,6 +14,7 @@ const { AssetManager } = await import("./asset-manager.js");
 function makeFile(name: string): string {
   const p = join(tmp, name);
   writeFileSync(p, "stub");
+
   return p;
 }
 

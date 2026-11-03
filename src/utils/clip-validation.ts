@@ -2,26 +2,32 @@ export function maxClipSeconds(format?: string): number {
   return format === "horizontal" ? 300 : 180;
 }
 
+/** A range bound as it arrives from a request or tool call, before it is checked. */
+export type RangeBound = number | string | null | undefined;
+
+function isFiniteBound(value: RangeBound): value is number {
+  return Number.isFinite(value);
+}
+
 /** Returns an error message, or null when the range is renderable. */
 export function validateClipRange(
-  start: unknown,
-  end: unknown,
+  start: RangeBound,
+  end: RangeBound,
   format?: string,
 ): string | null {
-  if (
-    typeof start !== "number" ||
-    !Number.isFinite(start) ||
-    typeof end !== "number" ||
-    !Number.isFinite(end)
-  ) {
+  if (!isFiniteBound(start) || !isFiniteBound(end)) {
     return "start_second and end_second must be numbers";
   }
+
   if (start < 0) return "start_second must be >= 0";
+
   if (end <= start) return "end_second must be greater than start_second";
   const maxDur = maxClipSeconds(format);
+
   if (end - start > maxDur) {
     return `Clip too long (${Math.round(end - start)}s). Max ${maxDur} seconds.`;
   }
+
   return null;
 }
 
@@ -29,20 +35,19 @@ export function validateClipRange(
 // renderable duration plus trim headroom.
 const MAX_SUGGESTION_SECONDS = 600;
 
-export function validateSuggestionRange(start: unknown, end: unknown): string | null {
-  if (
-    typeof start !== "number" ||
-    !Number.isFinite(start) ||
-    typeof end !== "number" ||
-    !Number.isFinite(end)
-  ) {
+export function validateSuggestionRange(start: RangeBound, end: RangeBound): string | null {
+  if (!isFiniteBound(start) || !isFiniteBound(end)) {
     return "start_second and end_second must be numbers";
   }
+
   if (start < 0) return "start_second must be >= 0";
+
   if (end <= start) return "end_second must be greater than start_second";
+
   if (end - start > MAX_SUGGESTION_SECONDS) {
     return `Suggested range too long (${Math.round(end - start)}s). Max ${MAX_SUGGESTION_SECONDS} seconds.`;
   }
+
   return null;
 }
 
@@ -53,6 +58,7 @@ export function validateSuggestionRange(start: unknown, end: unknown): string | 
 // ---------------------------------------------------------------------------
 
 const MIN_PAYOFF_WORDS = 5;
+
 // Japanese and Chinese do not space-delimit, so every payoff in them counts as
 // one "word" however long it runs. A character floor stands in there.
 const MIN_PAYOFF_CHARS = 12;
@@ -115,11 +121,13 @@ function normalize(text: string): string {
 
 function wordCount(text: string): number {
   const n = normalize(text);
+
   return n ? n.split(" ").length : 0;
 }
 
 function isTooThin(payoff: string): boolean {
   const normalized = normalize(payoff);
+
   return normalized.includes(" ")
     ? wordCount(payoff) < MIN_PAYOFF_WORDS
     : normalized.length < MIN_PAYOFF_CHARS;
@@ -130,43 +138,53 @@ export function isSelfContained(standalone: string): boolean {
 }
 
 /** Returns the backward-pointing opener, or null when the clip starts clean. */
-export function findOrphanOpener(previewText: unknown): string | null {
-  if (typeof previewText !== "string") return null;
+export function findOrphanOpener(previewText: string | null | undefined): string | null {
+  if (!previewText) return null;
   const words = normalize(previewText).split(" ").filter(Boolean);
+
   if (!words.length) return null;
+
   if (SELF_CONTAINED_STARTS.has(words.slice(0, 2).join(" "))) return null;
+
   // "I mean" is only a stall when the sentence leads with it.
   if (words[0] === "i" && words[1] === "mean") return "i mean";
+
   if (words[0] === "so") {
     // "that's" and "they're" have to match "that" and "they".
     const next = (words[1] ?? "").replace(/'(s|d|ll|re|ve)$/, "");
+
     return SO_POINTS_BACK.has(next) ? `so ${next}` : null;
   }
+
   return ORPHAN_OPENERS.has(words[0]) ? words[0] : null;
 }
 
 export interface SuggestionContext {
-  title?: unknown;
-  payoff?: unknown;
-  standalone?: unknown;
-  context_line?: unknown;
-  preview_text?: unknown;
+  title?: string | null;
+  payoff?: string | null;
+  standalone?: string | null;
+  context_line?: string | null;
+  preview_text?: string | null;
 }
 
 /** Returns an error message, or null when the clip carries its own context. */
 export function validateSuggestionContext(s: SuggestionContext): string | null {
-  const payoff = typeof s.payoff === "string" ? s.payoff.trim() : "";
+  const payoff = s.payoff?.trim() ?? "";
+
   if (!payoff) {
     return "payoff is required: one sentence, second person, on what the viewer walks away with.";
   }
+
   if (isTooThin(payoff)) {
     return `payoff is too thin ("${payoff}"). Write a full sentence on what the viewer walks away with.`;
   }
-  if (typeof s.title === "string" && normalize(s.title) === normalize(payoff)) {
+
+  if (s.title && normalize(s.title) === normalize(payoff)) {
     return "payoff just restates the title. Say what the viewer gets, not what the clip is called.";
   }
 
-  const standalone = typeof s.standalone === "string" ? s.standalone.trim() : "";
+  const standalone = s.standalone?.trim() ?? "";
+
   if (!standalone) {
     return 'standalone is required: what the viewer must already know to follow this clip, or "nothing".';
   }
@@ -184,6 +202,7 @@ export function validateSuggestionContext(s: SuggestionContext): string | null {
   }
 
   const orphan = findOrphanOpener(s.preview_text);
+
   if (orphan) {
     return (
       `preview_text opens on "${orphan}", which points at something said before the cut. ` +

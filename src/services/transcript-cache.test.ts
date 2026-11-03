@@ -5,7 +5,9 @@ import { join } from "path";
 import type { TranscriptResult } from "../models/index.js";
 
 const tmp = mkdtempSync(join(tmpdir(), "podcli-cache-test-"));
+
 process.env.PODCLI_HOME = tmp;
+
 process.env.PODCLI_DATA = tmp;
 
 const { TranscriptCache, hasSpeakerLabels, needsDiarizationRetry } = await import(
@@ -15,6 +17,7 @@ const { TranscriptCache, hasSpeakerLabels, needsDiarizationRetry } = await impor
 function makeFakeVideo(name: string, content: string): string {
   const p = join(tmp, name);
   writeFileSync(p, content);
+
   return p;
 }
 
@@ -54,7 +57,7 @@ describe("TranscriptCache", () => {
     expect(loaded?.words).toHaveLength(2);
   });
 
-  it("hashes the file content — different files get different cache keys", async () => {
+  it("hashes the file content: different files get different cache keys", async () => {
     const a = makeFakeVideo("a.mp4", "content A");
     const b = makeFakeVideo("b.mp4", "content B");
     await cache.set(a, { ...fakeTranscript, transcript: "A" });
@@ -84,11 +87,13 @@ describe("TranscriptCache", () => {
     const file = makeFakeVideo("packed-multi-key.mp4", "packed multi key");
     mkdirSync(join(tmp, "packed"), { recursive: true });
     const base = await cache.getFileHashForEngine(file, { engine: "whispercpp" });
+
     const small = await cache.getFileHashForEngine(file, {
       engine: "whispercpp",
       model: "small",
       language: "ka",
     });
+
     writeFileSync(join(tmp, "packed", `${base}.md`), "# base");
     writeFileSync(join(tmp, "packed", `${small}.md`), "# small-ka");
     expect(await cache.getPackedMarkdown(file, { engine: "whispercpp" })).toBe("# base");
@@ -107,11 +112,13 @@ describe("TranscriptCache", () => {
     const first = await cache.getFileHashForEngine(file, { engine: "whispercpp", model: "small" });
     writeFileSync(join(tmp, "packed", `${first}.md`), "# first");
     await new Promise((r) => setTimeout(r, 5));
+
     const second = await cache.getFileHashForEngine(file, {
       engine: "whispercpp",
       model: "medium",
       language: "ka",
     });
+
     writeFileSync(join(tmp, "packed", `${second}.md`), "# second");
     // Caller only knows the engine, not which model/language actually ran.
     // Deterministic rule: most recently written entry for this hash+engine.
@@ -188,30 +195,30 @@ describe("TranscriptCache", () => {
 });
 
 
+function spokenWord(speaker: string | null): TranscriptResult["words"][number] {
+  return { word: "hi", start: 0, end: 1, confidence: 1, speaker };
+}
+
 describe("hasSpeakerLabels", () => {
   it("accepts a transcript with speaker segments", () => {
     expect(hasSpeakerLabels({ speaker_segments: [{ speaker: "S0", start: 0, end: 1 }] })).toBe(true);
   });
 
   it("accepts a transcript whose words carry speakers", () => {
-    expect(hasSpeakerLabels({ words: [{ word: "hi", speaker: "SPEAKER_00" }] })).toBe(true);
+    expect(hasSpeakerLabels({ words: [spokenWord("SPEAKER_00")] })).toBe(true);
   });
 
   it("rejects a count with no labels behind it", () => {
     // The packer emits "S?" on every line for this shape, so serving it back
     // to a request for speakers would make re-transcribing a no-op.
     expect(
-      hasSpeakerLabels({ speakers: { num_speakers: 2 }, speaker_segments: [], words: [] }),
+      hasSpeakerLabels({ speaker_segments: [], words: [] }),
     ).toBe(false);
   });
 
   it("rejects the shape a whisper.cpp run leaves behind", () => {
     expect(
-      hasSpeakerLabels({
-        speakers: { num_speakers: 0 },
-        speaker_segments: [],
-        words: [{ word: "hi", speaker: null }],
-      }),
+      hasSpeakerLabels({ speaker_segments: [], words: [spokenWord(null)] }),
     ).toBe(false);
   });
 
@@ -222,8 +229,8 @@ describe("hasSpeakerLabels", () => {
 });
 
 describe("needsDiarizationRetry", () => {
-  const unlabelled = { diarization_attempted: false, words: [] };
-  const attemptedButNoneFound = { diarization_attempted: true, words: [] };
+  const unlabelled = { diarization_attempted: false };
+  const attemptedButNoneFound = { diarization_attempted: true };
 
   it("is false when diarization wasn't requested", () => {
     expect(needsDiarizationRetry(unlabelled, false, true)).toBe(false);

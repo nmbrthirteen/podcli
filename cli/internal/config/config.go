@@ -18,6 +18,7 @@ type Config struct {
 		Latest    string `json:"latest,omitempty"`
 		CheckedAt string `json:"checkedAt,omitempty"`
 	} `json:"update"`
+	Engine string `json:"engine,omitempty"`
 }
 
 func Load() Config {
@@ -76,6 +77,12 @@ func RecordUpdateCheck(latest string) {
 	c.Save()
 }
 
+// DefaultEngine is the transcription engine used when neither --engine nor
+// PODCLI_ENGINE is set. Empty means the launcher picks one.
+func DefaultEngine() string {
+	return Load().Engine
+}
+
 func Get(key string) (string, error) {
 	switch key {
 	case "update.auto":
@@ -83,8 +90,10 @@ func Get(key string) (string, error) {
 			return "off", nil
 		}
 		return "on", nil
+	case "engine":
+		return Load().Engine, nil
 	}
-	return "", fmt.Errorf("unknown config key %q (known: update.auto)", key)
+	return "", fmt.Errorf("unknown config key %q (known: update.auto, engine)", key)
 }
 
 func Set(key, val string) error {
@@ -94,8 +103,12 @@ func Set(key, val string) error {
 		c := Load()
 		c.Update.Auto = &on
 		return c.Save()
+	case "engine":
+		c := Load()
+		c.Engine = strings.ToLower(strings.TrimSpace(val))
+		return c.Save()
 	}
-	return fmt.Errorf("unknown config key %q (known: update.auto)", key)
+	return fmt.Errorf("unknown config key %q (known: update.auto, engine)", key)
 }
 
 func offValue(s string) bool {

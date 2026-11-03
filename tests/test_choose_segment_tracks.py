@@ -1,4 +1,4 @@
-"""Tests for video_processor._choose_segment_tracks — the per-turn
+"""Tests for video_processor._choose_segment_tracks: the per-turn
 face-track selector that decides which visual track represents the
 active speaker for a given segment.
 """

@@ -4,7 +4,7 @@ Clip suggestion via AI CLI (Claude Code or Codex).
 Delegates moment selection to an AI CLI, which uses the PodStack knowledge base
 (.podcli/knowledge/) and CLAUDE.md for context-aware clip extraction.
 
-Priority: Claude Code → Codex → heuristic fallback.
+Priority: podcli Pro cloud, then Claude Code or Codex, then the Anthropic API, then the heuristic fallback.
 """
 
 import hashlib
@@ -35,6 +35,36 @@ from services.ai_cli import (
     classify_cli_error,
     get_ai_cli_status,
 )
+
+
+def _title_key(title: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+
+
+def drop_published(clips: list[dict], episodes_path: str | None = None) -> list[dict]:
+    """Remove suggestions whose title matches a short already in the episode database.
+
+    The prompt asks the AI not to repeat published moments, but that is advice
+    and the heuristic fallback never reads the database at all. This runs after
+    whichever engine answered. Titles are the only thing the database records,
+    so the match is a normalised title comparison with a small similarity margin.
+    """
+    from difflib import SequenceMatcher
+
+    path = episodes_path or os.path.join(paths["knowledge"], "03-episodes-database.md")
+    published = [k for k in (_title_key(t) for t in _load_existing_shorts(path)) if k]
+    if not published or not clips:
+        return clips
+
+    kept = []
+    for clip in clips:
+        key = _title_key(str(clip.get("title", "")))
+        if key and any(
+            key == p or SequenceMatcher(None, key, p).ratio() >= 0.9 for p in published
+        ):
+            continue
+        kept.append(clip)
+    return kept
 
 
 def _load_existing_shorts(episodes_path: str) -> list[str]:
@@ -276,7 +306,7 @@ def _format_reaction_anchors(reaction_times: list[float] | None) -> str:
         "\nAUDIENCE REACTION ANCHORS (detected laughter/cheering peaks, in seconds):\n"
         f"{times}\n"
         "The moment that CAUSED each reaction sits just before its anchor. "
-        "Clips that contain or lead into an anchor are strong candidates — "
+        "Clips that contain or lead into an anchor are strong candidates, so "
         "prefer them when quality is otherwise equal.\n"
     )
 
@@ -296,7 +326,7 @@ def _build_prompt(
     can't read project files.
     """
 
-    # Load knowledge base files inline — prioritized by relevance to clip selection
+    # Load knowledge base files inline: prioritized by relevance to clip selection
     from services.knowledge_base import load_kb_context, warn_missing_context
 
     kb_dir = paths["knowledge"]
@@ -340,11 +370,11 @@ DURATION RULES (CRITICAL):
 
 CUTTING RULES (CRITICAL):
 - Cut TIGHT. Every second must earn its place.
-- Start at the exact moment the hook hits — no preamble, no "so", no "well"
+- Start at the exact moment the hook hits, no preamble, no "so", no "well"
 - ONE EXCEPTION: if the moment is an ANSWER, start on the QUESTION that prompted it.
   A question is not preamble, it is the setup the viewer needs. Only leave it out when
   it rambles past ~8 seconds, and then cut the rambling with "segments" or skip the moment.
-- End the MOMENT the point lands with a complete thought — don't trail off
+- End the MOMENT the point lands with a complete thought: don't trail off
 - NEVER cut mid-sentence or mid-thought. The viewer must feel closure.
 - The last sentence must feel like a natural ending, a punchline, or a mic-drop
 - If there's filler/tangent in the middle, use multiple segments to skip it
@@ -352,12 +382,12 @@ CUTTING RULES (CRITICAL):
 
 MOMENT SELECTION ({b.lens}):
 - Would YOU stop scrolling for this? If no, skip it.
-- First 3 seconds must HOOK — a bold claim, shocking number, or provocative question
-- Must make complete sense standalone — no "as I mentioned" or "going back to"
+- First 3 seconds must HOOK: a bold claim, shocking number, or provocative question
+- Must make complete sense standalone: no "as I mentioned" or "going back to"
 - Must not OPEN on a word pointing back before the cut: "that", "it", "they", "yeah",
   "so", "exactly", "right", "which is why". Widen the start until it is inside the clip.
-- Must end on a COMPLETE THOUGHT — sentence boundary, natural pause, or mic-drop moment
-- Single focused idea — one concept, fully delivered, no loose threads
+- Must end on a COMPLETE THOUGHT, sentence boundary, natural pause, or mic-drop moment
+- Single focused idea: one concept, fully delivered, no loose threads
 - Prioritize: controversial takes, surprising numbers, founder war stories, "wait what?" moments, emotional peaks
 - Skip: generic advice, obvious statements, context-dependent references
 - On long episodes, search the ENTIRE timeline and diversify the picks. Do not cluster all clips in one section if later sections contain strong standalone moments.
@@ -430,7 +460,7 @@ HOOK (optional):
 
 Rules:
 - Final clip duration (sum of segments) MUST be {b.dur_min}-{b.dur_max} seconds (target {b.target_min}-{b.target_max}s)
-- Each segment must start and end on COMPLETE SENTENCES — never mid-thought
+- Each segment must start and end on COMPLETE SENTENCES: never mid-thought
 - The LAST segment must end on a sentence that feels like a natural conclusion
 - Must make sense standalone when stitched together
 - Sort clips by timestamp order
@@ -565,7 +595,7 @@ def find_moments_from_text(
 ) -> list[dict]:
     """Locate the moment(s) the user described/pasted in the transcript.
     Returns clip dicts (same shape as suggest_with_claude). Status goes to
-    progress_callback; warnings to stderr — never stdout, which is the task
+    progress_callback; warnings to stderr: never stdout, which is the task
     runner's JSON-RPC channel."""
     existing_clips = existing_clips or []
     bounds = bounds or ClipBounds.of()
@@ -590,7 +620,7 @@ USER WANTS: "{description}"
 {existing_desc}
 RULES:
 - Find the EXACT moment(s) matching what the user pasted/described
-- The user may list several moments — return one clip per distinct moment they mention
+- The user may list several moments. Return one clip per distinct moment they mention
 - Return 1-{upper} matching moments (best match first)
 - All timestamps in SECONDS as numbers
 - Duration target: {bounds.target_min}-{bounds.target_max} seconds, max {bounds.dur_max} seconds
@@ -739,7 +769,7 @@ def suggest_with_claude(
     project_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 
     def _parse_seconds(val) -> float:
-        """Parse a timestamp value — handles both 123.4 and '2:03' formats."""
+        """Parse a timestamp value: handles both 123.4 and '2:03' formats."""
         if isinstance(val, (int, float)):
             return float(val)
         s = str(val).strip()
@@ -980,7 +1010,7 @@ def suggest_initial_with_claude(
         )
 
     if progress_callback:
-        progress_callback(0, f"Long episode detected — searching {len(buckets)} timeline buckets...")
+        progress_callback(0, f"Long episode detected: searching {len(buckets)} timeline buckets...")
 
     aggregated: list[dict] = []
     per_bucket_top_n = max(2, math.ceil(top_n / max(1, len(buckets))))

@@ -30,6 +30,7 @@ import type { Block } from "../scene";
  */
 
 export type { Brand } from "./brand";
+
 export { DEFAULT_BRAND } from "./brand";
 
 /**
@@ -89,7 +90,7 @@ const SHOWS_A_FILE = new Set(["image", "video"]);
  * Two, because the API cuts a caption at ninety characters and ninety
  * characters of label type do not fit on one line of this frame. Reserving one
  * was reserving for the caption that happens to be short, and the second line
- * of a long one came out of the band below it — which is the caption pill.
+ * of a long one came out of the band below it, which is the caption pill.
  */
 const CAPTION_LINES_MEDIA = 2;
 
@@ -238,10 +239,12 @@ const BleedMedia: React.FC<{
   const SAFE = safeFor(width, height);
   const src = card.src.startsWith("http") ? card.src : staticFile(card.src);
   const fit = card.fit === "fit" ? "contain" : "cover";
+
   const box: React.CSSProperties = {
     position: "absolute", inset: 0, width: "100%", height: "100%",
     objectFit: fit, backgroundColor: card.fit === "fit" ? brand.surface : "#000",
   };
+
   const Frame = getRemotionEnvironment().isRendering ? OffthreadVideo : Video;
 
   return (
@@ -445,6 +448,7 @@ const CardBody: React.FC<{
 
   if (card.kind === "compare") {
     const top = Math.max(...card.rows.map((r) => r.value)) || 1;
+
     return (
       <>
         {card.eyebrow && <Label text={card.eyebrow} scale={s} tone={MUTED} />}
@@ -511,6 +515,7 @@ const CardBody: React.FC<{
 
   if (card.kind === "share") {
     const pct = Math.max(0, Math.min(1, card.value));
+
     return (
       <>
         {card.eyebrow && <Label text={card.eyebrow} scale={s} tone={MUTED} />}
@@ -654,6 +659,7 @@ const CardBody: React.FC<{
     // The same split as the speaker above it: the player seeks a <video> per
     // frame, and a render has no seekable player to drive.
     const Frame = getRemotionEnvironment().isRendering ? OffthreadVideo : Video;
+
     return (
       <>
         <Frame
@@ -742,6 +748,7 @@ const SpeakerBand: React.FC<{ src: string; startFrom: number; faceY?: number | n
   src, startFrom, faceY,
 }) => {
   const Frame = getRemotionEnvironment().isRendering ? OffthreadVideo : Video;
+
   return (
     <Frame
       src={src}
@@ -782,22 +789,25 @@ const KNOWN_KINDS = new Set([
  * which is the two that show a file and the scene itself, return null and keep
  * the arithmetic they have.
  */
+const smallText = (text: string): Block => ({ type: "text", text, size: "sm" });
+
 const presetBlocks = (card: Card): Block[] | null => {
   const eyebrow: Block[] = "eyebrow" in card && card.eyebrow
     ? [{ type: "text", text: card.eyebrow, size: "xs" }]
     : [];
+
   switch (card.kind) {
     case "stat":
       return [
         ...eyebrow,
         { type: "text", text: card.value, size: "xxl" },
-        ...(card.caption ? [{ type: "text", text: card.caption, size: "sm" } as Block] : []),
+        ...(card.caption ? [smallText(card.caption)] : []),
       ];
     case "headline":
       return [
         ...eyebrow,
         { type: "text", text: card.lead, emphasis: card.emphasis, size: "xl" },
-        ...(card.sub ? [{ type: "text", text: card.sub, size: "sm" } as Block] : []),
+        ...(card.sub ? [smallText(card.sub)] : []),
       ];
     case "bullets":
       return [...eyebrow, { type: "list", items: card.items, size: "md" }];
@@ -809,7 +819,7 @@ const presetBlocks = (card: Card): Block[] | null => {
       return [
         ...eyebrow,
         { type: "meter", value: card.value, display: card.display },
-        ...(card.caption ? [{ type: "text", text: card.caption, size: "sm" } as Block] : []),
+        ...(card.caption ? [smallText(card.caption)] : []),
       ];
     case "entity":
       return [...eyebrow, { type: "chip", name: card.name, note: card.note, src: card.src }];
@@ -839,7 +849,7 @@ export const Cards: React.FC<{
 }> = ({
   cards, videoSrc, startFrom = 0, style, faceY, faceH, brand, topInset,
 }) => {
-  const colours = { ...DEFAULT_BRAND, ...(brand ?? {}) };
+  const colours = { ...DEFAULT_BRAND, ...brand };
   const frame = useCurrentFrame();
   const { fps, height, width } = useVideoConfig();
   const SAFE = safeFor(width, height);
@@ -857,11 +867,16 @@ export const Cards: React.FC<{
    */
   const usable = cards.filter((c) => {
     if (!KNOWN_KINDS.has(c.kind)) return false;
+
     if (c.kind === "image" || c.kind === "video") return Boolean(c.src);
+
     if (c.kind === "scene") return c.blocks.some(drawsSomething);
+
     return true;
   });
+
   const card = cardAt(usable, frame / fps);
+
   if (!card) return null;
 
   const { opacity } = motionAt({
@@ -870,6 +885,7 @@ export const Cards: React.FC<{
     end: card.end,
     motion: card.motion ?? MOTION.card,
   });
+
   if (opacity <= 0) return null;
 
   /*
@@ -914,7 +930,7 @@ export const Cards: React.FC<{
    * same call whether the arrangement was named by somebody or arrived as
    * blocks.
    */
-  const shape = presetBlocks(card);
+  const presetLayout = presetBlocks(card);
   /*
    * The measure a preset is actually set to, rather than the scene's.
    *
@@ -925,9 +941,11 @@ export const Cards: React.FC<{
    * same number, so nothing moves there.
    */
   const contentWidth = width / s - SAFE.left - SAFE.right;
-  const wanted = shape ? sceneHeight(shape, "stack", "tight", contentWidth) : 0;
+  const wanted = presetLayout ? sceneHeight(presetLayout, "stack", "tight", contentWidth) : 0;
+
   const fitFor = (available: number) =>
     wanted > 0 ? Math.max(MIN_FIT, Math.min(1, available / s / wanted)) : 1;
+
   /** How far this card would have to shrink to sit in a room of this height. */
   const fitsIn = (available: number) =>
     (card.kind === "scene"
@@ -935,6 +953,7 @@ export const Cards: React.FC<{
         layout: card.layout, gap: card.gap, room: available / s,
       }).fit
       : fitFor(available));
+
   const bodyShares = fitsIn(bodyRoom(room - speakerTakes)) > MIN_FIT;
   /*
    * How far down a card written into the shot has to start.
@@ -949,10 +968,12 @@ export const Cards: React.FC<{
    */
   const HEAD_BELOW_EYES = 0.13;
   const faceFloor = ((faceY ?? 0.4) + HEAD_BELOW_EYES) * height;
+
   const overRoom = Math.min(
     bodyRoom(room),
     Math.max(0, height - faceFloor - (captionZone(style) + GAP.section) * s),
   );
+
   /*
    * Written into the shot rather than laid over it, when the shot has the room.
    *
@@ -968,6 +989,7 @@ export const Cards: React.FC<{
    * makes its own.
    */
   const over = card.place === "over" && fitsIn(overRoom) > MIN_FIT;
+
   const withSpeaker = !over
     && card.speaker !== null
     && Boolean(videoSrc)
@@ -976,6 +998,7 @@ export const Cards: React.FC<{
     && (!SHOWS_A_FILE.has(card.kind)
       || mediaBand(card.kind, bodyRoom(room - speakerTakes), s, hasCaption)
          >= MEDIA_MIN * s);
+
   /*
    * How far the type has to come down to sit inside the band.
    *
@@ -989,7 +1012,9 @@ export const Cards: React.FC<{
   const bodyAvailable = over
     ? overRoom
     : bodyRoom(withSpeaker ? room - speakerTakes : room);
+
   const bodyFit = fitFor(bodyAvailable);
+
   /*
    * A file takes the whole frame when it was asked to, or when a band would
    * be too short to be worth one.
@@ -1006,6 +1031,7 @@ export const Cards: React.FC<{
   const bandWouldBe = SHOWS_A_FILE.has(card.kind)
     ? mediaBand(card.kind, bodyRoom(withSpeaker ? room - speakerTakes : room), s, hasCaption)
     : 0;
+
   const bleeds = SHOWS_A_FILE.has(card.kind)
     && !withSpeaker
     && (("bleed" in card && card.bleed === true) || bandWouldBe < MEDIA_MIN * s);

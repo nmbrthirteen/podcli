@@ -3,7 +3,7 @@ Audio-event detection (laughter, cheering, applause, screaming) for reaction-bas
 clip scoring.
 
 Runs YAMNet (AudioSet, 521 classes) as a self-contained ONNX graph via onnxruntime,
-which imports neither torch nor tensorflow — so this belongs on the native /
+which imports neither torch nor tensorflow, so this belongs on the native /
 whisper.cpp runtime path. Audio is extracted at 16 kHz mono (the same format
 whisper.cpp uses) and fed to the graph as a raw waveform; the log-mel front-end is
 baked into the model, so there is no librosa dependency.
@@ -94,7 +94,7 @@ def is_available() -> bool:
 def _read_waveform_16k_mono(video_path: str, wav_path: Optional[str] = None) -> Optional[np.ndarray]:
     """Extract audio as a float32 [-1, 1] mono waveform at 16 kHz via ffmpeg.
 
-    wav_path: optional pre-extracted 16 kHz mono WAV — read directly, no decode.
+    wav_path: optional pre-extracted 16 kHz mono WAV: read directly, no decode.
     """
     if wav_path and os.path.exists(wav_path):
         try:
@@ -260,7 +260,7 @@ def get_event_profile(
     Full pipeline: detect audio events and score all segments.
 
     Returns {events_data, segment_scores, reaction_times} where reaction_times are the
-    timestamps of frames whose reaction level clears reaction_threshold — the anchors a
+    timestamps of frames whose reaction level clears reaction_threshold, the anchors a
     reaction-based detector expands backwards from.
     """
     if not is_available():

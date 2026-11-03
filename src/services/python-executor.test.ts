@@ -1,7 +1,6 @@
-import { EventEmitter } from "events";
-import type { ChildProcess } from "child_process";
+import { ChildProcess } from "child_process";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { stderrTail, terminateProcessTree } from "./python-executor.js";
+import { stderrTail, terminateProcessTree, type SpawnProcess } from "./python-executor.js";
 
 describe("stderrTail", () => {
   it("returns short stderr unchanged", () => {
@@ -26,6 +25,7 @@ describe("stderrTail", () => {
       '  File "new.py", line 9',
       "ValueError: actual failure",
     ].join("\n");
+
     const tail = stderrTail(stderr);
     expect(tail.startsWith("Traceback (most recent call last):")).toBe(true);
     expect(tail).toContain("ValueError: actual failure");
@@ -42,9 +42,7 @@ describe("stderrTail", () => {
 
 describe("terminateProcessTree", () => {
   const fakeProc = () => {
-    const proc = new EventEmitter() as unknown as ChildProcess;
-    Object.assign(proc, { pid: 4242, exitCode: null, signalCode: null, kill: vi.fn() });
-    return proc;
+    return Object.assign(new ChildProcess(), { pid: 4242, exitCode: null, signalCode: null, kill: vi.fn() });
   };
 
   afterEach(() => {
@@ -89,13 +87,12 @@ describe("terminateProcessTree", () => {
   it("terminates the full Windows process tree", () => {
     vi.useFakeTimers();
     const proc = fakeProc();
-    const taskkillProc = new EventEmitter();
-    const spawnProcess = vi.fn().mockReturnValue(taskkillProc);
+    const spawnProcess = vi.fn<SpawnProcess>().mockReturnValue(new ChildProcess());
     const kill = vi.spyOn(process, "kill").mockReturnValue(true);
 
     terminateProcessTree(proc, 2000, {
       platform: "win32",
-      spawnProcess: spawnProcess as never,
+      spawnProcess,
     });
 
     expect(spawnProcess).toHaveBeenCalledWith(

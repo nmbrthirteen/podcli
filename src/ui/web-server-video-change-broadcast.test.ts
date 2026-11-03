@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { stubPythonBackend } from "../test-support/stub-python-backend.js";
 
 // A bare set_video from MCP (videoPath with no transcript in the same
 // request) clears the server's transcript/suggestions/selections, since
@@ -13,7 +14,8 @@ import { join } from "path";
 // server.
 
 const tmp = mkdtempSync(join(tmpdir(), "podcli-video-change-broadcast-"));
-const savedEnv: Record<string, string | undefined> = {
+
+const savedEnv = {
   PODCLI_HOME: process.env.PODCLI_HOME,
   PODCLI_DATA: process.env.PODCLI_DATA,
   PODCLI_PORT: process.env.PODCLI_PORT,
@@ -21,26 +23,19 @@ const savedEnv: Record<string, string | undefined> = {
 
 const PORT = 18429;
 
-vi.mock("../services/python-executor.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../services/python-executor.js")>();
-  class StubExecutor {
-    async execute() {
-      return { data: {} };
-    }
-  }
-  return { ...original, PythonExecutor: StubExecutor };
-});
-
 async function waitForServer(): Promise<void> {
   for (let i = 0; i < 50; i++) {
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/ui-state`);
+
       if (res.ok) return;
     } catch {
       // not up yet
     }
+
     await new Promise((r) => setTimeout(r, 100));
   }
+
   throw new Error("web server never came up");
 }
 
@@ -50,6 +45,9 @@ beforeAll(async () => {
   process.env.PODCLI_PORT = String(PORT);
   mkdirSync(process.env.PODCLI_HOME, { recursive: true });
 
+  // The web server spawns the Python backend on startup (manage_config status
+  // check) and per request. Stub it so the test never depends on a real backend.
+  await stubPythonBackend();
   await import("./web-server.js");
   await waitForServer();
 }, 20_000);
@@ -59,40 +57,52 @@ afterAll(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+
   rmSync(tmp, { recursive: true, force: true });
 });
 
 /** Collects every "event: state-sync" payload broadcast while `during` runs. */
-async function captureStateSyncEvents(during: () => Promise<void>): Promise<Array<Record<string, unknown>>> {
+interface StateSyncEvent {
+  videoPath?: string;
+  transcript?: object | null;
+  suggestions?: object[];
+}
+
+async function captureStateSyncEvents(during: () => Promise<void>): Promise<StateSyncEvent[]> {
   const res = await fetch(`http://127.0.0.1:${PORT}/api/events`);
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  const events: Array<Record<string, unknown>> = [];
+  const events: StateSyncEvent[] = [];
 
   const pump = async () => {
     for (;;) {
       const { value, done } = await reader.read();
+
       if (done) return;
       buffer += decoder.decode(value, { stream: true });
       let idx;
+
       while ((idx = buffer.indexOf("\n\n")) !== -1) {
         const chunk = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 2);
         const eventLine = chunk.split("\n").find((l) => l.startsWith("event: "));
         const dataLine = chunk.split("\n").find((l) => l.startsWith("data: "));
+
         if (eventLine?.slice(7) === "state-sync" && dataLine) {
           events.push(JSON.parse(dataLine.slice(6)));
         }
       }
     }
   };
+
   const pumpPromise = pump();
 
   await during();
   await new Promise((r) => setTimeout(r, 200)); // let the broadcast land
   await reader.cancel();
   await pumpPromise.catch(() => {});
+
   return events;
 }
 

@@ -5,14 +5,33 @@ import { join } from "path";
 
 // Isolate PODCLI_HOME before the module (and its paths import) are evaluated.
 const tmp = mkdtempSync(join(tmpdir(), "podcli-test-"));
+
 process.env.PODCLI_HOME = tmp;
+
 process.env.PODCLI_DATA = tmp;
 
 const { ClipsHistory } = await import("./clips-history.js");
 
+type NewClip = Parameters<InstanceType<typeof ClipsHistory>["record"]>[0];
+
+type ClipFields = Pick<
+  NewClip,
+  "source_video" | "output_path" | "start_second" | "end_second" | "caption_style" | "crop_strategy" | "title"
+> &
+  Partial<NewClip>;
+
+/** A history entry with the fields these tests do not care about filled in. */
+const clip = (fields: ClipFields): NewClip => ({
+  duration: fields.end_second - fields.start_second,
+  file_size_mb: 1,
+  format: "vertical",
+  ...fields,
+});
+
 function makeFakeOutput(name: string): string {
   const p = join(tmp, name);
   writeFileSync(p, "stub");
+
   return p;
 }
 
@@ -27,7 +46,7 @@ describe("ClipsHistory", () => {
   });
 
   it("records and lists clips", async () => {
-    await history.record({
+    await history.record(clip({
       source_video: "/videos/show.mp4",
       output_path: makeFakeOutput("a.mp4"),
       start_second: 10,
@@ -35,7 +54,7 @@ describe("ClipsHistory", () => {
       caption_style: "karaoke",
       crop_strategy: "smart",
       title: "hook A",
-    } as any);
+    }));
 
     const list = await history.list();
     expect(list).toHaveLength(1);
@@ -44,7 +63,7 @@ describe("ClipsHistory", () => {
 
   it("findDuplicate matches within ±2s tolerance", async () => {
     const output = makeFakeOutput("b.mp4");
-    await history.record({
+    await history.record(clip({
       source_video: "/videos/show.mp4",
       output_path: output,
       start_second: 10,
@@ -52,7 +71,7 @@ describe("ClipsHistory", () => {
       caption_style: "karaoke",
       crop_strategy: "smart",
       title: "original",
-    } as any);
+    }));
 
     const dup = await history.findDuplicate("/videos/show.mp4", 11, 41, "karaoke", "smart");
     expect(dup).not.toBeNull();
@@ -64,7 +83,7 @@ describe("ClipsHistory", () => {
 
   it("findDuplicate ignores entries whose output file is missing", async () => {
     const output = makeFakeOutput("c.mp4");
-    await history.record({
+    await history.record(clip({
       source_video: "/videos/show.mp4",
       output_path: output,
       start_second: 100,
@@ -72,7 +91,7 @@ describe("ClipsHistory", () => {
       caption_style: "karaoke",
       crop_strategy: "smart",
       title: "ghost",
-    } as any);
+    }));
 
     rmSync(output);
     const dup = await history.findDuplicate("/videos/show.mp4", 100, 130, "karaoke", "smart");
@@ -80,7 +99,7 @@ describe("ClipsHistory", () => {
   });
 
   it("minedYouTubeVideoIds reads the id out of the yt-dlp output template", async () => {
-    await history.record({
+    await history.record(clip({
       source_video: "/videos/Some Episode Title [aBc123_XYZ].mp4",
       output_path: makeFakeOutput("d.mp4"),
       start_second: 0,
@@ -88,14 +107,14 @@ describe("ClipsHistory", () => {
       caption_style: "karaoke",
       crop_strategy: "smart",
       title: "clip",
-    } as any);
+    }));
 
     const ids = await history.minedYouTubeVideoIds();
     expect(ids.has("aBc123_XYZ")).toBe(true);
   });
 
   it("minedYouTubeVideoIds is empty when no source_video carries a bracketed id", async () => {
-    await history.record({
+    await history.record(clip({
       source_video: "/videos/local-recording.mp4",
       output_path: makeFakeOutput("e.mp4"),
       start_second: 0,
@@ -103,7 +122,7 @@ describe("ClipsHistory", () => {
       caption_style: "karaoke",
       crop_strategy: "smart",
       title: "clip",
-    } as any);
+    }));
 
     const ids = await history.minedYouTubeVideoIds();
     expect(ids.size).toBe(0);
@@ -111,12 +130,13 @@ describe("ClipsHistory", () => {
 
   it("recordBatchResults skips failed/output-less rows and applies defaults", async () => {
     const ok = makeFakeOutput("batch-ok.mp4");
+
     const recorded = await history.recordBatchResults(
       [
         { status: "success", output_path: ok, start_second: 5, end_second: 20, title: "kept" },
         { status: "error", error: "boom" },
         { status: "success", title: "no output" },
-      ] as any,
+      ],
       { sourceVideo: "/videos/show.mp4", defaultCaptionStyle: "hormozi", defaultCropStrategy: "speaker" },
     );
 
@@ -131,15 +151,16 @@ describe("ClipsHistory", () => {
 
   it("recordBatchResults resolves content_type and transcript_slice per row", async () => {
     const ok = makeFakeOutput("batch-ct.mp4");
+
     const recorded = await history.recordBatchResults(
-      [{ status: "success", output_path: ok, start_second: 0, end_second: 10, title: "ct" }] as any,
+      [{ status: "success", output_path: ok, start_second: 0, end_second: 10, title: "ct" }],
       {
         sourceVideo: "/videos/show.mp4",
         transcriptWords: [
-          { word: "hello", start: 1, end: 2 },
-          { word: "world", start: 3, end: 4 },
-          { word: "later", start: 99, end: 100 },
-        ] as any,
+          { word: "hello", start: 1, end: 2, confidence: 1 },
+          { word: "world", start: 3, end: 4, confidence: 1 },
+          { word: "later", start: 99, end: 100, confidence: 1 },
+        ],
         contentTypeFor: (s, e) => (s === 0 && e === 10 ? "hook" : undefined),
       },
     );
@@ -156,7 +177,7 @@ describe("ClipsHistory", () => {
   it("serializes concurrent records without losing entries", async () => {
     await Promise.all(
       Array.from({ length: 25 }, (_, i) =>
-        history.record({
+        history.record(clip({
           source_video: "/videos/show.mp4",
           output_path: makeFakeOutput(`c-${i}.mp4`),
           start_second: i,
@@ -164,7 +185,7 @@ describe("ClipsHistory", () => {
           caption_style: "karaoke",
           crop_strategy: "smart",
           title: `clip ${i}`,
-        } as any),
+        })),
       ),
     );
     const list = await history.list(100);
@@ -173,7 +194,7 @@ describe("ClipsHistory", () => {
   });
 
   it("findById and update require an exact id (no prefix match)", async () => {
-    const rec = await history.record({
+    const rec = await history.record(clip({
       source_video: "/videos/show.mp4",
       output_path: makeFakeOutput("exact.mp4"),
       start_second: 0,
@@ -181,7 +202,7 @@ describe("ClipsHistory", () => {
       caption_style: "karaoke",
       crop_strategy: "smart",
       title: "exact",
-    } as any);
+    }));
 
     expect(await history.findById(rec.id)).toBeDefined();
     expect(await history.findById(rec.id.slice(0, 8))).toBeUndefined();
@@ -193,7 +214,7 @@ describe("ClipsHistory", () => {
   });
 
   it("resolveId accepts a full id or unambiguous ≥4-char prefix, rejects short/empty", async () => {
-    const rec = await history.record({
+    const rec = await history.record(clip({
       source_video: "/videos/show.mp4",
       output_path: makeFakeOutput("resolve.mp4"),
       start_second: 0,
@@ -201,7 +222,7 @@ describe("ClipsHistory", () => {
       caption_style: "karaoke",
       crop_strategy: "smart",
       title: "resolve",
-    } as any);
+    }));
 
     expect(await history.resolveId(rec.id)).toBe(rec.id);
     expect(await history.resolveId(rec.id.slice(0, 8))).toBe(rec.id);
@@ -211,7 +232,7 @@ describe("ClipsHistory", () => {
 
   it("findDuplicate matches by basename, not full path", async () => {
     const output = makeFakeOutput("d.mp4");
-    await history.record({
+    await history.record(clip({
       source_video: "/absolute/path/one/show.mp4",
       output_path: output,
       start_second: 0,
@@ -219,7 +240,7 @@ describe("ClipsHistory", () => {
       caption_style: "karaoke",
       crop_strategy: "smart",
       title: "basename test",
-    } as any);
+    }));
 
     const dup = await history.findDuplicate("/different/path/show.mp4", 0, 30, "karaoke", "smart");
     expect(dup).not.toBeNull();

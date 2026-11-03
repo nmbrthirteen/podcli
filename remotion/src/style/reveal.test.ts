@@ -19,13 +19,17 @@ describe("settle", () => {
     const crossings = (bounces: number) => {
       let count = 0;
       let above = false;
+
       for (let i = 1; i < 200; i++) {
         const now = settle(i / 200, bounces) > 1;
+
         if (now !== above) count++;
         above = now;
       }
+
       return count;
     };
+
     expect(crossings(1)).toBe(1);
     expect(crossings(2)).toBe(2);
   });

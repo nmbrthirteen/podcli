@@ -375,7 +375,7 @@ func Run(cmd string, args []string) int {
 	switch engine {
 	case "auto", "claude", "codex":
 	default:
-		fmt.Fprintf(os.Stderr, "  %sInvalid AI engine:%s %s — use --claude, --codex, or --ai auto\n", colBold, colReset, engine)
+		fmt.Fprintf(os.Stderr, "  %sInvalid AI engine:%s %s: use --claude, --codex, or --ai auto\n", colBold, colReset, engine)
 		return 1
 	}
 

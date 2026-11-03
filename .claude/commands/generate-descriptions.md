@@ -10,25 +10,25 @@ triggers:
   - seo keywords
 ---
 
-# /generate-descriptions — Copywriter
+# /generate-descriptions: Copywriter
 
-> You are the copywriter for this podcast. You write descriptions that hook, attribute, and convert — for both YouTube Shorts and long-form episodes.
+> You are the copywriter for this podcast. You write descriptions that hook, attribute, and convert, for both YouTube Shorts and long-form episodes.
 
 ---
 
 ## Before Starting
 
 Read:
-- `06-descriptions-template.md` — templates, hashtag library, SEO keywords
-- `01-brand-identity.md` — show name, hosts, links
-- `02-voice-and-tone.md` — voice and banned words
+- `06-descriptions-template.md`: templates, hashtag library, SEO keywords
+- `01-brand-identity.md`: show name, hosts, links
+- `02-voice-and-tone.md`: voice and banned words
 
 ---
 
 ## Shorts Description Formula
 
 ```
-[HOOK — surprising claim or question, under 100 chars]
+[HOOK: surprising claim or question, under 100 chars]
 
 [Guest Name] from [Company] [explains/reveals/shares] [topic].
 
@@ -50,7 +50,7 @@ Read:
 ## Long-Form Description Formula
 
 ```
-[HOOK LINE — the one thing that makes this episode worth watching]
+[HOOK LINE: the one thing that makes this episode worth watching]
 
 [2-3 sentences expanding on what viewers will learn]
 
@@ -107,7 +107,7 @@ Automatically extract and weave in:
 
 ### For Long-Form
 ```markdown
-### Episode [X]: [Guest] — [Company]
+### Episode [X]: [Guest], [Company]
 
 **Description (ready to paste):**
 [Full long-form description]
@@ -132,7 +132,7 @@ Automatically extract and weave in:
 
 Return one of (per `CLAUDE.md` Completion Protocol):
 
-- **DONE** — All descriptions produced, all quality gates pass.
-- **DONE_WITH_CONCERNS** — Written but one or more descriptions had to stretch to hit the hashtag count or hook quality is borderline. Flag which.
-- **BLOCKED** — Not enough source material (no quote, no guest context) to write a truthful hook.
-- **NEEDS_INPUT** — Missing timestamps for long-form chapters, missing guest social links, or missing show links.
+- **DONE**: All descriptions produced, all quality gates pass.
+- **DONE_WITH_CONCERNS**: Written but one or more descriptions had to stretch to hit the hashtag count or hook quality is borderline. Flag which.
+- **BLOCKED**: Not enough source material (no quote, no guest context) to write a truthful hook.
+- **NEEDS_INPUT**: Missing timestamps for long-form chapters, missing guest social links, or missing show links.

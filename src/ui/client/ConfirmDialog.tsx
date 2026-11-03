@@ -20,7 +20,9 @@ export default function ConfirmDialog({
   onCancel: () => void;
 }) {
   const dialogRef = useDialog(open, onCancel);
+
   if (!open) return null;
+
   return createPortal(
     <div className="modal-overlay" onClick={onCancel}>
       <div

@@ -1,5 +1,7 @@
-import { spawn, type ChildProcess } from "child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "child_process";
 import { v4 as uuidv4 } from "uuid";
+import { z } from "zod";
+import { absentWhenNull } from "../utils/zod-helpers.js";
 import { paths, pythonEnv } from "../config/paths.js";
 import type { TaskRequest, TaskResult, ProgressEvent } from "../models/index.js";
 
@@ -7,9 +9,12 @@ type ProgressCallback = (event: ProgressEvent) => void;
 
 const isWindows = process.platform === "win32";
 
+/** The one shape of spawn that taskkill needs, so a test can stand in for it. */
+export type SpawnProcess = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+
 type ProcessTreeOptions = {
   platform?: NodeJS.Platform;
-  spawnProcess?: typeof spawn;
+  spawnProcess?: SpawnProcess;
 };
 
 function hasExited(proc: ChildProcess): boolean {
@@ -23,6 +28,7 @@ export function killProcessTree(
 ): void {
   if (proc.pid === undefined || hasExited(proc)) return;
   const platform = options.platform ?? process.platform;
+
   try {
     if (platform === "win32") {
       const taskkill = (options.spawnProcess ?? spawn)(
@@ -30,6 +36,7 @@ export function killProcessTree(
         ["/pid", String(proc.pid), "/T", "/F"],
         { stdio: "ignore", windowsHide: true }
       );
+
       taskkill.once("error", () => undefined);
     } else process.kill(-proc.pid, signal);
   } catch {}
@@ -44,24 +51,32 @@ export function terminateProcessTree(
 ): void {
   if (hasExited(proc)) return;
   const platform = options.platform ?? process.platform;
+
   if (platform === "win32") {
     killProcessTree(proc, "SIGKILL", options);
+
     return;
   }
 
   let exited = false;
   let escalation: NodeJS.Timeout | undefined;
+
   const onExit = (): void => {
     exited = true;
+
     if (escalation) clearTimeout(escalation);
   };
+
   proc.once("exit", onExit);
+
   if (hasExited(proc)) {
     proc.removeListener("exit", onExit);
+
     return;
   }
 
   killProcessTree(proc, "SIGTERM", options);
+
   if (exited || hasExited(proc)) return;
 
   escalation = setTimeout(() => {
@@ -70,31 +85,91 @@ export function terminateProcessTree(
   escalation.unref();
 }
 
-// Prefer the last traceback block — that's where the actual failure is —
+// Prefer the last traceback block: that's where the actual failure is,
 // and keep a tail long enough to include it.
 export function stderrTail(stderr: string, maxChars = 4000): string {
   const tb = stderr.lastIndexOf("Traceback (most recent call last):");
   const tail = tb !== -1 ? stderr.slice(tb) : stderr;
+
   return tail.slice(-maxChars);
 }
+
+const resultEnvelopeSchema = z.looseObject({
+  task_id: z.string(),
+  status: z.enum(["success", "error"]),
+  data: z.unknown().optional(),
+  error: absentWhenNull(z.string()),
+});
+
+const clipResultRowSchema = z.looseObject({
+  clip_index: absentWhenNull(z.number()),
+  status: z.enum(["success", "error"]),
+  output_path: absentWhenNull(z.string()),
+  start_second: absentWhenNull(z.number()),
+  end_second: absentWhenNull(z.number()),
+  source_start_second: absentWhenNull(z.number()),
+  source_end_second: absentWhenNull(z.number()),
+  caption_style: absentWhenNull(z.string()),
+  crop_strategy: absentWhenNull(z.string()),
+  format: absentWhenNull(z.enum(["vertical", "horizontal", "square"])),
+  title: absentWhenNull(z.string()),
+  file_size_mb: absentWhenNull(z.number()),
+  duration: absentWhenNull(z.number()),
+  srt_path: absentWhenNull(z.string()),
+  vtt_path: absentWhenNull(z.string()),
+  clean_output_path: absentWhenNull(z.string()),
+  error: absentWhenNull(z.string()),
+});
+
+const progressEventSchema = z.looseObject({
+  task_id: z.string(),
+  stage: z.string(),
+  percent: z.number(),
+  message: z.string(),
+  clip_result: absentWhenNull(clipResultRowSchema),
+  partial: absentWhenNull(z.looseObject({})),
+});
 
 function parseResultLine<T>(stdout: string): TaskResult<T> | null {
   // The result is the last stdout line that parses to a JSON object with a
   // status field; the backend may also print stray lines.
   const lines = stdout.trim().split("\n");
+
   for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
+
     if (!trimmed.startsWith("{")) continue;
+
     try {
-      const parsed = JSON.parse(trimmed);
-      if (parsed && typeof parsed === "object" && "status" in parsed) {
-        return parsed as TaskResult<T>;
+      const parsed = resultEnvelopeSchema.safeParse(JSON.parse(trimmed));
+
+      if (parsed.success) {
+        // SAFETY: T is the data shape the caller declared for this task type, which the backend handler returns.
+        return { ...parsed.data, data: parsed.data.data as T | undefined };
       }
     } catch {
       continue;
     }
   }
+
   return null;
+}
+
+/** The part of PythonExecutor that callers need, so a test can hand in a stand-in. */
+export type TaskExecutor = Pick<PythonExecutor, "execute">;
+
+export type ExecutorFactory = (timeoutMs?: number) => TaskExecutor;
+
+let executorFactory: ExecutorFactory = (timeoutMs) => new PythonExecutor(timeoutMs);
+
+/** The executor a long-lived service (the studio server) runs its backend tasks through. */
+export function createExecutor(timeoutMs?: number): TaskExecutor {
+  return executorFactory(timeoutMs);
+}
+
+/** Swap how createExecutor builds executors. Tests use this to keep Python out of the loop. */
+export function setExecutorFactory(factory: ExecutorFactory): void {
+  executorFactory = factory;
 }
 
 /**
@@ -109,9 +184,9 @@ export class PythonExecutor {
     this.timeoutMs = timeoutMs;
   }
 
-  async execute<T = Record<string, unknown>>(
+  async execute<T = object, P extends object = object>(
     taskType: TaskRequest["task_type"],
-    params: Record<string, unknown>,
+    params: P,
     onProgress?: ProgressCallback
   ): Promise<TaskResult<T>> {
     const taskId = uuidv4();
@@ -140,6 +215,7 @@ export class PythonExecutor {
       const finish = (action: () => void): void => {
         if (settled) return;
         settled = true;
+
         if (timer) clearTimeout(timer);
         action();
       };
@@ -161,9 +237,12 @@ export class PythonExecutor {
 
         for (const line of lines) {
           const trimmed = line.trim();
+
           if (!trimmed || !trimmed.startsWith("{")) continue;
+
           try {
-            const event = JSON.parse(trimmed) as ProgressEvent;
+            const event = progressEventSchema.parse(JSON.parse(trimmed));
+
             if (event.task_id === taskId && onProgress) {
               onProgress(event);
             }
@@ -184,6 +263,7 @@ export class PythonExecutor {
       proc.on("close", (code) => {
         finish(() => {
           const result = parseResultLine<T>(stdout);
+
           if (!result) {
             reject(
               new Error(
@@ -191,11 +271,13 @@ export class PythonExecutor {
                   `Stdout: ${stdout.slice(-300)}. Stderr: ${stderrTail(stderr)}`
               )
             );
+
             return;
           }
 
           if (result.status === "error") {
             reject(new Error(result.error || "Unknown Python error"));
+
             return;
           }
 

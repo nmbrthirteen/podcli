@@ -21,9 +21,9 @@ const words: PreviewWord[] = [
 ];
 
 const asRendererWords = (ws: PreviewWord[]): Word[] =>
-  ws.map((w) => ({ word: w.text, start: w.start, end: w.end, speaker: w.speaker ?? null })) as Word[];
+  ws.map((w): Word => ({ word: w.text, start: w.start, end: w.end, speaker: w.speaker ?? undefined }));
 
-const shapes = (chunks: { words: { text?: string; word?: string }[] }[]) =>
+const captionTexts = (chunks: { words: { text?: string; word?: string }[] }[]) =>
   chunks.map((c) => c.words.map((w) => w.text ?? w.word));
 
 describe("buildPreviewChunks", () => {
@@ -37,6 +37,7 @@ describe("buildPreviewChunks", () => {
       { wordsPerChunk: 6, absorbTail: 2 },
     ]) {
       const preview = buildPreviewChunks(words, cfg, 6);
+
       const rendered = buildChunks(asRendererWords(words), {
         perChunk: cfg.wordsPerChunk,
         maxChars: cfg.maxCharsPerChunk,
@@ -44,14 +45,15 @@ describe("buildPreviewChunks", () => {
         splitTail: cfg.splitTail,
         clipEnd: 6,
       });
-      expect(shapes(preview)).toEqual(shapes(rendered));
+
+      expect(captionTexts(preview)).toEqual(captionTexts(rendered));
       expect(preview.map((c) => c.displayEnd)).toEqual(rendered.map((c) => c.displayEnd));
     }
   });
 
   it("breaks on terminal punctuation, speaker change and long gaps", () => {
     const chunks = buildPreviewChunks(words, { wordsPerChunk: 6, absorbTail: 2 });
-    expect(shapes(chunks)).toEqual([
+    expect(captionTexts(chunks)).toEqual([
       ["the", "secret", "to", "growth."],
       ["is", "boring", "work"],
       ["really?"],
@@ -80,10 +82,12 @@ describe("buildPreviewChunks", () => {
       end: index * 0.5 + 0.4,
       speaker: "A",
     }));
+
     const source = selectPreviewWords(transcript, {
       start_second: 0,
       end_second: 60,
     });
+
     const chunks = buildPreviewChunks(source, { wordsPerChunk: 5, absorbTail: 1 }, 60);
 
     expect(source).toHaveLength(120);

@@ -36,6 +36,7 @@ export interface AudiogramProps {
 const smooth = (levels: number[][], frame: number, bar: number): number => {
   const now = levels[Math.min(frame, levels.length - 1)]?.[bar] ?? 0;
   const before = levels[Math.max(0, Math.min(frame, levels.length - 1) - 1)]?.[bar] ?? 0;
+
   return now >= before ? now : before * 0.6 + now * 0.4;
 };
 
@@ -120,6 +121,7 @@ export const Audiogram: React.FC<AudiogramProps> = ({
         >
           {Array.from({ length: bars }, (_, bar) => {
             const level = smooth(levels, frame, bar);
+
             return (
               <div
                 key={bar}

@@ -13,6 +13,7 @@ Each thumbnail: 1080x1920 PNG with:
 
 import json
 import os
+from utils.log import warn as log_warn
 import sys
 from typing import Optional
 
@@ -54,7 +55,7 @@ DEFAULT_CONFIG = {
     "max_chars_per_line": 16,
     "text_y": 0.72,               # 0-1 vertical position
 
-    # Text box — set "box_enabled" false for floating text
+    # Text box: set "box_enabled" false for floating text
     "box_enabled": True,
     "box_border_color": None,      # None = accent_color
     "box_border_width": 4,
@@ -245,7 +246,7 @@ def extract_face_frame(
     Extract the best face frame from a video for use as thumbnail background.
 
     Samples frames, detects faces, picks the frame with the largest/clearest face.
-    Saves the FULL frame (no crop) — the HTML template's CSS `background: cover`
+    Saves the FULL frame (no crop), the HTML template's CSS `background: cover`
     handles the 9:16 crop so we get a natural chest-up portrait instead of an
     over-zoomed face slice.
 
@@ -344,7 +345,7 @@ def extract_face_frame(
         #   1. ≥3 sampled frames had ≥2 qualifying faces
         #   2. Median horizontal gap between leftmost and rightmost face
         #      across those frames exceeds 20% of source width
-        # Pure presence on both halves (#1) is not enough — an in-person
+        # Pure presence on both halves (#1) is not enough: an in-person
         # podcast with two heads sharing one camera will satisfy #1 but
         # not #2, and applying the seam clamp there would push a centered
         # face to the crop edge.
@@ -389,7 +390,7 @@ def extract_face_frame(
         # Center horizontally on face, then clamp to keep the seam outside
         # the crop window on true split-screen sources. When the winner
         # face sits very close to the seam, the clamp will push it toward
-        # the crop's inner edge — that's intentional and a strictly better
+        # the crop's inner edge: that's intentional and a strictly better
         # failure mode than showing the other speaker's tile bleed.
         crop_x = best_face_cx - crop_w // 2
         if is_split_screen:
@@ -466,7 +467,7 @@ def generate_thumbnail(
         guest_photo_path: Optional guest photo (fills background)
         logo_path: Optional logo (top corner)
         config: Override config dict (merged with defaults)
-        variation: Variation index (0, 1, 2) — changes layout slightly
+        variation: Variation index (0, 1, 2) that changes layout slightly
 
     Returns:
         Path to generated thumbnail
@@ -529,8 +530,8 @@ def generate_thumbnail(
                 photo = photo.filter(ImageFilter.GaussianBlur(blur))
 
             img.paste(photo, (x_offset, y_offset))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("thumbnail", "photo layer skipped", error=exc)
 
     # ── Layer 3: Gradient overlays ──
     img = _draw_gradients(img, bottom=cfg.get("gradient_bottom", 0.8), top=cfg.get("gradient_top", 0.0))
@@ -594,7 +595,7 @@ def generate_thumbnail(
     l2_block_h = sum(s[1] + hl_pad_y * 2 for s in l2_sizes) if line2_style == "highlight" else sum(s[1] for s in l2_sizes)
     total_content_h = l1_block_h + block_gap + l2_block_h
 
-    # Max width for box sizing — clamp to image bounds
+    # Max width for box sizing: clamp to image bounds
     all_widths = [s[0] for s in l1_sizes] + [s[0] + hl_pad_x * 2 for s in l2_sizes]
     max_content_w = min(max(all_widths) if all_widths else 400, max_text_w)
 
@@ -630,7 +631,7 @@ def generate_thumbnail(
         except TypeError:
             draw.rectangle([box_l, box_t, box_r, box_b], fill=fill_rgba)
 
-    # Draw Line 1 — white text, no background
+    # Draw Line 1: white text, no background
     y = content_top
     for i, line in enumerate(l1_lines):
         tw, th = l1_sizes[i]
@@ -641,7 +642,7 @@ def generate_thumbnail(
     # Gap between blocks
     y = content_top + l1_block_h + block_gap
 
-    # Draw Line 2 — dark text on accent highlight, or accent text
+    # Draw Line 2: dark text on accent highlight, or accent text
     dark_text = _hex_to_rgb(cfg.get("bg_color", "#0D0D0D"))
     for i, line in enumerate(l2_lines):
         tw, th = l2_sizes[i]
@@ -691,8 +692,8 @@ def generate_thumbnail(
                 lx, ly = margin, margin
 
             img.paste(logo, (lx, ly), logo)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("thumbnail", "logo layer skipped", error=exc)
 
     # ── Layer 6: Frame border around entire image ──
     if frame_border > 0:
@@ -744,7 +745,7 @@ def generate_variations(
         if result:
             guest_photo_path = result["path"]
 
-    # Split title into two lines (smart split — try to balance)
+    # Split title into two lines (smart split: try to balance)
     words = title.split()
     if len(words) <= 2:
         line1 = words[0] if words else ""

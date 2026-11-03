@@ -83,6 +83,7 @@ export default function ClipDetail() {
       .then((d: Clip[]) => {
         const found = Array.isArray(d) ? d.find((c) => c.id === id || String(c.id).startsWith(id || "\0")) : null;
         setClip(found || null);
+
         if (found) {
           setTitle(found.title);
           setCaptionStyle(found.caption_style);
@@ -96,6 +97,7 @@ export default function ClipDetail() {
       })
       .finally(() => setLoading(false));
   };
+
   useEffect(load, [id]);
   useEffect(() => {
     api("/integrations")
@@ -104,6 +106,7 @@ export default function ClipDetail() {
   }, []);
 
   if (loading) return <div className="app"><div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text2)", padding: 40 }}><div className="spinner sm" /> Loading…</div></div>;
+
   if (!clip) return <div className="app"><PageHeader title="Clip not found" /><Link to="/" style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}><BackIcon /> Library</Link></div>;
 
   const tc = clip.thumbnail_config || {};
@@ -115,8 +118,10 @@ export default function ClipDetail() {
 
   const save = async () => {
     setBusy("save"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await patch({ title, caption_style: captionStyle });
+
       if (r.error) throw new Error(r.error);
       load();
     } catch (e: any) { setMsg(`Save failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
@@ -124,12 +129,16 @@ export default function ClipDetail() {
 
   const loadOptions = async () => {
     setBusy("options"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await api(`/clips/${clip.id}/thumbnail/options?texts=6&frames=6`);
+
       if (r.error) throw new Error(r.error);
       setTextOpts(r.texts || []);
       setFrameOpts(r.frames || []);
+
       if ((r.frames || []).length) setSelFrame({ path: r.frames[0].path, info: r.frames[0] });
+
       if (!(r.texts || []).length && !(r.frames || []).length) { setMsg("No options. Is the AI CLI installed and the source video available?"); setMsgErr(true); }
       else if (r.warning) { setMsg(r.warning); setMsgErr(true); }
     } catch (e: any) { setMsg(`Options failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
@@ -137,9 +146,11 @@ export default function ClipDetail() {
 
   const uploadFrame = async (f: File) => {
     setBusy("upload"); setMsg(null); setMsgErr(false);
+
     try {
       const fd = new FormData(); fd.append("file", f);
       const r = await upload<any>("/upload", fd);
+
       if (!r.file_path) throw new Error("upload failed");
       setSelFrame({ path: r.file_path });
     } catch (e: any) { setMsg(`Upload failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
@@ -148,8 +159,14 @@ export default function ClipDetail() {
   const pairLayout = thumbLayout === "pair";
 
   const renderThumb = async () => {
-    if (!selFrame && needsFrame(thumbLayout)) { setMsg("Select or upload a frame first"); setMsgErr(true); return; }
+    if (!selFrame && needsFrame(thumbLayout)) {
+      setMsg("Select or upload a frame first"); setMsgErr(true);
+
+      return;
+    }
+
     setBusy("render"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await api(`/clips/${clip.id}/thumbnail/render`, {
         method: "POST",
@@ -159,32 +176,49 @@ export default function ClipDetail() {
           layout: thumbLayout, swap: pairLayout && swapSides,
         }),
       });
+
       if (r.error) throw new Error(r.error);
       setBust(Date.now()); load();
+
       if (r.note) { setMsg(r.note); setMsgErr(true); }
       else { setMsg(r.people?.length ? `Thumbnail generated: ${describePeople(r.people)}` : "Thumbnail generated"); setMsgErr(false); }
     } catch (e: any) { setMsg(`Generate failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const loadLogoPreviews = async () => {
-    if (!logoPath) { setMsg("Select a logo first"); setMsgErr(true); return; }
+    if (!logoPath) {
+      setMsg("Select a logo first"); setMsgErr(true);
+
+      return;
+    }
+
     setBusy("logo-preview"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await api(`/clips/${clip.id}/logo/previews?logo_path=${encodeURIComponent(logoPath)}`);
+
       if (r.error) throw new Error(r.error);
       setLogoPreviews(r.previews || []);
+
       if (r.previews?.[0]?.position) setLogoPosition(r.previews[0].position);
     } catch (e: any) { setMsg(`Logo previews failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
   };
 
   const applyLogo = async () => {
-    if (!logoPath) { setMsg("Select a logo first"); setMsgErr(true); return; }
+    if (!logoPath) {
+      setMsg("Select a logo first"); setMsgErr(true);
+
+      return;
+    }
+
     setBusy("logo-apply"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await api(`/clips/${clip.id}/logo`, {
         method: "POST",
         body: JSON.stringify({ action: "apply", logo_path: logoPath, logo_position: logoPosition }),
       });
+
       if (r.error) throw new Error(r.error);
       setBust(Date.now()); load();
       setMsg("Logo applied. Backup saved for removal"); setMsgErr(false);
@@ -193,8 +227,10 @@ export default function ClipDetail() {
 
   const removeLogo = async () => {
     setBusy("logo-remove"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await api(`/clips/${clip.id}/logo`, { method: "POST", body: JSON.stringify({ action: "remove" }) });
+
       if (r.error) throw new Error(r.error);
       setLogoPreviews([]);
       setBust(Date.now()); load();
@@ -203,28 +239,40 @@ export default function ClipDetail() {
   };
 
   // Pull a different frame from the clip (cycles the ranked candidates) and
-  // re-render — same one-click flow as Regenerate, but swaps the background frame.
+  // re-render: same one-click flow as Regenerate, but swaps the background frame.
   const newFrame = async () => {
     setBusy("newframe"); setMsg(null); setMsgErr(false);
+
     try {
       let frames = frameOpts;
+
       if (!frames.length) {
         const r = await api(`/clips/${clip.id}/thumbnail/options?texts=6&frames=8`);
+
         if (r.error) throw new Error(r.error);
         frames = r.frames || [];
         setFrameOpts(frames);
+
         if ((r.texts || []).length) setTextOpts(r.texts);
       }
-      if (!frames.length) { setMsg("No frames found in this clip"); setMsgErr(true); return; }
+
+      if (!frames.length) {
+        setMsg("No frames found in this clip"); setMsgErr(true);
+
+        return;
+      }
+
       const curIdx = frames.findIndex((f: any) => f.path === selFrame?.path);
       const next = ((curIdx < 0 ? frameIdx : curIdx) + 1) % frames.length;
       setFrameIdx(next);
       const frame = frames[next];
       setSelFrame({ path: frame.path, info: frame });
+
       const r = await api(`/clips/${clip.id}/thumbnail/render`, {
         method: "POST",
         body: JSON.stringify({ line1: line1 || undefined, line2: line2 || undefined, frame_path: frame.path, frame_info: frame }),
       });
+
       if (r.error) throw new Error(r.error);
       setBust(Date.now()); load();
       setMsg(`New frame from clip (${next + 1}/${frames.length})`); setMsgErr(false);
@@ -233,8 +281,10 @@ export default function ClipDetail() {
 
   const reopen = async () => {
     setBusy("reopen"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await api(`/clips/${clip.id}/reopen`, { method: "POST", body: "{}" });
+
       if (r.error) throw new Error(r.error);
       navigate("/episode");
     } catch (e: any) { setMsg(`Reopen failed: ${e.message}`); setMsgErr(true); setBusy(null); }
@@ -242,8 +292,10 @@ export default function ClipDetail() {
 
   const exportDavinci = async () => {
     setBusy("davinci"); setMsg(null); setMsgErr(false);
+
     try {
       const r = await api(`/clips/${clip.id}/davinci`, { method: "POST", body: "{}" });
+
       if (r.error) throw new Error(r.error);
       setMsg(r.path ? `DaVinci project: ${r.path}` : "Exported"); setMsgErr(false);
     } catch (e: any) { setMsg(`DaVinci export failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
@@ -251,6 +303,7 @@ export default function ClipDetail() {
 
   const generateContent = async () => {
     setBusy("content"); setMsg(null); setMsgErr(false);
+
     try {
       const body = {
         clip: {
@@ -262,8 +315,11 @@ export default function ClipDetail() {
           ? [{ start: clip.start_second, text: clip.transcript_slice }]
           : [],
       };
+
       const r = await api("/generate-content", { method: "POST", body: JSON.stringify(body) });
+
       if (r.error) throw new Error(r.error);
+
       if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing. Is claude/codex installed?");
       load();
     } catch (e: any) { setMsg(`Content generation failed: ${e.message}`); setMsgErr(true); } finally { setBusy(null); }
@@ -272,6 +328,7 @@ export default function ClipDetail() {
   const del = async () => {
     if (!window.confirm(`Delete "${clip.title}"? This removes the rendered file too.`)) return;
     setBusy("delete"); setMsg(null); setMsgErr(false);
+
     try {
       await api(`/clips/${clip.id}`, { method: "DELETE" });
       navigate("/");
@@ -464,6 +521,7 @@ export default function ClipDetail() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                       {clip.generated_titles.map((t, i) => {
                         const clean = t.replace(/^\d+\.\s*/, "");
+
                         return (
                           <button key={i} className={`title-option ${title === clean ? "selected" : ""}`} onClick={() => { setTitle(clean); setMsg("Title set. Click save to apply"); setMsgErr(false); }}>
                             {t}

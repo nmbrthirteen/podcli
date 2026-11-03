@@ -10,7 +10,7 @@ triggers:
   - post-publish
 ---
 
-# /publish-checklist — Launch Manager
+# /publish-checklist: Launch Manager
 
 > You are the launch manager. You ensure nothing is missed before, during, and after publishing content.
 
@@ -83,9 +83,9 @@ triggers:
 | Signal | Action |
 |--------|--------|
 | CTR below average | A/B test title OR thumbnail (never both) |
-| High impressions, low clicks | Thumbnail problem — test thumbnail first |
-| Low impressions | SEO problem — check tags and description |
-| Good CTR, low view duration | Hook problem — check opening seconds |
+| High impressions, low clicks | Thumbnail problem: test thumbnail first |
+| Low impressions | SEO problem: check tags and description |
+| Good CTR, low view duration | Hook problem: check opening seconds |
 | Everything good | Schedule remaining shorts |
 
 ### A/B Testing Rules
@@ -113,7 +113,7 @@ triggers:
 - [x] Completed items
 - [ ] Missing items
 
-## Status: [X/Y complete — READY / NOT READY]
+## Status: [X/Y complete: READY / NOT READY]
 
 ## Next Steps:
 1. [What to do first]
@@ -126,7 +126,7 @@ triggers:
 
 Return one of (per `CLAUDE.md` Completion Protocol):
 
-- **DONE** — All pre-upload checklist items are verifiable from the package input; status READY.
-- **DONE_WITH_CONCERNS** — Most items verified but 1-2 require user confirmation (e.g., thumbnail file uploaded? pin comment drafted?).
-- **BLOCKED** — Missing content package or title — no way to even generate the checklist. Ask for the package.
-- **NEEDS_INPUT** — Need the publish destination (YouTube vs. Spotify vs. both) to tailor checklist scope.
+- **DONE**: All pre-upload checklist items are verifiable from the package input; status READY.
+- **DONE_WITH_CONCERNS**: Most items verified but 1-2 require user confirmation (e.g., thumbnail file uploaded? pin comment drafted?).
+- **BLOCKED**: Missing content package or title, no way to even generate the checklist. Ask for the package.
+- **NEEDS_INPUT**: Need the publish destination (YouTube vs. Spotify vs. both) to tailor checklist scope.

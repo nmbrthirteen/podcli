@@ -10,7 +10,7 @@ import MulticamSync from "./multicam-sync";
 import MulticamSummary from "./multicam-summary";
 import MulticamResults, { DeliverActions } from "./multicam-deliver";
 import MulticamCloud from "./multicam-cloud";
-import type { McJobKind, McPreviewsResp, McSession, McSessionSummary } from "./multicam-types";
+import type { McEditBody, McJobKind, McPreviewsResp, McRequestBody, McSession, McSessionSummary } from "./multicam-types";
 
 const JOB_LABEL: Record<McJobKind, string> = {
   sync: "Syncing",
@@ -21,8 +21,8 @@ const JOB_LABEL: Record<McJobKind, string> = {
   pull: "Rendering the cloud edit",
 };
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const post = <T,>(body: Record<string, unknown>) => api<T>("/multicam", { method: "POST", body: JSON.stringify(body) });
+const errorText = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+const post = <T,>(body: McRequestBody) => api<T>("/multicam", { method: "POST", body: JSON.stringify(body) });
 
 export default function MulticamPage() {
   const navigate = useNavigate();
@@ -35,20 +35,22 @@ export default function MulticamPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<{ id: string; kind: McJobKind } | null>(null);
-  const jobState = useJob(job?.id ?? null);
+  const jobState = useJob<McSession>(job?.id ?? null);
   const [peopleDraft, setPeopleDraft] = useState<string[]>(["Host", "Guest"]);
   const [sourcesOpen, setSourcesOpen] = useState(false);
 
   // A running job owns the session until it finishes, so edits can't race it and get overwritten.
   const locked = busy || job !== null;
 
-  async function call<T = McSession>(body: Record<string, unknown>): Promise<T | null> {
+  async function call<T = McSession>(body: McRequestBody): Promise<T | null> {
     setBusy(true);
     setError(null);
+
     try {
       return await post<T>(body);
     } catch (e) {
       setError(errorText(e));
+
       return null;
     } finally {
       setBusy(false);
@@ -58,17 +60,18 @@ export default function MulticamPage() {
   function adopt(next: McSession | null) {
     if (!next) return;
     setSession(next);
+
     if (next.active_job) setJob({ id: next.active_job.id, kind: next.active_job.action });
   }
 
-  const mutate = (body: Record<string, unknown>) =>
-    session && call({ ...body, session_id: session.session_id }).then(adopt);
+  const mutate = (body: McEditBody) =>
+    session && call({ action: "map", ...body, session_id: session.session_id }).then(adopt);
 
   function refreshList() {
     post<{ sessions: McSessionSummary[] }>({ action: "list" }).then((r) => setSessions(r.sessions)).catch(() => {});
   }
 
-  function startJob(kind: McJobKind, extra: Record<string, unknown> = {}, sessionId = session?.session_id) {
+  function startJob(kind: McJobKind, extra: McEditBody = {}, sessionId = session?.session_id) {
     if (!sessionId) return;
     call<{ job_id: string }>({ action: kind, session_id: sessionId, ...extra }).then((r) => {
       if (r) setJob({ id: r.job_id, kind });
@@ -80,11 +83,14 @@ export default function MulticamPage() {
   useEffect(() => {
     setStills({});
     setSourcesOpen(false);
+
     if (!openId) {
       setSession(null);
       setJob(null);
+
       return;
     }
+
     if (session?.session_id !== openId) call({ action: "show", session_id: openId }).then(adopt);
   }, [openId]);
 
@@ -99,32 +105,41 @@ export default function MulticamPage() {
 
   useEffect(() => {
     if (!job || !jobState) return;
+
     if (jobState.status === "error") {
       setError(jobState.error || `${JOB_LABEL[job.kind]} failed. Check the files and try again.`);
       setJob(null);
+
       return;
     }
+
     if (jobState.status !== "done") return;
-    const result = jobState.result as unknown as McSession;
+    const result = jobState.result;
+
+    if (!result) return;
     setJob(null);
     setSession(result);
     refreshList();
     // A clean sync goes straight to cutting: that's the step everyone takes next.
     const allSynced = result.sources.every((s) => s.role === "ignore" || s.offset !== null);
+
     if (job.kind === "sync" && allSynced) startJob("plan", {}, result.session_id);
   }, [jobState?.status]);
 
-  async function startSession(seed: Record<string, unknown>): Promise<boolean> {
+  async function startSession(seed: { folder?: string; files?: string[] }): Promise<boolean> {
     const r = await call({ action: "new", ...seed, people: peopleDraft.filter((n) => n.trim()) });
+
     if (!r) return false;
     adopt(r);
     setSearchParams({ session: r.session_id });
     refreshList();
+
     return true;
   }
 
   async function deleteSession(id: string) {
     if (!window.confirm("Delete this multicam edit? Your recordings stay where they are.")) return;
+
     if (await call({ action: "delete", session_id: id })) {
       if (session?.session_id === id) setSearchParams({});
       refreshList();
@@ -138,7 +153,9 @@ export default function MulticamPage() {
 
   async function onMakeClips() {
     const video = session?.outputs.video;
+
     if (!video) return;
+
     try {
       await api("/ui-state", {
         method: "POST",
@@ -168,6 +185,7 @@ export default function MulticamPage() {
         jobState?.progress ? ` (${Math.round(jobState.progress)}%)` : ""
       }`
     : null;
+
   const synced = !!session?.sources.some((s) => s.sync?.status);
   const unsynced = session?.sources.filter((s) => s.role !== "ignore" && s.offset === null) || [];
   const showSources = !session || !cutReady || sourcesOpen || unsynced.length > 0;
@@ -186,6 +204,7 @@ export default function MulticamPage() {
             locked={locked}
             exportable={!session.cuts.some((c) => {
               const cam = session.sources.find((s) => s.id === c.source_id);
+
               return !!cam && (!!cam.parent || cam.members.length > 0);
             })}
             onRender={() => startJob("render", { stems: true })}

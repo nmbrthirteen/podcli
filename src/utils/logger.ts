@@ -17,9 +17,10 @@ export const logger = winston.createLogger({
     process.env.PODCLI_LOG_JSON === "1"
       ? winston.format.json()
       : winston.format.printf(({ timestamp, level: lvl, message, mod, ...rest }) => {
-          const tag = mod ? ` [${mod as string}]` : "";
+          const tag = mod ? ` [${mod}]` : "";
           const extra = Object.keys(rest).length ? ` ${JSON.stringify(rest)}` : "";
-          return `${timestamp as string} ${lvl}${tag} ${message as string}${extra}`;
+
+          return `${timestamp} ${lvl}${tag} ${message}${extra}`;
         }),
   ),
   transports: [new winston.transports.Console({ stderrLevels: ["error", "warn", "info", "debug"] })],

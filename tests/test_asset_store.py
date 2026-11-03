@@ -1,4 +1,4 @@
-"""Tests for backend.services.asset_store — named asset registry."""
+"""Tests for backend.services.asset_store: named asset registry."""
 
 import json
 import os

@@ -1,4 +1,4 @@
-# Parity harness — keeping every feature correct through the native-CLI migration
+# Parity harness: keeping every feature correct through the native-CLI migration
 
 This harness is the safety net for `plans/native-cli.md` (Go launcher, hermetic
 runtimes, **whisper.cpp** replacing openai-whisper/PyTorch). Its job: prove that
@@ -13,16 +13,16 @@ import, **and** the on-disk cache; consumed by corrections, cropping, moment
 selection, and captions). That seam lets correctness decompose into two layers
 that are verified independently.
 
-### Layer 1 — everything *downstream* of the transcript JSON
+### Layer 1: everything *downstream* of the transcript JSON
 Moments → crop → captions → normalize → encode. **This code does not change** in
 the migration; only the runtime relocates (system → hermetic). So the rule is
 absolute: a fixed transcript must yield identical output. Any difference is a
 runtime *pinning* bug, never a logic change.
 
-- `transcript_synthetic.json` — neutral, no podcast content; packs the word-text
+- `transcript_synthetic.json`: neutral, no podcast content; packs the word-text
   edge cases (leading-space token, number+symbol, punctuation, apostrophe,
   whitespace-only token, zero-duration token, speaker change).
-- `test_caption_parity.py` — renders all four caption styles from that transcript
+- `test_caption_parity.py`: renders all four caption styles from that transcript
   and diffs against committed goldens (`golden/*.ass.expected`). Also pins the
   **word-text normalization** the whisper.cpp boundary must reproduce exactly
   (the single highest-risk integration detail) and the 50ms zero-duration floor.
@@ -39,9 +39,9 @@ Intentionally update goldens after a deliberate change:
 UPDATE_GOLDENS=1 venv/bin/python3 -m pytest tests/parity/test_caption_parity.py -q
 ```
 
-### Layer 2 — the engine (`audio → transcript JSON`)
+### Layer 2: the engine (`audio → transcript JSON`)
 The only real change. Verified by comparing the new engine's output to a frozen
-openai-whisper baseline, with **forgiving** tolerances — because the caption
+openai-whisper baseline, with **forgiving** tolerances, because the caption
 pipeline already runs in production on evenly-spaced *synthetic* word timings
 (`transcript_parser.py:306`), so absolute timestamp fidelity is a quality nicety,
 not a correctness requirement.
@@ -68,11 +68,11 @@ not a correctness requirement.
 
 ## Why this makes "everything still works" tractable
 
-- **Layer 1 is identical by construction** — pinned runtime + frozen-transcript
+- **Layer 1 is identical by construction**, pinned runtime + frozen-transcript
   goldens. The boring 80% can't drift silently.
-- **Layer 2 is bounded against a floor the app already ships** — whisper.cpp only
+- **Layer 2 is bounded against a floor the app already ships**, whisper.cpp only
   has to beat evenly-spaced timings, which it does trivially.
-- **The cache protects existing work** — already-transcribed videos reuse their
+- **The cache protects existing work**: already-transcribed videos reuse their
   openai-whisper JSON, so they produce byte-identical output under the new binary.
 - **Dual-engine release** (`--engine whisper-py`, planned) gives an instant
   real-world fallback while whisper.cpp proves itself.
@@ -81,4 +81,4 @@ not a correctness requirement.
 
 Committed: this README, `transcript_synthetic.json`, `golden/*.ass.expected`,
 the harness scripts. **Never committed** (`.gitignore`): `local/` fixtures,
-`baseline/`, `candidate/` — they can contain podcast content.
+`baseline/`, `candidate/`, they can contain podcast content.

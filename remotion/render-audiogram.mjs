@@ -26,6 +26,7 @@ import { renderMedia, selectComposition } from "@remotion/renderer";
 // Same reason as remotion/render.mjs: the 30s default is measured against
 // the font delayRender competing with the whole bundle.
 const DELAY_RENDER_TIMEOUT_MS = 120_000;
+
 import { getCachedBundle } from "./bundle-cache.mjs";
 import path from "path";
 import fs from "fs";
@@ -36,17 +37,20 @@ import { spawnSync } from "child_process";
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = {};
+
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith("--") && i + 1 < args.length) {
       opts[args[i].replace(/^--/, "")] = args[i + 1];
       i++;
     }
   }
+
   return opts;
 }
 
 async function main() {
   const opts = parseArgs();
+
   if (!opts.props || !opts.output || !opts.audio) {
     console.error(
       "Usage: render-audiogram.mjs --props <json> --audio <file> --start <s> --end <s> --output <path>",
@@ -83,6 +87,7 @@ async function main() {
   const bundleLocation = await getCachedBundle({
     onBundle: () => console.log("  Remotion: bundling (first run, or src/config changed)..."),
   });
+
   const composition = await selectComposition({
     timeoutInMilliseconds: DELAY_RENDER_TIMEOUT_MS,
     serveUrl: bundleLocation,
@@ -111,6 +116,7 @@ async function main() {
   });
 
   const ffmpeg = process.env.PODCLI_FFMPEG || "ffmpeg";
+
   const mux = spawnSync(
     ffmpeg,
     [
@@ -132,11 +138,13 @@ async function main() {
     ],
     { encoding: "utf-8" },
   );
+
   try {
     fs.unlinkSync(silentVideo);
   } catch {
     // A leftover temp file is not worth failing a finished render over.
   }
+
   if (mux.status !== 0 || !fs.existsSync(opts.output)) {
     console.error(`Audio mux failed:\n${(mux.stderr || "").slice(-800)}`);
     process.exit(1);

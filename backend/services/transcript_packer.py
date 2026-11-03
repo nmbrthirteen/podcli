@@ -271,7 +271,7 @@ def _normalize_speakers(speakers_block) -> dict[str, dict]:
 def _speaker_short_map(speakers_block) -> dict[str, str]:
     """Map speaker IDs AND labels to short codes (S0, S1, ...) sorted by talk time.
 
-    Accepts either key — transcribe output uses SPEAKER_00 everywhere, but
+    Accepts either key: transcribe output uses SPEAKER_00 everywhere, but
     parse_transcript uses labels ("Host") in word.speaker/segment.speaker
     while keeping SPEAKER_0 as the canonical id. Mapping both avoids S? holes.
     """
@@ -312,7 +312,7 @@ def _build_phrases(
 ) -> list[dict]:
     """Group words into phrases by speaker + silence gaps.
 
-    Uses speaker_segments as authoritative for speaker attribution — per-word
+    Uses speaker_segments as authoritative for speaker attribution, because per-word
     speaker fields are often noisy at segment boundaries, causing single-word
     fragments that make the transcript unreadable.
 
@@ -483,7 +483,7 @@ def pack_transcript(
             lines.append(f"[{_fmt_ts(t)}] {rms:.1f}dB{snippet}")
         lines.append("")
 
-    # Laughter & reactions (optional) — the moment BEFORE a laugh is usually the
+    # Laughter & reactions (optional): the moment BEFORE a laugh is usually the
     # clippable one, so these timestamps flag where to look for the setup.
     if events_data:
         def level(e):

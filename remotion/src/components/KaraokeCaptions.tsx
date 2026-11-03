@@ -32,6 +32,7 @@ const KaraokeLine: React.FC<{
     >
       {words.map((word, i) => {
         const isSpoken = currentTime >= word.start;
+
         const progress = isSpoken
           ? Math.min(1, (currentTime - word.start) / Math.max(0.05, word.end - word.start))
           : 0;
@@ -83,6 +84,7 @@ export const KaraokeCaptions: React.FC<Props> = ({ words, style, singleLine = fa
     absorbTail: 1,
     clipEnd: durationInFrames / fps,
   });
+
   const activeChunk = activeChunkAt(chunks, currentTime);
 
   if (!activeChunk) return null;
@@ -92,6 +94,7 @@ export const KaraokeCaptions: React.FC<Props> = ({ words, style, singleLine = fa
     Math.ceil(activeChunk.words.length / 2),
     singleLine,
   );
+
   const scaledStyle = { ...style, fontSize: style.fontSize * s };
 
   return (

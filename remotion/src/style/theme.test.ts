@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ENTRANCES, FONT_IDS, MOTIONS, PACKS, PLACEMENTS, ROLES, resolveTheme } from "./theme";
+import { ENTRANCES, FONT_IDS, MOTIONS, PACKS, ROLES, resolveTheme } from "./theme";
+import type { PackId, ThemeInput } from "./theme";
+
+const isPackId = (id: string): id is PackId => id in PACKS;
+const isMotionId = (id: string): id is keyof typeof MOTIONS => id in MOTIONS;
+const packIds = Object.keys(PACKS).filter(isPackId);
+const motionIds = Object.keys(MOTIONS).filter(isMotionId);
 
 describe("resolveTheme", () => {
   it("returns null without a style", () => {
@@ -29,6 +35,7 @@ describe("resolveTheme", () => {
       pack: "clean",
       overrides: { color: { ground: "linear-gradient(red, blue)", accent: "url(x.png)", ink: "#FFFFFF" } },
     });
+
     expect(theme?.color.ground).toBe(PACKS.clean.color.ground);
     expect(theme?.color.accent).toBe(PACKS.clean.color.accent);
     expect(theme?.color.ink).toBe("#FFFFFF");
@@ -58,14 +65,15 @@ describe("motion presets", () => {
   it("name an entrance for every role and leave by fading", () => {
     for (const [id, motion] of Object.entries(MOTIONS)) {
       expect(Object.keys(motion.roles).sort(), id).toEqual([...ROLES].sort());
+
       for (const entrance of Object.values(motion.roles)) expect(ENTRANCES, id).toContain(entrance);
       expect(motion.exit, id).toBe("fade");
     }
   });
 
   it("resolve on every pack", () => {
-    for (const pack of Object.keys(PACKS) as (keyof typeof PACKS)[]) {
-      for (const motion of Object.keys(MOTIONS) as (keyof typeof MOTIONS)[]) {
+    for (const pack of packIds) {
+      for (const motion of motionIds) {
         expect(resolveTheme({ pack, motion })?.motion).toEqual(MOTIONS[motion]);
       }
     }
@@ -93,7 +101,7 @@ describe("fonts picked to match a reference", () => {
 
 describe("card placement", () => {
   it("draws cards as full pages unless a style asks otherwise", () => {
-    for (const pack of Object.keys(PACKS) as (keyof typeof PACKS)[]) {
+    for (const pack of packIds) {
       expect(resolveTheme({ pack })?.placement).toBe("page");
     }
   });
@@ -107,7 +115,9 @@ describe("card placement", () => {
   });
 
   it("ignores a placement the renderer does not know", () => {
-    const theme = resolveTheme({ pack: "poster", placement: "corner" as (typeof PLACEMENTS)[number] });
+    // A template arrives as JSON, so an unknown placement is a value the types cannot rule out.
+    const input: ThemeInput = JSON.parse('{ "pack": "poster", "placement": "corner" }');
+    const theme = resolveTheme(input);
     expect(theme?.placement).toBe("page");
   });
 });

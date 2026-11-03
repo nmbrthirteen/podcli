@@ -39,6 +39,7 @@ export default function KnowledgePage() {
 
       const saveFile = async () => {
         if (!activeFile) return;
+
         try {
           await api(`/knowledge/${encodeURIComponent(activeFile)}`, { method: 'POST', body: JSON.stringify({ content: editorContent }) });
           setDirty(false);
@@ -49,10 +50,14 @@ export default function KnowledgePage() {
 
       const deleteFile = async (filename, e) => {
         e.stopPropagation();
+
         if (!confirm(`Delete ${filename}?`)) return;
+
         try {
           await api(`/knowledge/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+
           if (activeFile === filename) { setActiveFile(null); setEditorContent(''); }
+
           showToast('Deleted');
           loadFiles();
         } catch (e) { showToast(`Delete failed: ${e.message}`); }
@@ -60,13 +65,17 @@ export default function KnowledgePage() {
 
       const createFile = async () => {
         let name = newName.trim();
+
         if (!name) return;
+
         if (!name.endsWith('.md')) name += '.md';
+
         try {
           await api(`/knowledge/${encodeURIComponent(name)}`, { method: 'POST', body: JSON.stringify({ content: `# ${name.replace('.md', '')}\n\n` }) });
           setNewName('');
           await loadFiles();
           const created = (await api('/knowledge')).find(f => f.filename === name);
+
           if (created) openFile(created);
           showToast('Created');
         } catch (e) { showToast(`Create failed: ${e.message}`); }
@@ -74,6 +83,7 @@ export default function KnowledgePage() {
 
       const createStarterFiles = async () => {
         setCreating(true);
+
         try {
           const r = await api('/knowledge/init', { method: 'POST' });
           setCreated(r.created || []);
@@ -84,10 +94,13 @@ export default function KnowledgePage() {
 
       const uploadFiles = async (fileList, label) => {
         const fd = new FormData();
+
         for (const f of fileList) {
           if (f.name.endsWith('.md') || f.name.endsWith('.txt')) fd.append('files', f);
         }
+
         if (!fd.has('files')) return;
+
         try {
           await upload('/knowledge/upload', fd);
           showToast(`${label} added`);
@@ -98,6 +111,7 @@ export default function KnowledgePage() {
       const handleDrop = async (e) => {
         e.preventDefault();
         setDragOver(false);
+
         if (!e.dataTransfer.files.length) return;
         await uploadFiles(e.dataTransfer.files, `${e.dataTransfer.files.length} file(s)`);
       };

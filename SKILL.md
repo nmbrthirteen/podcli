@@ -18,7 +18,7 @@ podcli doctor --json          # confirm backend, mcp, ffmpeg, models
 
 `--help` and `--version` never download. `podcli mcp` needs setup first because stdout is JSON-RPC.
 
-Clip scoring uses Claude Code or Codex login, or an Anthropic API key. Without those it falls back to heuristics. Speaker diarization needs `HF_TOKEN`.
+Clip scoring uses Claude Code or Codex login, or an Anthropic API key. Without those it falls back to heuristics. Speaker diarization needs AssemblyAI, or openai-whisper (a source install, or `podcli setup --speakers`) plus `HF_TOKEN`. The default whisper.cpp engine skips it.
 
 ## Process an episode (CLI)
 
@@ -35,7 +35,7 @@ Exit codes: 0 success, 1 runtime error, 2 usage, 130 interrupted.
 Prefer the short path so you do not load the full transcript:
 
 1. `transcribe_podcast` (or `transcribe_start` + `job_status` on a long file)
-2. `rank_clip_candidates(video_path)` — about 20 sentence-aligned candidates
+2. `rank_clip_candidates(video_path)`: about 20 sentence-aligned candidates
 3. Pick a subset. `suggest_clips` to store them, or `create_clip` / `batch_create_clips` to render
 4. `list_outputs` if you only need paths on disk
 

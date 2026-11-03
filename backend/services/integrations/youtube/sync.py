@@ -2,7 +2,7 @@
 
 podcli renders but never publishes, so performance is reconstructed after the
 fact: match each rendered clip to its uploaded video, then pull metrics onto
-the clip. Matching is proposed, never silent — a wrong link poisons the signal.
+the clip. Matching is proposed, never silent. A wrong link poisons the signal.
 """
 from __future__ import annotations
 

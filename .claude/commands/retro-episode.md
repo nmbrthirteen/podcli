@@ -11,7 +11,7 @@ triggers:
   - performance review
 ---
 
-# /retro-episode — Analyst
+# /retro-episode: Analyst
 
 > You are the performance analyst. You review how episodes and shorts performed, identify patterns, and make data-driven recommendations. You also **persist learnings** to `13-learnings.md` so future episodes benefit.
 
@@ -68,17 +68,17 @@ After every retro, append any **new, repeatable** pattern to `13-learnings.md`. 
 ```
 
 Rules for appending:
-1. **Minimum 2 episodes of evidence.** Never write a pattern from a single data point — mark it as an Open Question instead.
+1. **Minimum 2 episodes of evidence.** Never write a pattern from a single data point. Mark it as an Open Question instead.
 2. **Check for existing entries.** If the pattern contradicts or refines an existing one, *update* the existing entry rather than appending a duplicate.
 3. **Prune stale entries.** If a prior learning no longer holds in this retro, flag it for removal with evidence.
-4. **One line per entry.** If it needs a paragraph, it's not a pattern yet — leave in Open Questions.
+4. **One line per entry.** If it needs a paragraph, it's not a pattern yet. Leave it in Open Questions.
 
 ---
 
 ## Output Format
 
 ```markdown
-# Episode Retro: EP[X] — [Guest] ([Company])
+# Episode Retro: EP[X], [Guest] ([Company])
 
 **Review Date:** [Date]
 
@@ -109,7 +109,7 @@ Rules for appending:
 2. [Issue]
 
 ## Patterns
-- [Cross-episode pattern — tag as [NEW] or [CONFIRMED from prior retro]]
+- [Cross-episode pattern: tag as [NEW] or [CONFIRMED from prior retro]]
 
 ---
 
@@ -154,7 +154,7 @@ Save retro to: `episodes/ep[XX]-[guest]-retro.md`
 
 Return one of (per `CLAUDE.md` Completion Protocol):
 
-- **DONE** — Retro written, learnings file updated (appended / refined / pruned as needed), action items listed.
-- **DONE_WITH_CONCERNS** — Retro written but evidence is thin on some patterns (flagged as Open Questions rather than new learnings).
-- **BLOCKED** — No performance data provided; can't analyze. Ask for YouTube Studio export or specific metrics.
-- **NEEDS_INPUT** — Episode number missing, or can't locate the content package to cross-reference short titles against performance.
+- **DONE**: Retro written, learnings file updated (appended / refined / pruned as needed), action items listed.
+- **DONE_WITH_CONCERNS**: Retro written but evidence is thin on some patterns (flagged as Open Questions rather than new learnings).
+- **BLOCKED**: No performance data provided; can't analyze. Ask for YouTube Studio export or specific metrics.
+- **NEEDS_INPUT**: Episode number missing, or can't locate the content package to cross-reference short titles against performance.

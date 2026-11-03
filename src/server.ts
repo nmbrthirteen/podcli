@@ -18,7 +18,7 @@ import {
 } from "./handlers/compare-engines.handler.js";
 import {
   suggestClipsToolDef,
-  suggestClipsInputShape,
+  suggestClipsInputFields,
   handleSuggestClips,
   rankClipCandidatesToolDef,
   handleRankClipCandidates,
@@ -35,43 +35,43 @@ import {
 import { registerIntegrationMcpTools } from "./handlers/integrations.handler.js";
 import { mineChannelToolDef, handleMineChannel } from "./handlers/mine-channel.handler.js";
 import { isHttpUrl } from "./utils/ytdlp-args.js";
-import { FileManager } from "./services/file-manager.js";
 import { KnowledgeBase } from "./services/knowledge-base.js";
 import { AssetManager, inferType } from "./services/asset-manager.js";
 import { ClipsHistory } from "./services/clips-history.js";
 import { TranscriptCache } from "./services/transcript-cache.js";
 import { EpisodeState } from "./services/episode-state.js";
 import { paths } from "./config/paths.js";
+import { readUIStateFile } from "./services/ui-state-file.js";
 import { webServerUrl } from "./config/server.js";
 import { childLogger } from "./utils/logger.js";
 import { mcpError } from "./utils/errors.js";
 import { transcriptVideoMismatch } from "./utils/video-identity.js";
 import { podcliVersion, studioStartCommand } from "./version.js";
-import type { ClipHook, Format, SuggestedClip, UIState, WordTimestamp } from "./models/index.js";
+import type { ClipHook, SuggestedClip, UIState } from "./models/index.js";
 
 const log = childLogger("server");
 
 /**
  * Fire-and-forget notification to the optional Web UI.
- * Never throws — the UI may not be running, which is expected.
+ * Never throws: the UI may not be running, which is expected.
  */
 const transcriptCache = new TranscriptCache();
 
 /**
  * Only a studio that isn't listening may be retried inline. A render that
- * started and then failed, timed out, or went missing must surface — retrying it
+ * started and then failed, timed out, or went missing must surface: retrying it
  * would render the same clips twice.
  */
-function studioUnreachable(err: unknown, label: string): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
+function studioUnreachable(msg: string, label: string): boolean {
   if (!msg.includes("ECONNREFUSED") && !msg.includes("fetch failed")) return false;
   log.warn(
     `Studio not reachable at ${webServerUrl}. Running ${label} inline without live progress. If the studio listens on another port, set PODCLI_PORT for this MCP server too.`,
   );
+
   return true;
 }
 
-async function uiPing(body: Record<string, unknown>): Promise<void> {
+async function uiPing(body: UIState): Promise<void> {
   try {
     await fetch(`${webServerUrl}/api/ui-state`, {
       method: "POST",
@@ -94,9 +94,11 @@ const episodeState = new EpisodeState();
 async function withKnowledge(result: string): Promise<string> {
   try {
     const files = await kb.listFiles();
+
     if (!files.length) return result;
     const listing = files.map((f) => f.filename).join(", ");
-    return `[Knowledge Base: ${listing} — use knowledge_base tool to read specific files]\n\n${result}`;
+
+    return `[Knowledge Base: ${listing}. Use the knowledge_base tool to read specific files]\n\n${result}`;
   } catch {
     return result;
   }
@@ -116,7 +118,7 @@ const TRANSCRIPT_FALLBACK_CAP = 50_000;
 // captions_enabled gets no error and nothing recorded. record_decisions is
 // strict on purpose: it's meant to be the durable record of a decision, so a
 // typo'd key should fail loudly rather than quietly not stick.
-const recordDecisionsInputShape = {
+const recordDecisionsInputFields = {
   video_path: z.string().describe("The episode's source video path (same path used with set_video/transcribe_podcast)"),
   clip_count: z.number().optional().describe("How many clips to produce"),
   clip_duration_min: z.number().optional().describe("Minimum target clip duration in seconds"),
@@ -129,17 +131,18 @@ const recordDecisionsInputShape = {
   notes: z.string().optional().describe("Free-form notes that don't fit another field"),
 };
 
-export const recordDecisionsInputSchema = z.strictObject(recordDecisionsInputShape, {
+export const recordDecisionsInputSchema = z.strictObject(recordDecisionsInputFields, {
   // Returning undefined keeps zod's own message for every other issue.
   error: (issue) =>
     issue.code === "unrecognized_keys"
       ? `Unknown field(s): ${issue.keys.join(", ")}. Valid fields: ` +
-        Object.keys(recordDecisionsInputShape).join(", ")
+        Object.keys(recordDecisionsInputFields).join(", ")
       : undefined,
 });
 
 function capTranscriptText(text: string): string {
   if (text.length <= TRANSCRIPT_FALLBACK_CAP) return text;
+
   return (
     text.slice(0, TRANSCRIPT_FALLBACK_CAP) +
     `\n\n[Transcript truncated: showing the first ${TRANSCRIPT_FALLBACK_CAP} of ${text.length} characters. ` +
@@ -159,51 +162,116 @@ interface ServerUIState extends UIState {
   transcriptWordCount?: number;
 }
 
-interface WebJob {
-  job_id: string;
-  status: "pending" | "running" | "done" | "error";
-  result?: unknown;
-  error?: string;
-}
+const captionStyleSchema = z.enum(["hormozi", "karaoke", "subtle", "branded"]);
 
-interface OutputClip {
-  filename: string;
-  size_mb: number;
-  created?: string;
-}
+const resultEngineSchema = z.looseObject({ engine: z.string().optional() });
 
-interface ApiError {
-  error?: string;
-}
+const webJobSchema = z.looseObject({
+  job_id: z.string(),
+  status: z.enum(["pending", "running", "done", "error"]),
+  result: z.unknown().optional(),
+  error: z.string().optional(),
+});
 
-interface FileInfo {
-  filename?: string;
-  name?: string;
-  path?: string;
-  size_mb?: number;
-  duration?: number;
-}
+const outputClipsSchema = z.array(
+  z.looseObject({
+    filename: z.string(),
+    size_mb: z.number(),
+    created: z.string().optional(),
+  }),
+);
 
-interface PresetConfig {
-  caption_style?: string;
-  crop_strategy?: string;
-  logo_path?: string;
-  outro_path?: string;
-}
+const apiErrorSchema = z.looseObject({ error: z.string().optional() });
 
-interface PresetResult extends ApiError {
-  presets?: Array<string | { name?: string }>;
-  preset?: unknown;
-  config?: PresetConfig;
-}
+const apiResponseSchema = z.looseObject({
+  error: z.string().optional(),
+  job_id: z.string().optional(),
+  outputs: z
+    .looseObject({
+      validation: z.looseObject({ warnings: z.array(z.string()).optional() }).optional(),
+    })
+    .optional(),
+});
 
-interface ImportTranscriptResult extends ApiError {
-  data?: {
-    transcript?: string;
-    words?: unknown[];
-    segments?: unknown[];
-    duration?: number;
+const cropStrategySchema = z.enum(["center", "face", "speaker"]);
+const formatSchema = z.enum(["vertical", "horizontal", "square"]);
+
+function exportClipFromSuggestion(
+  s: SuggestedClip,
+  fallbackTitle: string,
+  settings: NonNullable<UIState["settings"]>,
+) {
+  return {
+    start_second: s.start_second,
+    end_second: s.end_second,
+    title: s.title || fallbackTitle,
+    caption_style: captionStyleSchema.catch("hormozi").parse(s.suggested_caption_style || settings.captionStyle),
+    crop_strategy: cropStrategySchema.catch("speaker").parse(settings.cropStrategy),
+    format: formatSchema.catch("vertical").parse(settings.format),
+    allow_ass_fallback: false,
+    ...(s.segments && s.segments.length > 0 && { keep_segments: s.segments }),
+    hook: s.hook ?? null,
   };
+}
+
+type RecordedDecisions = Parameters<EpisodeState["record"]>[1];
+
+const fileInfoSchema = z.looseObject({
+  filename: z.string().optional(),
+  name: z.string().optional(),
+  path: z.string().optional(),
+  size_mb: z.number().optional(),
+  duration: z.number().optional(),
+});
+
+const presetResultSchema = z.looseObject({
+  error: z.string().optional(),
+  presets: z.array(z.union([z.string(), z.looseObject({ name: z.string().optional() })])).optional(),
+  preset: z.unknown().optional(),
+  config: z
+    .looseObject({
+      caption_style: z.string().optional(),
+      crop_strategy: z.string().optional(),
+      logo_path: z.string().optional(),
+      outro_path: z.string().optional(),
+    })
+    .optional(),
+});
+
+const importTranscriptResultSchema = z.looseObject({
+  error: z.string().optional(),
+  data: z
+    .looseObject({
+      transcript: z.string().optional(),
+      words: z.array(z.unknown()).optional(),
+      segments: z.array(z.unknown()).optional(),
+      duration: z.number().optional(),
+    })
+    .optional(),
+});
+
+const clipEditResultSchema = z.looseObject({
+  error: z.string().optional(),
+  index: z.number().default(0),
+  total: z.number().default(0),
+  selectedCount: z.number().default(0),
+  clip: z.looseObject({
+    title: z.string().default(""),
+    start_second: z.number().optional(),
+    end_second: z.number().optional(),
+    duration: z.number().optional(),
+    hook: z
+      .looseObject({ mode: z.string(), start: z.number(), end: z.number() })
+      .optional(),
+  }).default({ title: "" }),
+});
+
+interface SuggestionsModifyBody {
+  action: string;
+  updates?: object;
+  selected?: boolean;
+  index?: number;
+  clip_id?: string;
 }
 
 /**
@@ -215,8 +283,9 @@ interface ImportTranscriptResult extends ApiError {
 function readUIStateFromDisk(): ServerUIState | null {
   try {
     if (!existsSync(paths.uiState)) return null;
-    const raw = JSON.parse(readFileSync(paths.uiState, "utf-8")) as UIState;
+    const raw = readUIStateFile();
     const words = raw.transcript?.words;
+
     return {
       ...raw,
       transcriptWordCount: Array.isArray(words) ? words.length : 0,
@@ -225,6 +294,7 @@ function readUIStateFromDisk(): ServerUIState | null {
     log.debug("readUIStateFromDisk failed", {
       err: err instanceof Error ? err.message : String(err),
     });
+
     return null;
   }
 }
@@ -232,12 +302,16 @@ function readUIStateFromDisk(): ServerUIState | null {
 async function readUIState(): Promise<ServerUIState | null> {
   try {
     const res = await fetch(`${webServerUrl}/api/ui-state`);
+
     if (!res.ok) return readUIStateFromDisk();
+
+    // SAFETY: /api/ui-state responds with the studio's UIState plus transcriptWordCount.
     return (await res.json()) as ServerUIState;
   } catch (err) {
     log.debug("readUIState via Web UI failed, falling back to disk", {
       err: err instanceof Error ? err.message : String(err),
     });
+
     return readUIStateFromDisk();
   }
 }
@@ -252,18 +326,21 @@ async function readUIState(): Promise<ServerUIState | null> {
 async function resolveEpisodeKeyPath(videoPath: string): Promise<string> {
   const state = await readUIState();
   const original = state?.silenceOriginal?.videoPath;
+
   if (original && (state?.videoPath === videoPath || state?.filePath === videoPath)) {
     return original;
   }
+
   return videoPath;
 }
 
 /** Generate workflow guidance based on current state. */
 async function getWorkflowGuidance(): Promise<string> {
   const state = await readUIState();
+
   if (!state) {
     return (
-      "WORKFLOW — Start from scratch:\n" +
+      "Start from scratch with this workflow:\n" +
       "1. Set the video: use set_video or transcribe_podcast with a file path\n" +
       "2. Get a transcript: use transcribe_podcast (auto) or import_transcript / parse_transcript\n" +
       "3. Read the transcript: use get_ui_state(include_transcript: true)\n" +
@@ -295,7 +372,7 @@ async function getWorkflowGuidance(): Promise<string> {
   } else if (!hasTranscript && !hasRawTranscript) {
     lines.push(
       `NEXT: Video is loaded but no transcript yet.\n` +
-        `  → Use transcribe_podcast(file_path: \"${state.videoPath}\") to auto-transcribe with Whisper\n` +
+        `  → Use transcribe_podcast(file_path: "${state.videoPath}") to auto-transcribe with Whisper\n` +
         `  → Or the user can paste a transcript in the Web UI and you can read it with get_ui_state(include_transcript: true)`,
     );
   } else if (hasRawTranscript && !hasTranscript) {
@@ -331,12 +408,14 @@ async function getWorkflowGuidance(): Promise<string> {
   }
 
   const videoPath = state.videoPath || state.filePath;
+
   if (videoPath) {
     // A silence-removal pass rewrites the video to a new path with a different
     // size, which would otherwise orphan decisions already recorded against the
     // original. Key on the original so they carry over to its derivative.
     const episodeKeyPath = state.silenceOriginal?.videoPath ?? videoPath;
     const openQuestions = await episodeState.openQuestions(episodeKeyPath).catch(() => []);
+
     if (openQuestions.length > 0) {
       lines.push(
         "\nOPEN QUESTIONS for this episode. Ask once, then call record_decisions so these never come up again:\n" +
@@ -423,17 +502,19 @@ export function createServer(): McpServer {
         });
 
         // Push FULL transcript (words[] + segments[]) to Web UI state from the
-        // on-disk cache — NOT the trimmed MCP response. Without words in UI
+        // on-disk cache: NOT the trimmed MCP response. Without words in UI
         // state, downstream batch_create_clips can't burn captions.
         // Skipped for a sample: it's never written to this cache, and it's a
         // slice of the file, not something that belongs in the UI session.
         const isSample = start_seconds !== undefined || duration_seconds !== undefined;
+
         try {
           // handleTranscribe's result carries the engine it actually resolved
           // to and cached under; the request-time `engine` can be unset while
           // the write landed under "whispercpp", so reading with it misses.
           const resolvedEngine =
-            (JSON.parse(result) as { engine?: string }).engine ?? engine;
+            resultEngineSchema.safeParse(JSON.parse(result)).data?.engine ?? engine;
+
           const cached = isSample
             ? null
             : await transcriptCache.get(file_path, {
@@ -441,6 +522,7 @@ export function createServer(): McpServer {
                 model: model_size,
                 language,
               });
+
           if (cached) {
             await uiPing({
               videoPath: file_path,
@@ -460,6 +542,7 @@ export function createServer(): McpServer {
           "Transcript is ready! Now read it with get_ui_state(include_transcript: true), " +
             "analyze it for viral moments, then call suggest_clips with your findings.",
         );
+
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         return mcpError(err);
@@ -487,6 +570,7 @@ export function createServer(): McpServer {
     async (input) => {
       try {
         const text = await handleTranscribeStart(input);
+
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         return mcpError(err);
@@ -495,7 +579,7 @@ export function createServer(): McpServer {
   );
 
   // =============================================
-  // Tool: job_status (generic poll — transcribe, render, batch, process_episode)
+  // Tool: job_status (generic poll: transcribe, render, batch, process_episode)
   // =============================================
   server.tool(
     jobStatusToolDef.name,
@@ -507,6 +591,7 @@ export function createServer(): McpServer {
     async (input) => {
       try {
         const text = await handleJobStatus(input);
+
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         return mcpError(err);
@@ -536,6 +621,7 @@ export function createServer(): McpServer {
     async (input) => {
       try {
         const text = await handleProcessEpisode(input);
+
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         return mcpError(err);
@@ -556,6 +642,7 @@ export function createServer(): McpServer {
     async (input) => {
       try {
         const text = await handleRankClipCandidates(input);
+
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         return mcpError(err);
@@ -569,7 +656,7 @@ export function createServer(): McpServer {
   server.tool(
     suggestClipsToolDef.name,
     suggestClipsToolDef.description,
-    suggestClipsInputShape,
+    suggestClipsInputFields,
     async ({ suggestions }) => {
       try {
         const result = await handleSuggestClips({ suggestions });
@@ -587,14 +674,16 @@ export function createServer(): McpServer {
         // Include clip history so Claude avoids duplicates
         const existing = await history.list(20);
         let text = await withKnowledge(result);
+
         if (existing.length > 0) {
           const summary = existing
             .map(
               (e) =>
-                `  - "${e.title}" ${e.start_second}s–${e.end_second}s (${e.caption_style})`,
+                `  - "${e.title}" ${e.start_second}s-${e.end_second}s (${e.caption_style})`,
             )
             .join("\n");
-          text += `\n\n[Previously Created Clips — avoid duplicates]\n${summary}`;
+
+          text += `\n\n[Previously Created Clips (avoid duplicates)]\n${summary}`;
         }
 
         const parsed2 = JSON.parse(result);
@@ -607,6 +696,7 @@ export function createServer(): McpServer {
             "  → To adjust: modify_clip(clip_number: N, updates: {start_second: ..., end_second: ...})\n" +
             "  → To remove one: toggle_clip(clip_number: N, selected: false)",
         );
+
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         return mcpError(err);
@@ -723,12 +813,14 @@ export function createServer(): McpServer {
         // Resolve asset names to paths
         if (params.logo_path) {
           const resolved = await assets.resolve(params.logo_path);
+
           if (resolved) params.logo_path = resolved;
         }
 
         // Resolve clip_number from UI state BEFORE routing
         let keepSegments: Array<{ start: number; end: number }> | null = null;
         let hook: ClipHook | null = params.hook ?? null;
+
         if (
           params.clip_number != null &&
           (params.start_second == null || params.end_second == null)
@@ -736,7 +828,8 @@ export function createServer(): McpServer {
           const uiState = await readUIState();
           const suggestions = uiState?.suggestions ?? [];
           const settings = uiState?.settings ?? {};
-          const idx = (params.clip_number as number) - 1;
+          const idx = params.clip_number - 1;
+
           if (idx < 0 || idx >= suggestions.length) {
             return {
               content: [
@@ -747,25 +840,31 @@ export function createServer(): McpServer {
               ],
             };
           }
+
           const suggestion = suggestions[idx];
+
           if (params.start_second == null)
-            params.start_second = suggestion.start_second as number;
+            params.start_second = suggestion.start_second;
+
           if (params.end_second == null)
-            params.end_second = suggestion.end_second as number;
+            params.end_second = suggestion.end_second;
+
           if (!params.video_path)
-            params.video_path = (uiState?.videoPath ||
-              uiState?.filePath ||
-              "") as string;
+            params.video_path = uiState?.videoPath || uiState?.filePath || "";
+
           if (!params.title || params.title === "clip")
-            params.title = (suggestion.title as string) || "clip";
+            params.title = suggestion.title || "clip";
+
           if (!params.caption_style || params.caption_style === "hormozi") {
-            params.caption_style =
-              ((suggestion.suggested_caption_style as string) ||
-                settings.captionStyle ||
-                "hormozi") as typeof params.caption_style;
+            const style = suggestion.suggested_caption_style || settings.captionStyle;
+            const parsedStyle = captionStyleSchema.safeParse(style);
+
+            params.caption_style = parsedStyle.success ? parsedStyle.data : "hormozi";
           }
+
           if (!params.transcript_words) {
             const transcript = uiState?.transcript;
+
             if (transcript?.words) {
               // handleCreateClip only runs this guard when transcript_words
               // arrives null, so filling it from state here has to run the
@@ -773,33 +872,53 @@ export function createServer(): McpServer {
               // would silently skip it.
               const mismatch = transcriptVideoMismatch(
                 uiState?.transcriptVideoIdentity,
-                params.video_path as string,
+                params.video_path ?? "",
               );
+
               if (mismatch) {
                 return { content: [{ type: "text" as const, text: mismatch }], isError: true };
               }
+
               params.transcript_words = transcript.words;
             }
           }
+
           // Pull multi-cut segments from suggestion
-          const segs = suggestion.segments as
-            | Array<{ start: number; end: number }>
-            | undefined;
+          const segs = suggestion.segments;
+
           if (segs && segs.length > 0) {
             keepSegments = segs;
           }
+
           if (params.hook === undefined && suggestion.hook) hook = suggestion.hook;
+        }
+
+        const videoPath = params.video_path;
+        const startSecond = params.start_second;
+        const endSecond = params.end_second;
+
+        if (!videoPath || startSecond === undefined || endSecond === undefined) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "create_clip needs video_path, start_second, and end_second, or a clip_number from the current suggestions.",
+              },
+            ],
+            isError: true,
+          };
         }
 
         // Check for duplicates
         const dup = await history.findDuplicate(
-          params.video_path as string,
-          params.start_second as number,
-          params.end_second as number,
-          (params.caption_style || "hormozi") as string,
-          (params.crop_strategy || "speaker") as string,
-          (params.format || "vertical") as string,
+          videoPath,
+          startSecond,
+          endSecond,
+          params.caption_style,
+          params.crop_strategy,
+          params.format,
         );
+
         if (dup) {
           return {
             content: [
@@ -814,6 +933,7 @@ export function createServer(): McpServer {
         // Route through web server for real-time UI progress tracking
         let usedWebServer = false;
         let finalResult = "";
+
         try {
           const webRes = await fetch(`${webServerUrl}/api/mcp/export`, {
             method: "POST",
@@ -824,7 +944,7 @@ export function createServer(): McpServer {
                 {
                   start_second: params.start_second,
                   end_second: params.end_second,
-                  title: (params.title || "clip") as string,
+                  title: params.title,
                   caption_style: params.caption_style || "hormozi",
                   crop_strategy: params.crop_strategy || "speaker",
                   format: params.format || "vertical",
@@ -845,32 +965,40 @@ export function createServer(): McpServer {
               write_clean_variant: params.write_clean_variant === true,
             }),
           });
+
           if (webRes.ok) {
-            const webData = (await webRes.json()) as WebJob;
+            const webData = webJobSchema.parse(await webRes.json());
             const jobId = webData.job_id;
 
             // Poll the job until completion (1 hour max)
             const deadline = Date.now() + 3600_000;
             let lostJob = false;
+
             while (Date.now() < deadline) {
               await new Promise((r) => setTimeout(r, 2000));
+
               const pollRes = await fetch(
                 `${webServerUrl}/api/job/${jobId}`,
               );
+
               if (!pollRes.ok) {
                 lostJob = true;
                 break;
               }
-              const job = (await pollRes.json()) as WebJob;
+
+              const job = webJobSchema.parse(await pollRes.json());
+
               if (job.status === "done") {
                 usedWebServer = true;
                 finalResult = JSON.stringify(job.result, null, 2);
                 break;
               }
+
               if (job.status === "error") {
                 throw new Error(job.error || "Job failed");
               }
             }
+
             if (!usedWebServer) {
               throw new Error(
                 lostJob
@@ -880,7 +1008,7 @@ export function createServer(): McpServer {
             }
           }
         } catch (webErr: unknown) {
-          if (!studioUnreachable(webErr, "create_clip")) throw webErr;
+          if (!studioUnreachable(webErr instanceof Error ? webErr.message : String(webErr), "create_clip")) throw webErr;
         }
 
         if (!usedWebServer) {
@@ -892,14 +1020,14 @@ export function createServer(): McpServer {
 
           // Record to history
           const rec = await history.record({
-            source_video: params.video_path as string,
-            start_second: params.start_second as number,
-            end_second: params.end_second as number,
-            caption_style: (params.caption_style || "hormozi") as string,
-            crop_strategy: (params.crop_strategy || "speaker") as string,
-            format: (params.format || "vertical") as Format,
-            logo_path: params.logo_path as string | undefined,
-            title: (params.title || "clip") as string,
+            source_video: videoPath,
+            start_second: startSecond,
+            end_second: endSecond,
+            caption_style: params.caption_style,
+            crop_strategy: params.crop_strategy,
+            format: params.format,
+            logo_path: params.logo_path,
+            title: params.title,
             output_path: parsed.output_path,
             file_size_mb: parsed.file_size_mb,
             duration: parsed.duration,
@@ -909,12 +1037,13 @@ export function createServer(): McpServer {
             context_line: parsed.context_line,
             preview_text: parsed.preview_text,
           });
+
           const uiStateForRecipe = await readUIState().catch(() => null);
           const recipeSettings = uiStateForRecipe?.settings ?? {};
           await history.persistClipRecipe(rec, {
-            transcriptWords: params.transcript_words as WordTimestamp[] | undefined,
-            logoPath: (params.logo_path as string) || recipeSettings.logoPath || null,
-            outroPath: (params.outro_path as string) || recipeSettings.outroPath || null,
+            transcriptWords: params.transcript_words,
+            logoPath: params.logo_path || recipeSettings.logoPath || null,
+            outroPath: params.outro_path || recipeSettings.outroPath || null,
             introPath: recipeSettings.introPath || null,
             cleanFillers: params.clean_fillers ?? recipeSettings.cleanFillers ?? true,
             keepSegments: keepSegments ?? undefined,
@@ -932,6 +1061,7 @@ export function createServer(): McpServer {
             "  → List all outputs: list_outputs\n" +
             '  → Try a different style: create_clip(clip_number: N, caption_style: "karaoke")',
         );
+
         return { content: [{ type: "text" as const, text: clipText }] };
       } catch (err: unknown) {
         return mcpError(err);
@@ -1029,17 +1159,19 @@ export function createServer(): McpServer {
         let resolvedClips = params.clips;
         let resolvedVideoPath = params.video_path;
         let resolvedTranscriptWords = params.transcript_words;
+
         if (!resolvedClips && (params.export_selected || params.clip_numbers)) {
           const uiState = await readUIState();
           const suggestions = uiState?.suggestions ?? [];
           const settings = uiState?.settings ?? {};
-          const deselected = (uiState?.deselectedIndices as number[]) || [];
+          const deselected = uiState?.deselectedIndices ?? [];
+
           if (!resolvedVideoPath)
-            resolvedVideoPath = (uiState?.videoPath ||
-              uiState?.filePath ||
-              "") as string;
+            resolvedVideoPath = uiState?.videoPath || uiState?.filePath || "";
+
           if (!resolvedTranscriptWords) {
             const transcript = uiState?.transcript;
+
             if (transcript?.words) {
               // handleBatchClips only runs this guard when transcript_words
               // arrives null, so filling it from state here has to run the
@@ -1047,11 +1179,13 @@ export function createServer(): McpServer {
               // would silently skip it.
               const mismatch = transcriptVideoMismatch(
                 uiState?.transcriptVideoIdentity,
-                resolvedVideoPath as string,
+                resolvedVideoPath,
               );
+
               if (mismatch) {
                 return { content: [{ type: "text" as const, text: mismatch }], isError: true };
               }
+
               resolvedTranscriptWords = transcript.words;
             }
           }
@@ -1059,42 +1193,11 @@ export function createServer(): McpServer {
           if (params.export_selected) {
             resolvedClips = suggestions
               .filter((_, i) => !deselected.includes(i))
-              .map((s, i) => ({
-                start_second: s.start_second,
-                end_second: s.end_second,
-                title: s.title || `clip_${i + 1}`,
-                caption_style:
-                  s.suggested_caption_style ||
-                  settings.captionStyle ||
-                  "hormozi",
-                crop_strategy: settings.cropStrategy || "speaker",
-                format: settings.format || "vertical",
-                allow_ass_fallback: false,
-                ...(s.segments &&
-                  s.segments.length > 0 && { keep_segments: s.segments }),
-                hook: s.hook ?? null,
-              })) as any;
+              .map((s, i) => exportClipFromSuggestion(s, `clip_${i + 1}`, settings));
           } else if (params.clip_numbers) {
-            resolvedClips = (params.clip_numbers as number[])
+            resolvedClips = params.clip_numbers
               .filter((n) => n >= 1 && n <= suggestions.length)
-              .map((n) => {
-                const s = suggestions[n - 1];
-                return {
-                  start_second: s.start_second,
-                  end_second: s.end_second,
-                  title: s.title || `clip_${n}`,
-                  caption_style:
-                    s.suggested_caption_style ||
-                    settings.captionStyle ||
-                    "hormozi",
-                  crop_strategy: settings.cropStrategy || "speaker",
-                  format: settings.format || "vertical",
-                  allow_ass_fallback: false,
-                  ...(s.segments &&
-                    s.segments.length > 0 && { keep_segments: s.segments }),
-                  hook: s.hook ?? null,
-                };
-              }) as any;
+              .map((n) => exportClipFromSuggestion(suggestions[n - 1], `clip_${n}`, settings));
           }
         }
 
@@ -1102,6 +1205,7 @@ export function createServer(): McpServer {
         // The web server handles SSE broadcasts (export-started, job-update, job-complete)
         let usedWebServer = false;
         let finalResult: string = "";
+
         try {
           const webRes = await fetch(`${webServerUrl}/api/mcp/export`, {
             method: "POST",
@@ -1117,8 +1221,9 @@ export function createServer(): McpServer {
               write_clean_variant: params.write_clean_variant === true,
             }),
           });
+
           if (webRes.ok) {
-            const webData = (await webRes.json()) as WebJob;
+            const webData = webJobSchema.parse(await webRes.json());
             const jobId = webData.job_id;
 
             // async_mode: return job_id immediately so the caller can narrate
@@ -1132,35 +1237,42 @@ export function createServer(): McpServer {
                       job_id: jobId,
                       status: "running",
                       clip_count: (resolvedClips || []).length,
-                      next_step: `Poll job_status("${jobId}", wait_seconds: 30) in a loop, emitting one terse progress line per poll (e.g. "Rendering 3/7 — clip #3"). Stop when done=true.`,
+                      next_step: `Poll job_status("${jobId}", wait_seconds: 30) in a loop, emitting one terse progress line per poll (e.g. "Rendering 3/7, clip #3"). Stop when done=true.`,
                     }),
                   },
                 ],
               };
             }
 
-            // Sync path — poll internally until completion (1 hour max)
+            // Sync path: poll internally until completion (1 hour max)
             const deadline = Date.now() + 3600_000;
             let lostJob = false;
+
             while (Date.now() < deadline) {
               await new Promise((r) => setTimeout(r, 2000));
+
               const pollRes = await fetch(
                 `${webServerUrl}/api/job/${jobId}`,
               );
+
               if (!pollRes.ok) {
                 lostJob = true;
                 break;
               }
-              const job = (await pollRes.json()) as WebJob;
+
+              const job = webJobSchema.parse(await pollRes.json());
+
               if (job.status === "done") {
                 usedWebServer = true;
                 finalResult = JSON.stringify(job.result, null, 2);
                 break;
               }
+
               if (job.status === "error") {
                 throw new Error(job.error || "Job failed");
               }
             }
+
             if (!usedWebServer) {
               throw new Error(
                 lostJob
@@ -1170,7 +1282,7 @@ export function createServer(): McpServer {
             }
           }
         } catch (webErr: unknown) {
-          if (!studioUnreachable(webErr, "batch_create_clips")) throw webErr;
+          if (!studioUnreachable(webErr instanceof Error ? webErr.message : String(webErr), "batch_create_clips")) throw webErr;
         }
 
         if (!usedWebServer) {
@@ -1194,6 +1306,7 @@ export function createServer(): McpServer {
             "  → Find more moments: get_ui_state(include_transcript: true) and suggest_clips again\n" +
             "  → Re-export with different styles: update_settings then batch_create_clips(export_selected: true)",
         );
+
         return { content: [{ type: "text" as const, text: batchText }] };
       } catch (err: unknown) {
         // Notify UI of error
@@ -1202,6 +1315,7 @@ export function createServer(): McpServer {
           err: err instanceof Error ? err.stack : String(err),
         });
         const msg = err instanceof Error ? err.message : String(err);
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -1233,6 +1347,7 @@ export function createServer(): McpServer {
       try {
         if (action === "read_all" || action === "list") {
           const files = await kb.listFiles();
+
           if (files.length === 0) {
             return {
               content: [
@@ -1243,15 +1358,20 @@ export function createServer(): McpServer {
               ],
             };
           }
+
           const summaries: string[] = [];
+
           for (const f of files) {
             let preview = "";
+
             try {
               const content = await kb.readFile(f.filename);
+
               // First non-empty, non-heading line as preview
               const lines = content
                 .split("\n")
                 .filter((l: string) => l.trim() && !l.startsWith("#"));
+
               preview = lines[0]?.trim().slice(0, 100) || "";
             } catch (err) {
               log.debug("Failed to read KB file for preview", {
@@ -1259,35 +1379,44 @@ export function createServer(): McpServer {
                 err: err instanceof Error ? err.message : String(err),
               });
             }
+
             summaries.push(
               `- ${f.filename} (updated ${f.updatedAt})${preview ? `\n  ${preview}` : ""}`,
             );
           }
+
           return {
             content: [
               {
                 type: "text" as const,
-                text: `Knowledge base (${files.length} files) — use read action with filename to get full content:\n${summaries.join("\n")}`,
+                text: `Knowledge base (${files.length} files). Use the read action with filename to get full content:\n${summaries.join("\n")}`,
               },
             ],
           };
         }
+
         if (action === "read" && filename) {
           const text = await kb.readFile(filename);
+
           return { content: [{ type: "text" as const, text }] };
         }
+
         if (action === "write" && filename && content) {
           await kb.writeFile(filename, content);
+
           return {
             content: [{ type: "text" as const, text: `Saved ${filename}` }],
           };
         }
+
         if (action === "delete" && filename) {
           await kb.deleteFile(filename);
+
           return {
             content: [{ type: "text" as const, text: `Deleted ${filename}` }],
           };
         }
+
         return {
           content: [
             {
@@ -1335,19 +1464,24 @@ export function createServer(): McpServer {
       try {
         if (action === "list") {
           const items = await assets.list(type || undefined);
+
           if (items.length === 0)
             return {
               content: [
                 { type: "text" as const, text: "No assets registered." },
               ],
             };
+
           const text = items
             .map((a) => `- ${a.name} (${a.type})${a.default ? " [default]" : ""}: ${a.path}`)
             .join("\n");
+
           return { content: [{ type: "text" as const, text }] };
         }
+
         if (action === "register" && name && path) {
           const asset = await assets.register(name, path, type || inferType(path));
+
           return {
             content: [
               {
@@ -1357,8 +1491,10 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         if (action === "import" && path && name) {
           const asset = await assets.importFile(path, name, type || inferType(path));
+
           return {
             content: [
               {
@@ -1368,8 +1504,10 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         if (action === "import_url" && url && name) {
           const asset = await assets.importUrl(url, name, type);
+
           return {
             content: [
               {
@@ -1379,16 +1517,20 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         if (action === "unregister" && name) {
           await assets.unregister(name);
+
           return {
             content: [
               { type: "text" as const, text: `Unregistered "${name}"` },
             ],
           };
         }
+
         if (action === "resolve" && name) {
           const resolved = await assets.resolve(name);
+
           return {
             content: [
               {
@@ -1398,8 +1540,10 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         if (action === "set_default" && name) {
           const asset = await assets.setDefault(name);
+
           return {
             content: [
               {
@@ -1409,22 +1553,27 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         if (action === "clear_default" && name) {
           await assets.clearDefault(name);
+
           return {
             content: [
               { type: "text" as const, text: `"${name}" is no longer a default.` },
             ],
           };
         }
+
         if (action === "rename" && name && new_name) {
           const asset = await assets.rename(name, new_name);
+
           return {
             content: [
               { type: "text" as const, text: `Renamed to "${asset.name}".` },
             ],
           };
         }
+
         return {
           content: [
             {
@@ -1491,6 +1640,7 @@ export function createServer(): McpServer {
               content: [{ type: "text" as const, text: "Provide clip_id to delete." }],
             };
           const removed = await history.remove(clip_id);
+
           return {
             content: [
               {
@@ -1502,24 +1652,29 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         if (action === "list") {
           const entries = source_video
             ? await history.getBySource(source_video)
             : await history.list(limit || 20);
+
           if (entries.length === 0)
             return {
               content: [
                 { type: "text" as const, text: "No clips in history." },
               ],
             };
+
           const text = entries
             .map(
               (e) =>
-                `- "${e.title}" ${e.start_second}s–${e.end_second}s | ${e.caption_style} | ${e.created_at} | ${e.output_path}`,
+                `- "${e.title}" ${e.start_second}s-${e.end_second}s | ${e.caption_style} | ${e.created_at} | ${e.output_path}`,
             )
             .join("\n");
+
           return { content: [{ type: "text" as const, text }] };
         }
+
         if (
           action === "check" &&
           source_video &&
@@ -1534,6 +1689,7 @@ export function createServer(): McpServer {
             crop_strategy || "speaker",
             format || "vertical",
           );
+
           if (dup) {
             return {
               content: [
@@ -1544,6 +1700,7 @@ export function createServer(): McpServer {
               ],
             };
           }
+
           return {
             content: [
               {
@@ -1553,6 +1710,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [
             {
@@ -1579,7 +1737,7 @@ export function createServer(): McpServer {
       "batch_create_clips(clip_numbers), modify_clip, and toggle_clip.\n\n" +
       "Set include_transcript=true to analyze transcript content. Returns a compact phrase-grouped " +
       "markdown view (~10x smaller than raw segments) with speaker attribution, silence gaps, and " +
-      "optional energy peaks — the primary surface for reasoning about clip boundaries.",
+      "optional energy peaks: the primary surface for reasoning about clip boundaries.",
     {
       include_transcript: z
         .boolean()
@@ -1592,14 +1750,17 @@ export function createServer(): McpServer {
     async ({ include_transcript }) => {
       try {
         const state = await readUIState();
+
         if (!state) {
           const guidance = await getWorkflowGuidance();
+
           return { content: [{ type: "text" as const, text: guidance }] };
         }
 
         const lines: string[] = [];
         lines.push(`Phase: ${state.phase}`);
         lines.push(`Video: ${state.videoPath || state.filePath || "(none)"}`);
+
         if (state.videoMissing) {
           lines.push(
             "WARNING: the video file above was not found on disk at last check (e.g. an external " +
@@ -1607,6 +1768,7 @@ export function createServer(): McpServer {
               "batch_create_clips will fail until the file is reachable again.",
           );
         }
+
         lines.push(
           `Settings: caption=${state.settings?.captionStyle}, crop=${state.settings?.cropStrategy}, logo=${state.settings?.logoPath || "none"}`,
         );
@@ -1624,51 +1786,61 @@ export function createServer(): McpServer {
           lines.push(
             "Clips (use these numbers with create_clip/batch_create_clips):",
           );
+
           for (let i = 0; i < allSuggestions.length; i++) {
             const clip = allSuggestions[i];
             const num = i + 1;
             const title = clip.title || "untitled";
             const start = clip.start_second ?? "?";
             const end = clip.end_second ?? "?";
+
             const duration =
-              typeof start === "number" && typeof end === "number"
+              clip.start_second !== undefined && clip.end_second !== undefined
                 ? `${Math.round(end - start)}s`
                 : "?";
+
             const style = clip.suggested_caption_style || "hormozi";
+
             const tag = deselected.includes(i)
               ? " [DESELECTED]"
               : clip.changedSinceSelection
                 ? " [CHANGED SINCE SELECTION, re-confirm before exporting]"
                 : "";
+
             lines.push(
-              `  #${num}: "${title}" (${start}s–${end}s, ${duration}) [${style}]${tag}`,
+              `  #${num}: "${title}" (${start}s-${end}s, ${duration}) [${style}]${tag}`,
             );
           }
         }
 
         if (include_transcript) {
           // Prefer packed markdown (10x smaller, phrase-grouped, LLM-readable).
-          // Auto-generated during transcription — see backend/services/transcript_packer.py.
+          // Auto-generated during transcription: see backend/services/transcript_packer.py.
           let packed: string | null = null;
+
           if (state.videoPath) {
             packed = await transcriptCache.getPackedMarkdown(
               state.videoPath,
               state.transcript?.engine,
             );
           }
+
           if (!packed && state.rawTranscriptText) {
             packed = await transcriptCache.getPackedMarkdownFromText(
               state.rawTranscriptText,
             );
           }
+
           if (packed) {
             lines.push("");
             lines.push("=== PACKED TRANSCRIPT ===");
             lines.push(packed);
           } else if (state.transcript) {
             const segments = state.transcript.segments || [];
+
             if (segments.length) {
               const segLines: string[] = [];
+
               for (const seg of segments) {
                 const speaker = seg.speaker || "?";
                 const start = Math.floor(seg.start || 0);
@@ -1676,6 +1848,7 @@ export function createServer(): McpServer {
                 const text = seg.text || "";
                 segLines.push(`[${start}s-${end}s] ${speaker}: ${text}`);
               }
+
               lines.push("");
               lines.push("=== TRANSCRIPT ===");
               lines.push(capTranscriptText(segLines.join("\n")));
@@ -1683,7 +1856,7 @@ export function createServer(): McpServer {
           } else if (state.rawTranscriptText) {
             lines.push("");
             lines.push(
-              "=== RAW TRANSCRIPT (not yet parsed — use this to analyze and suggest clips) ===",
+              "=== RAW TRANSCRIPT (not yet parsed: use this to analyze and suggest clips) ===",
             );
             lines.push(capTranscriptText(state.rawTranscriptText));
           }
@@ -1698,6 +1871,7 @@ export function createServer(): McpServer {
         return { content: [{ type: "text" as const, text: lines.join("\n") }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         return {
           content: [
             { type: "text" as const, text: `Error reading UI state: ${msg}` },
@@ -1771,7 +1945,8 @@ export function createServer(): McpServer {
 
         // Mutate server-side so concurrent edits aren't lost to a wholesale
         // state replace (clip_number is 1-based).
-        const body: Record<string, unknown> = { action, updates };
+        const body: SuggestionsModifyBody = { action, updates };
+
         if (clip_number !== undefined) body.index = clip_number - 1;
         else if (clip_id) body.clip_id = clip_id;
         else if (index !== undefined) body.index = index;
@@ -1781,11 +1956,9 @@ export function createServer(): McpServer {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = (await res.json()) as ApiError & {
-          index: number;
-          clip: SuggestedClip;
-          total: number;
-        };
+
+        const data = clipEditResultSchema.parse(await res.json());
+
         if (!res.ok || data.error) {
           if (res.status === 404) {
             return {
@@ -1797,6 +1970,7 @@ export function createServer(): McpServer {
               ],
             };
           }
+
           throw new Error(data.error || `HTTP ${res.status}`);
         }
 
@@ -1824,6 +1998,7 @@ export function createServer(): McpServer {
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [
@@ -1834,6 +2009,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -1867,7 +2043,8 @@ export function createServer(): McpServer {
       try {
         // Mutate server-side so concurrent edits aren't lost to a wholesale
         // state replace (clip_number is 1-based).
-        const body: Record<string, unknown> = { action: "toggle", selected };
+        const body: SuggestionsModifyBody = { action: "toggle", selected };
+
         if (clip_number !== undefined) body.index = clip_number - 1;
         else if (clip_id) body.clip_id = clip_id;
         else if (index !== undefined) body.index = index;
@@ -1877,12 +2054,9 @@ export function createServer(): McpServer {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = (await res.json()) as ApiError & {
-          index: number;
-          clip: SuggestedClip;
-          total: number;
-          selectedCount: number;
-        };
+
+        const data = clipEditResultSchema.parse(await res.json());
+
         if (!res.ok || data.error) {
           if (res.status === 404) {
             return {
@@ -1894,6 +2068,7 @@ export function createServer(): McpServer {
               ],
             };
           }
+
           throw new Error(data.error || `HTTP ${res.status}`);
         }
 
@@ -1907,6 +2082,7 @@ export function createServer(): McpServer {
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [
@@ -1917,6 +2093,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -1956,16 +2133,21 @@ export function createServer(): McpServer {
     async ({ caption_style, crop_strategy, logo_path, outro_path, intro_path }) => {
       try {
         const settings: Record<string, string> = {};
+
         if (caption_style) settings.captionStyle = caption_style;
+
         if (crop_strategy) settings.cropStrategy = crop_strategy;
+
         if (logo_path) {
           const resolved = await assets.resolve(logo_path);
           settings.logoPath = resolved || logo_path;
         }
+
         if (outro_path) {
           const resolved = await assets.resolve(outro_path);
           settings.outroPath = resolved || outro_path;
         }
+
         if (intro_path) {
           const resolved = await assets.resolve(intro_path);
           settings.introPath = resolved || intro_path;
@@ -1989,6 +2171,7 @@ export function createServer(): McpServer {
         });
 
         const parts = Object.entries(settings).map(([k, v]) => `${k}=${v}`);
+
         return {
           content: [
             {
@@ -1999,6 +2182,7 @@ export function createServer(): McpServer {
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [
@@ -2009,6 +2193,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -2035,8 +2220,10 @@ export function createServer(): McpServer {
     async ({ video_path, clip_count, clip_duration_min, clip_duration_max, caption_style, captions_enabled, language, thumbnails_wanted, delivery_target, notes }) => {
       try {
         const keyPath = await resolveEpisodeKeyPath(video_path);
-        const decisions: Record<string, unknown> = {};
+        const decisions: RecordedDecisions = {};
+
         if (clip_count !== undefined) decisions.clipCount = clip_count;
+
         if (clip_duration_min !== undefined || clip_duration_max !== undefined) {
           const existing = await episodeState.get(keyPath);
           // A side nobody gave stays absent; 0 would read as a real limit.
@@ -2047,11 +2234,17 @@ export function createServer(): McpServer {
             ...(max !== undefined && { max }),
           };
         }
+
         if (caption_style !== undefined) decisions.captionStyle = caption_style;
+
         if (captions_enabled !== undefined) decisions.captionsEnabled = captions_enabled;
+
         if (language !== undefined) decisions.language = language;
+
         if (thumbnails_wanted !== undefined) decisions.thumbnailsWanted = thumbnails_wanted;
+
         if (delivery_target !== undefined) decisions.deliveryTarget = delivery_target;
+
         if (notes !== undefined) decisions.notes = notes;
 
         if (Object.keys(decisions).length === 0) {
@@ -2062,16 +2255,20 @@ export function createServer(): McpServer {
 
         const recorded = await episodeState.record(keyPath, decisions);
         const remaining = await episodeState.openQuestions(keyPath);
+
         const lines = [
           `Recorded: ${Object.keys(decisions).join(", ")}`,
           remaining.length > 0
             ? `Still open: ${remaining.map((q) => q.question).join(" / ")}`
             : "All episode decisions answered.",
         ];
+
         void recorded;
+
         return { content: [{ type: "text" as const, text: lines.join("\n") }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         return {
           content: [{ type: "text" as const, text: `Error recording decisions: ${msg}` }],
           isError: true,
@@ -2090,8 +2287,9 @@ export function createServer(): McpServer {
     async () => {
       try {
         const res = await fetch(`${webServerUrl}/api/outputs`);
+
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const clips = (await res.json()) as OutputClip[];
+        const clips = outputClipsSchema.parse(await res.json());
 
         if (!clips.length) {
           return {
@@ -2103,6 +2301,7 @@ export function createServer(): McpServer {
 
         const lines = clips.map((c) => {
           const date = c.created ? c.created.split("T")[0] : "unknown";
+
           return `  - ${c.filename} (${c.size_mb} MB, ${date})`;
         });
 
@@ -2116,6 +2315,7 @@ export function createServer(): McpServer {
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [
@@ -2126,6 +2326,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -2179,8 +2380,9 @@ export function createServer(): McpServer {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action, name, config }),
         });
+
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as PresetResult;
+        const data = presetResultSchema.parse(await res.json());
 
         if (data.error) {
           return {
@@ -2191,15 +2393,17 @@ export function createServer(): McpServer {
 
         if (action === "list") {
           const presets = data.presets ?? [];
+
           if (!presets.length)
             return {
               content: [{ type: "text" as const, text: "No presets saved." }],
             };
+
           return {
             content: [
               {
                 type: "text" as const,
-                text: `Presets:\n${presets.map((p) => `  - ${typeof p === "string" ? p : p.name || JSON.stringify(p)}`).join("\n")}`,
+                text: `Presets:\n${presets.map((p) => `  - ${p instanceof Object ? p.name || JSON.stringify(p) : p}`).join("\n")}`,
               },
             ],
           };
@@ -2208,13 +2412,18 @@ export function createServer(): McpServer {
         if (action === "load" && data.config) {
           // Push loaded config to UI settings
           const settings: Record<string, string> = {};
+
           if (data.config.caption_style)
             settings.captionStyle = data.config.caption_style;
+
           if (data.config.crop_strategy)
             settings.cropStrategy = data.config.crop_strategy;
+
           if (data.config.logo_path) settings.logoPath = data.config.logo_path;
+
           if (data.config.outro_path)
             settings.outroPath = data.config.outro_path;
+
           if (Object.keys(settings).length) {
             await fetch(`${webServerUrl}/api/ui-state`, {
               method: "POST",
@@ -2222,6 +2431,7 @@ export function createServer(): McpServer {
               body: JSON.stringify({ settings }),
             });
           }
+
           return {
             content: [
               {
@@ -2253,6 +2463,7 @@ export function createServer(): McpServer {
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [
@@ -2263,6 +2474,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -2290,46 +2502,67 @@ export function createServer(): McpServer {
         if ((action === "export" || action === "import") && !filePath) {
           return mcpError(`'path' is required for action '${action}'.`);
         }
+
         if (action === "set_layout" && !layout) {
           return mcpError("'layout' is required for action 'set_layout': 'single' or 'pair'.");
         }
+
         const base = `${webServerUrl}/api/thumbnail-config`;
+
         if (action === "set_layout") {
           const current = await fetch(base);
+
           if (!current.ok) throw new Error(`HTTP ${current.status}`);
+
           const res = await fetch(base, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ...(await current.json()), layout }),
           });
+
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
           return { content: [{ type: "text" as const, text: `Thumbnail layout set to ${layout}.` }] };
         }
+
         if (action === "show") {
           const res = await fetch(base);
+
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
           return { content: [{ type: "text" as const, text: JSON.stringify(await res.json(), null, 2) }] };
         }
+
         if (action === "export") {
           const res = await fetch(base);
+
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           writeFileSync(filePath!, JSON.stringify(await res.json(), null, 2), "utf-8");
+
           return { content: [{ type: "text" as const, text: `Exported thumbnail config to ${filePath}` }] };
         }
+
         if (action === "import") {
           const parsed = JSON.parse(readFileSync(filePath!, "utf-8"));
           const res = await fetch(base, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parsed) });
+
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
           return { content: [{ type: "text" as const, text: `Imported thumbnail config from ${filePath}` }] };
         }
+
         const res = await fetch(`${base}/reset`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
         return { content: [{ type: "text" as const, text: "Reset thumbnail config to the generic default." }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return { content: [{ type: "text" as const, text: `Web UI is not running. Start with: ${studioStartCommand()}` }] };
         }
+
         return mcpError(msg);
       }
     },
@@ -2366,9 +2599,13 @@ export function createServer(): McpServer {
         // If no video_path, read from UI state
         if (!vPath || !segs) {
           const stateRes = await fetch(`${webServerUrl}/api/ui-state`);
+
           if (stateRes.ok) {
-            const state = (await stateRes.json()) as ServerUIState;
+            const state = // SAFETY: /api/ui-state responds with the studio's UIState plus transcriptWordCount.
+            (await stateRes.json()) as ServerUIState;
+
             if (!vPath) vPath = state.videoPath || state.filePath;
+
             if (!segs) {
               const suggestions = state.suggestions ?? [];
               segs = suggestions.map((s) => ({
@@ -2406,8 +2643,9 @@ export function createServer(): McpServer {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ video_path: vPath, segments: segs }),
         });
+
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as ApiError & Record<string, unknown>;
+        const data = apiResponseSchema.parse(await res.json());
 
         if (data.error) {
           return {
@@ -2423,6 +2661,7 @@ export function createServer(): McpServer {
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [
@@ -2433,6 +2672,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -2510,14 +2750,17 @@ export function createServer(): McpServer {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(params),
         });
+
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as ApiError & Record<string, unknown>;
+        const data = apiResponseSchema.parse(await res.json());
+
         if (data.error) {
           return {
             content: [{ type: "text" as const, text: `Error: ${data.error}` }],
             isError: true,
           };
         }
+
         return {
           content: [
             { type: "text" as const, text: JSON.stringify(data, null, 2) },
@@ -2525,6 +2768,7 @@ export function createServer(): McpServer {
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [
@@ -2535,6 +2779,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -2643,31 +2888,39 @@ export function createServer(): McpServer {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(params),
         });
-        const data = (await res.json()) as ApiError & Record<string, unknown>;
+
+        const data = apiResponseSchema.parse(await res.json());
+
         if (data.error) {
           return {
             content: [{ type: "text" as const, text: `Error: ${data.error}` }],
             isError: true,
           };
         }
-        const validation = (data.outputs as { validation?: { warnings?: string[] } } | undefined)?.validation;
+
+        const validation = data.outputs?.validation;
+
         const warnings = validation?.warnings?.length
           ? `\n\n[Render warnings]\n${validation.warnings.map((w) => `  - ${w}`).join("\n")}`
           : "";
-        const text = typeof data.job_id === "string"
+
+        const text = data.job_id !== undefined
           ? withNextStep(
               JSON.stringify(data, null, 2),
               `Poll job_status("${data.job_id}", wait_seconds: 30) until done, then manage_multicam(action: "show", session_id) to read the result.`,
             )
           : JSON.stringify(data, null, 2) + warnings;
+
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [{ type: "text" as const, text: `Web UI is not running. Start with: ${studioStartCommand()}` }],
           };
         }
+
         return mcpError(err);
       }
     },
@@ -2691,8 +2944,10 @@ export function createServer(): McpServer {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ file_path }),
         });
+
         if (!selectRes.ok) {
-          const err = (await selectRes.json()) as ApiError;
+          const err = apiErrorSchema.parse(await selectRes.json());
+
           return {
             content: [
               {
@@ -2703,7 +2958,8 @@ export function createServer(): McpServer {
             isError: true,
           };
         }
-        const fileInfo = (await selectRes.json()) as FileInfo;
+
+        const fileInfo = fileInfoSchema.parse(await selectRes.json());
 
         // Push to UI state
         await fetch(`${webServerUrl}/api/ui-state`, {
@@ -2717,9 +2973,11 @@ export function createServer(): McpServer {
           `Now transcribe it: transcribe_podcast(file_path: "${file_path}")\n` +
             "  Or if the user pastes a transcript in the UI, read it with get_ui_state(include_transcript: true)",
         );
+
         return { content: [{ type: "text" as const, text: setText }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [
@@ -2730,6 +2988,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -2784,8 +3043,10 @@ export function createServer(): McpServer {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ file_path, transcript }),
         });
+
         if (!res.ok) {
-          const err = (await res.json()) as ApiError;
+          const err = apiErrorSchema.parse(await res.json());
+
           return {
             content: [
               {
@@ -2796,7 +3057,8 @@ export function createServer(): McpServer {
             isError: true,
           };
         }
-        const result = (await res.json()) as ImportTranscriptResult;
+
+        const result = importTranscriptResultSchema.parse(await res.json());
 
         // Push transcript to UI state
         await fetch(`${webServerUrl}/api/ui-state`, {
@@ -2813,14 +3075,17 @@ export function createServer(): McpServer {
 
         const wordCount = result.data?.words?.length || 0;
         const duration = result.data?.duration || 0;
+
         const importText = withNextStep(
           `Transcript imported: ${wordCount} words, ${Math.round(duration)}s duration.`,
           "Now read the transcript with get_ui_state(include_transcript: true), " +
             "analyze it for viral moments, then call suggest_clips with your picks.",
         );
+
         return { content: [{ type: "text" as const, text: importText }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [
@@ -2831,6 +3096,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -2880,8 +3146,10 @@ export function createServer(): McpServer {
             language,
           }),
         });
+
         if (!res.ok) {
-          const err = (await res.json()) as ApiError;
+          const err = apiErrorSchema.parse(await res.json());
+
           return {
             content: [
               {
@@ -2892,7 +3160,8 @@ export function createServer(): McpServer {
             isError: true,
           };
         }
-        const result = (await res.json()) as ImportTranscriptResult;
+
+        const result = importTranscriptResultSchema.parse(await res.json());
 
         // Push parsed transcript to UI state
         await fetch(`${webServerUrl}/api/ui-state`, {
@@ -2909,14 +3178,17 @@ export function createServer(): McpServer {
 
         const wordCount = result.data?.words?.length || 0;
         const segCount = result.data?.segments?.length || 0;
+
         const parseText = withNextStep(
           `Transcript parsed: ${wordCount} words, ${segCount} segments.`,
           "Now read the transcript with get_ui_state(include_transcript: true), " +
             "analyze it for viral moments, then call suggest_clips with your picks.",
         );
+
         return { content: [{ type: "text" as const, text: parseText }] };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
           return {
             content: [
@@ -2927,6 +3199,7 @@ export function createServer(): McpServer {
             ],
           };
         }
+
         return {
           content: [{ type: "text" as const, text: `Error: ${msg}` }],
           isError: true,
@@ -2962,6 +3235,7 @@ export function createServer(): McpServer {
     async (input) => {
       try {
         const text = await handleMineChannel(input);
+
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         return mcpError(err);
@@ -2995,6 +3269,7 @@ export function createServer(): McpServer {
     async (input) => {
       try {
         const text = await handleCompareEngines(input);
+
         return { content: [{ type: "text" as const, text }] };
       } catch (err: unknown) {
         return mcpError(err);
@@ -3009,7 +3284,7 @@ export function createServer(): McpServer {
   // =============================================
   server.prompt(
     "workflow",
-    "Complete podcli workflow guide — from podcast file to finished clips",
+    "Complete podcli workflow guide: from podcast file to finished clips",
     async () => ({
       messages: [
         {

@@ -49,8 +49,10 @@ const waitForAssets = async (page) => {
   await ensureBrowser({logLevel: "error"});
   const browser = await openBrowser("chrome", {logLevel: "error"});
   const closeBrowser = () => { try { browser.close({silent: true}); } catch {} };
+
   process.on("SIGINT", () => { closeBrowser(); process.exit(1); });
   process.on("SIGTERM", () => { closeBrowser(); process.exit(1); });
+
   try {
     const page = await browser.newPage({
       context: () => null,
@@ -60,6 +62,7 @@ const waitForAssets = async (page) => {
       onBrowserLog: () => undefined,
       onLog: () => undefined,
     });
+
     await page.setViewport({width, height, deviceScaleFactor: 1});
     await page.goto({
       url: `file://${path.resolve(htmlPath)}`,
@@ -69,9 +72,11 @@ const waitForAssets = async (page) => {
       },
     });
     await waitForAssets(page);
+
     if (waitMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
+
     await screenshot({
       page,
       path: outputPath,

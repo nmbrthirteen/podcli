@@ -1,8 +1,8 @@
 """YouTube Data + Analytics client and CSV importer.
 
 Two ways to get per-video performance into podcli:
-  1. OAuth (bring-your-own Google Cloud creds) — full, live metrics.
-  2. CSV export from YouTube Studio — no auth, works offline.
+  1. OAuth (bring-your-own Google Cloud creds): full, live metrics.
+  2. CSV export from YouTube Studio: no auth, works offline.
 
 The google-api libraries are imported lazily so the rest of podcli runs
 without them; OAuth paths raise a clear, actionable error when they're absent.
@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+from utils.log import warn as log_warn
 from typing import Any, Optional
 
 from config.paths import paths
@@ -42,7 +43,7 @@ def is_authorized() -> bool:
 
 
 def _write_token(creds) -> None:
-    # 0o600: the file holds a long-lived refresh token — keep it owner-only.
+    # 0o600: the file holds a long-lived refresh token: keep it owner-only.
     fd = os.open(_TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
@@ -158,8 +159,8 @@ def fetch_metrics(video_id: str) -> dict[str, Any]:
         irows = imp.get("rows") or [[0, 0]]
         metrics["impressions"] = int(irows[0][0])
         metrics["ctr"] = round(float(irows[0][1]), 1)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("youtube", "impressions report unavailable", error=exc)
     return metrics
 
 

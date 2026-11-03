@@ -11,6 +11,7 @@ const CASELESS_SCRIPT_RANGES: Array<[number, number]> = [
 
 function isCaselessScriptChar(ch: string): boolean {
   const cp = ch.codePointAt(0) ?? 0;
+
   return CASELESS_SCRIPT_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi);
 }
 
@@ -21,13 +22,16 @@ function isCaselessScriptChar(ch: string): boolean {
 export function safeUpper(text: string): string {
   if (!text) return text;
   let hasCaseless = false;
+
   for (const ch of text) {
     if (isCaselessScriptChar(ch)) {
       hasCaseless = true;
       break;
     }
   }
+
   if (!hasCaseless) return text.toUpperCase();
+
   return Array.from(text)
     .map((ch) => (isCaselessScriptChar(ch) ? ch : ch.toUpperCase()))
     .join("");

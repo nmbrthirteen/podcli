@@ -132,7 +132,7 @@ def clamp_away_from_dead_zone(
     cluster instead.
 
     Only triggers when the crop CENTER is close to the midline of the
-    source frame — a crop that merely straddles the midline is fine on
+    source frame: a crop that merely straddles the midline is fine on
     fullscreen layouts where the face genuinely sits near center.
     """
     if not has_any_split or not face_map:
@@ -162,7 +162,7 @@ def upgrade_speaker_mappings(face_map: dict) -> dict:
     v1 caches used "first-to-speak = left" which breaks when the host
     speaks first but sits on the right. This function clears the
     mappings entirely and stamps `_mappings_v2 = True` so the clear
-    only runs once per cache. Cluster positions are kept — they're
+    only runs once per cache. Cluster positions are kept because they're
     still useful for dead-zone clamping and safe defaults.
 
     Note: face_analysis.py writes its own v2-quality mappings and

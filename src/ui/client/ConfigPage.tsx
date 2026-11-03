@@ -43,6 +43,7 @@ export default function ConfigPage() {
     try {
       const data = await api<{ settings?: SettingRow[]; ai_cli?: AiCliStatus }>("/settings");
       setSettings(data.settings || []);
+
       if (data.ai_cli) {
         setAiCli(data.ai_cli);
       } else {
@@ -59,6 +60,7 @@ export default function ConfigPage() {
 
   async function refreshAiCli() {
     setAiRefresh((n) => n + 1);
+
     try {
       setAiCli(await api<AiCliStatus>("/ai-cli-status"));
     } catch {
@@ -75,13 +77,16 @@ export default function ConfigPage() {
     setSavingKey(key);
     setMsg(null);
     const value = secret ? (secretInputs[key] ?? "") : (pathInputs[key] ?? "");
+
     try {
       await api("/settings", { method: "POST", body: JSON.stringify({ key, value }) });
+
       if (secret) {
         setSecretInputs((p) => ({ ...p, [key]: "" }));
       } else {
         setPathInputs((p) => ({ ...p, [key]: "" }));
       }
+
       setMsg({ text: `${key} saved.`, ok: true });
       await loadSettings();
       await refreshAiCli();
@@ -95,6 +100,7 @@ export default function ConfigPage() {
   async function clearSetting(key: string) {
     setSavingKey(key);
     setMsg(null);
+
     try {
       await api("/settings", { method: "POST", body: JSON.stringify({ key, value: "" }) });
       setPathInputs((p) => ({ ...p, [key]: "" }));
@@ -110,6 +116,7 @@ export default function ConfigPage() {
 
   async function onMigrate() {
     setMsg({ text: "Migrating…", ok: true });
+
     try {
       const data = await api<any>("/config/migrate", { method: "POST" });
       setMsg({ text: `Moved ${data.moved_json || 0} cache file(s).`, ok: true });
@@ -125,12 +132,14 @@ export default function ConfigPage() {
 
   async function onImport() {
     const file = fileRef.current?.files?.[0];
+
     if (!file) return;
     const fd = new FormData();
     fd.append("bundle", file);
     fd.append("activate", activate ? "1" : "0");
     setMsg({ text: "Importing…", ok: true });
     setImporting(true);
+
     try {
       const data = await upload<any>("/config/import", fd);
       setMsg({ text: data.backup ? `Imported into ${data.home} · backup ${data.backup}` : `Imported into ${data.home}`, ok: true });

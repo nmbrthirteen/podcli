@@ -14,10 +14,14 @@ interface ContentResult {
 
 const STORE = "podcli.content-studio";
 
+type ContentMode = "episode" | "shorts";
+
+const CONTENT_MODES: readonly ContentMode[] = ["episode", "shorts"];
+
 export default function ContentStudio() {
   const [title, setTitle] = useState("");
   const [transcript, setTranscript] = useState("");
-  const [mode, setMode] = useState<"episode" | "shorts">("shorts");
+  const [mode, setMode] = useState<ContentMode>("shorts");
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -36,12 +40,14 @@ export default function ContentStudio() {
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(STORE) || "null");
+
       if (saved?.result) {
         setResult(saved.result);
         setTitle(saved.title || "");
         setMode(saved.mode === "episode" ? "episode" : "shorts");
       }
     } catch {}
+
     api("/ui-state")
       .then((s) => {
         setSessionText(s?.transcript?.transcript || s?.rawTranscriptText || "");
@@ -65,10 +71,13 @@ export default function ContentStudio() {
 
   const generate = async () => {
     if (isBusy) return;
+
     if (!transcript.trim()) {
       setMsg("Paste a transcript first");
+
       return;
     }
+
     setBusy(true);
     setMsg(null);
     setResult(null);
@@ -76,22 +85,30 @@ export default function ContentStudio() {
     const streamId = Math.random().toString(36).slice(2);
     const es = new EventSource("/api/events");
     es.addEventListener("content-partial", (e) => {
+      if (!(e instanceof MessageEvent)) return;
+
       try {
-        const d = JSON.parse((e as MessageEvent).data);
+        const d = JSON.parse(e.data);
+
         if (d.stream_id === streamId && d.partial) setResult(d.partial);
       } catch {}
     });
     es.addEventListener("job-update", (e) => {
+      if (!(e instanceof MessageEvent)) return;
+
       try {
-        const d = JSON.parse((e as MessageEvent).data);
+        const d = JSON.parse(e.data);
+
         if (d.message) setStage(d.message);
       } catch {}
     });
+
     try {
       const r = await api<ContentResult>("/content-studio/generate", {
         method: "POST",
         body: JSON.stringify({ title: title || undefined, transcript_text: transcript, mode, stream_id: streamId }),
       });
+
       if (!r.titles?.length && !r.description) throw new Error("AI CLI returned nothing. Is claude or codex installed?");
       setResult(r);
       persist(r);
@@ -109,7 +126,9 @@ export default function ContentStudio() {
       method: "POST",
       body: JSON.stringify({ instruction, transcript_text: transcript || undefined, mode }),
     });
+
     if (r.error) throw new Error(r.error);
+
     return r.text?.trim() || null;
   };
 
@@ -118,6 +137,7 @@ export default function ContentStudio() {
     setCustomBusy(true);
     setCustomOut(null);
     setMsg(null);
+
     try {
       setCustomOut((await runCustom(customReq.trim())) || "No output.");
     } catch (e: any) {
@@ -127,22 +147,25 @@ export default function ContentStudio() {
     }
   };
 
-  const REGEN: Record<string, string> = {
-    titles: "Give me 8 fresh YouTube title options for this content, one per line, numbered 1-8. Return only the titles.",
-    description: "Rewrite the YouTube description for this content. Return only the description text, no labels.",
-    tags: "Give a comma-separated list of 10-15 YouTube tags for this content. Return only the tags.",
-    hashtags: "Give 5 relevant hashtags for this content. Return only the hashtags, space-separated.",
-  };
+  const REGEN = new Map([
+    ["titles", "Give me 8 fresh YouTube title options for this content, one per line, numbered 1-8. Return only the titles."],
+    ["description", "Rewrite the YouTube description for this content. Return only the description text, no labels."],
+    ["tags", "Give a comma-separated list of 10-15 YouTube tags for this content. Return only the tags."],
+    ["hashtags", "Give 5 relevant hashtags for this content. Return only the hashtags, space-separated."],
+  ]);
 
   const regenerate = async (field: string) => {
     if (isBusy) return;
     setRegenBusy(true);
     setMsg(null);
+
     try {
-      const instruction = `${REGEN[field]}${regenNote.trim() ? ` Extra guidance: ${regenNote.trim()}` : ""}`;
+      const instruction = `${REGEN.get(field)}${regenNote.trim() ? ` Extra guidance: ${regenNote.trim()}` : ""}`;
       const text = await runCustom(instruction);
+
       if (!text) throw new Error("empty response");
-      const next = { ...(result || {}) } as ContentResult;
+      const next: ContentResult = { ...result };
+
       if (field === "titles") {
         next.titles = text
           .split(/\r?\n/)
@@ -192,10 +215,12 @@ export default function ContentStudio() {
     ) : null;
 
   const hasTitle = !!(result?.titles?.length || title.trim());
+
   const previewTitle =
     result?.titles?.[0]?.replace(/^\d+\.\s*/, "").replace(/^["']|["']$/g, "") ||
     title.trim() ||
     "Your title appears here";
+
   const vertical = mode === "shorts";
 
   return (
@@ -230,7 +255,7 @@ export default function ContentStudio() {
             />
 
             <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
-              <select value={mode} onChange={(e) => setMode(e.target.value as "episode" | "shorts")} style={{ flex: 1 }}>
+              <select value={mode} onChange={(e) => setMode(CONTENT_MODES.find((m) => m === e.target.value) ?? mode)} style={{ flex: 1 }}>
                 <option value="episode">Full episode (long-form)</option>
                 <option value="shorts">Short / clip</option>
               </select>
@@ -294,6 +319,7 @@ export default function ContentStudio() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     {result.titles.map((t, i) => {
                       const clean = t.replace(/^\d+\.\s*/, "");
+
                       return (
                         <button key={i} className={`title-option stream-in ${copied === clean ? "selected" : ""}`} onClick={() => copy(clean)}>
                           {t}{copied === clean ? " · copied" : ""}

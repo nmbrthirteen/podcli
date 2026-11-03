@@ -15,7 +15,7 @@ from typing import Optional, Callable
 
 from utils.proc import run as proc_run, ProcError
 
-# Fix torchaudio compatibility — speechbrain calls torchaudio.list_audio_backends()
+# Fix torchaudio compatibility: speechbrain calls torchaudio.list_audio_backends()
 # which was removed in torchaudio >= 2.10. Monkey-patch before any import.
 try:
     import torchaudio
@@ -111,14 +111,14 @@ def run_diarization(
     try:
         from pyannote.audio import Pipeline
     except ImportError:
-        msg = "Speaker detection not installed — run: podcli setup --speakers"
+        msg = "Speaker detection not installed. Run: podcli setup --speakers"
         if progress_callback:
             progress_callback(0, msg)
         raise ImportError(msg)
 
     if not token:
         msg = (
-            "HF_TOKEN not set — speaker detection requires a HuggingFace token.\n"
+            "HF_TOKEN not set: speaker detection requires a HuggingFace token.\n"
             "\n"
             "  Setup (one-time):\n"
             "  1. Create a token at https://huggingface.co/settings/tokens\n"
@@ -195,7 +195,7 @@ def run_diarization(
     if progress_callback:
         progress_callback(30, time_msg)
 
-    # Run diarization — this is a blocking call, no progress updates from pyannote
+    # Run diarization: this is a blocking call, no progress updates from pyannote
     diarization_params = {}
     if num_speakers:
         diarization_params["num_speakers"] = num_speakers
@@ -238,7 +238,7 @@ def assign_speakers_to_segments(
     during that segment's time range (majority vote).
     """
     if not speaker_segments:
-        # No diarization data — return segments unchanged
+        # No diarization data: return segments unchanged
         for seg in segments:
             seg["speaker"] = None
         return segments
@@ -273,7 +273,7 @@ def assign_speakers_to_words(
     """
     Assign speaker labels to individual words.
 
-    Picks the speaker whose diarization segment overlaps the word the most —
+    Picks the speaker whose diarization segment overlaps the word the most,
     at turn boundaries several segments can touch a word, and the first
     match is often the previous speaker trailing off.
     """

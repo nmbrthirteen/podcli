@@ -28,7 +28,7 @@ def safe_upper(text: str) -> str:
         return text.upper() if text else text
     return "".join(c if _is_caseless_script_char(c) else c.upper() for c in text)
 
-_TRAILING_PUNCT = " ,;:-–—"
+_TRAILING_PUNCT = " ,;:-\u2013\u2014"
 
 # Windows refuses these as a filename stem whatever the extension, so "CON.fcpxml"
 # fails just as "CON" does.

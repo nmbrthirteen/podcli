@@ -9,6 +9,12 @@ export interface McPerson {
 }
 
 export type McRole = "camera" | "mic" | "ignore";
+
+const MC_ROLES: readonly McRole[] = ["camera", "mic", "ignore"];
+
+/** The role named by a <select> value, or undefined for a value that is not a role. */
+export const mcRole = (value: string): McRole | undefined => MC_ROLES.find((role) => role === value);
+
 export type McSyncStatus = "reference" | "ok" | "review" | "rough" | "failed" | "manual" | "assumed";
 
 export interface McSourceSync {
@@ -60,6 +66,11 @@ export interface McCut {
 }
 
 export type McStyle = "auto" | "studio" | "remote";
+
+const MC_STYLES: readonly McStyle[] = ["auto", "studio", "remote"];
+
+/** The style named by a <select> value, or undefined for a value that is not a style. */
+export const mcStyle = (value: string): McStyle | undefined => MC_STYLES.find((style) => style === value);
 
 export interface McCutSettings {
   style: McStyle;
@@ -156,20 +167,59 @@ export const personName = (people: McPerson[], id: string): string =>
 /** Who a file shows or records, in the words the UI uses everywhere. */
 export function whoLabel(people: McPerson[], source: McSource): string {
   if (source.role === "camera") return source.person === "wide" ? "Everyone (wide)" : personName(people, source.person);
+
   if (source.channel_people.length) return source.channel_people.map((id) => personName(people, id) || "Nobody").join(" / ");
+
   return source.person ? personName(people, source.person) : "Shared room mic";
 }
 
-export type McEdit = (body: Record<string, unknown>) => void;
+export interface McSourceEdit {
+  role?: McRole;
+  person?: string;
+  channel_people?: string[];
+  offset?: number;
+  nudge?: number;
+}
+
+/** Cut settings that differ from the session's, keyed by setting name. */
+export type McCutSettingChanges = Record<string, string | number | boolean>;
+
+/** Fields an edit can set on a multicam session (the body of POST /api/multicam, minus routing). */
+export interface McEditBody {
+  action?: string;
+  sources?: Array<{ id: string } & McSourceEdit>;
+  people?: McPerson[];
+  look?: string;
+  format?: string;
+  stems?: boolean;
+  range_start?: number;
+  range_end?: number;
+  cut_settings?: McCutSettingChanges;
+}
+
+export interface McRequestBody extends Omit<McEditBody, "people"> {
+  action: string;
+  session_id?: string;
+  folder?: string;
+  files?: string[];
+  people?: McPerson[] | string[];
+}
+
+export type McEdit = (body: McEditBody) => void;
+
+interface CameraColors {
+  [cameraId: string]: string;
+}
 
 // One color per camera in the order the cameras are listed, so the shot strip
 // and the legend agree on which color means which camera.
 const CAMERA_COLORS = ["var(--accent)", "var(--green)", "var(--blue)", "var(--amber)", "var(--red)", "var(--text2)"];
 
-export function cameraColorMap(cameraIds: string[]): Record<string, string> {
-  const map: Record<string, string> = {};
+export function cameraColorMap(cameraIds: string[]): CameraColors {
+  const map: CameraColors = {};
   cameraIds.forEach((id, i) => {
     map[id] = CAMERA_COLORS[i % CAMERA_COLORS.length];
   });
+
   return map;
 }

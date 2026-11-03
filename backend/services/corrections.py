@@ -1,5 +1,5 @@
 """
-Transcript word corrections — fixes Whisper misheard proper nouns.
+Transcript word corrections: fixes Whisper misheard proper nouns.
 
 Loads replacements from .podcli/corrections.json and applies them to
 transcript words and segments. Single source of truth used by all paths

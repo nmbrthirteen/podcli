@@ -18,23 +18,26 @@ import {
 import CommandPalette from "./CommandPalette";
 import AccountChip from "./AccountChip";
 
-const icons: Record<string, typeof LayoutGrid> = {
-  library: LayoutGrid,
-  episode: Play,
-  content: FileText,
-  thumbnail: Image,
-  knowledge: BookOpen,
-  config: Settings,
-  integrations: Plug,
-  mcp: Terminal,
-  analytics: BarChart3,
-  highlights: Scissors,
-  assets: Package,
-  multicam: Video,
-};
+const icons = new Map([
+  ["library", LayoutGrid],
+  ["episode", Play],
+  ["content", FileText],
+  ["thumbnail", Image],
+  ["knowledge", BookOpen],
+  ["config", Settings],
+  ["integrations", Plug],
+  ["mcp", Terminal],
+  ["analytics", BarChart3],
+  ["highlights", Scissors],
+  ["assets", Package],
+  ["multicam", Video],
+]);
 
 function Icon({ name }: { name: string }) {
-  const Glyph = icons[name];
+  const Glyph = icons.get(name);
+
+  if (!Glyph) return null;
+
   return <Glyph className="ico" strokeWidth={1.8} />;
 }
 

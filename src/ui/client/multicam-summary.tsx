@@ -1,7 +1,7 @@
 import React from "react";
 import { fmt } from "./lib";
 import MulticamAutoCut from "./multicam-auto-cut";
-import type { McEdit, McSession } from "./multicam-types";
+import type { McEdit, McEditBody, McSession } from "./multicam-types";
 import { cameraColorMap, whoLabel } from "./multicam-types";
 
 export default function MulticamSummary({
@@ -13,7 +13,7 @@ export default function MulticamSummary({
   session: McSession;
   locked: boolean;
   onEdit: McEdit;
-  onRecut: (extra: Record<string, unknown>) => void;
+  onRecut: (extra: McEditBody) => void;
 }) {
   const cameras = session.sources.filter((s) => s.role === "camera" && s.offset !== null);
   const colors = cameraColorMap(cameras.map((c) => c.id));

@@ -46,6 +46,15 @@ SETTINGS = [
         "placeholder": "chrome",
     },
     {
+        "key": "PODCLI_CLOUD_SYNC",
+        "label": "Cloud clip sync",
+        "help": "Set to 1 to upload each rendered clip video and its transcript "
+        "slice to your podcli Pro workspace. Off by default. Only applies "
+        "when you are signed in.",
+        "secret": False,
+        "placeholder": "1",
+    },
+    {
         "key": "PODCLI_CLAUDE_PATH",
         "label": "Claude Code CLI path",
         "help": "Full path to the claude binary when auto-discovery fails. "

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-clip_studio — cut a precise fragment from a video and wrap it with a Remotion
+clip_studio: cut a precise fragment from a video and wrap it with a Remotion
 intro + "Follow for more" outro (with social icons).
 
 Cut a fragment by TIMESTAMP or by PARAGRAPH text (matched against the
@@ -146,7 +146,7 @@ def _find_paragraph(words: list, phrase: str) -> tuple[float, float]:
         raise SystemExit(f"Could not confidently locate paragraph in transcript (best match {best_score}/{win} words).")
     start = float(words[best_i]["start"])
     end = float(words[min(best_i + win - 1, len(words) - 1)]["end"])
-    print(f"  [paragraph] matched {best_score}/{win} words → {start:.1f}s–{end:.1f}s", flush=True)
+    print(f"  [paragraph] matched {best_score}/{win} words → {start:.1f}s-{end:.1f}s", flush=True)
     return start, end
 
 
@@ -269,7 +269,7 @@ def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt=
                      captions=True, face_map=None, crop_keyframes=None, hook=None):
     """Render the fragment with face-crop + captions via the existing engine."""
     from services.clip_generator import generate_clip
-    print(f"  [fragment] rendering {start:.1f}s–{end:.1f}s ({style}, crop={crop}, {fmt})", flush=True)
+    print(f"  [fragment] rendering {start:.1f}s-{end:.1f}s ({style}, crop={crop}, {fmt})", flush=True)
     res = generate_clip(
         video_path=video, start_second=start, end_second=end,
         caption_style=style, caption_position=caption_position,
@@ -576,7 +576,7 @@ def main():
     else:
         final = os.path.join(out_dir, "studio_final.mp4")
     if len(parts) == 1:
-        # no bookends — fragment is the result
+        # no bookends: fragment is the result
         import shutil
         shutil.copy(parts[0], final)
     else:

@@ -1,16 +1,23 @@
 import React, { useState } from "react";
 import { basename } from "./lib";
-import type { McEdit, McPerson, McSession, McSource } from "./multicam-types";
+import type { McEdit, McPerson, McSession, McSource, McSourceEdit } from "./multicam-types";
 import { whoLabel } from "./multicam-types";
 
-const STATUS: Record<string, { label: string; color: string; pill: string }> = {
-  reference: { label: "Reference", color: "var(--green)", pill: "pill-green" },
-  ok: { label: "Synced", color: "var(--green)", pill: "pill-green" },
-  review: { label: "Check sync", color: "var(--amber)", pill: "pill-amber" },
-  rough: { label: "Rough sync", color: "var(--amber)", pill: "pill-amber" },
-  manual: { label: "Set by hand", color: "var(--blue)", pill: "pill-sky" },
-  assumed: { label: "Starts with the others", color: "var(--amber)", pill: "pill-amber" },
-};
+interface SyncStatusStyle {
+  label: string;
+  color: string;
+  pill: string;
+}
+
+const STATUS = new Map<string, SyncStatusStyle>([
+  ["reference", { label: "Reference", color: "var(--green)", pill: "pill-green" }],
+  ["ok", { label: "Synced", color: "var(--green)", pill: "pill-green" }],
+  ["review", { label: "Check sync", color: "var(--amber)", pill: "pill-amber" }],
+  ["rough", { label: "Rough sync", color: "var(--amber)", pill: "pill-amber" }],
+  ["manual", { label: "Set by hand", color: "var(--blue)", pill: "pill-sky" }],
+  ["assumed", { label: "Starts with the others", color: "var(--amber)", pill: "pill-amber" }],
+]);
+
 const NOT_SYNCED = { label: "Not synced", color: "var(--red)", pill: "pill-red" };
 
 export default function MulticamSync({
@@ -37,6 +44,7 @@ export default function MulticamSync({
         {active.map((source, i) => {
           const start = source.timeline_start ?? 0;
           const end = source.timeline_end ?? start;
+
           return (
             <div
               key={source.id}
@@ -44,7 +52,7 @@ export default function MulticamSync({
               style={{
                 position: "absolute", top: i * 34 + 4, left: `${(start / duration) * 100}%`,
                 width: `${Math.max(0.5, ((end - start) / duration) * 100)}%`, height: 24,
-                background: (STATUS[source.sync.status || ""] || NOT_SYNCED).color, opacity: 0.85, borderRadius: 4,
+                background: (STATUS.get(source.sync.status || "") || NOT_SYNCED).color, opacity: 0.85, borderRadius: 4,
                 display: "flex", alignItems: "center", padding: "0 8px", fontSize: 11, color: "var(--bg)",
                 fontWeight: 600, overflow: "hidden", whiteSpace: "nowrap",
               }}
@@ -71,14 +79,15 @@ export default function MulticamSync({
 }
 
 function SyncRow({ source, people, onEdit, disabled }: { source: McSource; people: McPerson[]; onEdit: McEdit; disabled: boolean }) {
-  const status = STATUS[source.sync.status || ""] || NOT_SYNCED;
+  const status = STATUS.get(source.sync.status || "") || NOT_SYNCED;
   const [draft, setDraft] = useState("");
   const frame = 1 / (source.fps || 30);
   const drift = source.sync.drift_ppm;
-  const edit = (change: Record<string, number>) => onEdit({ action: "map", sources: [{ id: source.id, ...change }] });
+  const edit = (change: McSourceEdit) => onEdit({ action: "map", sources: [{ id: source.id, ...change }] });
 
   function saveOffset() {
     const offset = Number(draft);
+
     if (draft.trim() === "" || !Number.isFinite(offset)) return;
     edit({ offset });
     setDraft("");
@@ -94,7 +103,7 @@ function SyncRow({ source, people, onEdit, disabled }: { source: McSource; peopl
       </div>
 
       <span className={`pill ${status.pill}`}>{status.label}</span>
-      {typeof drift === "number" && Math.abs(drift) >= 5 && (
+      {drift !== undefined && Math.abs(drift) >= 5 && (
         <span className="hint">Clock drift {Math.round(drift)} ppm, corrected</span>
       )}
       {source.offset === null && (

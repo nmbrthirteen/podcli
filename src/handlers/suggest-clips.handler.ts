@@ -1,5 +1,5 @@
 /**
- * suggest_clips tool — helps Claude structure its clip suggestions.
+ * suggest_clips tool: helps Claude structure its clip suggestions.
  *
  * This tool doesn't do heavy processing. Claude analyzes the transcript
  * in conversation, then calls this tool to store/format the suggestions.
@@ -99,7 +99,7 @@ const suggestionSchema = z.object({
 });
 
 /** Single source of truth for the tool's arguments; server.ts registers this. */
-export const suggestClipsInputShape = {
+export const suggestClipsInputFields = {
   suggestions: z
     .array(suggestionSchema)
     .describe("Array of suggested clip moments"),
@@ -108,7 +108,7 @@ export const suggestClipsInputShape = {
 export const suggestClipsToolDef = {
   name: "suggest_clips",
   description:
-    "STEP 2 — Submit your clip suggestions after analyzing the transcript.\n\n" +
+    "STEP 2: Submit your clip suggestions after analyzing the transcript.\n\n" +
     "Before calling this: read the transcript via get_ui_state(include_transcript: true) " +
     "and identify the best viral moments.\n\n" +
     "Every suggestion must carry its own context. A clip that opens on an answer " +
@@ -130,17 +130,21 @@ export async function handleSuggestClips(input: SuggestClipsInput): Promise<stri
   const suggestions = input.suggestions;
 
   const problems: string[] = [];
+
   for (let i = 0; i < suggestions.length; i++) {
     const s = suggestions[i];
+
     const errors = [
       validateSuggestionRange(s.start_second, s.end_second),
       validateSuggestionContext(s),
       validateHook(s.hook, s.start_second, s.end_second, s.segments),
     ].filter((e): e is string => e !== null);
+
     for (const error of errors) {
       problems.push(`Suggestion ${i + 1} ("${s.title}"): ${error}`);
     }
   }
+
   if (problems.length > 0) {
     throw new Error(
       `${problems.length} of ${suggestions.length} suggestions need work. ` +
@@ -185,6 +189,7 @@ export async function handleSuggestClips(input: SuggestClipsInput): Promise<stri
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
+
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
@@ -203,10 +208,11 @@ export async function handleRankClipCandidates(input: {
 }): Promise<string> {
   const result = await rankExecutor.execute<{
     count: number;
-    candidates: Array<Record<string, unknown>>;
+    candidates: object[];
   }>("rank_candidates", {
     video_path: input.video_path,
     top_n: input.top_n ?? 20,
   });
+
   return JSON.stringify(result.data ?? result);
 }

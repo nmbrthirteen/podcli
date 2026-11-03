@@ -1,5 +1,5 @@
 """
-Shared asset registry — works from CLI, Web UI, and MCP.
+Shared asset registry: works from CLI, Web UI, and MCP.
 
 Assets are named references to local files (logos, intros, outros, music,
 images). Register once, use by name everywhere:

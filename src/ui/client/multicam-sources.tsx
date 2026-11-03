@@ -3,6 +3,7 @@ import { fmt, basename } from "./lib";
 import { AudioIcon } from "./icons";
 import PersonChip from "./multicam-person-chip";
 import type { McEdit, McPerson, McRole, McSession, McSource } from "./multicam-types";
+import { mcRole } from "./multicam-types";
 import { mcImageUrl } from "./multicam-types";
 
 const selectStyle = { width: "auto" } as const;
@@ -27,6 +28,7 @@ export default function MulticamSources({
 
   function commitName(person: McPerson) {
     const draft = nameDraft[person.id]?.trim();
+
     if (!draft || draft === person.name) return;
     savePeople(session.people.map((p) => (p.id === person.id ? { ...p, name: draft } : p)));
   }
@@ -95,11 +97,13 @@ function SourceRow({
   disabled: boolean;
 }) {
   const split = source.channel_people.length > 0;
+
   const details = [
     fmt(source.duration),
     source.kind === "video" ? `${source.width}x${source.height}` : "Audio",
     source.has_audio ? `${source.audio_channels}ch audio` : "No audio",
   ];
+
   const personOptions = people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>);
 
   return (
@@ -127,7 +131,7 @@ function SourceRow({
       {source.guessed && source.role !== "ignore" && <span className="pill pill-amber">Guessed</span>}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto", flexWrap: "wrap", justifyContent: "flex-end" }}>
-        <select value={source.role} disabled={disabled} style={selectStyle} onChange={(e) => onEdit({ role: e.target.value as McRole })}>
+        <select value={source.role} disabled={disabled} style={selectStyle} onChange={(e) => onEdit({ role: mcRole(e.target.value) })}>
           <option value="camera" disabled={source.kind === "audio"}>Camera</option>
           <option value="mic" disabled={!source.has_audio}>Mic</option>
           <option value="ignore">Ignore</option>

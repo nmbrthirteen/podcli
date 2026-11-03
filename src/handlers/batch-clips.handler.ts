@@ -1,6 +1,7 @@
-import { readFileSync } from "fs";
+import { z } from "zod";
 import { PythonExecutor } from "../services/python-executor.js";
 import { FileManager } from "../services/file-manager.js";
+import { readUIStateFile } from "../services/ui-state-file.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import { paths } from "../config/paths.js";
 import { webServerUrl } from "../config/server.js";
@@ -22,12 +23,15 @@ const executor = new PythonExecutor();
 const fileManager = new FileManager();
 const history = new ClipsHistory();
 
+const jobStartedSchema = z.object({ job_id: z.string(), status: z.string() });
+
 /** Load UI state from disk. Returns null if unavailable. */
 function loadState(): UIState | null {
   try {
-    return JSON.parse(readFileSync(paths.uiState, "utf-8")) as UIState;
+    return readUIStateFile();
   } catch (err) {
     log.debug("UI state unavailable", { err: err instanceof Error ? err.message : err });
+
     return null;
   }
 }
@@ -35,7 +39,7 @@ function loadState(): UIState | null {
 export const batchClipsToolDef = {
   name: "batch_create_clips",
   description:
-    "STEP 3 — Export multiple clips at once as finished vertical shorts.\n\n" +
+    "STEP 3: Export multiple clips at once as finished vertical shorts.\n\n" +
     "EASIEST: pass export_selected=true to export all selected clips in one go.\n" +
     "Alternative: pass clip_numbers=[1, 3, 5] for specific ones.\n" +
     "Everything (video, timestamps, settings) auto-loads from session state.\n\n" +
@@ -157,6 +161,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
 
   // Auto-resolve video path
   const videoPath = input.video_path || state?.videoPath || "";
+
   if (!videoPath) {
     return JSON.stringify({ error: "video_path is required (no video in session state)" });
   }
@@ -166,6 +171,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   // swapped in after that transcript was generated.
   if (input.transcript_words == null && transcript) {
     const mismatch = transcriptVideoMismatch(state?.transcriptVideoIdentity, videoPath);
+
     if (mismatch) {
       return JSON.stringify({ error: mismatch });
     }
@@ -199,11 +205,13 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   if (input.export_selected) {
     // Export all selected (non-deselected) clips
     clips = [];
+
     for (let i = 0; i < suggestions.length; i++) {
       if (!deselected.includes(i)) {
         clips.push(buildClipFromSuggestion(suggestions[i], i + 1));
       }
     }
+
     if (clips.length === 0) {
       return JSON.stringify({
         error: `No selected clips to export. ${suggestions.length} total, all deselected.`,
@@ -215,10 +223,12 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
 
     for (const num of input.clip_numbers) {
       const idx = num - 1;
+
       if (idx < 0 || idx >= suggestions.length) {
         errors.push(`Clip #${num} not found`);
         continue;
       }
+
       clips.push(buildClipFromSuggestion(suggestions[idx], num));
     }
 
@@ -238,6 +248,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   if (input.keep_caption_overlay === true) {
     clips = clips.map((c) => ({ ...c, keep_caption_overlay: c.keep_caption_overlay ?? true }));
   }
+
   if (input.write_clean_variant === true) {
     clips = clips.map((c) => ({ ...c, write_clean_variant: c.write_clean_variant ?? true }));
   }
@@ -248,21 +259,24 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
       clips[i].end_second,
       clips[i].format || batchFormat,
     );
+
     if (rangeError) {
       return JSON.stringify({ error: `Clip ${i + 1}: ${rangeError}` });
     }
+
     const hookError = validateHook(
       clips[i].hook,
       clips[i].start_second,
       clips[i].end_second,
       clips[i].keep_segments,
     );
+
     if (hookError) {
       return JSON.stringify({ error: `Clip ${i + 1}: ${hookError}` });
     }
   }
 
-  // Async path — route through Web UI so caller can poll job_status for
+  // Async path: route through Web UI so caller can poll job_status for
   // live progress during a multi-minute render. Falls back to sync if the
   // UI isn't running.
   if (input.async_mode) {
@@ -283,16 +297,19 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
           write_clean_variant: input.write_clean_variant === true,
         }),
       });
+
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      const data = (await res.json()) as { job_id: string; status: string };
+      const data = jobStartedSchema.parse(await res.json());
+
       return JSON.stringify({
         job_id: data.job_id,
         status: data.status,
         clip_count: clips.length,
-        next_step: `Poll job_status("${data.job_id}", wait_seconds: 30) in a loop, emitting one terse progress line to the user between polls (e.g. "Rendering 3/7 — clip #3"). Stop when done=true.`,
+        next_step: `Poll job_status("${data.job_id}", wait_seconds: 30) in a loop, emitting one terse progress line to the user between polls (e.g. "Rendering 3/7, clip #3"). Stop when done=true.`,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+
       if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
         log.warn("Web UI unavailable, falling back to sync batch render", { err: msg });
         // fall through to sync path
@@ -320,6 +337,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   if (!result.data) {
     throw new Error("Batch clip creation returned no data");
   }
+
   const data = result.data;
 
   const recorded = await history.recordBatchResults(data.results, {
@@ -331,6 +349,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
     contentTypeFor: (s, e) => findContentType(suggestions, s, e),
     suggestions,
   });
+
   await history.persistBatchRecipes(data.results, recorded, {
     transcriptWords: transcriptWords,
     clipSpecs: clips,

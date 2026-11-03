@@ -13,7 +13,7 @@ import json
 import os
 import subprocess
 from utils.proc import run as proc_run
-from utils.log import log_event
+from utils.log import log_event, warn as log_warn
 import sys
 import tempfile
 import base64
@@ -40,8 +40,8 @@ def _load_brand_config() -> dict:
         try:
             with open(config_path, encoding="utf-8") as f:
                 defaults.update(json.load(f))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("thumbnail", "thumbnail config unreadable, using defaults", error=exc)
     return defaults
 
 
@@ -80,7 +80,7 @@ def _tile_bounds_for_face(gray, face_cx: int) -> tuple[int, int]:
 
 
 def _frame_sharpness(frame, face_roi=None) -> float:
-    """Laplacian variance — higher = sharper. Measures face region if provided."""
+    """Laplacian variance: higher = sharper. Measures face region if provided."""
     import cv2
     if face_roi is not None:
         x1, y1, x2, y2 = face_roi
@@ -110,7 +110,7 @@ def _face_expression_quality(frame, x1: int, y1: int, x2: int, y2: int) -> float
     gray = _normalize_roi(gray)
     h, w = gray.shape[:2]
 
-    # 1) Face angle — reject extreme tilt (looking down, sideways)
+    # 1) Face angle: reject extreme tilt (looking down, sideways)
     #    A front-facing face has the brightest area (forehead) in the top third.
     #    Looking down shifts brightness to forehead being occluded.
     top_third = gray[:int(h * 0.33), :]
@@ -122,9 +122,9 @@ def _face_expression_quality(frame, x1: int, y1: int, x2: int, y2: int) -> float
 
     # Looking down: top third is much darker than bottom (forehead hidden, chin/neck visible)
     if top_brightness < mid_brightness * 0.7:
-        return 0.2  # Looking down — terrible for thumbnails
+        return 0.2  # Looking down: terrible for thumbnails
 
-    # 2) Face symmetry — detect extreme side angles
+    # 2) Face symmetry: detect extreme side angles
     #    A frontal face has roughly symmetric left/right brightness
     left_half = gray[:, :w // 2]
     right_half = gray[:, w // 2:]
@@ -151,7 +151,7 @@ def _face_expression_quality(frame, x1: int, y1: int, x2: int, y2: int) -> float
         elif mouth_var > 120:
             mouth_penalty = 0.15
 
-    # 5) Overall face sharpness — catch motion blur
+    # 5) Overall face sharpness: catch motion blur
     face_sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
     if face_sharpness < 25:
         return 0.3  # Motion blur
@@ -161,7 +161,7 @@ def _face_expression_quality(frame, x1: int, y1: int, x2: int, y2: int) -> float
     if aspect < 0.7 or aspect > 1.4:
         return 0.35  # Odd angle or distortion
 
-    # 7) Expressiveness — reward animated faces over flat/neutral ones.
+    # 7) Expressiveness: reward animated faces over flat/neutral ones.
     #    Engaged speakers have higher variance in the eyebrow region (raised brows)
     #    and moderate mouth activity (mid-speech, not slack-jawed).
     brow_region = gray[int(h * 0.15):int(h * 0.30), :]
@@ -294,7 +294,7 @@ def extract_candidate_frames(
             if fw < w * 0.08:
                 continue
 
-            # Split-screen check — only for landscape sources where
+            # Split-screen check: only for landscape sources where
             # a small centered face likely means a multi-cam layout.
             # Portrait sources naturally have centered faces.
             face_cx = (x1 + x2) / 2
@@ -406,7 +406,7 @@ def extract_candidate_frames(
         src_ratio = fw / fh
 
         if is_portrait and src_ratio > 0.5:
-            # Already portrait (9:16 ish) — scale to fit width, place face
+            # Already portrait (9:16 ish): scale to fit width, place face
             # in upper portion with dark padding below for text area.
             scale = target_w / fw
             new_w = target_w
@@ -605,7 +605,7 @@ RULES:
 - photo_object_position: CSS value to show the face well. The photo is already 1080x1920 with face centered, so "center top" usually works. Adjust if face_y is unusual.
 - Font sizes: for short text (1-2 words per line) use 96-110px. For medium (3-4 words) use 80-96px. For long (5+ words) use 64-80px. Line 2 should be 85-95% of Line 1.
 - No slashes in the text lines.
-- This is thumbnail variation #{variation + 1}. Give a DISTINCT headline angle and wording from the most obvious phrasing — vary the hook, the emphasis, or which idea you lead with so each variation reads differently."""
+- This is thumbnail variation #{variation + 1}. Give a DISTINCT headline angle and wording from the most obvious phrasing. Vary the hook, the emphasis, or which idea you lead with so each variation reads differently."""
 
     layout = _ask_ai_for_json(prompt, timeout=30)
     return layout if isinstance(layout, dict) else None
@@ -617,7 +617,7 @@ def generate_headline_variations(
     """Write n DISTINCT 2-line thumbnail headlines in a single AI call.
 
     One call (rather than n independent layout calls) is both cheaper and the
-    only way to guarantee the variations actually differ — the model has to see
+    only way to guarantee the variations actually differ, because the model has to see
     all n at once to make them distinct. Returns [] if no AI CLI answers, letting
     the caller fall back to per-variation layout.
     """
@@ -632,7 +632,7 @@ RULES:
 - Rewrite the title into punchy thumbnail copy, not a literal transcript sentence. If clip content is given above, the copy must match what the clip actually delivers.
 - Line 1 = setup, Line 2 = payoff. 4-8 words total. Hard max 24 characters per line.
 - Drop filler words; keep numbers, nouns, and the strongest claim. No slashes.
-- Every option must read DIFFERENTLY — vary the hook, the emphasis, or which idea leads. Do not repeat the same phrasing across options."""
+- Every option must read DIFFERENTLY: vary the hook, the emphasis, or which idea leads. Do not repeat the same phrasing across options."""
 
     items = _ask_ai_for_json(prompt, timeout=45)
     if not isinstance(items, list):
@@ -662,7 +662,7 @@ def generate_thumbnail_with_template(
     Template provides consistent visual structure.
 
     When line1_override is given, the two lines are used verbatim and the
-    Claude rewrite is skipped — the caller controls the exact split.
+    Claude rewrite is skipped: the caller controls the exact split.
     `people` carries the two panels of the pair layout from thumbnail_pair.
     """
     from services.thumbnail_html import generate_thumbnail, _load_config, _prepare_thumbnail_lines
@@ -822,14 +822,14 @@ def render_variations(
                                         end_second=end_second)
             if result:
                 frames = [result]
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn("thumbnail", "frame extraction failed", error=exc)
 
     if not frames:
         frames = [{"path": None}]
 
     # When the caller didn't pin exact copy, get n distinct headlines up front so
-    # the variations differ in wording — not just in frame/styling.
+    # the variations differ in wording: not just in frame/styling.
     headlines: list[tuple[str, str]] = []
     if line1 is None:
         headlines = generate_headline_variations(title, n, config=cfg, grounding=grounding)
@@ -874,7 +874,7 @@ def thumbnail_to_video_frame(
     """Convert thumbnail to a short video clip for appending.
 
     Includes silent audio so concat_outro's acrossfade works.
-    No baked-in fades — crossfade handles the transition.
+    No baked-in fades: crossfade handles the transition.
     """
     cmd = [
         "ffmpeg", "-y",

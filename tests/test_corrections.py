@@ -1,4 +1,4 @@
-"""Tests for backend.services.corrections — word/segment replacement."""
+"""Tests for backend.services.corrections: word/segment replacement."""
 
 import json
 import os
@@ -197,7 +197,7 @@ class CorrectionsTests(unittest.TestCase):
         words = [{"word": "Foo"}]
         segments = [{"text": "Foo"}]
         w, s = corrections.apply_corrections(words, segments)
-        # Same list identity — mutated in place
+        # Same list identity: mutated in place
         self.assertIs(w, words)
         self.assertIs(s, segments)
 

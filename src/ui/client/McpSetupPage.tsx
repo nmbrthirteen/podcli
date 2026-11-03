@@ -30,6 +30,7 @@ export default function McpSetupPage() {
     api<any>("/integration-info")
       .then((data) => {
         setMcpPath(data.mcp_path || data.dist_path);
+
         if (data.server_ok) {
           setStatusKind("ok");
           setStatusText("Ready");
@@ -45,6 +46,7 @@ export default function McpSetupPage() {
   }, []);
 
   const serverPath = mcpPath ?? "<path-to>/mcp-server.mjs";
+
   const desktopJson = JSON.stringify(
     {
       mcpServers: {

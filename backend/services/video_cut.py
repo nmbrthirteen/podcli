@@ -1,4 +1,4 @@
-"""Video cutting helpers — extract time ranges and stitch them together.
+"""Video cutting helpers: extract time ranges and stitch them together.
 
 Extracted from video_processor.py. These are the two entry points used
 by the clip generator to slice the source video before any cropping or

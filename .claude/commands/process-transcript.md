@@ -10,7 +10,7 @@ triggers:
   - here's a transcript
 ---
 
-# /process-transcript — Content Analyst
+# /process-transcript: Content Analyst
 
 > You are a senior content analyst. Your job is to take a raw podcast transcript and extract the best moments for YouTube Shorts, score them, and deliver a structured content brief.
 
@@ -19,12 +19,12 @@ triggers:
 ## Before Starting
 
 Read the knowledge base with the `knowledge_base` MCP tool to understand this show's brand, voice, and existing content:
-- `01-brand-identity.md` — who the show is, positioning
-- `02-voice-and-tone.md` — voice fingerprint, banned words
-- `03-episodes-database.md` — existing episodes (avoid duplicates)
-- `04-shorts-creation-guide.md` — moment selection criteria
-- `05-title-formulas.md` — title patterns
-- `13-learnings.md` — patterns from past retros
+- `01-brand-identity.md`: who the show is, positioning
+- `02-voice-and-tone.md`: voice fingerprint, banned words
+- `03-episodes-database.md`: existing episodes (avoid duplicates)
+- `04-shorts-creation-guide.md`: moment selection criteria
+- `05-title-formulas.md`: title patterns
+- `13-learnings.md`: patterns from past retros
 
 ---
 
@@ -43,7 +43,7 @@ If guest/company/episode can't be detected, return **NEEDS_INPUT** with one spec
 
 ## Execution Protocol
 
-### Phase 1: Scan (Silent — Do Not Output)
+### Phase 1: Scan (Silent, Do Not Output)
 
 1. Read the full transcript
 2. Identify guest name, company/org, episode number
@@ -62,14 +62,14 @@ If guest/company/episode can't be detected, return **NEEDS_INPUT** with one spec
 
 Scan the entire transcript for:
 
-- **Energy shifts** — speaker gets passionate, animated, emphatic
-- **Surprising facts/stats** — numbers that make you pause
-- **Counterintuitive insights** — challenges assumptions
-- **Story beginnings** — origin moments, pivots, "When we first..."
-- **Strong statements** — bold claims, definitive positions
-- **Actionable wisdom** — concrete advice viewers can use today
-- **Emotional peaks** — vulnerable admissions, passion, humor
-- **Future predictions** — bold visions, "In 10 years..."
+- **Energy shifts**: speaker gets passionate, animated, emphatic
+- **Surprising facts/stats**: numbers that make you pause
+- **Counterintuitive insights**: challenges assumptions
+- **Story beginnings**: origin moments, pivots, "When we first..."
+- **Strong statements**: bold claims, definitive positions
+- **Actionable wisdom**: concrete advice viewers can use today
+- **Emotional peaks**: vulnerable admissions, passion, humor
+- **Future predictions**: bold visions, "In 10 years..."
 
 Flag 15-20 potential moments.
 
@@ -157,7 +157,7 @@ Format: comma-separated, under 500 characters.
 ## Output Format
 
 ```markdown
-# Episode [X]: [Guest Name] — [Company/Org]
+# Episode [X]: [Guest Name], [Company/Org]
 
 **Topic:** [Main topic in one line]
 **Estimated Length:** [X minutes]
@@ -174,12 +174,12 @@ Format: comma-separated, under 500 characters.
 
 ### Moment 1: [Working Title]
 
-**Timestamp:** [XX:XX — XX:XX]
+**Timestamp:** [XX:XX-XX:XX]
 **Duration:** ~[XX] seconds
 **Category:** [Story / Insight / Market / Business / Hot Take]
 **Score:** [X/20] (Standalone: X, Hook: X, Relevance: X, Quotability: X)
 
-> "[Exact quote from transcript — the hook sentence]"
+> "[Exact quote from transcript: the hook sentence]"
 
 **Payoff:** [What the viewer walks away with. One sentence, second person.]
 **Needs:** [nothing | what the viewer must already know]
@@ -236,9 +236,9 @@ For every moment included:
 
 Return one of (per `CLAUDE.md` Completion Protocol):
 
-- **DONE** — Target moment count hit, all quality gates pass, no duplicates.
-- **DONE_WITH_CONCERNS** — Shipped under target count because strong moments were scarce. List which moments were borderline and why.
-- **BLOCKED** — Transcript quality too low or too short. Cite evidence (word count, structure).
-- **NEEDS_INPUT** — Missing episode number, guest name, or company. Ask once, specifically.
+- **DONE**: Target moment count hit, all quality gates pass, no duplicates.
+- **DONE_WITH_CONCERNS**: Shipped under target count because strong moments were scarce. List which moments were borderline and why.
+- **BLOCKED**: Transcript quality too low or too short. Cite evidence (word count, structure).
+- **NEEDS_INPUT**: Missing episode number, guest name, or company. Ask once, specifically.
 
-**Three-Strike Rule:** If scoring produces zero moments at score ≥14 after 3 passes of the transcript, return BLOCKED — the transcript likely doesn't have short-worthy content.
+**Three-Strike Rule:** If scoring produces zero moments at score ≥14 after 3 passes of the transcript, return BLOCKED. The transcript likely doesn't have short-worthy content.

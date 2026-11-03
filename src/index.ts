@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * podcli — MCP Server
+ * podcli: MCP Server
  *
- * Entry point — starts the MCP server over stdio transport.
+ * Entry point: starts the MCP server over stdio transport.
  * Connect this to Claude Desktop, Claude Code, or any MCP client.
  */
 

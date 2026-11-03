@@ -5,6 +5,7 @@
  * drifted: the Python one lacked --js-runtimes. Whatever is added here reaches
  * every download instead of the one that happened to be edited.
  */
+import { z } from "zod";
 
 /** yt-dlp's SUPPORTED_BROWSERS, per yt_dlp/cookies.py. */
 export const COOKIE_BROWSERS = [
@@ -21,8 +22,10 @@ export const COOKIE_BROWSERS = [
 
 export type CookieBrowser = (typeof COOKIE_BROWSERS)[number];
 
+const cookieBrowserSchema = z.enum(COOKIE_BROWSERS);
+
 export function isCookieBrowser(value: unknown): value is CookieBrowser {
-  return typeof value === "string" && (COOKIE_BROWSERS as readonly string[]).includes(value);
+  return cookieBrowserSchema.safeParse(value).success;
 }
 
 // A bare z.string() lets a value like "--config-locations=/tmp/evil.conf" through
@@ -30,9 +33,13 @@ export function isCookieBrowser(value: unknown): value is CookieBrowser {
 // positional argument, one that can point at a config carrying --exec. Only
 // http(s) URLs are legitimate inputs here.
 export function isHttpUrl(value: unknown): value is string {
-  if (typeof value !== "string") return false;
+  const text = z.string().safeParse(value);
+
+  if (!text.success) return false;
+
   try {
-    const parsed = new URL(value);
+    const parsed = new URL(text.data);
+
     return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
@@ -72,7 +79,9 @@ export function buildYtDlpArgs(opts: YtDlpOptions): string[] {
   args.push("--merge-output-format", "mp4");
 
   if (opts.ffmpegLocation) args.push("--ffmpeg-location", opts.ffmpegLocation);
+
   if (opts.cookiesFromBrowser) args.push("--cookies-from-browser", opts.cookiesFromBrowser);
+
   // Free-text rather than an enum: YouTube rotates which clients work every few
   // months, and an enum guarantees shipping a stale list.
   if (opts.extractorArgs) args.push("--extractor-args", opts.extractorArgs);
@@ -84,10 +93,12 @@ export function buildYtDlpArgs(opts: YtDlpOptions): string[] {
   if (opts.progressTemplate) {
     args.push("--newline", "--progress", "--progress-template", opts.progressTemplate);
   }
+
   args.push("--print", "after_move:podcli-filepath:%(filepath)s");
   // "--" forces everything after it to be read positionally, so a url that
   // starts with a dash can never be parsed as another flag.
   args.push("--", opts.url);
+
   return args;
 }
 
@@ -106,20 +117,25 @@ const CHANNEL_TABS = ["videos", "shorts", "streams", "playlists", "live", "podca
 // (a tab, a playlist, a single video) pass through unchanged.
 export function normalizeChannelUrl(url: string): string {
   let parsed: URL;
+
   try {
     parsed = new URL(url);
   } catch {
     return url;
   }
+
   const segments = parsed.pathname.split("/").filter(Boolean);
   const isChannelRoot = segments.length === 1 && segments[0].startsWith("@");
   const isChannelIdRoot = segments.length === 2 && ["channel", "c", "user"].includes(segments[0]);
+
   if (!isChannelRoot && !isChannelIdRoot) return url;
 
   const lastSegment = segments.at(-1) ?? "";
+
   if (CHANNEL_TABS.includes(lastSegment)) return url;
 
   parsed.pathname = `${parsed.pathname.replace(/\/+$/, "")}/videos`;
+
   return parsed.toString();
 }
 
@@ -131,10 +147,13 @@ export function buildChannelListArgs(opts: YtDlpListOptions): string[] {
   const args = ["-m", "yt_dlp"];
   args.push("--ignore-config", "--no-config-locations", "--no-plugin-dirs");
   args.push("--flat-playlist", "--no-warnings");
+
   if (opts.limit) args.push("--playlist-end", String(opts.limit));
+
   if (opts.cookiesFromBrowser) args.push("--cookies-from-browser", opts.cookiesFromBrowser);
   args.push("--print", "%(.{id,title,duration,upload_date,url})j");
   args.push("--", opts.channelUrl);
+
   return args;
 }
 
@@ -154,8 +173,10 @@ export function buildVideoInfoArgs(opts: YtDlpVideoInfoOptions): string[] {
   // dump the first entry's info instead of erroring, silently mining the
   // wrong video's captions.
   args.push("--no-playlist");
+
   if (opts.cookiesFromBrowser) args.push("--cookies-from-browser", opts.cookiesFromBrowser);
   args.push("--dump-json", "--", opts.videoUrl);
+
   return args;
 }
 
@@ -165,13 +186,18 @@ export function extractYouTubeVideoId(url: string): string | null {
   try {
     const parsed = new URL(url);
     const vParam = parsed.searchParams.get("v");
+
     if (vParam) return vParam;
     const pathMatch = parsed.pathname.match(/\/(?:shorts|embed|live)\/([^/?]+)/);
+
     if (pathMatch) return pathMatch[1];
+
     if (parsed.hostname === "youtu.be") {
       const id = parsed.pathname.slice(1).split("/")[0];
+
       return id || null;
     }
+
     return null;
   } catch {
     return null;
@@ -181,6 +207,7 @@ export function extractYouTubeVideoId(url: string): string | null {
 /** Turns a yt-dlp failure into one line naming what to do about it. */
 export function ytDlpHint(stderr: string): string | null {
   const s = stderr.toLowerCase();
+
   if (
     s.includes("sign in to confirm") ||
     s.includes("confirm you're not a bot") ||
@@ -188,14 +215,18 @@ export function ytDlpHint(stderr: string): string | null {
   ) {
     return "The site asked for a signed-in session. Set PODCLI_YTDLP_BROWSER to the browser you are logged into (chrome, firefox, safari, edge, brave, chromium, opera, vivaldi, whale).";
   }
+
   if (s.includes("members-only") || s.includes("members only")) {
     return "This is members-only. Set PODCLI_YTDLP_BROWSER to a browser signed in to an account with access.";
   }
+
   if (s.includes("private video")) {
     return "This video is private. If it is yours, set PODCLI_YTDLP_BROWSER to a browser signed in to that account.";
   }
+
   if (s.includes("video unavailable") || s.includes("not available in your")) {
     return "The video is unavailable from here, which is usually a region or age restriction. A signed-in browser profile via PODCLI_YTDLP_BROWSER often clears it.";
   }
+
   return null;
 }

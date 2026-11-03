@@ -6,7 +6,7 @@ import { labelStyle } from "./lib";
  * Workspace-wide performance and learned house style.
  *
  * Renders nothing at all when signed out. A free user sees the Analytics page
- * they have always seen — no locked panel, no upsell banner, no greyed-out
+ * they have always seen: no locked panel, no upsell banner, no greyed-out
  * button. This section exists because the workspace data exists.
  */
 
@@ -47,7 +47,7 @@ export default function WorkspaceInsights() {
   const hasModel = (insights.guidance?.length ?? 0) > 0;
   const hasStyle = (preferences?.observations?.length ?? 0) > 0;
 
-  // Signed in but nothing learned yet. Say why, and say what changes it —
+  // Signed in but nothing learned yet. Say why, and say what changes it:
   // an empty panel with no explanation reads as broken.
   if (!hasModel && !hasStyle) {
     return (

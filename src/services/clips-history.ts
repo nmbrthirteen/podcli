@@ -1,14 +1,74 @@
 import { readFile, writeFile, mkdir, rm } from "fs/promises";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { basename, join } from "path";
 import { v4 as uuidv4 } from "uuid";
+import { z } from "zod";
 import { paths } from "../config/paths.js";
 import { writeFileAtomic } from "../utils/atomic-file.js";
+import type * as cloudApi from "./podcli-cloud.js";
 import { sliceTranscript, sliceWords, findGroundingText } from "../utils/transcript.js";
 import { isDemoMode, demoClips } from "../ui/demo-fixtures.js";
 import type { BatchClipsResult, ClipHistoryEntry, ClipHook, Format, WordTimestamp } from "../models/index.js";
 
+/**
+ * Cloud clip sync uploads rendered videos and transcript slices, so it stays
+ * off until PODCLI_CLOUD_SYNC is turned on in the environment or the settings
+ * .env. The TypeScript side does not load that file itself, so it is read here.
+ */
+export function cloudSyncEnabled(): boolean {
+  const on = (v: string | undefined) => ["1", "true", "yes", "on"].includes((v ?? "").trim().toLowerCase());
+
+  if (process.env.PODCLI_CLOUD_SYNC !== undefined) return on(process.env.PODCLI_CLOUD_SYNC);
+
+  try {
+    const match = readFileSync(paths.envFile, "utf-8").match(/^PODCLI_CLOUD_SYNC=(.*)$/m);
+
+    return on(match?.[1]);
+  } catch {
+    return false;
+  }
+}
+
 type BatchResultRow = BatchClipsResult["results"][number];
+
+const wordsSchema = z.array(
+  z.object({
+    word: z.string(),
+    start: z.number(),
+    end: z.number(),
+    confidence: z.number().default(0),
+    speaker: z.string().nullish(),
+  }),
+);
+
+const timeRangeSchema = z.object({ start: z.number(), end: z.number() });
+
+/** What a render needs to be repeated faithfully. Unknown fields are kept on rewrite. */
+const clipRecipeSchema = z.looseObject({
+  caption_style: z.string().optional(),
+  crop_strategy: z.string().optional(),
+  format: z.string().optional(),
+  logo_path: z.string().nullish(),
+  outro_path: z.string().nullish(),
+  intro_path: z.string().nullish(),
+  clean_fillers: z.boolean().optional(),
+  transcript_words: wordsSchema.optional(),
+  keep_segments: z.array(timeRangeSchema).optional(),
+  hook: z
+    .object({ start: z.number(), end: z.number(), mode: z.enum(["repeat", "move"]) })
+    .optional(),
+});
+
+export type ClipRecipe = z.infer<typeof clipRecipeSchema>;
+
+/** Reframe editor state: source-absolute keyframes plus the trim window. */
+export const reframeStateSchema = z.looseObject({
+  keyframes: z.array(z.object({ tAbs: z.number(), x_pct: z.number() })).optional(),
+  inSec: z.number().optional(),
+  outSec: z.number().optional(),
+});
+
+export type ReframeState = z.infer<typeof reframeStateSchema>;
 
 interface BatchRecordContext {
   sourceVideo: string;
@@ -42,7 +102,19 @@ export interface BatchRecipeContext {
   clipSpecs?: BatchClipSpec[];
 }
 
+/** The workspace calls clip sync makes. Tests pass a stand-in instead of the hosted API. */
+export type HistoryCloud = Pick<
+  typeof cloudApi,
+  "signedIn" | "sourceHash" | "registerClip" | "uploadClipVideo" | "logClipEvent"
+>;
+
 export class ClipsHistory {
+  constructor(private readonly cloudClient?: HistoryCloud) {}
+
+  private async loadCloud(): Promise<HistoryCloud> {
+    return this.cloudClient ?? (await import("./podcli-cloud.js"));
+  }
+
   private historyPath = paths.clipsHistory;
   // Serializes this process's own read-modify-write cycles so concurrent HTTP
   // requests can't lose each other's edits. Cross-process safety (vs the Python
@@ -58,9 +130,12 @@ export class ClipsHistory {
 
   async load(): Promise<ClipHistoryEntry[]> {
     if (isDemoMode()) return demoClips();
+
     try {
       if (!existsSync(this.historyPath)) return [];
       const raw = await readFile(this.historyPath, "utf-8");
+
+      // SAFETY: clips.json is written only by save(), which serializes ClipHistoryEntry[].
       return JSON.parse(raw) as ClipHistoryEntry[];
     } catch {
       return [];
@@ -80,9 +155,12 @@ export class ClipsHistory {
       const entries = await this.load();
       const result = await fn(entries);
       await this.save(entries);
+
       return result;
     });
+
     this.writeChain = run.then(() => undefined, () => undefined);
+
     return run;
   }
 
@@ -92,34 +170,42 @@ export class ClipsHistory {
       id: uuidv4(),
       created_at: new Date().toISOString(),
     };
+
     await this.mutate((entries) => {
       entries.push(full);
     });
     void this.syncToCloud(full);
+
     return full;
   }
 
   /**
-   * Mirror a rendered clip to the workspace, for signed-in users.
+   * Mirror a rendered clip to the workspace, for signed-in users who turned
+   * on PODCLI_CLOUD_SYNC.
    *
    * Deliberately not awaited and unable to throw: a clip that rendered
    * successfully must be recorded locally whether or not a server was reachable.
    * The local history file remains the source of truth; this is a copy.
    *
-   * Clips that fail to sync are left marked so a later sweep can backfill them —
+   * Clips that fail to sync are left marked so a later sweep can backfill them,
    * the performance model wants the whole history, not the part that happened to
    * have a working network.
    */
   private async syncToCloud(entry: ClipHistoryEntry): Promise<void> {
     // record() starts this in the background, so `podcli sync` can reach the
     // same entry while it is still in flight and register the clip twice.
+    if (!cloudSyncEnabled()) return;
+
     if (this.syncing.has(entry.id)) return;
     this.syncing.add(entry.id);
+
     try {
-      const cloud = await import("./podcli-cloud.js");
+      const cloud = await this.loadCloud();
+
       if (!(await cloud.signedIn())) return;
 
       const source = entry.source_video;
+
       if (!source) return;
 
       const clipId = entry.cloud_id ?? (await cloud.registerClip({
@@ -134,6 +220,7 @@ export class ClipsHistory {
         aspectRatio: entry.format,
         transcriptSlice: entry.transcript_slice,
       }))?.id;
+
       if (!clipId) return;
 
       await this.update(entry.id, { cloud_id: clipId });
@@ -149,6 +236,7 @@ export class ClipsHistory {
 
       if (uploadable) {
         hasVideo = await cloud.uploadClipVideo(clipId, entry.output_path);
+
         if (hasVideo) await this.update(entry.id, { cloud_video_uploaded: true });
       }
 
@@ -166,7 +254,7 @@ export class ClipsHistory {
   }
 
   // Persist every successful row of a batch render. Single source of truth for
-  // turning backend batch results into history entries — callers used to inline
+  // turning backend batch results into history entries. Callers used to inline
   // this loop, drifting on defaults and on which fields got recorded.
   async recordBatchResults(
     results: BatchResultRow[] | undefined,
@@ -174,6 +262,7 @@ export class ClipsHistory {
   ): Promise<ClipHistoryEntry[]> {
     if (!results) return [];
     const recorded: ClipHistoryEntry[] = [];
+
     for (const r of results) {
       if (r.status !== "success" || !r.output_path) continue;
       const start = r.start_second || 0;
@@ -196,6 +285,7 @@ export class ClipsHistory {
         }),
       );
     }
+
     return recorded;
   }
 
@@ -206,12 +296,15 @@ export class ClipsHistory {
   ): Promise<void> {
     if (!rows?.length || !recorded.length) return;
     let recordedIdx = 0;
+
     for (const row of rows) {
       if (row.status !== "success" || !row.output_path) continue;
       const rec = recorded[recordedIdx++];
+
       if (!rec) continue;
-      const spec =
-        typeof row.clip_index === "number" ? ctx.clipSpecs?.[row.clip_index] : undefined;
+
+      const spec = row.clip_index !== undefined ? ctx.clipSpecs?.[row.clip_index] : undefined;
+
       await this.persistClipRecipe(rec, {
         transcriptWords: ctx.transcriptWords,
         logoPath: ctx.logoPath,
@@ -250,6 +343,7 @@ export class ClipsHistory {
       ...(ctx.keepSegments?.length && { keep_segments: ctx.keepSegments }),
       ...(ctx.hook && { hook: ctx.hook }),
     });
+
     if (ctx.keepSegments?.length) {
       await this.update(rec.id, { keep_segments: ctx.keepSegments });
     }
@@ -273,11 +367,17 @@ export class ClipsHistory {
     return (
       entries.find((e) => {
         if (basename(e.source_video) !== srcName) return false;
+
         if (e.caption_style !== captionStyle) return false;
+
         if (e.crop_strategy !== cropStrategy) return false;
+
         if ((e.format || "vertical") !== format) return false;
+
         if (Math.abs(e.start_second - startSecond) > 2) return false;
+
         if (Math.abs(e.end_second - endSecond) > 2) return false;
+
         // Check output still exists
         return existsSync(e.output_path);
       }) || null
@@ -290,23 +390,28 @@ export class ClipsHistory {
   async minedYouTubeVideoIds(): Promise<Set<string>> {
     const entries = await this.load();
     const ids = new Set<string>();
+
     for (const e of entries) {
       const m = basename(e.source_video || "").match(/\[([A-Za-z0-9_-]{6,})\]\.[^.]+$/);
+
       if (m) ids.add(m[1]);
     }
+
     return ids;
   }
 
   async list(limit = 50): Promise<ClipHistoryEntry[]> {
     const entries = await this.load();
+
     return entries.slice(-limit).reverse();
   }
 
-  // Exact match only — REST routes feed req.params.id straight in, so a loose
+  // Exact match only: REST routes feed req.params.id straight in, so a loose
   // prefix could target the wrong clip (and an empty prefix the first one).
   async findById(id: string): Promise<ClipHistoryEntry | undefined> {
     if (!id) return undefined;
     const entries = await this.load();
+
     return entries.find((e) => e.id === id);
   }
 
@@ -315,30 +420,38 @@ export class ClipsHistory {
   async resolveId(idOrPrefix: string): Promise<string | null> {
     if (!idOrPrefix) return null;
     const entries = await this.load();
+
     if (entries.some((e) => e.id === idOrPrefix)) return idOrPrefix;
+
     if (idOrPrefix.length < 4) return null;
     const matches = entries.filter((e) => e.id.startsWith(idOrPrefix));
+
     return matches.length === 1 ? matches[0].id : null;
   }
 
   async update(id: string, patch: Partial<ClipHistoryEntry>): Promise<ClipHistoryEntry | null> {
     if (!id) return null;
+
     const changed = await this.mutate((entries) => {
       const e = entries.find((x) => x.id === id);
+
       if (!e) return null;
       const before = e.title;
       Object.assign(e, patch);
+
       return { entry: e, previousTitle: before };
     });
+
     if (!changed) return null;
 
     // A human rewriting a generated title is the clearest taste signal podcli
-    // gets — it says what the model produced and what a person preferred
+    // gets: it says what the model produced and what a person preferred
     // instead. Reported only when the title actually changed, so the sync
     // bookkeeping in syncToCloud can't trigger it.
     if (patch.title !== undefined && patch.title !== changed.previousTitle) {
       void this.reportEvent(changed.entry, "title_edited", changed.previousTitle, patch.title);
     }
+
     return changed.entry;
   }
 
@@ -350,8 +463,10 @@ export class ClipsHistory {
     after?: string,
   ): Promise<void> {
     if (!entry.cloud_id) return;
+
     try {
-      const cloud = await import("./podcli-cloud.js");
+      const cloud = await this.loadCloud();
+
       if (!(await cloud.signedIn())) return;
       await cloud.logClipEvent(entry.cloud_id, kind, before, after);
     } catch {
@@ -363,12 +478,14 @@ export class ClipsHistory {
    * Push clips that never reached the workspace.
    *
    * Covers two cases that both matter: a render that happened while the network
-   * was down, and — more importantly — everything rendered *before* the user
+   * was down, and, more importantly, everything rendered *before* the user
    * subscribed. A new Pro user should start with their back catalogue behind the
    * performance model, not an empty history.
    */
   async backfillCloud(limit = 200): Promise<{ synced: number; failed: number }> {
-    const cloud = await import("./podcli-cloud.js");
+    if (!cloudSyncEnabled()) return { synced: 0, failed: 0 };
+    const cloud = await this.loadCloud();
+
     if (!(await cloud.signedIn())) return { synced: 0, failed: 0 };
 
     // A clip whose source video has been moved or deleted can never be hashed,
@@ -382,16 +499,19 @@ export class ClipsHistory {
 
     let synced = 0;
     let failed = 0;
+
     for (const entry of pending) {
       try {
         await this.syncToCloud(entry);
         const after = await this.findById(entry.id);
+
         if (after?.cloud_synced) synced++;
         else failed++;
       } catch {
         failed++;
       }
     }
+
     return { synced, failed };
   }
 
@@ -400,14 +520,20 @@ export class ClipsHistory {
   // Accepts a full id or an unambiguous prefix (MCP convenience).
   async remove(idOrPrefix: string): Promise<ClipHistoryEntry | null> {
     const id = await this.resolveId(idOrPrefix);
+
     if (!id) return null;
-    // Demo entries are read-only fixtures — never delete their (shipped) artifacts.
+
+    // Demo entries are read-only fixtures: never delete their (shipped) artifacts.
     if (isDemoMode()) return (await this.findById(id)) ?? null;
+
     const entry = await this.mutate((entries) => {
       const idx = entries.findIndex((e) => e.id === id);
+
       if (idx < 0) return null;
+
       return entries.splice(idx, 1)[0];
     });
+
     if (!entry) return null;
 
     const artifacts = [
@@ -416,16 +542,19 @@ export class ClipsHistory {
       this.reframePath(entry.id),
       entry.output_path,
     ];
+
     await Promise.all(
       artifacts.map((p) => (p ? rm(p, { force: true }) : Promise.resolve())),
     );
     await rm(join(paths.output, "thumbnails", entry.id), { recursive: true, force: true });
+
     return entry;
   }
 
   async getBySource(videoPath: string): Promise<ClipHistoryEntry[]> {
     const entries = await this.load();
     const srcName = basename(videoPath);
+
     return entries.filter((e) => basename(e.source_video) === srcName).reverse();
   }
 
@@ -435,34 +564,34 @@ export class ClipsHistory {
     return join(paths.history, "words", `${id}.json`);
   }
 
-  async saveWords(id: string, words: unknown[]): Promise<void> {
-    if (!words || words.length === 0) return;
+  async saveWords(id: string, words: WordTimestamp[]): Promise<void> {
+    if (words.length === 0) return;
     await mkdir(join(paths.history, "words"), { recursive: true });
     await writeFile(this.wordsPath(id), JSON.stringify(words), "utf-8");
   }
 
-  async loadWords(id: string): Promise<unknown[]> {
+  async loadWords(id: string): Promise<WordTimestamp[]> {
     try {
-      return JSON.parse(await readFile(this.wordsPath(id), "utf-8"));
+      return wordsSchema.parse(JSON.parse(await readFile(this.wordsPath(id), "utf-8")));
     } catch {
       return [];
     }
   }
 
   // Full render recipe (logo/outro/captions/fillers/segments/words) so a clip
-  // can be re-rendered faithfully — e.g. after a manual reframe.
+  // can be re-rendered faithfully: e.g. after a manual reframe.
   private recipePath(id: string): string {
     return join(paths.history, "recipes", `${id}.json`);
   }
 
-  async saveRecipe(id: string, recipe: Record<string, unknown>): Promise<void> {
+  async saveRecipe(id: string, recipe: ClipRecipe): Promise<void> {
     await mkdir(join(paths.history, "recipes"), { recursive: true });
     await writeFile(this.recipePath(id), JSON.stringify(recipe), "utf-8");
   }
 
-  async loadRecipe(id: string): Promise<Record<string, unknown> | null> {
+  async loadRecipe(id: string): Promise<ClipRecipe | null> {
     try {
-      return JSON.parse(await readFile(this.recipePath(id), "utf-8"));
+      return clipRecipeSchema.safeParse(JSON.parse(await readFile(this.recipePath(id), "utf-8"))).data ?? null;
     } catch {
       return null;
     }
@@ -473,14 +602,14 @@ export class ClipsHistory {
     return join(paths.history, "reframe", `${id}.json`);
   }
 
-  async saveReframe(id: string, state: Record<string, unknown>): Promise<void> {
+  async saveReframe(id: string, state: ReframeState): Promise<void> {
     await mkdir(join(paths.history, "reframe"), { recursive: true });
     await writeFile(this.reframePath(id), JSON.stringify(state), "utf-8");
   }
 
-  async loadReframe(id: string): Promise<Record<string, unknown> | null> {
+  async loadReframe(id: string): Promise<ReframeState | null> {
     try {
-      return JSON.parse(await readFile(this.reframePath(id), "utf-8"));
+      return reframeStateSchema.safeParse(JSON.parse(await readFile(this.reframePath(id), "utf-8"))).data ?? null;
     } catch {
       return null;
     }

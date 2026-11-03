@@ -50,19 +50,25 @@ const FORMAT_BOUNDS = {
   square: { min: 20, max: 45, ceiling: 60 },
   horizontal: { min: 60, max: 300, ceiling: 360 },
 };
+
 const boundsFor = (f) => FORMAT_BOUNDS[f] || FORMAT_BOUNDS.vertical;
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const fmtSaved = (s) => s < 10 ? `${Number(s || 0).toFixed(1)}s` : fmt(s);
 const isHttpUrl = (value) => /^https?:\/\//i.test(value.trim());
+
 const onKeyActivate = (fn) => (e) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); fn(e); }
 };
+
     const api = async (path, opts = {}) => {
       const res = await fetch(`/api${path}`, { headers: { 'Content-Type': 'application/json', ...opts.headers }, ...opts });
       let body = null;
+
       try { body = await res.json(); } catch { /* empty / non-JSON body */ }
+
       if (!res.ok) return { error: (body && body.error) || `HTTP ${res.status}` };
+
       return body ?? {};
     };
 
@@ -72,7 +78,9 @@ const onKeyActivate = (fn) => (e) => {
         const fd = new FormData();
         fd.append('file', file);
         xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100)); };
+
         xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)); } catch (e) { reject(e); } };
+
         xhr.onerror = () => reject(new Error('Upload failed'));
         xhr.open('POST', '/api/upload');
         xhr.send(fd);
@@ -82,12 +90,22 @@ const onKeyActivate = (fn) => (e) => {
     function useJob(jobId) {
       const [state, setState] = useState(null);
       useEffect(() => {
-        if (!jobId) { setState(null); return; }
+        if (!jobId) {
+          setState(null);
+
+          return;
+        }
+
         const es = new EventSource(`/api/job/${jobId}/stream`);
-        es.onmessage = e => { const d = JSON.parse(e.data); setState(d); if (d.status === 'done' || d.status === 'error') es.close(); };
+        es.onmessage = e => { const d = JSON.parse(e.data); setState(d);
+
+ if (d.status === 'done' || d.status === 'error') es.close(); };
+
         es.onerror = () => es.close();
+
         return () => es.close();
       }, [jobId]);
+
       return state;
     }
 
@@ -97,9 +115,11 @@ const onKeyActivate = (fn) => (e) => {
       const [connected, setConnected] = useState(false);
       useEffect(() => {
         const es = new EventSource('/api/events');
+
         const handle = (type) => (e) => {
           try { setLastEvent({ type, data: JSON.parse(e.data), ts: Date.now() }); } catch { }
         };
+
         es.addEventListener('state', (e) => { setConnected(true); handle('state')(e); });
         es.addEventListener('state-sync', handle('state-sync'));
         es.addEventListener('export-started', handle('export-started'));
@@ -107,8 +127,10 @@ const onKeyActivate = (fn) => (e) => {
         es.addEventListener('job-complete', handle('job-complete'));
         es.addEventListener('job-error', handle('job-error'));
         es.onerror = () => { };
+
         return () => es.close();
       }, []);
+
       return { lastEvent, connected };
     }
 
@@ -120,13 +142,16 @@ const onKeyActivate = (fn) => (e) => {
     const PROD_TO_PCT = (margin) => ((margin / 1920) * 100).toFixed(1) + '%';
     const CAPTION_BOTTOMS = { upper: PROD_TO_PCT(760), center: PROD_TO_PCT(480), lower: PROD_TO_PCT(220) };
     const captionBottom = (cfg, position) => CAPTION_BOTTOMS[position] || cfg.bottom;
+
     const logoPlacement = (position) => {
       const vertical = position.startsWith('bottom-') ? { bottom: '7%', top: 'auto' } : { top: '7%', bottom: 'auto' };
+
       const horizontal = position.endsWith('-right')
         ? { right: '3%', left: 'auto', transform: 'none' }
         : position.endsWith('-center')
           ? { left: '50%', right: 'auto', transform: 'translateX(-50%)' }
           : { left: '3%', right: 'auto', transform: 'none' };
+
       return { ...vertical, ...horizontal };
     };
 
@@ -141,6 +166,7 @@ const onKeyActivate = (fn) => (e) => {
 
     function LogoPositionPicker({ value, onChange, disabled }) {
       const activeLabel = LOGO_POSITIONS.find(([position]) => position === value)?.[1] || 'Top left';
+
       return (
         <div className="logo-position-control">
           <div className="logo-position-picker" role="radiogroup" aria-label="Logo position">
@@ -198,11 +224,12 @@ const onKeyActivate = (fn) => (e) => {
 
     function splitBrandedLines(chunk) {
       if (chunk.length <= 2) return [chunk, []];
+
       return [chunk.slice(0, 2), chunk.slice(2)];
     }
 
 
-    function TikTokWireframe({ activeClip, captionStyle }) {
+    function TikTokWireframe() {
       const Heart = () => <HeartGlyph size={28} fill="#fff" strokeWidth={0} />;
       const Comment = () => <MessageCircle size={28} fill="#fff" strokeWidth={0} />;
       const Bookmark = () => <BookmarkGlyph size={26} fill="#fff" strokeWidth={0} />;
@@ -214,16 +241,21 @@ const onKeyActivate = (fn) => (e) => {
       const NavFriends = () => <UsersGlyph className="tt-nav-icon" fill="#fff" color="#fff" strokeWidth={1.5} />;
       const NavInbox = () => <Inbox className="tt-nav-icon" color="#fff" strokeWidth={2.2} />;
       const NavProfile = () => <UserGlyph className="tt-nav-icon" fill="#fff" color="#fff" strokeWidth={1.5} />;
+
       const fmtCount = (n) => {
         if (n >= 100000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+
         if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+
         return String(n);
       };
+
       const likes = fmtCount(999000);
       const comments = fmtCount(2463);
       const saves = fmtCount(60500);
       const shares = fmtCount(2230);
       const caption = activeClip ? activeClip.title : 'Description #shorts #podcast';
+
       return (
         <div className="tt-overlay">
           <div className="tt-top">
@@ -315,6 +347,7 @@ const onKeyActivate = (fn) => (e) => {
             </span>
           );
         }
+
         return (
           <span key={`${w}-${i}`} style={{
             color: isActive ? cfg.activeColor : cfg.color,
@@ -329,6 +362,7 @@ const onKeyActivate = (fn) => (e) => {
       if (cfg.splitLines && !singleLine) {
         const [line1, line2] = splitBrandedLines(chunk);
         const startIdx2 = line1.length;
+
         return (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
             <div style={{ whiteSpace: 'nowrap' }}>
@@ -373,17 +407,21 @@ const onKeyActivate = (fn) => (e) => {
           }}>{inner}</div>
         );
       }
+
       return <div style={{ whiteSpace: singleLine ? 'nowrap' : 'normal' }}>{inner}</div>;
     }
 
     function useLiveCaptionPreview({ videoUrl, videoRef, captionStyle, activeClip, transcriptWords }) {
       const cfg = STYLE_CONFIGS[captionStyle] || STYLE_CONFIGS.branded;
+
       const sourcePool = useMemo(() => {
         const words = selectPreviewWords(transcriptWords, activeClip);
+
         return words.length >= 2 ? words : null;
       }, [activeClip, transcriptWords]);
 
       const usingSample = !sourcePool;
+
       const poolWords = useMemo(
         () => sourcePool || cfg.sample.map(text => ({ text, start: 0, end: 0 })),
         [sourcePool, cfg.sample]
@@ -402,25 +440,35 @@ const onKeyActivate = (fn) => (e) => {
       useEffect(() => {
         setCursor(0);
         setClock(0);
+
         if (poolWords.length <= 1) return;
+
         if (timed) {
           let raf;
+
           const step = () => {
             const v = videoRef?.current;
+
             if (v) setClock(v.currentTime);
             raf = requestAnimationFrame(step);
           };
+
           raf = requestAnimationFrame(step);
+
           return () => cancelAnimationFrame(raf);
         }
+
         const tick = captionStyle === 'karaoke' ? 320 : 420;
         const iv = setInterval(() => setCursor(i => (i + 1) % poolWords.length), tick);
+
         return () => clearInterval(iv);
       }, [captionStyle, poolWords, timed]);
 
       let activeChunk = null, activeWordInChunk = 0;
+
       if (timed) {
         activeChunk = activePreviewChunk(chunks, clock) || null;
+
         if (activeChunk) {
           for (let k = 0; k < activeChunk.words.length; k++) {
             if (activeChunk.words[k].start <= clock) activeWordInChunk = k;
@@ -429,12 +477,14 @@ const onKeyActivate = (fn) => (e) => {
         }
       } else {
         let consumed = 0;
+
         for (const chunk of chunks) {
           if (cursor < consumed + chunk.words.length) {
             activeChunk = chunk;
             activeWordInChunk = cursor - consumed;
             break;
           }
+
           consumed += chunk.words.length;
         }
       }
@@ -446,6 +496,7 @@ const onKeyActivate = (fn) => (e) => {
       const { cfg, usingSample, activeChunk, activeWordInChunk } = useLiveCaptionPreview({
         videoUrl, videoRef, captionStyle, activeClip, transcriptWords,
       });
+
       const [logoBroken, setLogoBroken] = useState(false);
       useEffect(() => { setLogoBroken(false); }, [logoPreviewUrl]);
 
@@ -507,7 +558,7 @@ const onKeyActivate = (fn) => (e) => {
             </div>
           )}
           {videoUrl && showTikTokFrame && (
-            <TikTokWireframe activeClip={activeClip} captionStyle={captionStyle} />
+            <TikTokWireframe />
           )}
         </div>
         <div className="preview-toggle-row">
@@ -524,6 +575,7 @@ const onKeyActivate = (fn) => (e) => {
       const { cfg, usingSample, activeChunk, activeWordInChunk } = useLiveCaptionPreview({
         videoUrl, videoRef, captionStyle, activeClip: null, transcriptWords,
       });
+
       const [logoBroken, setLogoBroken] = useState(false);
       const [playing, setPlaying] = useState(false);
       const [currentTime, setCurrentTime] = useState(0);
@@ -533,10 +585,13 @@ const onKeyActivate = (fn) => (e) => {
 
       const togglePlay = () => {
         const video = videoRef?.current;
+
         if (!video) return;
+
         if (video.paused) video.play().catch(() => {});
         else video.pause();
       };
+
       const progress = duration > 0 ? Math.max(0, Math.min(100, (currentTime / duration) * 100)) : 0;
 
       return (
@@ -614,6 +669,7 @@ const onKeyActivate = (fn) => (e) => {
       const cfg = STYLE_CONFIGS[captionStyle] || STYLE_CONFIGS.branded;
       // Sample "color" comes from the active-word style of the caption preset.
       const swatch = (cfg.activeStyle && (cfg.activeStyle.color || cfg.activeStyle.background)) || '#ffffff';
+
       const rows = [
         ['Caption style', captionStyle],
         ['Crop', cropStrategy],
@@ -623,9 +679,13 @@ const onKeyActivate = (fn) => (e) => {
         ['Quality', quality || 'standard'],
         ['Clean fillers', cleanFillers ? 'on' : 'off'],
       ];
+
       if (logoPath) rows.push(['Logo', `${logoPath.split('/').pop()} · ${logoPosition}`]);
+
       if (outroPath) rows.push(['Outro', outroPath.split('/').pop()]);
+
       if (activePreset) rows.push(['Preset', activePreset]);
+
       return (
         <div className="spec-recap fade-in">
           {rows.map(([k, v]) => (
@@ -725,10 +785,13 @@ const onKeyActivate = (fn) => (e) => {
       const [logoPath, setLogoPath] = useState('');
       const [outroPath, setOutroPath] = useState('');
       const [introPath, setIntroPath] = useState('');
+
       const logoPreviewUrl = useMemo(() => {
         const name = resolveAssetName(assets, logoPath, 'logo');
+
         return name ? assetSrc(name) : '';
       }, [assets, logoPath]);
+
       const [stateHydrated, setStateHydrated] = useState(false);
       const hydrationTargetRef = useRef(null);
       const videoFileRef = useRef();
@@ -740,10 +803,12 @@ const onKeyActivate = (fn) => (e) => {
       const [transcript, setTranscript] = useState(null);
       const [transcriptOpen, setTranscriptOpen] = useState(true);
       const [transcriptFormat, setTranscriptFormat] = useState('readable');
+
       const formattedTranscript = useMemo(
         () => formatTranscriptText(transcript, transcriptFormat),
         [transcript, transcriptFormat],
       );
+
       const [suggestions, setSuggestions] = useState([]);
       const [deselected, setDeselected] = useState(new Set());
       const [batchJobId, setBatchJobId] = useState(null);
@@ -823,12 +888,16 @@ const onKeyActivate = (fn) => (e) => {
       const exportMenuRef = useRef(null);
       useEffect(() => {
         if (!exportMenuOpen) return;
+
         const onDown = (e) => {
           if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) setExportMenuOpen(false);
         };
+
         const onKey = (e) => { if (e.key === 'Escape') setExportMenuOpen(false); };
+
         document.addEventListener('mousedown', onDown);
         document.addEventListener('keydown', onKey);
+
         return () => {
           document.removeEventListener('mousedown', onDown);
           document.removeEventListener('keydown', onKey);
@@ -847,32 +916,49 @@ const onKeyActivate = (fn) => (e) => {
       useEffect(() => {
         api('/encoder-info').then(d => { if (d.best) setEncoderInfo(d); }).catch(() => { });
         api('/speaker-status').then(d => setSpeakerStatus(d)).catch(() => { });
-        api('/corrections').then(d => { if (d && typeof d === 'object') setCorrections(d); }).catch(() => { });
+        api('/corrections').then(d => { if (d instanceof Object) setCorrections(d); }).catch(() => { });
       }, []);
 
       // Fetch presets on mount
       const fetchPresets = () => { api('/presets').then(d => { if (d.presets) setPresets(d.presets); }).catch(() => {}); };
+
       useEffect(fetchPresets, []);
 
       const loadPreset = async (name) => {
-        if (!name) { setActivePreset(''); return; }
+        if (!name) {
+          setActivePreset('');
+
+          return;
+        }
+
         try {
           const response = await api('/presets', { method: 'POST', body: JSON.stringify({ action: 'get', name }) });
           const d = response.config || response;
+
           if (d.caption_style) setCaptionStyle(d.caption_style);
+
           if (d.caption_position) setCaptionPosition(d.caption_position);
+
           if (d.caption_font_scale) setCaptionFontScale(Number(d.caption_font_scale));
+
           if (d.logo_position) setLogoPosition(d.logo_position);
+
           if (d.crop_strategy) setCropStrategy(d.crop_strategy);
+
           if (d.format) setFormat(d.format);
+
           if (d.logo_path !== undefined) setLogoPath(d.logo_path || '');
+
           if (d.outro_path !== undefined) setOutroPath(d.outro_path || '');
+
           if (d.intro_path !== undefined) setIntroPath(d.intro_path || '');
+
           if (d.video_path !== undefined) {
             const nextVideoPath = d.video_path || '';
             const changedVideo = nextVideoPath.trim() !== videoPath.trim();
             setVideoPath(nextVideoPath);
             setFile(null);
+
             if (changedVideo) {
               setSilenceOriginal(null);
               setSilencePlan(null);
@@ -884,14 +970,23 @@ const onKeyActivate = (fn) => (e) => {
               autoTranscribeRef.current = '';
             }
           }
+
           if (d.clean_fillers !== undefined) setCleanFillers(d.clean_fillers);
+
           if (d.quality) setQuality(d.quality);
+
           if (d.top_clips) setTopClips(d.top_clips);
+
           if (d.min_clip_duration) setMinDuration(d.min_clip_duration);
+
           if (d.max_clip_duration) setMaxDuration(d.max_clip_duration);
+
           if (d.energy_boost !== undefined) setEnergyBoost(d.energy_boost);
+
           if (d.whisper_model) setWhisperModel(d.whisper_model);
+
           if (d.transcription_engine) setTranscriptionEngine(d.transcription_engine);
+
           if (d.time_adjust !== undefined) setTimeAdjust(d.time_adjust);
           setActivePreset(name);
         } catch {}
@@ -900,6 +995,7 @@ const onKeyActivate = (fn) => (e) => {
       const savePreset = async () => {
         if (!presetName.trim()) return;
         setPresetSaving(true);
+
         try {
           await api('/presets', { method: 'POST', body: JSON.stringify({
             action: 'save', name: presetName.trim(),
@@ -914,8 +1010,10 @@ const onKeyActivate = (fn) => (e) => {
 
       const deletePreset = async (name) => {
         if (!confirm(`Delete preset "${name}"?`)) return;
+
         try {
           await api('/presets', { method: 'POST', body: JSON.stringify({ action: 'delete', name }) });
+
           if (activePreset === name) setActivePreset('');
           fetchPresets();
         } catch {}
@@ -924,6 +1022,7 @@ const onKeyActivate = (fn) => (e) => {
       // Clip editing
       const openClipEdit = (idx) => {
         const clip = suggestions[idx];
+
         if (!clip) return;
         setEditingClip(idx);
         setEditForm({
@@ -939,18 +1038,22 @@ const onKeyActivate = (fn) => (e) => {
       // Saving drops segments, but the server restores them while the range
       // stays within half a second, so the hook is checked against the same.
       const editedClip = editingClip !== null ? suggestions[editingClip] : null;
+
       const editSegments = editedClip
         && Math.abs(editedClip.start_second - editForm.start) < 0.5
         && Math.abs(editedClip.end_second - editForm.end) < 0.5
         ? editedClip.segments : undefined;
+
       const editHookError = validateHook(editForm.hook, editForm.start, editForm.end, editSegments);
       const setEditHook = (patch) => setEditForm(f => ({ ...f, hook: patch && { ...f.hook, ...patch } }));
+
       const addEditHook = () => setEditForm(f => ({
         ...f, hook: { start: f.start, end: Math.min(f.end, f.start + 3), mode: 'repeat' },
       }));
 
       const clampEditTime = (v) => {
         const n = Number.isFinite(v) ? Math.max(0, v) : 0;
+
         return editDuration ? Math.min(n, editDuration) : n;
       };
 
@@ -971,8 +1074,10 @@ const onKeyActivate = (fn) => (e) => {
             segments: undefined,
             hook: editForm.hook || undefined,
           };
+
           return next;
         });
+
         // The score was measured over the old range, so it no longer describes this clip.
         if (reTimed) setEnergyData(prev => dropEnergy(prev, edited));
         setEditingClip(null);
@@ -980,17 +1085,21 @@ const onKeyActivate = (fn) => (e) => {
 
       const deleteClipEdit = () => {
         if (editingClip === null) return;
+
         if (!confirm(`Delete clip "${editForm.title}" from this batch?`)) return;
         const removed = suggestions[editingClip];
         setSuggestions(prev => prev.filter((_, i) => i !== editingClip));
         setDeselected(prev => {
           const next = new Set();
+
           for (const idx of prev) {
             if (idx < editingClip) next.add(idx);
             else if (idx > editingClip) next.add(idx - 1);
           }
+
           return next;
         });
+
         if (removed) setEnergyData(prev => dropEnergy(prev, removed));
         setEditingClip(null);
       };
@@ -999,10 +1108,12 @@ const onKeyActivate = (fn) => (e) => {
       const analyzeEnergy = async () => {
         setAnalyzingEnergy(true);
         const analyzed = suggestions;
+
         try {
           const segments = analyzed.map(c => ({ start: c.start_second, end: c.end_second }));
           const vp = file?.file_path || videoPath.trim();
           const d = await api('/analyze-energy', { method: 'POST', body: JSON.stringify({ video_path: vp, segments }) });
+
           // Backend returns { segment_scores: [0-10, ...], peak_times: [...] }
           if (Array.isArray(d.segment_scores)) setEnergyData(buildEnergyMap(d.segment_scores, analyzed));
         } catch {}
@@ -1014,11 +1125,19 @@ const onKeyActivate = (fn) => (e) => {
         if (!vp || transcribing || transcript) return;
         setTranscribing(true);
         setCachedTranscript(false);
+
         try {
           const fileData = await api('/select-file', { method: 'POST', body: JSON.stringify({ file_path: vp }) });
-          if (fileData.error) { setTranscribing(false); return; }
+
+          if (fileData.error) {
+            setTranscribing(false);
+
+            return;
+          }
+
           setFile(fileData);
           const engine = transcriptionEngine === 'whisper' ? undefined : transcriptionEngine;
+
           const data = await api('/transcribe', { method: 'POST', body: JSON.stringify({
             file_path: vp,
             model_size: whisperModel,
@@ -1026,11 +1145,14 @@ const onKeyActivate = (fn) => (e) => {
             assemblyai_api_key: transcriptionEngine === 'assemblyai' ? assemblyAiKey.trim() : undefined,
             enable_diarization: transcriptionEngine === 'assemblyai' || speakerStatus?.configured !== false,
           }) });
+
           if (data.error) {
             setError(data.error);
             setTranscribing(false);
+
             return;
           }
+
           if (data.cached && data.data) {
             // Instant cache hit
             setTranscript(data.data);
@@ -1047,6 +1169,7 @@ const onKeyActivate = (fn) => (e) => {
       // Watch transcribe job completion
       useEffect(() => {
         if (!transcribeStream) return;
+
         if (transcribeStream.status === 'done') {
           setTranscript(transcribeStream.result);
           setTranscribing(false);
@@ -1062,6 +1185,7 @@ const onKeyActivate = (fn) => (e) => {
       const autoTranscribeRef = useRef('');
       useEffect(() => {
         const vp = videoPath.trim();
+
         if (transcriptMode === 'whisper' && transcriptionEngine === 'whisper' && vp && !isHttpUrl(vp) && !transcript && !transcribing && vp !== autoTranscribeRef.current) {
           autoTranscribeRef.current = vp;
           autoTranscribe(vp);
@@ -1070,6 +1194,7 @@ const onKeyActivate = (fn) => (e) => {
 
       // Fetch clip history on mount and after exports
       const fetchHistory = () => { fetch('/api/history?limit=50').then(r => r.json()).then(d => { if (Array.isArray(d)) setClipHistory(d); }).catch(() => { }); };
+
       useEffect(fetchHistory, []);
       useEffect(() => { if (phase === 'done') fetchHistory(); }, [phase]);
 
@@ -1084,6 +1209,7 @@ const onKeyActivate = (fn) => (e) => {
       const prevTranscriptRef = useRef(null);
       useEffect(() => {
         if (!stateHydrated) return;
+
         const syncable = {
           videoPath,
           silenceOriginal,
@@ -1095,7 +1221,9 @@ const onKeyActivate = (fn) => (e) => {
           results,
           energyData,
         };
+
         const signature = JSON.stringify(syncable);
+
         // React may expose the readiness flag before every restored field has
         // committed. Skip that one intermediate render rather than erasing
         // server state, but release the guard either way: a signature that
@@ -1103,13 +1231,17 @@ const onKeyActivate = (fn) => (e) => {
         if (hydrationTargetRef.current) {
           const target = hydrationTargetRef.current;
           hydrationTargetRef.current = null;
+
           if (signature !== target) return;
         }
+
         const transcriptChanged = transcript !== prevTranscriptRef.current;
         const state = buildUiStateSyncPayload(syncable, file?.file_path || '', transcript, transcriptChanged);
         const key = JSON.stringify(state);
+
         if (key === prevSyncRef.current) return;
         prevSyncRef.current = key;
+
         if (transcriptChanged) prevTranscriptRef.current = transcript;
         fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }).catch(() => { });
       }, [stateHydrated, videoPath, file, silenceOriginal, silencePlan, suggestions, deselected, captionStyle, captionPosition, captionFontScale, logoPosition, cropStrategy, format, logoPath, outroPath, introPath, cleanFillers, silenceThreshold, silenceMinPause, silencePadding, phase, results, energyData, transcript]);
@@ -1118,8 +1250,10 @@ const onKeyActivate = (fn) => (e) => {
       const prevRawRef = useRef('');
       useEffect(() => {
         if (!stateHydrated) return;
+
         if (transcriptText === prevRawRef.current) return;
         prevRawRef.current = transcriptText;
+
         if (transcriptText.trim()) {
           fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _source: 'ui', rawTranscriptText: transcriptText }) }).catch(() => { });
         }
@@ -1131,12 +1265,14 @@ const onKeyActivate = (fn) => (e) => {
       );
 
       const applyClipResult = useCallback((row) => {
-        if (!row || typeof row.clip_index !== 'number') return;
+        if (!row || !Number.isInteger(row.clip_index)) return;
         setResults(prev => {
           const cur = prev[row.clip_index];
+
           if (cur && cur.status === row.status && cur.output_path === row.output_path) return prev;
           const next = [...prev];
           next[row.clip_index] = row;
+
           return next;
         });
       }, []);
@@ -1149,6 +1285,7 @@ const onKeyActivate = (fn) => (e) => {
 
         if (sseEvent.type === 'state-sync' || sseEvent.type === 'state') {
           const d = sseEvent.data;
+
           if (sseEvent.type === 'state') {
             hydrationTargetRef.current = JSON.stringify({
               videoPath: d.videoPath || '',
@@ -1176,37 +1313,64 @@ const onKeyActivate = (fn) => (e) => {
               energyData: d.energyData || {},
             });
           }
+
           if (d.suggestions) setSuggestions(d.suggestions);
+
           if (d.energyData !== undefined) setEnergyData(d.energyData || {});
+
           if (d.deselectedIndices !== undefined) setDeselected(new Set(d.deselectedIndices));
           else if (d.suggestions && !d.deselectedIndices) setDeselected(new Set());
+
           if (d.phase) setPhase(d.phase);
+
           if (sseEvent.type === 'state' && Array.isArray(d.results)) setResults(d.results);
+
           if (d.activeExportJobId !== undefined) setBatchJobId(d.activeExportJobId);
+
           if (d.videoPath !== undefined) setVideoPath(d.videoPath);
+
           if (d.silenceOriginal !== undefined) setSilenceOriginal(d.silenceOriginal);
+
           if (d.silencePlan !== undefined) setSilencePlan(d.silencePlan);
+
           if (d.transcript !== undefined) {
             setTranscript(d.transcript);
+
             if (d.videoPath) autoTranscribeRef.current = d.videoPath;
+
             if (d.transcript === null) autoTranscribeRef.current = '';
           }
+
           if (d.rawTranscriptText !== undefined && (d.transcript === null || !transcript)) setTranscriptText(d.rawTranscriptText);
+
           if (d.settings) {
             if (d.settings.captionStyle) setCaptionStyle(d.settings.captionStyle);
+
             if (d.settings.captionPosition) setCaptionPosition(d.settings.captionPosition);
+
             if (d.settings.captionFontScale) setCaptionFontScale(Number(d.settings.captionFontScale));
+
             if (d.settings.logoPosition) setLogoPosition(d.settings.logoPosition);
+
             if (d.settings.cropStrategy) setCropStrategy(d.settings.cropStrategy);
+
             if (d.settings.format) setFormat(d.settings.format);
+
             if (d.settings.logoPath !== undefined) setLogoPath(d.settings.logoPath);
+
             if (d.settings.outroPath !== undefined) setOutroPath(d.settings.outroPath);
+
             if (d.settings.introPath !== undefined) setIntroPath(d.settings.introPath);
+
             if (d.settings.cleanFillers !== undefined) setCleanFillers(d.settings.cleanFillers !== false);
+
             if (d.settings.silenceThreshold !== undefined) setSilenceThreshold(Number(d.settings.silenceThreshold));
+
             if (d.settings.silenceMinPause !== undefined) setSilenceMinPause(Number(d.settings.silenceMinPause));
+
             if (d.settings.silencePadding !== undefined) setSilencePadding(Number(d.settings.silencePadding));
           }
+
           // Flip readiness in the same React batch as the restored fields. The
           // first sync therefore contains restored values, never mount defaults.
           if (sseEvent.type === 'state') {
@@ -1239,14 +1403,14 @@ const onKeyActivate = (fn) => (e) => {
       const [activeClipIdx, setActiveClipIdx] = useState(null);
       const [previewSrc, setPreviewSrc] = useState(null); // null=source, string=rendered clip filename
       const [previewMode, setPreviewMode] = useState('clips'); // clips | youtube
-      const [settingsFlash, setSettingsFlash] = useState(null);
+      const [, setSettingsFlash] = useState(null);
       const [clipEnded, setClipEnded] = useState(false);
       const previewSessionRef = useRef(Date.now().toString(36));
 
       const activeClip = activeClipIdx !== null ? suggestions[activeClipIdx] : null;
 
       // An agent can delete a clip out from under the cursor, leaving it on a row
-      // that no longer exists — space would then deselect an index nobody owns.
+      // that no longer exists: space would then deselect an index nobody owns.
       useEffect(() => {
         setActiveClipIdx(prev => clampClipIndex(prev, suggestions.length));
       }, [suggestions.length]);
@@ -1257,6 +1421,7 @@ const onKeyActivate = (fn) => (e) => {
         : videoPath && !isHttpUrl(videoPath)
           ? `/api/stream-source?path=${encodeURIComponent(videoPath)}&preview=${previewSessionRef.current}`
           : null;
+
       const youtubePreviewTitle = (videoPath.split(/[\\/]/).pop() || 'Full episode')
         .replace(/\.[^.]+$/, '')
         .replace(/[_-]+/g, ' ')
@@ -1266,22 +1431,29 @@ const onKeyActivate = (fn) => (e) => {
       // its end boundary so the preview doesn't run into the rest of the episode
       useEffect(() => {
         setClipEnded(false);
+
         if (activeClipIdx === null || previewSrc) return;
         const v = videoRef.current;
+
         if (!activeClip || !v) return;
+
         const seek = () => {
           v.currentTime = activeClip.start_second;
           v.play().catch(() => { });
         };
+
         if (v.readyState >= 1) seek();
         else v.addEventListener('loadedmetadata', seek, { once: true });
+
         const onTime = () => {
           if (v.currentTime >= activeClip.end_second) {
             v.pause();
             setClipEnded(true);
           }
         };
+
         v.addEventListener('timeupdate', onTime);
+
         return () => {
           v.removeEventListener('loadedmetadata', seek);
           v.removeEventListener('timeupdate', onTime);
@@ -1290,6 +1462,7 @@ const onKeyActivate = (fn) => (e) => {
 
       const replayClip = () => {
         const v = videoRef.current;
+
         if (!v || !activeClip) return;
         v.currentTime = activeClip.start_second;
         setClipEnded(false);
@@ -1310,6 +1483,7 @@ const onKeyActivate = (fn) => (e) => {
       const onClipClick = (idx) => {
         setPreviewMode('clips');
         setActiveClipIdx(idx);
+
         if (previewSrc) setPreviewSrc(null);
       };
 
@@ -1348,9 +1522,12 @@ const onKeyActivate = (fn) => (e) => {
       const setUploadedVideo = useCallback(async (file) => {
         if (!file) return;
         setBrowsing(true); setError(null);
+
         try {
           const d = await uploadFile(file, () => { });
+
           if (d.error) setError(d.error);
+
           if (d.file_path) {
             setVideoPath(d.file_path);
             setFile({ file_path: d.file_path });
@@ -1375,12 +1552,25 @@ const onKeyActivate = (fn) => (e) => {
 
       const downloadVideo = async () => {
         const url = videoPath.trim();
+
         if (!url || downloadingVideo) return;
         setDownloadingVideo(true); setError(null);
+
         try {
           const d = await api('/download-video', { method: 'POST', body: JSON.stringify({ url }) });
-          if (d.error) { setError(d.error); setDownloadingVideo(false); return; }
-          if (d.job_id) { setDownloadJobId(d.job_id); return; }
+
+          if (d.error) {
+            setError(d.error); setDownloadingVideo(false);
+
+            return;
+          }
+
+          if (d.job_id) {
+            setDownloadJobId(d.job_id);
+
+            return;
+          }
+
           setError('Download failed: missing job id');
           setDownloadingVideo(false);
         } catch (e) { setError('Download failed: ' + e.message); setDownloadingVideo(false); }
@@ -1388,14 +1578,18 @@ const onKeyActivate = (fn) => (e) => {
 
       useEffect(() => {
         if (!downloadStream) return;
+
         if (downloadStream.status === 'done') {
           const d = downloadStream.result;
+
           if (!d?.file_path) {
             setError('Download finished without a video file.');
             setDownloadingVideo(false);
             setDownloadJobId(null);
+
             return;
           }
+
           setFile(d);
           setVideoPath(d.file_path);
           setSilenceOriginal(null);
@@ -1422,15 +1616,25 @@ const onKeyActivate = (fn) => (e) => {
 
       const findMoment = async () => {
         const text = momentText.trim();
+
         if (!text || findingMoment) return;
         setFindingMoment(true); setError(null); setMomentNotice(null);
+
         try {
           const d = await api('/find-moment', { method: 'POST', body: JSON.stringify({ text }) });
-          if (d.error) { setError(d.error); return; }
-          if (!d.added) {
-            setMomentNotice(d.found ? 'Those moments are already in your clips.' : "Couldn't find that moment. Try different wording or a direct quote.");
+
+          if (d.error) {
+            setError(d.error);
+
             return;
           }
+
+          if (!d.added) {
+            setMomentNotice(d.found ? 'Those moments are already in your clips.' : "Couldn't find that moment. Try different wording or a direct quote.");
+
+            return;
+          }
+
           // suggestions refresh via the SSE state-sync broadcast
           setMomentText('');
           setMomentNotice(`Added ${d.added} moment${d.added !== 1 ? 's' : ''}.`);
@@ -1459,6 +1663,7 @@ const onKeyActivate = (fn) => (e) => {
         setPhase('exporting'); setResults([]);
         const sc = suggestions.filter((_, i) => !deselected.has(i));
         const vp = videoPath.trim() || file?.file_path;
+
         const data = await api('/batch-clips', {
           method: 'POST', body: JSON.stringify({
             video_path: vp,
@@ -1467,6 +1672,7 @@ const onKeyActivate = (fn) => (e) => {
             caption_position: captionPosition, caption_font_scale: captionFontScale, logo_position: logoPosition,
           })
         });
+
         setBatchJobId(data.job_id);
       };
 
@@ -1474,6 +1680,7 @@ const onKeyActivate = (fn) => (e) => {
         setError(null);
         setFullEpisodeResult(null);
         const vp = videoPath.trim() || file?.file_path;
+
         const data = await api('/export-full-episode', {
           method: 'POST', body: JSON.stringify({
             video_path: vp,
@@ -1485,10 +1692,13 @@ const onKeyActivate = (fn) => (e) => {
             logo_path: captionStyle === 'branded' ? logoPath || undefined : undefined,
           })
         });
+
         if (data.error) {
           setError(data.error);
+
           return;
         }
+
         setFullEpisodeJobId(data.job_id);
       };
 
@@ -1497,6 +1707,7 @@ const onKeyActivate = (fn) => (e) => {
           setFullEpisodeResult(fullEpisodeStream.result || null);
           setFullEpisodeJobId(null);
         }
+
         if (fullEpisodeStream?.status === 'error') {
           setError('Full episode export failed: ' + (fullEpisodeStream.error || 'Unknown error'));
           setFullEpisodeJobId(null);
@@ -1505,9 +1716,11 @@ const onKeyActivate = (fn) => (e) => {
 
       const analyzeSilence = async () => {
         const vp = videoPath.trim() || file?.file_path;
+
         if (!vp || !transcript?.words?.length || silenceOriginal) return;
         setError(null);
         setSilencePlan(null);
+
         const data = await api('/analyze-silence', {
           method: 'POST',
           body: JSON.stringify({
@@ -1518,15 +1731,23 @@ const onKeyActivate = (fn) => (e) => {
             padding_seconds: silencePadding,
           }),
         });
-        if (data.error) { setError(data.error); return; }
+
+        if (data.error) {
+          setError(data.error);
+
+          return;
+        }
+
         setSilenceAnalyzeJobId(data.job_id);
       };
 
       const applySilenceRemoval = async () => {
         const vp = videoPath.trim() || file?.file_path;
+
         if (!vp || !transcript || !silencePlan?.keep_segments?.length || silenceOriginal) return;
         setError(null);
         pendingSilenceOriginalRef.current = { videoPath: vp, transcript };
+
         const data = await api('/render-silence-removed', {
           method: 'POST',
           body: JSON.stringify({
@@ -1535,11 +1756,14 @@ const onKeyActivate = (fn) => (e) => {
             transcript,
           }),
         });
+
         if (data.error) {
           pendingSilenceOriginalRef.current = null;
           setError(data.error);
+
           return;
         }
+
         setSilenceRenderJobId(data.job_id);
       };
 
@@ -1579,17 +1803,19 @@ const onKeyActivate = (fn) => (e) => {
         if (silenceRenderStream?.status === 'done') {
           const rendered = silenceRenderStream.result;
           const original = pendingSilenceOriginalRef.current;
+
           if (rendered?.output_path && rendered?.transcript && original) {
             setSilenceOriginal(original);
             setVideoPath(rendered.output_path);
             setFile({ file_path: rendered.output_path });
             setTranscript(rendered.transcript);
-            setSilencePlan(prev => ({ ...(prev || {}), applied: true, output_path: rendered.output_path }));
+            setSilencePlan(prev => ({ ...prev, applied: true, output_path: rendered.output_path }));
             resetClipWorkForSource();
             autoTranscribeRef.current = rendered.output_path;
           } else {
             setError('Silence removal finished but returned no usable episode. Try again.');
           }
+
           pendingSilenceOriginalRef.current = null;
           setSilenceRenderJobId(null);
         } else if (silenceRenderStream?.status === 'error') {
@@ -1601,22 +1827,27 @@ const onKeyActivate = (fn) => (e) => {
 
       useEffect(() => {
         if (!batchStream) return;
+
         const rows = Array.isArray(batchStream.clip_results)
           ? batchStream.clip_results
           : batchStream.clip_result ? [batchStream.clip_result] : [];
+
         rows.forEach(applyClipResult);
       }, [batchStream, applyClipResult]);
 
       useEffect(() => {
         if (batchStream?.status === 'done') { setPhase('done'); setResults(batchStream.result?.results || []); setBatchJobId(null); }
+
         if (batchStream?.status === 'error') { setError('Export failed: ' + batchStream.error); setPhase('review'); setBatchJobId(null); }
       }, [batchStream?.status]);
 
       const retryClipRef = useRef(null);
+
       const retryClip = async (idx) => {
         const sc = suggestions.filter((_, i) => !deselected.has(i));
         const c = sc[idx]; retryClipRef.current = c; setRetryIdx(idx); setRetryJobId(null);
         const vp = file?.file_path || videoPath.trim();
+
         const data = await api('/create-clip', {
           method: 'POST', body: JSON.stringify({
             video_path: vp, start_second: c.start_second, end_second: c.end_second,
@@ -1626,29 +1857,41 @@ const onKeyActivate = (fn) => (e) => {
             hook: c.hook || null,
           })
         });
+
         setRetryJobId(data.job_id);
       };
 
       useEffect(() => {
         if (retryStream?.status !== 'done') return;
         const c = retryClipRef.current;
+
         const row = {
           ...retryStream.result,
           status: 'success',
           ...(c && { source_start_second: c.start_second, source_end_second: c.end_second }),
         };
+
         setResults(prev => {
           const key = resultBoundsKey(row);
           const found = key ? prev.findIndex(r => resultBoundsKey(r) === key) : -1;
-          const at = found >= 0 ? found : typeof retryIdx === 'number' ? retryIdx : prev.length;
+          const at = found >= 0 ? found : Number.isInteger(retryIdx) ? retryIdx : prev.length;
           const next = [...prev];
           next[at] = row;
+
           return next;
         });
         setRetryIdx(null); setRetryJobId(null);
       }, [retryStream?.status]);
 
-      const toggleClip = (i) => setDeselected(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
+      const toggleClip = (i) => setDeselected(prev => {
+        const n = new Set(prev);
+
+        if (n.has(i)) n.delete(i);
+        else n.add(i);
+
+        return n;
+      });
+
       const selectedClips = suggestions.filter((_, i) => !deselected.has(i));
       const selectedCount = selectedClips.length;
       const clipRowRefs = useRef([]);
@@ -1658,22 +1901,29 @@ const onKeyActivate = (fn) => (e) => {
         const onKey = (e) => {
           if (e.metaKey || e.ctrlKey || e.altKey) return;
           const t = e.target instanceof Element ? e.target : null;
+
           if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
           // Reviewing a clip means focusing its row, so the row is the one control
           // these keys must still reach. Anything else that activates on the same
           // key would fire twice.
           const control = t?.closest('button, a, [role="button"], [role="checkbox"], [role="switch"], [role="tab"], [role="menuitem"]');
+
           if (control && !control.hasAttribute('data-clip-row')) return;
+
           if (editingClip !== null || previewFile) return;
+
           if (!suggestions.length) return;
           const key = e.key.toLowerCase();
+
           if (key === 'j' || key === 'k') {
             e.preventDefault();
             setPreviewSrc(null);
             const cur = activeClipIdx === null ? -1 : activeClipIdx;
+
             const next = key === 'j'
               ? Math.min(cur + 1, suggestions.length - 1)
               : Math.max(cur - 1, 0);
+
             setActiveClipIdx(next);
             // Without this the focus ring, the highlight, and what Enter
             // re-activates drift onto different rows.
@@ -1688,57 +1938,62 @@ const onKeyActivate = (fn) => (e) => {
             openClipEdit(activeClipIdx);
           }
         };
+
         window.addEventListener('keydown', onKey);
+
         return () => window.removeEventListener('keydown', onKey);
       }, [suggestions, phase, activeClipIdx, editingClip, previewFile]);
-      const buildLocalPrompt = () => {
-        const parts = [];
-        const hasTranscriptReady = transcript || transcriptText.trim();
-        if (transcriptMode === 'whisper' && !hasTranscriptReady) {
-          parts.push(`Transcribe the podcast at ${videoPath} using transcribe_podcast with model_size="${whisperModel}".`);
-          parts.push('Then find the 5-8 best viral-worthy moments and call suggest_clips.');
-        } else {
-          parts.push('Use get_ui_state with include_transcript=true to read the full transcript.');
-          parts.push('Find the 5-8 best viral-worthy moments: hot takes, strong opinions, funny moments, actionable advice, and emotional stories.');
-          parts.push('Then call suggest_clips with your suggestions.');
-        }
-        const settings = [];
-        if (videoPath) settings.push(`Video: ${videoPath.split(/[\\/]/).pop()}`);
-        settings.push(`Style: ${captionStyle}`);
-        settings.push(`Crop: ${cropStrategy}`);
-        if (logoPath) settings.push(`Logo: set`);
-        if (outroPath) settings.push(`Outro: set`);
-        parts.push(`Current settings: ${settings.join(', ')}`);
-        return parts.join('\n');
-      };
 
       const copyGeneratePrompt = async () => {
         if (isProcessing) return;
+
         if (sourceIsUrl) {
           setError('Download the video first, then find best moments.');
+
           return;
         }
+
         // If user has pasted a transcript but it hasn't been parsed yet, parse it first
         if (transcriptMode === 'import' && transcriptText.trim() && !transcript) {
           setError(null);
           setPhase('parsing');
           const fileData = await api('/select-file', { method: 'POST', body: JSON.stringify({ file_path: videoPath.trim() }) });
-          if (fileData.error) { setError(fileData.error); setPhase('idle'); return; }
+
+          if (fileData.error) {
+            setError(fileData.error); setPhase('idle');
+
+            return;
+          }
+
           setFile(fileData);
           const text = transcriptText.trim();
           const isJson = text.startsWith('{') || text.startsWith('[');
           let t = null;
+
           if (isJson) {
             const parsed = JSON.parse(text);
             const tr = Array.isArray(parsed) ? { words: parsed } : parsed;
             const data = await api('/import-transcript', { method: 'POST', body: JSON.stringify({ file_path: videoPath.trim(), transcript: tr }) });
-            if (data.error) { setError(data.error); setPhase('idle'); return; }
+
+            if (data.error) {
+              setError(data.error); setPhase('idle');
+
+              return;
+            }
+
             t = data.data;
           } else {
             const data = await api('/parse-transcript', { method: 'POST', body: JSON.stringify({ file_path: videoPath.trim(), raw_text: text, time_adjust: timeAdjust }) });
-            if (data.error) { setError(data.error); setPhase('idle'); return; }
+
+            if (data.error) {
+              setError(data.error); setPhase('idle');
+
+              return;
+            }
+
             t = data.data;
           }
+
           setTranscript(t);
           // Sync transcript + video to server immediately (don't wait for React useEffect)
           await fetch('/api/ui-state', {
@@ -1766,22 +2021,25 @@ const onKeyActivate = (fn) => (e) => {
         // Ask Claude directly for clip suggestions (same as CLI)
         setPhase('suggesting');
         setGenerateCopied(false);
+
         try {
           const res = await fetch('/api/claude-suggest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ top_n: topClips, min_duration: minDuration, max_duration: maxDuration }),
           });
+
           const data = await res.json();
 
           if (!res.ok) {
             setPhase('idle');
             setError(data.error || 'Suggestion failed');
+
             return;
           }
 
           if (data.clips && data.clips.length > 0) {
-            // Claude returned suggestions — populate directly
+            // Claude returned suggestions: populate directly
             const mapped = data.clips.map((c, i) => ({
               clip_id: `claude-${i}`,
               title: c.title,
@@ -1795,23 +2053,27 @@ const onKeyActivate = (fn) => (e) => {
               segments: c.segments,
               duration: c.duration ?? Math.round((c.end_second || 0) - (c.start_second || 0)),
             }));
+
             setSuggestions(mapped);
             setEnergyData({});
             setPhase('review');
           } else if (data.fallback === 'clipboard') {
-            // Claude not installed — fall back to clipboard copy
+            // Claude not installed: fall back to clipboard copy
             setPhase('idle');
             setError('Claude Code not found. Install it for automatic clip selection, or use MCP.');
             let prompt;
+
             try {
               const pRes = await fetch('/api/generate-prompt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: 'suggest' }),
               });
+
               const pData = await pRes.json();
               prompt = pData.prompt || '';
             } catch { prompt = ''; }
+
             if (prompt) {
               navigator.clipboard.writeText(prompt).then(() => {
                 setGenerateCopied(true);
@@ -1832,6 +2094,7 @@ const onKeyActivate = (fn) => (e) => {
       const silenceBusy = !!silenceAnalyzeJobId || !!silenceRenderJobId;
       const isProcessing = phase === 'parsing' || phase === 'suggesting' || phase === 'exporting' || transcribing || downloadingVideo || fullEpisodeBusy || silenceBusy;
       const sourceIsUrl = isHttpUrl(videoPath);
+
       const exportStats = phase === 'done' ? {
         total: results.length || selectedClips.length,
         ok: results.filter(r => r?.status === 'success').length,
@@ -1843,7 +2106,9 @@ const onKeyActivate = (fn) => (e) => {
       const getExportStatus = (clip, resultIdx) => {
         if (phase !== 'exporting') return null;
         const r = resultFor(clip, resultIdx);
+
         if (r) return r.status === 'error' ? 'failed' : 'exported';
+
         return batchStream ? 'pending' : null;
       };
 
@@ -1852,8 +2117,15 @@ const onKeyActivate = (fn) => (e) => {
         const f = e.dataTransfer?.files?.[0];
         setUploadedVideo(f);
       };
-      const handleTranscriptDrop = (e) => { e.preventDefault(); setTranscriptDragOver(false); const files = e.dataTransfer?.files; if (!files?.length) return; const f = files[0]; setTranscriptFileName(f.name); const reader = new FileReader(); reader.onload = (ev) => setTranscriptText(ev.target.result); reader.readAsText(f); };
-      const handleTranscriptFileSelect = (e) => { const f = e.target.files?.[0]; if (!f) return; setTranscriptFileName(f.name); const reader = new FileReader(); reader.onload = (ev) => setTranscriptText(ev.target.result); reader.readAsText(f); };
+
+      const handleTranscriptDrop = (e) => { e.preventDefault(); setTranscriptDragOver(false); const files = e.dataTransfer?.files;
+
+ if (!files?.length) return; const f = files[0]; setTranscriptFileName(f.name); const reader = new FileReader(); reader.onload = (ev) => setTranscriptText(ev.target.result); reader.readAsText(f); };
+
+      const handleTranscriptFileSelect = (e) => { const f = e.target.files?.[0];
+
+ if (!f) return; setTranscriptFileName(f.name); const reader = new FileReader(); reader.onload = (ev) => setTranscriptText(ev.target.result); reader.readAsText(f); };
+
       const preventDef = (e) => e.preventDefault();
 
       return (
@@ -2210,7 +2482,9 @@ const onKeyActivate = (fn) => (e) => {
                             // A zero or missing duration would emit NaN%, which
                             // the browser drops, leaving the bar unpositioned.
                             const span = Number(silencePlan.source_duration) || 0;
+
                             if (span <= 0) return null;
+
                             return (
                               <span key={index} className="silence-cut" style={{
                                 left: `${(range.start / span) * 100}%`,
@@ -2259,7 +2533,9 @@ const onKeyActivate = (fn) => (e) => {
                 {showPresetSave ? (
                   <div className="preset-save-row">
                     <input type="text" placeholder="Preset name" value={presetName} onChange={e => setPresetName(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') savePreset(); if (e.key === 'Escape') setShowPresetSave(false); }}
+                      onKeyDown={e => { if (e.key === 'Enter') savePreset();
+
+ if (e.key === 'Escape') setShowPresetSave(false); }}
                       autoFocus disabled={presetSaving} />
                     <button className="btn btn-primary btn-sm" onClick={savePreset} disabled={!presetName.trim() || presetSaving}>
                       {presetSaving ? <div className="spinner sm" /> : 'Save'}
@@ -2698,7 +2974,7 @@ const onKeyActivate = (fn) => (e) => {
                   {phase === 'done' && exportStats && (exportStats.failed > 0 || exportStats.ok < exportStats.total) && (
                     <div className={`set-note ${exportStats.ok === 0 ? 'err' : ''}`} style={{ marginTop: 14, background: exportStats.ok === 0 ? undefined : 'var(--amber-subtle, rgba(251,191,36,0.1))', color: exportStats.ok === 0 ? undefined : 'var(--amber, #f59e0b)', border: exportStats.ok === 0 ? undefined : '1px solid rgba(251,191,36,0.25)' }}>
                       {exportStats.ok} of {exportStats.total} clip{exportStats.total !== 1 ? 's' : ''} exported
-                      {exportStats.failed > 0 && ` — ${exportStats.failed} failed`}
+                      {exportStats.failed > 0 && `, ${exportStats.failed} failed`}
                       {exportStats.failed > 0 && results.filter(r => r?.status === 'error').slice(0, 3).map((r, i) => (
                         <span key={i} style={{ display: 'block', marginTop: 4, fontSize: 11, opacity: 0.9 }}>{r.error?.slice(0, 120)}</span>
                       ))}
@@ -2785,11 +3061,16 @@ const onKeyActivate = (fn) => (e) => {
                         const ago = ((Date.now() - date.getTime()) / 3600000);
                         const timeStr = ago < 1 ? `${Math.round(ago * 60)}m ago` : ago < 24 ? `${Math.round(ago)}h ago` : date.toLocaleDateString();
                         const fname = c.output_path?.split('/').pop() || c.title;
+
                         return (
                           <div key={c.id || i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--surface)', borderRadius: 'var(--radius-sm)', fontSize: 12, cursor: 'pointer' }}
                             role="button" tabIndex={0} aria-label={`Preview ${c.title || fname}`}
-                            onClick={() => { const f = c.output_path?.split('/').pop(); if (f) onPlayRendered(f); }}
-                            onKeyDown={onKeyActivate(() => { const f = c.output_path?.split('/').pop(); if (f) onPlayRendered(f); })}>
+                            onClick={() => { const f = c.output_path?.split('/').pop();
+
+ if (f) onPlayRendered(f); }}
+                            onKeyDown={onKeyActivate(() => { const f = c.output_path?.split('/').pop();
+
+ if (f) onPlayRendered(f); })}>
                             <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--green)', flexShrink: 0 }} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || fname}</div>
@@ -2806,7 +3087,7 @@ const onKeyActivate = (fn) => (e) => {
               )}
             </div>
 
-            {/* ═══════════ RIGHT COLUMN — PREVIEW ═══════════ */}
+            {/* ═══════════ RIGHT COLUMN: PREVIEW ═══════════ */}
             <div className="preview-col">
               <div className="preview-panel">
 
@@ -2855,7 +3136,7 @@ const onKeyActivate = (fn) => (e) => {
                   </div>
                 )}
 
-                {/* Style preview mockup — hidden when rendered clip is playing, whose
+                {/* Style preview mockup: hidden when rendered clip is playing, whose
                     captions are already burned in and whose clock is clip-relative */}
                 {previewMode === 'clips' && !previewSrc && (
                   <LivePhonePreview

@@ -1,6 +1,7 @@
 import { basename } from "path";
 import { randomUUID } from "crypto";
-import { PythonExecutor } from "../services/python-executor.js";
+import { z } from "zod";
+import { PythonExecutor, type TaskExecutor } from "../services/python-executor.js";
 import { TranscriptCache, needsDiarizationRetry } from "../services/transcript-cache.js";
 import { resolveTranscribeEngine, engineCanDiarize } from "../services/engine-resolve.js";
 import { webServerUrl } from "../config/server.js";
@@ -20,6 +21,15 @@ const processExecutor = new PythonExecutor();
 const executor = new PythonExecutor();
 const cache = new TranscriptCache();
 
+/** What handleTranscribe talks to. Tests pass stand-ins instead of the Python process and the disk cache. */
+export interface TranscribeDeps {
+  executor: TaskExecutor;
+  cache: Pick<TranscriptCache, "get" | "set" | "getPackedMarkdown" | "getFileHashForEngine">;
+  resolveEngine: typeof resolveTranscribeEngine;
+}
+
+const defaultDeps: TranscribeDeps = { executor, cache, resolveEngine: resolveTranscribeEngine };
+
 export interface TranscribeInput {
   file_path: string;
   model_size?: "tiny" | "base" | "small" | "medium" | "large";
@@ -34,15 +44,15 @@ export interface TranscribeInput {
 export const transcribeToolDef = {
   name: "transcribe_podcast",
   description:
-    "STEP 1 — Transcribe a podcast video/audio file. This is typically the first tool you call.\n\n" +
+    "STEP 1: Transcribe a podcast video/audio file. This is typically the first tool you call.\n\n" +
     "What it does: Uses Whisper AI for word-level timestamps, with speaker detection (who said what) on by " +
     "default. Speaker labels are what let a clip tell a question from an answer, so leave them on for any " +
     "interview. Pass enable_diarization=false to skip them and save time on a single-speaker recording.\n" +
-    "Returns: Lightweight metadata only — duration, language, word/segment counts, speaker summary, and " +
+    "Returns: lightweight metadata only, namely duration, language, word/segment counts, speaker summary, and " +
     "packed_ready flag. The actual transcript body is NOT returned here (it would be 500KB+ for a typical " +
     "episode). Read the content via get_ui_state(include_transcript: true) which returns a compact " +
     "phrase-grouped markdown view (~10x smaller than raw segments).\n" +
-    "Caching: Results are cached by file hash — same file won't be re-transcribed.\n" +
+    "Caching: Results are cached by file hash, so the same file won't be re-transcribed.\n" +
     "Supported formats: MP4, MOV, WebM, MKV, MP3, WAV.\n\n" +
     "After transcription: call rank_clip_candidates(video_path) for a ~20-clip shortlist " +
     "(do not read the whole transcript unless you need to rewrite a range). " +
@@ -101,7 +111,10 @@ export const transcribeToolDef = {
   },
 };
 
-export async function handleTranscribe(input: TranscribeInput): Promise<string> {
+export async function handleTranscribe(
+  input: TranscribeInput,
+  { executor, cache, resolveEngine }: TranscribeDeps = defaultDeps,
+): Promise<string> {
   const filePath = input.file_path;
   const modelSize = input.model_size ?? "base";
   const engine = input.engine;
@@ -118,16 +131,18 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   // Resolve before reading the cache: an unset engine is written under
   // whatever transcribe_file actually ran (e.g. "whispercpp" on a native
   // install), so reading with the raw unset request always misses.
-  const resolvedEngine = await resolveTranscribeEngine(executor, engine, modelSize);
+  const resolvedEngine = await resolveEngine(executor, engine, modelSize);
   const cacheKey = { engine: resolvedEngine, model: modelSize, language };
 
   // A sample is a throwaway check on a slice of the file. It must never
   // serve (or pollute) the main transcript cache, which is keyed by the
   // whole file and assumed complete.
   const cachedRaw = isSample ? null : await cache.get(filePath, cacheKey);
+
   const cached = needsDiarizationRetry(cachedRaw, enableDiarization, engineCanDiarize(resolvedEngine))
     ? null
     : cachedRaw;
+
   if (cached) {
     // Same combo cache.get(filePath, cacheKey) just matched: the packed
     // view has to be keyed identically, or a backfill here would write it
@@ -135,6 +150,7 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
     const packedKey = { engine: cached.engine ?? resolvedEngine, model: modelSize, language };
     // Backfill packed view if this cache predates auto-packing.
     let packed = await cache.getPackedMarkdown(filePath, packedKey);
+
     if (!packed) {
       try {
         const cacheHash = await cache.getFileHashForEngine(filePath, packedKey);
@@ -146,9 +162,10 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
         });
         packed = await cache.getPackedMarkdown(filePath, packedKey);
       } catch {
-        // Non-fatal — caller still gets metadata
+        // Non-fatal: caller still gets metadata
       }
     }
+
     return JSON.stringify({ cached: true, packed_ready: !!packed, ...formatResult(cached) });
   }
 
@@ -167,6 +184,7 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
   if (!result.data) {
     throw new Error("Transcription returned no data");
   }
+
   const data = result.data;
   const actualEngine = data.engine ?? resolvedEngine;
 
@@ -186,7 +204,7 @@ export async function handleTranscribe(input: TranscribeInput): Promise<string> 
 }
 
 /**
- * Returns lightweight metadata — NOT the transcript body. The full transcript
+ * Returns lightweight metadata: NOT the transcript body. The full transcript
  * is available via get_ui_state(include_transcript: true), which serves the
  * packed markdown view (~10x smaller than raw segments/words). Raw segments
  * and words arrays stay in the on-disk cache for internal Python consumers.
@@ -201,9 +219,10 @@ function formatResult(data: TranscriptResult) {
     word_count: (data.words ?? []).length,
     segment_count: (data.segments ?? []).length,
     speakers: data.speakers ?? { num_speakers: 0, speakers: {} },
-    ...(data.complete === false
-      ? { complete: false, sample_offset_seconds: data.sample_offset_seconds ?? 0 }
-      : {}),
+    ...(data.complete === false && {
+      complete: false,
+      sample_offset_seconds: data.sample_offset_seconds ?? 0,
+    }),
     next_step: "Read the transcript via get_ui_state(include_transcript: true), then suggest_clips.",
   };
 }
@@ -212,12 +231,26 @@ function formatResult(data: TranscriptResult) {
 // Async transcription via Web UI job queue
 // =============================================
 
+const jobStartSchema = z.object({
+  job_id: z.string(),
+  status: z.string(),
+  cached: z.boolean().optional(),
+});
+
+const jobPollSchema = z.object({
+  status: z.enum(["running", "done", "error"]),
+  progress: z.number(),
+  message: z.string(),
+  result: z.unknown().optional(),
+  error: z.string().optional(),
+});
+
 export const transcribeStartToolDef = {
   name: "transcribe_start",
   description:
     "Start transcription as a background job and return a job_id immediately. " +
     "Use this instead of transcribe_podcast for long files so you can narrate progress " +
-    "to the user while it runs (a 60-min episode takes 15–25 min).\n\n" +
+    "to the user while it runs (a 60-min episode takes 15-25 min).\n\n" +
     "Flow: call transcribe_start(file_path) → emit status text to user → " +
     "call job_status(job_id, wait_seconds: 30) in a loop until done → " +
     "then read the packed transcript via get_ui_state(include_transcript: true).\n\n" +
@@ -269,17 +302,19 @@ export async function handleTranscribeStart(input: TranscribeInput): Promise<str
         duration_seconds: input.duration_seconds,
       }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-    const data = (await res.json()) as { job_id: string; status: string; cached?: boolean };
 
-    // Rough estimate — Whisper base + diarization is roughly 1/3× audio duration on CPU.
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    const data = jobStartSchema.parse(await res.json());
+
+    // Rough estimate: Whisper base + diarization is roughly 1/3× audio duration on CPU.
     // We don't know duration here; ballpark from file size.
-    let estimate = "10–30 min depending on episode length";
+    let estimate = "10-30 min depending on episode length";
+
     try {
       const { statSync } = await import("fs");
       const mb = statSync(input.file_path).size / (1024 * 1024);
       const mins = Math.max(2, Math.round(mb / 50)); // very rough: ~50MB/min of processing
-      estimate = data.cached ? "instant (cached)" : `~${mins}–${mins * 2} min`;
+      estimate = data.cached ? "instant (cached)" : `~${mins}-${mins * 2} min`;
     } catch {
       // ignore
     }
@@ -290,16 +325,18 @@ export async function handleTranscribeStart(input: TranscribeInput): Promise<str
       status: data.status,
       estimate,
       next_step: data.cached
-        ? "Cached — skip polling, read via get_ui_state(include_transcript: true)."
+        ? "Cached: skip polling, read via get_ui_state(include_transcript: true)."
         : `Poll job_status("${data.job_id}", wait_seconds: 30) in a loop, emitting one terse progress line to the user between polls.`,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+
     if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
       return JSON.stringify({
         error: "Web UI not running. Start it with `npm run ui`, or fall back to transcribe_podcast for synchronous transcription.",
       });
     }
+
     throw err;
   }
 }
@@ -308,7 +345,7 @@ export const jobStatusToolDef = {
   name: "job_status",
   description:
     "Poll the status of any background job (transcription, clip render, batch export, process_episode). " +
-    "Supports long-polling: pass wait_seconds (1–60) to block until the job changes state " +
+    "Supports long-polling: pass wait_seconds (1-60) to block until the job changes state " +
     "or the timeout elapses, whichever comes first. Paces Claude's polling naturally so " +
     "the spinner doesn't spam and the user sees steady progress text.\n\n" +
     "Returns { status: 'running'|'done'|'error', progress, message, done, result? }.\n" +
@@ -336,15 +373,22 @@ export async function handleJobStatus(input: {
 }): Promise<string> {
   const wait = Math.max(0, Math.min(60, input.wait_seconds ?? 30));
   const deadline = Date.now() + wait * 1000;
-  let lastProgress = -1;
+  // Seeded from the first read, so the wait ends on a change after the caller
+  // asked, not on the first look.
+  let lastProgress: number | null = null;
 
   const local = localJobs.get(input.job_id);
+
   if (local) {
     while (true) {
       const job = localJobs.get(input.job_id);
+
       if (!job) break;
       const terminal = job.status === "done" || job.status === "error";
+
+      if (lastProgress === null) lastProgress = job.progress;
       const progressChanged = job.progress !== lastProgress;
+
       if (terminal || progressChanged || Date.now() >= deadline) {
         return JSON.stringify({
           status: job.status,
@@ -357,10 +401,11 @@ export async function handleJobStatus(input: {
             job.status === "done"
               ? "Job complete. The result field lists clip paths, durations, scores, titles, and captions."
               : job.status === "error"
-                ? "Job failed — check the error. Retry process_episode if appropriate."
-                : `Still running — call job_status("${input.job_id}", wait_seconds: 30) again.`,
+                ? "Job failed: check the error. Retry process_episode if appropriate."
+                : `Still running: call job_status("${input.job_id}", wait_seconds: 30) again.`,
         });
       }
+
       lastProgress = job.progress;
       await new Promise((r) => setTimeout(r, 2000));
     }
@@ -369,18 +414,16 @@ export async function handleJobStatus(input: {
   try {
     while (true) {
       const res = await fetch(`${webServerUrl}/api/job/${input.job_id}`);
+
       if (res.status === 404) {
         return JSON.stringify({ error: `Job ${input.job_id} not found` });
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const job = (await res.json()) as {
-        status: "running" | "done" | "error";
-        progress: number;
-        message: string;
-        result?: unknown;
-        error?: string;
-      };
 
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const job = jobPollSchema.parse(await res.json());
+
+      if (lastProgress === null) lastProgress = job.progress;
       const progressChanged = job.progress !== lastProgress;
       const terminal = job.status === "done" || job.status === "error";
 
@@ -393,10 +436,10 @@ export async function handleJobStatus(input: {
           error: job.error,
           next_step:
             job.status === "done"
-              ? "Job complete. For transcription: get_ui_state(include_transcript: true). For renders: clips are on disk — the result field lists paths."
+              ? "Job complete. For transcription: get_ui_state(include_transcript: true). For renders: clips are on disk. The result field lists paths."
               : job.status === "error"
-              ? "Job failed — check the error. Retry the original start call if appropriate."
-              : `Still running — call job_status("${input.job_id}", wait_seconds: 30) again and emit one terse progress line to the user between polls.`,
+              ? "Job failed: check the error. Retry the original start call if appropriate."
+              : `Still running: call job_status("${input.job_id}", wait_seconds: 30) again and emit one terse progress line to the user between polls.`,
         });
       }
 
@@ -405,9 +448,11 @@ export async function handleJobStatus(input: {
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+
     if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
       return JSON.stringify({ error: "Web UI not running." });
     }
+
     throw err;
   }
 }
@@ -455,6 +500,7 @@ export async function handleProcessEpisode(input: {
       fast: input.fast,
     }, (event) => {
       const job = localJobs.get(jobId);
+
       if (!job || job.status !== "running") return;
       job.progress = event.percent;
       job.message = event.message;
@@ -467,14 +513,15 @@ export async function handleProcessEpisode(input: {
         result: result.data,
       });
     })
-    .catch((err: unknown) => {
+    .catch((cause: unknown) => {
       localJobs.set(jobId, {
         status: "error",
         progress: 0,
         message: "Failed",
-        error: err instanceof Error ? err.message : String(err),
+        error: cause instanceof Error ? cause.message : String(cause),
       });
     });
+
   return JSON.stringify({
     job_id: jobId,
     status: "running",

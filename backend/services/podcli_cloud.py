@@ -2,7 +2,7 @@
 
 This module is the whole of Pro that lives in the open source app: where the
 token is kept, how it is sent, and what shape the request takes. There is no
-secret here and nothing to crack — the server decides entitlement, so a patched
+secret here and nothing to crack: the server decides entitlement, so a patched
 client gets a UI that says Pro and an HTTP 401.
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from utils.log import warn as log_warn
 import time
 import urllib.error
 import urllib.parse
@@ -143,7 +144,7 @@ def request(method: str, path: str, body: Optional[dict] = None,
             timeout: int = 300) -> Any:
     token = read_token()
     if not token:
-        raise CloudError("not signed in — run `podcli login`", status=401)
+        raise CloudError("not signed in: run `podcli login`", status=401)
 
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(
@@ -177,14 +178,14 @@ def _describe(exc: urllib.error.HTTPError) -> tuple[str, bool]:
         # turns the error path itself into an AttributeError.
         if isinstance(parsed, dict):
             payload = parsed
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn("cloud", "could not parse error body", error=exc)
     detail = payload.get("error")
     if isinstance(detail, list):
         detail = "; ".join(str(item.get("message", item)) for item in detail)
 
     if exc.code == 401:
-        return ("podcli Pro session expired — run `podcli login` again", False)
+        return ("podcli Pro session expired: run `podcli login` again", False)
     if exc.code == 402:
         # A plan's own limits (footage, cameras) say which one; a bare 402 means no plan at all.
         return (detail or "this workspace has no active podcli Pro subscription", False)
@@ -222,7 +223,7 @@ def source_hash(video_path: str) -> Optional[str]:
     """Identify an episode across machines.
 
     Must stay byte-identical to the TypeScript implementation in
-    src/services/podcli-cloud.ts — the two clients hash the same file and the
+    src/services/podcli-cloud.ts: the two clients hash the same file and the
     server dedupes episodes on the result, so any divergence silently splits one
     episode into two. First 8 MB only: distinctive enough, and digesting a 2 GB
     master on every render is not.
@@ -375,7 +376,7 @@ def create_workspace(name: str) -> dict:
 def switch_workspace(workspace_id: str) -> dict:
     """Switching means a new session, not a mutable field on the old one.
 
-    Tenancy is decided once, at authentication, from the session's workspace —
+    Tenancy is decided once, at authentication, from the session's workspace,
     so a token can never be pointed at a workspace it was not issued for.
     """
     payload = request("POST", f"/v1/workspaces/{workspace_id}/session", {}, timeout=30)

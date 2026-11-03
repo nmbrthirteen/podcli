@@ -16,7 +16,7 @@ case "$(uname -s 2>/dev/null)" in
 esac
 
 # ============================================================
-# podcli — Install & Launch
+# podcli: Install & Launch
 # Usage:
 #   ./setup.sh              # Install everything + open UI
 #   ./setup.sh --install    # Install only (no launch)
@@ -76,20 +76,6 @@ install() {
   mkdir -p "$DATA_DIR"/{cache/transcripts,working,working/uploads,output,logs}
   echo "  ✓ $CLIPPER_HOME (internal)"
   echo "  ✓ $DATA_DIR (output & cache)"
-
-  # Download DNN face detection model if missing
-  MODEL_DIR="$SCRIPT_DIR/backend/models"
-  mkdir -p "$MODEL_DIR"
-  if [ ! -f "$MODEL_DIR/res10_300x300_ssd_iter_140000.caffemodel" ]; then
-    echo "  ↓ Downloading face detection model..."
-    curl -sL -o "$MODEL_DIR/deploy.prototxt" \
-      "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
-    curl -sL -o "$MODEL_DIR/res10_300x300_ssd_iter_140000.caffemodel" \
-      "https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
-    echo "  ✓ Face detection model ready"
-  else
-    echo "  ✓ Face detection model exists"
-  fi
 
   echo ""
   echo "━━━ [3/6] Python virtual environment ━━━"
@@ -172,7 +158,7 @@ launch_ui() {
   # The studio is a Vite + React Router SPA; build it before serving.
   if [ ! -f dist/ui/public/index.html ]; then
     echo "  Building the studio UI..."
-    npm run build || { echo "  Build failed — run ./setup.sh --install first."; exit 1; }
+    npm run build || { echo "  Build failed: run ./setup.sh --install first."; exit 1; }
   fi
 
   echo "  Studio: http://localhost:${PORT:-3847}"

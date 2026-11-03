@@ -1,4 +1,4 @@
-"""Tests for backend.services.face_track_helpers — pure camera /
+"""Tests for backend.services.face_track_helpers: pure camera /
 speaker-switch decision helpers.
 """
 

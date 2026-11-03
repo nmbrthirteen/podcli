@@ -7,28 +7,28 @@ layers.
 
 Targets free + Studio Resolve 20.x on macOS, Windows, Linux. No Studio gates
 on the import path (FCPXML import, compound clips, alpha auto-detect, SRT
-subtitle import, markers — all confirmed free-tier).
+subtitle import, markers, all confirmed free-tier).
 
 ## What it does (and doesn't)
 
-- ✅ Source clip on V1, alpha caption overlay on V2 — Resolve auto-detects the
+- ✅ Source clip on V1, alpha caption overlay on V2. Resolve auto-detects the
   alpha and composites identically to podcli's baked render.
 - ✅ Per-short compound clip on the master timeline. Double-click to dive into
   the nested timeline and edit individual layers.
 - ✅ Editable cuts, trims, audio, color grading on top, sidecar SRT.
-- ⚠️ Reframe (face-track Pan/Tilt) is **baked into the V1 source** — Resolve's
+- ⚠️ Reframe (face-track Pan/Tilt) is **baked into the V1 source**. Resolve's
   FCPXML importer mis-translates transform keyframe values, so we don't emit
   them. To re-frame, swap V1 with the untouched source clip and add your own
   Pan/Tilt, or re-render in podcli with different params.
 - ⚠️ Caption animation curves (Hormozi spring physics, karaoke highlight) are
   inside the V2 alpha overlay. Swap the overlay by re-rendering in podcli with
-  a different `--style` — no per-word edits inside Resolve.
+  a different `--style`: no per-word edits inside Resolve.
 
 ## Free Resolve caveat
 
 Resolve 20.2 silently watermarks the timeline if **any** Studio-only effect
 appears anywhere on it, even unused. The emitter is constrained to free-tier
-structure only — no `<adjust-blend>`, no Studio-gated nodes, no FCPXML
+structure only: no `<adjust-blend>`, no Studio-gated nodes, no FCPXML
 transform keyframes (which Resolve mis-translates anyway).
 
 ## Spike verification
@@ -48,7 +48,7 @@ as V1 plus a synthetic ProRes 4444 alpha test pattern as V2.
 
 ```bash
 # Generate a 1080x1920 ProRes 4444 alpha test pattern matching the source's duration.
-DUR=50  # seconds — match (or undershoot) the source duration
+DUR=50  # seconds: match (or undershoot) the source duration
 ffmpeg -y -f lavfi -i "color=c=red@0.0:s=1080x1920:r=24:d=$DUR" \
   -vf "drawbox=x=140:y=1500:w=800:h=180:color=yellow@0.85:t=fill, \
        drawtext=text='ALPHA OVERLAY':fontcolor=black:fontsize=110:x=190:y=1545" \
@@ -88,8 +88,8 @@ node remotion/render.mjs \
 
 That produces:
 
-- `/tmp/spike_baked.mp4` — baked composite (the ground-truth render)
-- `/tmp/spike_baked_captions.mov` — ProRes 4444 alpha overlay
+- `/tmp/spike_baked.mp4`: baked composite (the ground-truth render)
+- `/tmp/spike_baked_captions.mov`: ProRes 4444 alpha overlay
 
 Then:
 

@@ -1,4 +1,4 @@
-"""YouTube analytics integration — links rendered clips to uploads and pulls
+"""YouTube analytics integration: links rendered clips to uploads and pulls
 per-video performance (views, retention, CTR) for the learning loop."""
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ class YouTubeIntegration(IntegrationBase):
     description = (
         "Performance feedback, not publishing. Links rendered clips to your published "
         "videos and pulls views, retention, and CTR so podcli learns what works and "
-        "Claude picks better shorts. Read-only — podcli never uploads. Bring your own "
+        "Claude picks better shorts. Read-only: podcli never uploads. Bring your own "
         "Google OAuth client, or import a YouTube Studio analytics CSV."
     )
     default_enabled = False

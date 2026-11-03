@@ -1,4 +1,6 @@
 import { spawn } from "child_process";
+import { z } from "zod";
+import { absentWhenNull } from "../utils/zod-helpers.js";
 import { paths, pythonEnv } from "../config/paths.js";
 import { ClipsHistory } from "../services/clips-history.js";
 import {
@@ -8,7 +10,7 @@ import {
   isCookieBrowser,
   normalizeChannelUrl,
 } from "../utils/ytdlp-args.js";
-import { selectBestCaptionTrack, parseVtt, parseJson3, cuesToWords, type CaptionTrackRef } from "../utils/captions.js";
+import { selectBestCaptionTrack, parseVtt, parseJson3, cuesToWords } from "../utils/captions.js";
 import type { WordTimestamp } from "../models/index.js";
 
 const history = new ClipsHistory();
@@ -53,9 +55,29 @@ async function runYtDlp(args: string[]): Promise<RunResult> {
 
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url);
+
   if (!res.ok) throw new Error(`HTTP ${res.status} fetching caption track`);
+
   return res.text();
 }
+
+const uploadEntrySchema = z.looseObject({
+  id: absentWhenNull(z.string()),
+  title: z.string().catch(""),
+  duration: absentWhenNull(z.number()),
+  upload_date: absentWhenNull(z.string()),
+  url: absentWhenNull(z.string()),
+});
+
+const captionTracksSchema = z.record(z.string(), z.array(z.object({ ext: z.string(), url: z.string() })));
+
+const videoInfoSchema = z.looseObject({
+  id: z.string(),
+  title: z.string(),
+  duration: absentWhenNull(z.number()),
+  subtitles: absentWhenNull(captionTracksSchema),
+  automatic_captions: absentWhenNull(captionTracksSchema),
+});
 
 export interface ChannelUpload {
   video_id: string;
@@ -100,27 +122,37 @@ export async function listChannelUploads(
     limit: input.limit,
     cookiesFromBrowser: isCookieBrowser(input.cookies_from_browser) ? input.cookies_from_browser : undefined,
   });
+
   const { stdout, stderr, code } = await deps.runYtDlp(args);
+
   if (code !== 0) {
     throw new Error(stderr.trim() || "yt-dlp failed to list the channel's uploads");
   }
+
   const minedIds = await deps.minedVideoIds();
+
   return stdout
     .trim()
     .split("\n")
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as { id?: string; title: string; duration?: number; upload_date?: string; url?: string })
-    // A tab or sub-playlist entry (e.g. "Shorts", "Live") has no video id of
-    // its own: only real uploads do.
-    .filter((u): u is { id: string; title: string; duration?: number; upload_date?: string; url?: string } => Boolean(u.id))
-    .map((u) => ({
-      video_id: u.id,
-      title: u.title,
-      duration: u.duration,
-      upload_date: u.upload_date,
-      url: u.url ?? `https://www.youtube.com/watch?v=${u.id}`,
-      already_mined: minedIds.has(u.id),
-    }));
+    .flatMap((line) => {
+      const u = uploadEntrySchema.parse(JSON.parse(line));
+
+      // A tab or sub-playlist entry (e.g. "Shorts", "Live") has no video id of
+      // its own: only real uploads do.
+      if (!u.id) return [];
+
+      return [
+        {
+          video_id: u.id,
+          title: u.title,
+          duration: u.duration,
+          upload_date: u.upload_date,
+          url: u.url ?? `https://www.youtube.com/watch?v=${u.id}`,
+          already_mined: minedIds.has(u.id),
+        },
+      ];
+    });
 }
 
 export async function mineVideoCaptions(
@@ -131,27 +163,27 @@ export async function mineVideoCaptions(
     videoUrl: input.video_url,
     cookiesFromBrowser: isCookieBrowser(input.cookies_from_browser) ? input.cookies_from_browser : undefined,
   });
+
   const { stdout, stderr, code } = await deps.runYtDlp(args);
+
   if (code !== 0) {
     throw new Error(stderr.trim() || "yt-dlp failed to fetch video info");
   }
+
   // --dump-json prints exactly one JSON object; take the last non-empty line
   // defensively in case a warning slipped through on an earlier line.
   const jsonLine = stdout.trim().split("\n").filter(Boolean).at(-1);
+
   if (!jsonLine) throw new Error("yt-dlp returned no video info");
-  const info = JSON.parse(jsonLine) as {
-    id: string;
-    title: string;
-    duration?: number;
-    subtitles?: Record<string, CaptionTrackRef[]>;
-    automatic_captions?: Record<string, CaptionTrackRef[]>;
-  };
+
+  const info = videoInfoSchema.parse(JSON.parse(jsonLine));
 
   // --no-playlist stops a playlist/mix url from resolving to its first entry,
   // but a url that already names one video (e.g. a stale redirect) can still
   // resolve to a different id than the one asked for. Catch that here rather
   // than silently returning the wrong video's captions.
   const requestedId = extractYouTubeVideoId(input.video_url);
+
   if (requestedId && requestedId !== info.id) {
     throw new Error(
       `yt-dlp resolved ${input.video_url} to video ${info.id}, not the requested ${requestedId}`,
@@ -162,6 +194,7 @@ export async function mineVideoCaptions(
   const alreadyMined = minedIds.has(info.id);
 
   const track = selectBestCaptionTrack(info.subtitles, info.automatic_captions);
+
   if (!track) {
     return {
       video_id: info.id,
@@ -176,13 +209,16 @@ export async function mineVideoCaptions(
   }
 
   const captionText = await deps.fetchText(track.url);
+
   const { words, segments } =
     track.ext === "json3"
       ? parseJson3(captionText)
       : (() => {
           const cues = parseVtt(captionText);
+
           return { words: cuesToWords(cues), segments: cues.map((c) => ({ text: c.text, start: c.start, end: c.end })) };
         })();
+
   const language = track.lang.replace(/-orig$/, "");
 
   return {
@@ -215,18 +251,22 @@ const defaultDeps: MineChannelDeps = {
 export async function handleMineChannel(input: MineChannelInput): Promise<string> {
   if (input.action === "list") {
     if (!input.channel_url) throw new Error("channel_url is required for action=list");
+
     const uploads = await listChannelUploads(defaultDeps, {
       channel_url: input.channel_url,
       limit: input.limit,
       cookies_from_browser: input.cookies_from_browser,
     });
+
     return JSON.stringify({ uploads, count: uploads.length });
   }
 
   if (!input.video_url) throw new Error("video_url is required for action=mine");
+
   const result = await mineVideoCaptions(defaultDeps, {
     video_url: input.video_url,
     cookies_from_browser: input.cookies_from_browser,
   });
+
   return JSON.stringify(result);
 }

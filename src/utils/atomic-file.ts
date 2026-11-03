@@ -10,6 +10,7 @@ function tmpPathFor(filePath: string): string {
 
 export function writeFileAtomicSync(filePath: string, data: string): void {
   const tmp = tmpPathFor(filePath);
+
   try {
     writeFileSync(tmp, data, "utf-8");
     renameSync(tmp, filePath);
@@ -17,12 +18,14 @@ export function writeFileAtomicSync(filePath: string, data: string): void {
     try {
       rmSync(tmp, { force: true });
     } catch {}
+
     throw err;
   }
 }
 
 export async function writeFileAtomic(filePath: string, data: string): Promise<void> {
   const tmp = tmpPathFor(filePath);
+
   try {
     await writeFile(tmp, data, "utf-8");
     await rename(tmp, filePath);

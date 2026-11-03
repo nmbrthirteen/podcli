@@ -9,9 +9,9 @@ behavior, not a roadmap.
   fine GCC-PHAT match with linear clock-drift correction
   (`backend/services/multicam_signal.py`). There is no timecode-based sync;
   embedded timecode is read as session metadata only
-  (`backend/services/multicam.py:278-282`).
+  (`_timecode_seconds` in `backend/services/multicam.py`).
 - A camera with no audio track cannot be synced automatically. Its offset
-  must be set by hand (`backend/services/multicam.py:1082`).
+  must be set by hand (`update_mapping` in `backend/services/multicam.py`).
 - Remote call recordings (Zoom, Riverside, one file per person) are assumed
   to start together, since there's no shared audio to cross-correlate
   against.
@@ -41,7 +41,7 @@ behavior, not a roadmap.
   `compare_transcription_engines`.
 - Speaker diarization runs on the `whisper-py` and `assemblyai` paths.
   `whispercpp` and `omnilingual` never produce speaker labels. Every word comes back with
-  `speaker: null` (`backend/services/transcription_whispercpp.py:67,215`).
+  `speaker: null` (`_tokens_to_words` and `transcribe_file` in `backend/services/transcription_whispercpp.py`).
 - Diarization needs `HF_TOKEN` set (see `docs/configuration.md`). Without
   it, or if diarization fails for any other reason, transcription still
   completes. It just comes back with no speaker labels, degrading

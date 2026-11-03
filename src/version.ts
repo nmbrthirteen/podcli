@@ -1,14 +1,21 @@
 import { readFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { z } from "zod";
+
+const packageVersionSchema = z.looseObject({ version: z.string() });
 
 export function podcliVersion(): string {
   const envVersion = process.env.PODCLI_VERSION?.trim();
+
   if (envVersion) return envVersion;
 
   try {
-    const pkg = JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf-8"));
-    if (typeof pkg.version === "string" && pkg.version.trim()) return pkg.version;
+    const pkg = packageVersionSchema.parse(
+      JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf-8")),
+    );
+
+    if (pkg.version.trim()) return pkg.version;
   } catch {
     // Local dev fallback; release builds are stamped through PODCLI_VERSION.
   }

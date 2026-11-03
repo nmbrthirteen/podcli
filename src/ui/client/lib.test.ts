@@ -54,6 +54,7 @@ describe("findClipResult", () => {
     const results = [
       { status: "success", output_path: "/out/third.mp4", source_start_second: 640, source_end_second: 700 },
     ];
+
     expect(findClipResult(results, clips[0], 0)).toBeUndefined();
     expect(findClipResult(results, clips[1], 1)).toBeUndefined();
     expect(findClipResult(results, clips[2], 2)?.output_path).toBe("/out/third.mp4");
@@ -65,6 +66,7 @@ describe("findClipResult", () => {
       undefined,
       { status: "success", output_path: "/out/b.mp4", source_start_second: 120, source_end_second: 165 },
     ];
+
     expect(findClipResult(results, clips[0], 0)).toBeUndefined();
     expect(findClipResult(results, clips[1], 1)?.output_path).toBe("/out/b.mp4");
   });
@@ -78,6 +80,7 @@ describe("findClipResult", () => {
     const results = [
       { status: "success", output_path: "/out/a.mp4", source_start_second: 10.001, source_end_second: 40 },
     ];
+
     expect(findClipResult(results, clips[0], 0)?.output_path).toBe("/out/a.mp4");
   });
 });
@@ -120,6 +123,7 @@ describe("buildEnergyMap", () => {
       { start_second: 10, end_second: 40 },
       { start_second: 120, end_second: 165 },
     ];
+
     const map = buildEnergyMap([9, 3], legacy);
     expect(map[clipKey(legacy[0])].score).toBe(9);
     expect(map[clipKey(legacy[1])].score).toBe(3);
@@ -176,6 +180,7 @@ describe("formatTranscriptText", () => {
         { start: 2, end: 4, text: "Today we discuss relationships." },
       ],
     };
+
     expect(formatTranscriptText(transcript)).toBe(
       "Welcome to the show. Today we discuss relationships.",
     );
@@ -188,6 +193,7 @@ describe("formatTranscriptText", () => {
         { start: 8, end: 12, text: "Relationships matter.", speaker: "SPEAKER_01" },
       ],
     };
+
     expect(formatTranscriptText(transcript)).toBe(
       "Speaker 1\nWhy did you start?\n\nSpeaker 2\nRelationships matter.",
     );
@@ -197,6 +203,7 @@ describe("formatTranscriptText", () => {
     const transcript = {
       segments: [{ start: 0, end: 2, text: "Welcome back.", speaker: "Speaker 1" }],
     };
+
     expect(formatTranscriptText(transcript)).toBe("Speaker 1\nWelcome back.");
   });
 
@@ -204,6 +211,7 @@ describe("formatTranscriptText", () => {
     const transcript = {
       segments: [{ start: 65.2, end: 70, text: "A useful answer." }],
     };
+
     expect(formatTranscriptText(transcript, "timestamped")).toBe(
       "[1:05]\nA useful answer.",
     );

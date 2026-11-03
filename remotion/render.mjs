@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Remotion render script — called by Python backend.
+ * Remotion render script: called by Python backend.
  *
  * Caches the bundle under PODCLI_CACHE_DIR/remotion-bundle/ (default data/cache/)
  * so subsequent renders skip the ~15-20s bundling step.
@@ -36,17 +36,21 @@ const BOOLEAN_FLAGS = new Set(["prebundle", "keep-overlay", "progress"]);
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = {};
+
   for (let i = 0; i < args.length; i++) {
     const key = args[i].replace(/^--/, "");
+
     if (BOOLEAN_FLAGS.has(key)) {
       opts[key] = true;
       continue;
     }
+
     if (args[i].startsWith("--") && i + 1 < args.length) {
       opts[key] = args[i + 1];
       i++;
     }
   }
+
   return opts;
 }
 
@@ -54,11 +58,13 @@ function parseArgs() {
 // and Remotion caption paths render the same size for a given request.
 function clampCaptionFontScale(raw) {
   const value = Number(raw);
+
   return Number.isFinite(value) ? Math.min(160, Math.max(60, value)) : 100;
 }
 
 function clampLogoScale(raw) {
   const value = Number(raw);
+
   return Number.isFinite(value) ? Math.min(1.5, Math.max(0.5, value)) : 1;
 }
 
@@ -68,24 +74,29 @@ function clampLogoScale(raw) {
 // compositions now, and the slowest CI runner does not finish inside 30s.
 const timeoutFor = (durationSec) => {
   const override = parseInt(process.env.PODCLI_REMOTION_TIMEOUT_MS ?? "", 10);
+
   if (Number.isFinite(override)) return Math.max(1, override);
+
   return Math.round(Math.min(50 * 60_000, Math.max(120_000, 90_000 + durationSec * 15_000)));
 };
 
 const videoCacheBytes = () => {
   const mb = parseInt(process.env.PODCLI_REMOTION_VIDEO_CACHE_MB ?? "", 10);
+
   return (Number.isFinite(mb) && mb > 0 ? mb : 512) * 1024 * 1024;
 };
+
 const offthreadVideoCacheSizeInBytes = videoCacheBytes();
 
 async function main() {
   const opts = parseArgs();
 
-  // Prebundle mode — just bundle and exit
+  // Prebundle mode: just bundle and exit
   if (opts.prebundle) {
     const t0 = Date.now();
     const loc = await getCachedBundle({ onBundle: () => console.log("  Remotion: bundling (first run, or src/config changed)...") });
     console.log(`Remotion bundle ready at ${loc} (${Date.now() - t0}ms)`);
+
     return;
   }
 
@@ -107,6 +118,7 @@ async function main() {
   const t0 = Date.now();
   const bundleLocation = await getCachedBundle({ onBundle: () => console.log("  Remotion: bundling (first run, or src/config changed)...") });
   const bundleMs = Date.now() - t0;
+
   if (bundleMs > 1000) {
     console.log(`  bundled in ${(bundleMs / 1000).toFixed(1)}s`);
   }
@@ -114,8 +126,10 @@ async function main() {
   // Serve video and logo via a tiny local HTTP server
   // (Remotion's bundled server can't serve dynamically added files)
   const http = await import("http");
+
   const assetServer = http.createServer((req, res) => {
     let filePath = null;
+
     if (req.url === "/clip.mp4") filePath = path.resolve(opts.video);
     else if (req.url === "/logo.png" && opts.logo) filePath = path.resolve(opts.logo);
 
@@ -130,19 +144,24 @@ async function main() {
       res.end();
     }
   });
+
   await new Promise((resolve) => assetServer.listen(0, "127.0.0.1", resolve));
   const assetPort = assetServer.address().port;
 
   // Ensure the asset server is closed and the overlay temp file removed on any exit path
   let captionOverlay;
   const closeAssetServer = () => { try { assetServer.close(); } catch {} };
+
   const cleanupOnSignal = () => {
     closeAssetServer();
+
     if (captionOverlay && !opts["keep-overlay"]) {
       try { fs.unlinkSync(captionOverlay); } catch {}
     }
+
     process.exit(1);
   };
+
   process.on("SIGINT", cleanupOnSignal);
   process.on("SIGTERM", cleanupOnSignal);
 
@@ -165,13 +184,16 @@ async function main() {
    */
   const { spawnSync } = await import("child_process");
   const ffprobe = process.env.PODCLI_FFPROBE || "ffprobe";
+
   const probeFor = (...entries) => {
     const r = spawnSync(
       ffprobe,
       ["-v", "error", ...entries, path.resolve(opts.video)],
       { encoding: "utf-8", timeout: 5000 },
     );
+
     if (r.error || r.status !== 0) return null;
+
     return String(r.stdout ?? "").trim();
   };
 
@@ -179,8 +201,10 @@ async function main() {
     "-select_streams", "v:0", "-show_entries", "stream=width,height",
     "-of", "csv=s=x:p=0",
   );
+
   if (size) {
     const [w, h] = size.split("x").map(Number);
+
     if (w > 0 && h > 0) {
       renderW = w;
       renderH = h;
@@ -197,9 +221,11 @@ async function main() {
     "-show_entries", "format=duration",
     "-of", "default=noprint_wrappers=1:nokey=1",
   );
+
   // Same silence as the shape, and the same cost: an overlay cut to the last
   // word rather than to the file stops before the clip does.
   const measured = Number.parseFloat(durStr ?? "");
+
   if (Number.isFinite(measured) && measured > 0) {
     videoDuration = measured;
   } else {
@@ -228,6 +254,7 @@ async function main() {
   // How each part arrives and leaves. A JSON object rather than a flag per
   // property: it is one value in a template, and it travels as one.
   let motion = null;
+
   if (opts.motion) {
     try {
       motion = JSON.parse(opts.motion);
@@ -246,10 +273,12 @@ async function main() {
    */
   const json = (name) => {
     if (!opts[name]) return null;
+
     try {
       return JSON.parse(opts[name]);
     } catch {
       console.error(`Ignoring --${name}: not valid JSON`);
+
       return null;
     }
   };
@@ -257,16 +286,18 @@ async function main() {
   const cards = json("cards");
   const brand = json("brand");
   const theme = json("theme");
+
   const topic = opts.topic
     ? {
         label: opts.topic,
         position: opts["topic-position"] || "top-left",
-        ...(opts["topic-color"] ? { color: opts["topic-color"] } : {}),
-        ...(opts["topic-background"] ? { background: opts["topic-background"] } : {}),
+        ...(opts["topic-color"] && { color: opts["topic-color"] }),
+        ...(opts["topic-background"] && { background: opts["topic-background"] }),
       }
     : null;
+
   const progress = opts.progress
-    ? { ...(opts["progress-color"] ? { color: opts["progress-color"] } : {}) }
+    ? (opts["progress-color"] ? { color: opts["progress-color"] } : {})
     : null;
 
   const inputProps = {
@@ -286,8 +317,8 @@ async function main() {
     topic,
     progress,
     cards: Array.isArray(cards) ? cards : null,
-    brand: brand && typeof brand === "object" ? brand : null,
-    theme: theme && typeof theme === "object" && !Array.isArray(theme) ? theme : null,
+    brand: brand instanceof Object ? brand : null,
+    theme: theme instanceof Object && !Array.isArray(theme) ? theme : null,
     fontFamily: opts["font-family"] || null,
   };
 
@@ -324,9 +355,11 @@ async function main() {
     });
 
     const cpus = os.cpus().length;
+
     const concurrency = process.env.PODCLI_REMOTION_CONCURRENCY
       ? Math.max(1, parseInt(process.env.PODCLI_REMOTION_CONCURRENCY, 10))
       : Math.max(2, Math.min(cpus, 8));
+
     if (opts["keep-overlay"]) {
       const outBase = opts.output.replace(/\.[^.]+$/, "");
       captionOverlay = `${outBase}_captions.mov`;
@@ -359,6 +392,7 @@ async function main() {
       offthreadVideoCacheSizeInBytes,
       onProgress: ({ progress }) => {
         const pct = Math.round(progress * 100);
+
         if (pct > lastPct + 9) {
           lastPct = pct;
           process.stderr.write(`  captions: ${pct}%\n`);
@@ -379,6 +413,7 @@ async function main() {
     // one with a space in it broke the quoting instead of the render.
     process.stderr.write("  compositing...\n");
     const ffmpeg = process.env.PODCLI_FFMPEG || "ffmpeg";
+
     const composite = spawnSync(
       ffmpeg,
       [
@@ -392,10 +427,12 @@ async function main() {
       ],
       { stdio: ["pipe", "pipe", "pipe"], timeout: 300000, encoding: "utf8" }
     );
+
     if (composite.error || composite.status !== 0) {
       const why = composite.error
         ? `${composite.error.code === "ENOENT" ? `${ffmpeg} not found` : composite.error.message}`
         : `exit ${composite.status}: ${(composite.stderr || "").trim().slice(-500)}`;
+
       throw new Error(`compositing the captions failed (${why})`);
     }
 
@@ -404,6 +441,7 @@ async function main() {
     } else {
       try { fs.unlinkSync(captionOverlay); } catch {}
     }
+
     console.log(`Done: ${opts.output}`);
   } finally {
     closeAssetServer();

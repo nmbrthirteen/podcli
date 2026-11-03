@@ -13,16 +13,19 @@ function resolveHome(): string {
   if (process.env.PODCLI_HOME) {
     return resolve(process.env.PODCLI_HOME);
   }
+
   if (existsSync(homeMarker)) {
     try {
       const marker = readFileSync(homeMarker, "utf-8").trim();
+
       if (marker) {
         return isAbsolute(marker) ? resolve(marker) : resolve(projectRoot, marker);
       }
     } catch {
-      // Unreadable marker — fall through to the default home.
+      // Unreadable marker: fall through to the default home.
     }
   }
+
   return resolve(projectRoot, ".podcli");
 }
 
@@ -36,11 +39,13 @@ function resolveBackendDir(): string {
   }
 
   const sourceBackend = join(projectRoot, "backend");
+
   if (existsSync(join(sourceBackend, "cli.py"))) {
     return sourceBackend;
   }
 
   const runtimeBackend = join(projectRoot, "runtime", "backend");
+
   if (existsSync(join(runtimeBackend, "cli.py"))) {
     return runtimeBackend;
   }
@@ -53,13 +58,16 @@ const backendDir = resolveBackendDir();
 function detectPython(): string {
   if (process.env.PYTHON_PATH) return process.env.PYTHON_PATH;
   const isWindows = process.platform === "win32";
+
   const venvPython = join(
     projectRoot,
     "venv",
     isWindows ? "Scripts" : "bin",
     isWindows ? "python.exe" : "python3"
   );
+
   if (existsSync(venvPython)) return venvPython;
+
   return isWindows ? "python" : "python3";
 }
 

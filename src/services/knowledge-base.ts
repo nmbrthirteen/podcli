@@ -3,6 +3,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { paths } from "../config/paths.js";
 import type { KnowledgeFile } from "../models/index.js";
+import { safePath } from "../utils/safe-path.js";
 
 const templatesDir = join(paths.backendDir, "templates", "knowledge");
 
@@ -15,7 +16,9 @@ function placeholders(text: string): number {
 
 export function isFilledIn(content: string, template: string): boolean {
   const body = content.trim();
+
   if (!body || body === template.trim()) return false;
+
   return placeholders(body) <= placeholders(template) * 0.3;
 }
 
@@ -36,36 +39,45 @@ export class KnowledgeBase {
   private async loadTemplates(): Promise<Map<string, string>> {
     const templates = new Map<string, string>();
     let names: string[];
+
     try {
       names = (await readdir(templatesDir)).filter((f) => f.endsWith(".md")).sort();
     } catch {
       return templates;
     }
+
     for (const name of names) {
       templates.set(name, await readFile(join(templatesDir, name), "utf-8"));
     }
+
     return templates;
   }
 
   /** Copy the starter templates in, never overwriting a file the user already has. */
   async initFromTemplates(): Promise<{ created: string[]; kept: string[] }> {
     const templates = await this.loadTemplates();
+
     if (templates.size === 0) {
       throw new Error(`No knowledge templates found at ${templatesDir}`);
     }
+
     await this.ensureDir();
 
     const created: string[] = [];
     const kept: string[] = [];
+
     for (const name of templates.keys()) {
       const target = join(this.dir, name);
+
       if (existsSync(target)) {
         kept.push(name);
         continue;
       }
+
       await copyFile(join(templatesDir, name), target);
       created.push(name);
     }
+
     return { created, kept };
   }
 
@@ -76,15 +88,20 @@ export class KnowledgeBase {
     const present: string[] = [];
     const filled: string[] = [];
     const missing: string[] = [];
+
     for (const [name, template] of templates) {
       const content = byName.get(name);
+
       if (content === undefined) {
         missing.push(name);
         continue;
       }
+
       present.push(name);
+
       if (isFilledIn(content, template)) filled.push(name);
     }
+
     return { templates: [...templates.keys()], present, filled, missing };
   }
 
@@ -94,6 +111,7 @@ export class KnowledgeBase {
     const mdFiles = entries.filter((f) => f.endsWith(".md"));
 
     const files: KnowledgeFile[] = [];
+
     for (const filename of mdFiles) {
       const filePath = join(this.dir, filename);
       const s = await stat(filePath);
@@ -104,14 +122,16 @@ export class KnowledgeBase {
         updatedAt: s.mtime.toISOString(),
       });
     }
+
     return files.sort((a, b) => a.filename.localeCompare(b.filename));
   }
 
-  /** Read all .md files concatenated — the main method used by MCP tools. */
+  /** Read all .md files concatenated: the main method used by MCP tools. */
   async readAll(): Promise<string> {
     const files = await this.listFiles();
     // Skip README
     const relevant = files.filter((f) => f.filename !== "README.md");
+
     if (relevant.length === 0) return "";
 
     return relevant
@@ -119,20 +139,32 @@ export class KnowledgeBase {
       .join("\n\n");
   }
 
+  private resolve(filename: string): string {
+    const filePath = safePath(this.dir, filename);
+
+    if (!filePath) throw new Error(`Invalid filename: ${filename}`);
+
+    return filePath;
+  }
+
   async readFile(filename: string): Promise<string> {
-    const filePath = join(this.dir, filename);
+    const filePath = this.resolve(filename);
+
     if (!existsSync(filePath)) throw new Error(`File not found: ${filename}`);
+
     return readFile(filePath, "utf-8");
   }
 
   async writeFile(filename: string, content: string): Promise<void> {
     await this.ensureDir();
+
     if (!filename.endsWith(".md")) filename += ".md";
-    await writeFile(join(this.dir, filename), content, "utf-8");
+    await writeFile(this.resolve(filename), content, "utf-8");
   }
 
   async deleteFile(filename: string): Promise<void> {
-    const filePath = join(this.dir, filename);
+    const filePath = this.resolve(filename);
+
     if (existsSync(filePath)) await unlink(filePath);
   }
 }

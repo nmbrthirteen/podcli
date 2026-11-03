@@ -13,6 +13,7 @@ describe("tagSubmittedClip", () => {
       { clip_index: 1, status: "success", output_path: "/out/b.mp4" },
       specs,
     );
+
     expect(row.source_start_second).toBe(640);
     expect(row.source_end_second).toBe(700);
   });
@@ -24,6 +25,7 @@ describe("tagSubmittedClip", () => {
       { clip_index: 0, status: "success", start_second: 123.4, end_second: 165 },
       specs,
     );
+
     expect(row.start_second).toBe(123.4);
     expect(row.source_start_second).toBe(120);
   });
@@ -39,6 +41,7 @@ describe("tagSubmittedClip", () => {
       { clip_index: 1, status: "error", error: "ffmpeg died" },
       specs,
     );
+
     expect(row.source_start_second).toBe(640);
   });
 });
@@ -53,6 +56,7 @@ describe("tagSubmittedClips", () => {
         { clip_index: 1, status: "error", error: "boom" },
       ],
     };
+
     const tagged = tagSubmittedClips(data, specs);
     expect(tagged?.results.map((r) => r.source_start_second)).toEqual([120, 640]);
   });
