@@ -1210,6 +1210,7 @@ def _emit_process_json(*, json_out, video_path, output_dir, quality, clips, resu
             "start_second": result.get("start_second", clip.get("start_second")),
             "end_second": result.get("end_second", clip.get("end_second")),
             "score": clip.get("score"),
+            "crop_strategy": result.get("crop_strategy_used"),
             "file_size_mb": result.get("file_size_mb"),
             "status": result.get("status", "ok" if path else "error"),
             "error": result.get("error"),
