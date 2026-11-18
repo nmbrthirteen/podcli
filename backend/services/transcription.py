@@ -54,6 +54,8 @@ def _whispercpp_cli() -> Optional[str]:
 
 
 
+DIARIZATION_DISABLED_WARNING = "Speaker detection disabled"
+
 # "large" alone doesn't name a real ggml file (upstream ships v1/v2/v3/v3-turbo
 # builds); provisioning always fetches large-v3, so resolve the same way here.
 _WHISPERCPP_MODEL_ALIASES = {"large": "large-v3"}
@@ -619,7 +621,7 @@ def _attach_speakers_and_faces(
                 progress_callback(90, diarization_warning)
     else:
         if not speaker_segments:
-            diarization_warning = "Speaker detection disabled"
+            diarization_warning = DIARIZATION_DISABLED_WARNING
 
     face_map = None
     try:

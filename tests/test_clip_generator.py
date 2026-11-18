@@ -563,6 +563,213 @@ class BoundRangeToSourceTests(unittest.TestCase):
         self.assertIsNone(segs)
 
 
+def _word(text, start, end, speaker=None):
+    return {"word": text, "start": start, "end": end, "speaker": speaker}
+
+
+def _two_sentences():
+    return [
+        _word("We", 0.05, 0.3),
+        _word("went", 0.3, 0.6),
+        _word("to", 0.6, 0.9),
+        _word("the", 0.9, 1.2),
+        _word("store.", 1.2, 1.8),
+        _word("Then", 2.0, 2.3),
+        _word("we", 2.3, 2.6),
+        _word("left", 2.6, 3.0),
+        _word("early", 3.0, 3.5),
+        _word("today.", 3.5, 4.0),
+    ]
+
+
+def _run_on(count, speaker="A"):
+    return [_word(f"w{i}", i * 0.5, i * 0.5 + 0.5, speaker) for i in range(count)]
+
+
+class SnapToSentenceStartTests(unittest.TestCase):
+    def test_mid_sentence_start_moves_back_to_the_sentence_start(self):
+        start = cg._snap_to_sentence_start(_two_sentences(), 2.4, 20.0)
+        self.assertAlmostEqual(start, 1.92, places=3)
+
+    def test_start_right_after_a_long_pause_stays(self):
+        words = [
+            _word("done.", 9.0, 10.0),
+            _word("So", 10.8, 11.1),
+            _word("anyway", 11.1, 11.6),
+            _word("then", 11.6, 12.0),
+        ]
+        self.assertEqual(cg._snap_to_sentence_start(words, 10.8, 20.0), 10.8)
+
+    def test_start_in_the_gap_before_a_sentence_start_stays(self):
+        self.assertEqual(cg._snap_to_sentence_start(_two_sentences(), 1.9, 20.0), 1.9)
+
+    def test_a_word_straddling_the_start_pulls_it_to_the_word_onset(self):
+        words = [_word("done.", 0.0, 1.0), _word("Hello", 3.0, 3.6), _word("there", 3.6, 4.0)]
+        start = cg._snap_to_sentence_start(words, 3.3, 20.0)
+        self.assertAlmostEqual(start, 2.92, places=3)
+
+    def test_never_returns_below_zero(self):
+        words = [_word("Hello", 0.05, 0.4), _word("there", 0.4, 0.8), _word("friend", 0.8, 1.2)]
+        self.assertEqual(cg._snap_to_sentence_start(words, 0.5, 20.0), 0.0)
+
+    def test_search_back_is_capped_at_six_seconds(self):
+        words = _run_on(20)
+        self.assertEqual(cg._snap_to_sentence_start(words, 7.1, 20.0), 7.1)
+
+    def test_search_back_finds_a_start_inside_six_seconds(self):
+        words = _run_on(20)
+        words[8] = _word("w8.", 4.0, 4.5, "A")
+        start = cg._snap_to_sentence_start(words, 7.1, 20.0)
+        self.assertAlmostEqual(start, 4.42, places=3)
+
+    def test_speaker_change_stops_the_forward_search(self):
+        words = _run_on(20) + [_word("Right.", 10.0, 10.5, "B")]
+        self.assertEqual(cg._snap_to_sentence_start(words, 7.1, 12.0), 7.1)
+
+    def test_forward_search_finds_a_same_speaker_start(self):
+        words = _run_on(20)
+        words[18] = _word("w18.", 9.0, 9.5, "A")
+        start = cg._snap_to_sentence_start(words, 7.1, 20.0)
+        self.assertAlmostEqual(start, 9.42, places=3)
+
+    def test_forward_search_is_capped_at_three_seconds(self):
+        words = _run_on(30)
+        words[22] = _word("w22.", 11.0, 11.5, "A")
+        self.assertEqual(cg._snap_to_sentence_start(words, 7.1, 20.0), 7.1)
+
+    def test_forward_search_never_lands_inside_the_last_half_second(self):
+        words = _run_on(20)
+        words[18] = _word("w18.", 9.0, 9.5, "A")
+        self.assertEqual(cg._snap_to_sentence_start(words, 7.1, 9.8), 7.1)
+
+    def test_no_words_in_range_returns_start_unchanged(self):
+        self.assertEqual(cg._snap_to_sentence_start(_two_sentences(), 50.0, 60.0), 50.0)
+
+
+class SnapToSentenceEndTests(unittest.TestCase):
+    def test_end_extends_to_the_period_with_a_tail_pad(self):
+        end = cg._snap_to_sentence_end(_two_sentences(), 0.0, 2.2)
+        self.assertAlmostEqual(end, 4.15, places=3)
+
+    def test_end_already_on_a_period_gets_the_tail_pad(self):
+        end = cg._snap_to_sentence_end(_two_sentences(), 0.0, 3.9)
+        self.assertAlmostEqual(end, 4.15, places=3)
+
+    def test_end_past_the_tail_pad_is_left_alone(self):
+        end = cg._snap_to_sentence_end(_two_sentences(), 0.0, 4.5)
+        self.assertEqual(end, 4.5)
+
+    def test_a_pause_over_six_tenths_is_a_boundary(self):
+        words = [
+            _word("so", 4.0, 4.4),
+            _word("then", 4.4, 5.0),
+            _word("Next.", 5.9, 6.3),
+        ]
+        self.assertAlmostEqual(cg._snap_to_sentence_end(words, 4.0, 4.5), 5.15, places=3)
+
+    def test_a_short_pause_is_not_a_boundary(self):
+        words = [
+            _word("so", 4.0, 4.4),
+            _word("then", 4.4, 5.0),
+            _word("next.", 5.4, 5.8),
+        ]
+        self.assertAlmostEqual(cg._snap_to_sentence_end(words, 4.0, 4.5), 5.95, places=3)
+
+    def test_extension_reaches_five_seconds_past_the_end(self):
+        words = _run_on(12)
+        words[10] = _word("w10.", 5.0, 5.5, "A")
+        end = cg._snap_to_sentence_end(words, 0.0, 0.5)
+        self.assertAlmostEqual(end, 5.65, places=3)
+
+    def test_extension_stops_beyond_five_seconds(self):
+        words = _run_on(14)
+        words[12] = _word("w12.", 6.0, 6.5, "A")
+        self.assertEqual(cg._snap_to_sentence_end(words, 0.0, 0.5), 0.5)
+
+    def test_speaker_change_stops_the_extension(self):
+        words = [
+            _word("and", 1.0, 1.3, "A"),
+            _word("then", 1.3, 1.6, "A"),
+            _word("ok.", 1.6, 2.0, "B"),
+        ]
+        self.assertEqual(cg._snap_to_sentence_end(words, 0.5, 1.4), 1.4)
+
+    def test_no_words_in_range_returns_end_unchanged(self):
+        self.assertEqual(cg._snap_to_sentence_end(_two_sentences(), 50.0, 60.0), 60.0)
+
+
+class SentenceSnapRangeTests(unittest.TestCase):
+    def test_a_snapped_end_past_the_source_is_clamped(self):
+        words = _two_sentences()
+        end = cg._snap_to_sentence_end(words, 0.0, 2.2)
+        bounded, _ = cg._bound_range_to_source(0.0, end, None, source_duration=4.05)
+        self.assertAlmostEqual(end, 4.15, places=3)
+        self.assertEqual(bounded, 4.05)
+
+
+class SentenceSnapOrderTests(unittest.TestCase):
+    class _Stop(Exception):
+        pass
+
+    def _generate(self, **kwargs):
+        calls = []
+
+        def recording(name, fn):
+            def wrapper(*args, **kw):
+                calls.append(name)
+                return fn(*args, **kw)
+            return wrapper
+
+        cut = mock.Mock(side_effect=self._Stop())
+        with tempfile.TemporaryDirectory() as td:
+            video = os.path.join(td, "ep.mp4")
+            with open(video, "wb") as fh:
+                fh.write(b"x")
+            with mock.patch.object(cg, "_get_media_duration", return_value=4.05), \
+                 mock.patch.object(cg, "probe_has_audio_stream", return_value=True), \
+                 mock.patch("services.audiogram.is_audio_only", return_value=False), \
+                 mock.patch.object(cg, "cut_segment", cut), \
+                 mock.patch.object(cg, "_snap_to_sentence_start", recording("start", cg._snap_to_sentence_start)), \
+                 mock.patch.object(cg, "_trim_weak_opening", recording("trim", cg._trim_weak_opening)), \
+                 mock.patch.object(cg, "_snap_to_sentence_end", recording("end", cg._snap_to_sentence_end)):
+                with self.assertRaises(self._Stop):
+                    cg.generate_clip(
+                        video_path=video,
+                        transcript_words=_two_sentences(),
+                        clean_fillers=False,
+                        output_dir=td,
+                        **kwargs,
+                    )
+        return calls, cut
+
+    def test_single_range_snaps_start_then_trims_then_snaps_end(self):
+        calls, cut = self._generate(start_second=2.4, end_second=3.2, trim_opening=True)
+
+        self.assertEqual(calls, ["start", "trim", "end"])
+        args = cut.call_args.args
+        self.assertAlmostEqual(args[2], 1.92, places=3)
+        self.assertEqual(args[3], 4.05)
+
+    def test_explicit_trim_opening_false_keeps_the_requested_start(self):
+        calls, cut = self._generate(start_second=2.4, end_second=3.2, trim_opening=False)
+
+        self.assertEqual(calls, ["end"])
+        self.assertEqual(cut.call_args.args[2], 2.4)
+
+    def test_keep_segments_snap_start_then_trim_then_snap_end(self):
+        calls, cut = self._generate(
+            start_second=2.4,
+            end_second=3.2,
+            keep_segments=[{"start": 2.4, "end": 3.2}],
+            trim_opening=True,
+        )
+
+        self.assertEqual(calls, ["start", "trim", "end"])
+        args = cut.call_args.args
+        self.assertAlmostEqual(args[2], 1.92, places=3)
+        self.assertEqual(args[3], 4.05)
+
+
 @unittest.skipUnless(
     shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg/ffprobe not installed"
 )
@@ -622,6 +829,8 @@ class SidecarsAndCleanVariantTests(unittest.TestCase):
         )
 
         self.assertTrue(os.path.exists(result["output_path"]))
+        self.assertEqual(result["crop_strategy"], "center")
+        self.assertEqual(result["crop_strategy_used"], "center")
 
         self.assertIn("srt_path", result)
         self.assertTrue(os.path.exists(result["srt_path"]))
@@ -679,6 +888,24 @@ class SidecarsAndCleanVariantTests(unittest.TestCase):
         self.assertIn("output_duration", result)
         self.assertAlmostEqual(result["output_duration"], 3.5, delta=0.3)
         self.assertGreater(result["output_duration"], result["duration"])
+
+    def test_non_reframing_format_reports_fit(self):
+        from services import clip_generator as cg
+
+        result = cg.generate_clip(
+            video_path=self.src,
+            start_second=0,
+            end_second=2.0,
+            caption_style="subtle",
+            crop_strategy="face",
+            format="horizontal",
+            title="fit_test",
+            output_dir=os.path.join(self.tmpdir, "out_fit"),
+            captions=False,
+            clean_fillers=False,
+        )
+        self.assertEqual(result["crop_strategy"], "face")
+        self.assertEqual(result["crop_strategy_used"], "fit")
 
     def test_video_only_source_does_not_require_an_audio_stream(self):
         from services import clip_generator as cg

@@ -1,4 +1,6 @@
 import argparse
+import contextlib
+import io
 import json
 import os
 import sys
@@ -66,7 +68,14 @@ def _process_args(video_path, transcript_path, output_dir):
 
 
 class CliTranscriptTests(unittest.TestCase):
-    def _run_process(self, transcript_text, cached_transcript=None):
+    def _run_process(
+        self,
+        transcript_text,
+        cached_transcript=None,
+        use_cache=False,
+        generated_extra=None,
+        no_speakers=False,
+    ):
         """Run cmd_process with --transcript and return the generate_clip mock."""
         clip = {
             "title": "Test clip",
@@ -82,12 +91,17 @@ class CliTranscriptTests(unittest.TestCase):
             with open(video_path, "wb") as video_file:
                 video_file.write(b"video")
             with open(transcript_path, "w", encoding="utf-8") as transcript_file:
-                transcript_file.write(transcript_text)
+                transcript_file.write(transcript_text or "")
 
             generated = {
                 "output_path": os.path.join(output_dir, "test-clip.mp4"),
                 "file_size_mb": 1.0,
+                **(generated_extra or {}),
             }
+            args = _process_args(video_path, None if use_cache else transcript_path, output_dir)
+            args.no_cache = not use_cache
+            args.no_speakers = no_speakers
+            out = io.StringIO()
 
             with (
                 mock.patch.object(cli_mod, "kb_is_empty", return_value=False),
@@ -101,6 +115,7 @@ class CliTranscriptTests(unittest.TestCase):
                     "services.claude_suggest._find_ai_cli",
                     return_value=(None, None),
                 ),
+                mock.patch("services.ai_provider.status", return_value={"providers": []}),
                 mock.patch(
                     "services.transcript_packer.load_cached_transcript_for_video",
                     return_value=cached_transcript,
@@ -114,9 +129,14 @@ class CliTranscriptTests(unittest.TestCase):
                     "services.clip_generator.generate_clip",
                     return_value=generated,
                 ) as generate_clip,
+                mock.patch.dict(os.environ),
+                contextlib.redirect_stdout(out),
             ):
-                cli_mod.cmd_process(_process_args(video_path, transcript_path, output_dir))
+                os.environ.pop("NO_COLOR", None)
+                os.environ.pop("PODCLI_ENGINE", None)
+                cli_mod.cmd_process(args)
 
+        self.stdout = out.getvalue()
         generate_clip.assert_called_once()
         return generate_clip
 
@@ -154,6 +174,46 @@ class CliTranscriptTests(unittest.TestCase):
         generate_clip = self._run_process(json.dumps(payload), cached_transcript=stale)
 
         self.assertEqual(generate_clip.call_args.kwargs["face_map"], FACE_MAP)
+
+    def _cached_whispercpp(self):
+        return {
+            "engine": "whispercpp",
+            "words": [{"word": "hello", "start": 0.0, "end": 0.5, "speaker": None}],
+            "segments": [{"start": 0.0, "end": 0.5, "text": "hello"}],
+            "diarization_warning": "Speaker detection disabled",
+        }
+
+    def test_whispercpp_run_says_speakers_need_whisper_py_and_a_token(self):
+        self._run_process(None, cached_transcript=self._cached_whispercpp(), use_cache=True)
+
+        note = "Speaker detection needs the whisper-py engine plus HF_TOKEN. Crop will use face tracking."
+        self.assertEqual(self.stdout.count(note), 1)
+        self.assertLess(self.stdout.index("1 segments, 1 words"), self.stdout.index(note))
+
+    def test_whispercpp_run_with_no_speakers_prints_no_note(self):
+        self._run_process(
+            None, cached_transcript=self._cached_whispercpp(), use_cache=True, no_speakers=True
+        )
+
+        self.assertNotIn("whisper-py engine", self.stdout)
+
+    def test_a_diarization_failure_prints_once_with_the_fix(self):
+        cached = self._cached_whispercpp()
+        cached["engine"] = "whisper-py"
+        cached["diarization_warning"] = (
+            "HF_TOKEN not set, so speakers are not detected. Fix: podcli env set HF_TOKEN hf_..."
+        )
+
+        self._run_process(None, cached_transcript=cached, use_cache=True)
+
+        self.assertEqual(self.stdout.count("podcli env set HF_TOKEN hf_..."), 1)
+
+    def test_summary_reports_the_crop_strategy_each_clip_used(self):
+        self._run_process(
+            SRT, generated_extra={"crop_strategy_used": "speaker"}
+        )
+
+        self.assertIn("Crop used: 1 speaker", self.stdout)
 
 
 if __name__ == "__main__":

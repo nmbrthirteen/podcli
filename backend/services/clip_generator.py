@@ -63,6 +63,69 @@ _WEAK_OPENING_WORDS = frozenset([
 _SCENE_TIME_RE = re.compile(r"pts_time:([0-9]+(?:\.[0-9]+)?)")
 
 
+_SENTENCE_ENDINGS = ".!?"
+_SENTENCE_PAUSE = 0.6
+_START_PAD = 0.08
+_END_PAD = 0.15
+
+
+def _ends_sentence(word: dict) -> bool:
+    text = str(word.get("word", "")).strip().rstrip("\"')]}")
+    return bool(text) and text[-1] in _SENTENCE_ENDINGS
+
+
+def _speaker_changed(a: dict, b: dict) -> bool:
+    return a.get("speaker") is not None and b.get("speaker") is not None and a.get("speaker") != b.get("speaker")
+
+
+def _starts_sentence(ordered: list[dict], idx: int) -> bool:
+    if idx == 0:
+        return True
+    prev, word = ordered[idx - 1], ordered[idx]
+    return (
+        _ends_sentence(prev)
+        or word["start"] - prev["end"] > _SENTENCE_PAUSE
+        or _speaker_changed(prev, word)
+    )
+
+
+def _snap_to_sentence_start(
+    transcript_words: list[dict], start_second: float, end_second: float,
+    max_back: float = 6.0, max_forward: float = 3.0,
+) -> float:
+    ordered = sorted(transcript_words, key=lambda w: w["start"])
+    first_idx = next(
+        (i for i, w in enumerate(ordered) if w["end"] > start_second and w["start"] < end_second),
+        None,
+    )
+    if first_idx is None:
+        return start_second
+
+    first = ordered[first_idx]
+    if _starts_sentence(ordered, first_idx):
+        if first["start"] >= start_second:
+            return start_second
+        return max(0.0, round(first["start"] - _START_PAD, 3))
+
+    for idx in range(first_idx - 1, -1, -1):
+        word = ordered[idx]
+        if word["start"] < start_second - max_back or _speaker_changed(word, first):
+            break
+        if _starts_sentence(ordered, idx):
+            return max(0.0, round(word["start"] - _START_PAD, 3))
+
+    for idx in range(first_idx + 1, len(ordered)):
+        word = ordered[idx]
+        if word["start"] > start_second + max_forward or word["start"] >= end_second - 0.5:
+            break
+        if _speaker_changed(first, word):
+            break
+        if _starts_sentence(ordered, idx):
+            return max(0.0, round(word["start"] - _START_PAD, 3))
+
+    return start_second
+
+
 def _trim_weak_opening(
     words: list[dict],
     start_second: float,
@@ -422,35 +485,35 @@ def _auto_fix_transition_jumps(
 
 def _snap_to_sentence_end(
     transcript_words: list[dict], start_second: float, end_second: float,
-    max_extension: float = 3.0,
+    max_extension: float = 5.0,
 ) -> float:
     """Snap clip end_second forward to the nearest sentence boundary.
 
-    Forward-only. Stops at speaker changes to avoid bleeding into a reply.
+    Forward-only. A sentence-ending mark or a pause longer than 0.6s counts as
+    a boundary. Stops at speaker changes to avoid bleeding into a reply.
     """
-    SENTENCE_ENDINGS = ".!?"
-
-    clip_words = [w for w in transcript_words if w["end"] > start_second and w["start"] < end_second]
+    ordered = sorted(transcript_words, key=lambda x: x["start"])
+    clip_words = [w for w in ordered if w["end"] > start_second and w["start"] < end_second]
     if not clip_words:
         return end_second
 
     last_clip_word = clip_words[-1]
-    last_word_text = last_clip_word.get("word", "").strip()
-    last_speaker = last_clip_word.get("speaker")
+    if _ends_sentence(last_clip_word):
+        return max(end_second, last_clip_word["end"] + _END_PAD)
 
-    if last_word_text and last_word_text[-1] in SENTENCE_ENDINGS:
-        return max(end_second, last_clip_word["end"])
-
-    for w in sorted(transcript_words, key=lambda x: x["start"]):
+    prev = last_clip_word
+    for w in ordered:
         if w["start"] < last_clip_word["end"]:
             continue
         if w["end"] > end_second + max_extension:
             break
-        if last_speaker is not None and w.get("speaker") is not None and w.get("speaker") != last_speaker:
+        if w["start"] - prev["end"] > _SENTENCE_PAUSE:
+            return max(end_second, prev["end"] + _END_PAD)
+        if _speaker_changed(last_clip_word, w):
             break
-        text = w.get("word", "").strip()
-        if text and text[-1] in SENTENCE_ENDINGS:
-            return w["end"]
+        if _ends_sentence(w):
+            return w["end"] + _END_PAD
+        prev = w
 
     return end_second
 
@@ -1021,6 +1084,7 @@ def generate_clip(
             progress_callback=progress_callback,
         )
 
+    snap_start = trim_opening is not False
     if trim_opening is None:
         trim_opening = not (keep_segments and len(keep_segments) > 0)
 
@@ -1041,6 +1105,15 @@ def generate_clip(
         keep_segments = [s for s in keep_segments if s["end"] > s["start"]]
         keep_segments.sort(key=lambda s: s["start"])
 
+        if snap_start and transcript_words:
+            snapped_start = _snap_to_sentence_start(
+                transcript_words,
+                keep_segments[0]["start"],
+                keep_segments[0]["end"],
+            )
+            if snapped_start < keep_segments[0]["end"] - 0.5:
+                keep_segments[0]["start"] = snapped_start
+
         if trim_opening and transcript_words:
             trimmed_start = _trim_weak_opening(
                 transcript_words,
@@ -1059,6 +1132,9 @@ def generate_clip(
             if snapped_end > keep_segments[-1]["end"]:
                 keep_segments[-1]["end"] = snapped_end
 
+        end_second, keep_segments = _bound_range_to_source(
+            keep_segments[0]["start"], keep_segments[-1]["end"], keep_segments, source_duration
+        )
         start_second = keep_segments[0]["start"]
         end_second = keep_segments[-1]["end"]
 
@@ -1073,11 +1149,15 @@ def generate_clip(
 
         duration = sum(s["end"] - s["start"] for s in keep_segments)
     else:
+        if snap_start and transcript_words:
+            start_second = _snap_to_sentence_start(transcript_words, start_second, end_second)
+
         if trim_opening and transcript_words:
             start_second = _trim_weak_opening(transcript_words, start_second, end_second)
 
         if transcript_words:
             end_second = _snap_to_sentence_end(transcript_words, start_second, end_second)
+            end_second, _ = _bound_range_to_source(start_second, end_second, None, source_duration)
 
         # Auto-build tight segments: cut long pauses and isolated fillers
         if transcript_words and clean_fillers:
@@ -1219,6 +1299,7 @@ def generate_clip(
         ) if crop_keyframes else crop_keyframes
 
         cropped_path = os.path.join(work_dir, "cropped.mp4")
+        crop_report: dict = {}
         with timed("render", "crop", strategy=crop_strategy if spec.reframe else "fit"):
             if spec.reframe:
                 crop_to_vertical(
@@ -1229,9 +1310,11 @@ def generate_clip(
                     face_map=face_map,
                     crop_keyframes=playback_keyframes,
                     target_dims=spec.dims,
+                    report=crop_report,
                 )
             else:
                 fit_to_frame(segment_path, cropped_path, target_dims=spec.dims)
+                crop_report["strategy_used"] = "fit"
 
         # Only Remotion draws the name card, and --fast forces the ASS renderer,
         # which cannot. Refusing beats returning a clip that quietly lacks the
@@ -1607,6 +1690,7 @@ def generate_clip(
             "end_second": end_second,
             "caption_style": caption_style,
             "crop_strategy": crop_strategy,
+            "crop_strategy_used": crop_report.get("strategy_used"),
             "format": spec.name,
             **sidecar_paths,
         }

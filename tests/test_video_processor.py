@@ -793,6 +793,80 @@ class VideoProcessorTests(unittest.TestCase):
         self.assertEqual(result, "ok.mp4")
         face_map_crop.assert_called_once()
 
+    def _crop(self, strategy, words, face_map=None, keyframes=None, track=None, face_x="456"):
+        report = {}
+        with mock.patch.object(vp, "get_dimensions", return_value=(1920, 1080)), \
+             mock.patch.object(vp, "_use_face_map", return_value=face_x), \
+             mock.patch.object(vp, "_track_and_crop", return_value=track) as track_crop, \
+             mock.patch.object(vp, "_run_ffmpeg_with_fallback", return_value="ok.mp4"):
+            vp.crop_to_vertical(
+                input_path="in.mp4",
+                output_path="out.mp4",
+                strategy=strategy,
+                transcript_words=words,
+                clip_start=0.0,
+                face_map=face_map,
+                crop_keyframes=keyframes,
+                report=report,
+            )
+        return report, track_crop
+
+    def test_face_request_with_speaker_labels_runs_and_reports_the_speaker_path(self):
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_00"}]
+        for requested in ("face", "speaker"):
+            report, track_crop = self._crop(requested, words, track="tracked.mp4")
+            self.assertEqual(report, {"strategy_used": "speaker"})
+            track_crop.assert_called_once()
+
+    def test_speaker_labels_without_a_face_map_still_use_the_speaker_path(self):
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_01"}]
+        report, _ = self._crop("face", words, face_map=None, track="tracked.mp4")
+        self.assertEqual(report["strategy_used"], "speaker")
+
+    def test_face_request_without_labels_reports_face_when_tracking_succeeds(self):
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": None}]
+        report, _ = self._crop("face", words, track="tracked.mp4")
+        self.assertEqual(report["strategy_used"], "face")
+
+    def test_failed_speaker_track_falls_back_to_the_face_map(self):
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_00"}]
+        face_map = {"clusters": [{"center_x": 100, "crop_x": 0}], "video_width": 1920}
+        report, track_crop = self._crop("speaker", words, face_map=face_map, track=None)
+        self.assertEqual(report["strategy_used"], "face")
+        track_crop.assert_called_once()
+
+    def test_everything_failing_reports_center(self):
+        words = [{"word": "hi", "start": 0.0, "end": 0.4, "speaker": "SPEAKER_00"}]
+        report, track_crop = self._crop("speaker", words, face_map=None, track=None)
+        self.assertEqual(report["strategy_used"], "center")
+        self.assertEqual(track_crop.call_count, 2)
+
+    def test_center_request_reports_center_without_tracking(self):
+        report, track_crop = self._crop("center", [], track="tracked.mp4")
+        self.assertEqual(report["strategy_used"], "center")
+        track_crop.assert_not_called()
+
+    def test_manual_request_with_keyframes_reports_manual(self):
+        keyframes = [{"time": 0.0, "x": 0.5}]
+        with mock.patch.object(vp, "_manual_crop_x_expr", return_value="100"):
+            report, _ = self._crop("manual", [], keyframes=keyframes)
+        self.assertEqual(report["strategy_used"], "manual")
+
+    def test_manual_without_keyframes_reports_what_it_fell_back_to(self):
+        report, _ = self._crop("manual", [], track="tracked.mp4")
+        self.assertEqual(report["strategy_used"], "face")
+
+    def test_hardcut_reports_hardcut_when_the_face_map_places_the_frame(self):
+        face_map = {"clusters": [{"center_x": 100, "crop_x": 0}], "video_width": 1920}
+        report, _ = self._crop("speaker-hardcut", [], face_map=face_map)
+        self.assertEqual(report["strategy_used"], "speaker-hardcut")
+
+    def test_report_is_optional(self):
+        with mock.patch.object(vp, "get_dimensions", return_value=(1920, 1080)), \
+             mock.patch.object(vp, "_run_ffmpeg_with_fallback", return_value="ok.mp4"):
+            result = vp.crop_to_vertical("in.mp4", "out.mp4", strategy="center")
+        self.assertEqual(result, "ok.mp4")
+
 
 if __name__ == "__main__":
     unittest.main()

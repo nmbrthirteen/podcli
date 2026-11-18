@@ -187,3 +187,102 @@ class AgentOutputHelpersTests(unittest.TestCase):
         self.assertEqual(payload["quality"], "high")
         self.assertEqual(payload["clips"][0]["title"], "A")
         self.assertEqual(payload["clips"][0]["path"], "/out/a.mp4")
+
+
+class DiarizationNoticeTests(unittest.TestCase):
+    TOKEN_WARNING = (
+        "HF_TOKEN not set, so speakers are not detected. Fix: podcli env set HF_TOKEN hf_...\n"
+        "\n"
+        "  Setup (one-time):\n"
+        "  1. Create a token at https://huggingface.co/settings/tokens"
+    )
+
+    def _printed(self, result, no_speakers=False, env=None):
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with mock.patch.dict(os.environ, env or {}), redirect_stdout(buf):
+            if not env or "NO_COLOR" not in env:
+                os.environ.pop("NO_COLOR", None)
+            cli_mod._print_diarization_notice(result, no_speakers)
+        return buf.getvalue()
+
+    def test_a_failure_warning_prints_on_its_own_line_with_the_fix(self):
+        out = self._printed({"engine": "whisper-py", "diarization_warning": self.TOKEN_WARNING})
+        lines = out.splitlines()
+        self.assertEqual(lines[0].strip(), "\u26a0 HF_TOKEN not set, so speakers are not detected. Fix: podcli env set HF_TOKEN hf_...")
+        self.assertIn("Setup (one-time):", out)
+        self.assertNotIn("\n\n", out)
+
+    def test_the_warning_is_yellow_when_color_is_on(self):
+        out = self._printed(
+            {"engine": "whisper-py", "diarization_warning": "Speaker detection failed: boom"},
+            env={"FORCE_COLOR": "1"},
+        )
+        self.assertTrue(out.startswith("\033[38;2;250;204;21m"))
+        self.assertIn("Speaker detection failed: boom", out)
+        self.assertTrue(out.rstrip("\n").endswith("\033[0m"))
+
+    def test_no_color_prints_plain_text(self):
+        out = self._printed(
+            {"engine": "whisper-py", "diarization_warning": "Speaker detection failed: boom"},
+            env={"NO_COLOR": "1", "FORCE_COLOR": "1"},
+        )
+        self.assertNotIn("\033", out)
+        self.assertIn("Speaker detection failed: boom", out)
+
+    def test_whispercpp_prints_one_line_about_the_engine_and_face_tracking(self):
+        out = self._printed({"engine": "whispercpp", "diarization_warning": "Speaker detection disabled"})
+        self.assertEqual(len(out.splitlines()), 1)
+        self.assertIn("whisper-py", out)
+        self.assertIn("HF_TOKEN", out)
+        self.assertIn("face tracking", out)
+
+    def test_whispercpp_stays_quiet_when_the_user_passed_no_speakers(self):
+        out = self._printed({"engine": "whispercpp", "diarization_warning": "Speaker detection disabled"}, no_speakers=True)
+        self.assertEqual(out, "")
+
+    def test_a_failure_stays_quiet_when_the_user_passed_no_speakers(self):
+        out = self._printed({"engine": "whisper-py", "diarization_warning": "Speaker detection failed: boom"}, no_speakers=True)
+        self.assertEqual(out, "")
+
+    def test_the_plain_disabled_marker_is_not_a_warning(self):
+        self.assertEqual(self._printed({"engine": "assemblyai", "diarization_warning": "Speaker detection disabled"}), "")
+
+    def test_no_warning_prints_nothing(self):
+        self.assertEqual(self._printed({"engine": "whisper-py"}), "")
+
+
+class CropStrategySummaryTests(unittest.TestCase):
+    def _summary(self, results, requested="face", env=None):
+        with mock.patch.dict(os.environ, env or {}):
+            if not env or "NO_COLOR" not in env:
+                os.environ.pop("NO_COLOR", None)
+            return cli_mod._crop_strategy_summary(results, requested)
+
+    def test_counts_each_strategy_most_used_first(self):
+        results = [
+            {"crop_strategy_used": "speaker"},
+            {"crop_strategy_used": "center"},
+            {"crop_strategy_used": "speaker"},
+            {"crop_strategy_used": "face"},
+            {"crop_strategy_used": "speaker"},
+        ]
+        self.assertEqual(self._summary(results), "Crop used: 3 speaker, 1 center, 1 face")
+
+    def test_failed_and_unreported_clips_are_skipped(self):
+        results = [{"status": "error", "error": "boom"}, {"output_path": "a.mp4"}, {"crop_strategy_used": "face"}]
+        self.assertEqual(self._summary(results), "Crop used: 1 face")
+
+    def test_nothing_reported_means_no_line(self):
+        self.assertIsNone(self._summary([{"status": "error"}]))
+        self.assertIsNone(self._summary([]))
+
+    def test_center_fallback_is_yellow_when_another_strategy_was_asked(self):
+        line = self._summary([{"crop_strategy_used": "center"}], requested="face", env={"FORCE_COLOR": "1"})
+        self.assertTrue(line.startswith("\033[38;2;250;204;21m"))
+
+    def test_center_is_plain_when_center_was_asked(self):
+        line = self._summary([{"crop_strategy_used": "center"}], requested="center", env={"FORCE_COLOR": "1"})
+        self.assertEqual(line, "Crop used: 1 center")

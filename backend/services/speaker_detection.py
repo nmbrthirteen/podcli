@@ -118,15 +118,15 @@ def run_diarization(
 
     if not token:
         msg = (
-            "HF_TOKEN not set: speaker detection requires a HuggingFace token.\n"
+            "HF_TOKEN not set, so speakers are not detected. Fix: podcli env set HF_TOKEN hf_...\n"
             "\n"
             "  Setup (one-time):\n"
             "  1. Create a token at https://huggingface.co/settings/tokens\n"
-            "  2. Accept model terms at ALL THREE:\n"
+            "  2. Accept model terms at all three:\n"
             "     → https://huggingface.co/pyannote/speaker-diarization-3.1\n"
             "     → https://huggingface.co/pyannote/segmentation-3.0\n"
             "     → https://huggingface.co/pyannote/speaker-diarization-community-1\n"
-            "  3. Set it: podcli env set HF_TOKEN hf_your_token_here\n"
+            "  3. Set it: podcli env set HF_TOKEN hf_...\n"
             "     (or in the Web UI: Config → Secrets)"
         )
         if progress_callback:
