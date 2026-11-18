@@ -67,7 +67,7 @@ def _request(method: str, path: str, body: Optional[dict] = None) -> dict:
         raise MulticamCloudError(str(exc)) from None
 
 
-def push(session: mc.MulticamSession, *, model_size: str = "base", engine: Optional[str] = None,
+def push(session: mc.MulticamSession, *, model_size: str = "small", engine: Optional[str] = None,
          progress_callback: ProgressCallback = None) -> mc.MulticamSession:
     """Builds what the editor plays, sends it, and remembers which cloud edit this session became."""
     if not podcli_cloud.signed_in():

@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { PythonExecutor, type TaskExecutor } from "../services/python-executor.js";
 import { TranscriptCache, needsDiarizationRetry } from "../services/transcript-cache.js";
-import { resolveTranscribeEngine, engineCanDiarize } from "../services/engine-resolve.js";
+import { resolveTranscribeInfo, engineCanDiarize } from "../services/engine-resolve.js";
 import { webServerUrl } from "../config/server.js";
 import type { TranscriptResult } from "../models/index.js";
 
@@ -25,10 +25,10 @@ const cache = new TranscriptCache();
 export interface TranscribeDeps {
   executor: TaskExecutor;
   cache: Pick<TranscriptCache, "get" | "set" | "getPackedMarkdown" | "getFileHashForEngine">;
-  resolveEngine: typeof resolveTranscribeEngine;
+  resolveEngine: typeof resolveTranscribeInfo;
 }
 
-const defaultDeps: TranscribeDeps = { executor, cache, resolveEngine: resolveTranscribeEngine };
+const defaultDeps: TranscribeDeps = { executor, cache, resolveEngine: resolveTranscribeInfo };
 
 export interface TranscribeInput {
   file_path: string;
@@ -69,7 +69,7 @@ export const transcribeToolDef = {
         enum: ["tiny", "base", "small", "medium", "large"],
         description:
           "Whisper model size. tiny=fastest, large=most accurate. Default: base",
-        default: "base",
+        default: "small",
       },
       language: {
         type: "string",
@@ -116,7 +116,7 @@ export async function handleTranscribe(
   { executor, cache, resolveEngine }: TranscribeDeps = defaultDeps,
 ): Promise<string> {
   const filePath = input.file_path;
-  const modelSize = input.model_size ?? "base";
+  const modelSize = input.model_size ?? "small";
   const engine = input.engine;
   const language = input.language;
   const enableDiarization = input.enable_diarization !== false;
@@ -131,8 +131,9 @@ export async function handleTranscribe(
   // Resolve before reading the cache: an unset engine is written under
   // whatever transcribe_file actually ran (e.g. "whispercpp" on a native
   // install), so reading with the raw unset request always misses.
-  const resolvedEngine = await resolveEngine(executor, engine, modelSize);
-  const cacheKey = { engine: resolvedEngine, model: modelSize, language };
+  const resolved = await resolveEngine(executor, engine, modelSize);
+  const resolvedEngine = resolved.engine;
+  const cacheKey = { engine: resolvedEngine, model: resolved.model, language };
 
   // A sample is a throwaway check on a slice of the file. It must never
   // serve (or pollute) the main transcript cache, which is keyed by the
@@ -147,7 +148,7 @@ export async function handleTranscribe(
     // Same combo cache.get(filePath, cacheKey) just matched: the packed
     // view has to be keyed identically, or a backfill here would write it
     // under a key the next read for this same request won't find.
-    const packedKey = { engine: cached.engine ?? resolvedEngine, model: modelSize, language };
+    const packedKey = { engine: cached.engine ?? resolvedEngine, model: resolved.model, language };
     // Backfill packed view if this cache predates auto-packing.
     let packed = await cache.getPackedMarkdown(filePath, packedKey);
 
@@ -197,7 +198,11 @@ export async function handleTranscribe(
   // Cache the raw result under what it actually ran with, not the prediction
   // above: resolveTranscribeEngine can't see a model-load failure that only
   // shows up once transcribe_file tries it for real.
-  await cache.set(filePath, data, { engine: actualEngine, model: modelSize, language });
+  await cache.set(filePath, data, {
+    engine: actualEngine,
+    model: data.model_size ?? resolved.model,
+    language,
+  });
   const packed = await cache.getPackedMarkdown(filePath, { engine: actualEngine, model: modelSize, language });
 
   return JSON.stringify({ cached: false, packed_ready: !!packed, ...formatResult(data) });
@@ -262,7 +267,7 @@ export const transcribeStartToolDef = {
       model_size: {
         type: "string",
         enum: ["tiny", "base", "small", "medium", "large"],
-        default: "base",
+        default: "small",
       },
       language: { type: "string" },
       engine: {
@@ -293,7 +298,7 @@ export async function handleTranscribeStart(input: TranscribeInput): Promise<str
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         file_path: input.file_path,
-        model_size: input.model_size ?? "base",
+        model_size: input.model_size ?? "small",
         engine: input.engine,
         language: input.language,
         enable_diarization: input.enable_diarization !== false,

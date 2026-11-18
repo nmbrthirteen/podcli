@@ -182,11 +182,15 @@ def _json_object_arg(raw: str | None, name: str):
     return parsed
 
 
-def _transcript_cache_engine(model_size: str | None = None) -> str:
+def _transcript_cache_key(model_size: str | None = None) -> dict:
     from presets import DEFAULT_PRESET
     from services.transcription import resolve_engine_info
 
-    return resolve_engine_info(None, model_size or DEFAULT_PRESET["whisper_model"])["engine"]
+    return resolve_engine_info(None, model_size or DEFAULT_PRESET["whisper_model"])
+
+
+def _transcript_cache_engine(model_size: str | None = None) -> str:
+    return _transcript_cache_key(model_size)["engine"]
 
 
 def _cached_transcript(video_path: str) -> dict:
@@ -1469,15 +1473,15 @@ def cmd_process(args):
         save_cached_transcript_for_video,
     )
 
-    cache_engine = _transcript_cache_engine(config.get("whisper_model", "base"))
+    cache_key = _transcript_cache_key(config.get("whisper_model", "small"))
 
     if skip_transcript:
         # Reuse an existing transcript so highlight boundaries snap to whole sentences;
         # only skip transcription outright when there is none (true no-dialogue footage).
         cached = load_cached_transcript_for_video(
             video_path,
-            engine=cache_engine,
-            model=config.get("whisper_model", "base"),
+            engine=cache_key["engine"],
+            model=cache_key["model_size"],
             language=config.get("language"),
         )
         if cached and not config.get("no_cache", False):
@@ -1526,8 +1530,8 @@ def cmd_process(args):
         # different one that happens to share the file.
         cached = load_cached_transcript_for_video(
             video_path,
-            engine=cache_engine,
-            model=config.get("whisper_model", "base"),
+            engine=cache_key["engine"],
+            model=cache_key["model_size"],
             language=config.get("language"),
         )
         if cached and not config.get("no_cache", False):
@@ -1578,7 +1582,7 @@ def cmd_process(args):
                 # and AssemblyAI decode the source themselves).
                 result = transcribe_file(
                     file_path=video_path,
-                    model_size=config.get("whisper_model", "base"),
+                    model_size=config.get("whisper_model", "small"),
                     engine=os.environ.get("PODCLI_ENGINE") or None,
                     language=config.get("language") or None,
                     enable_diarization=not config.get("no_speakers", False),
@@ -1601,8 +1605,8 @@ def cmd_process(args):
             save_cached_transcript_for_video(
                 video_path,
                 result,
-                engine=result.get("engine") or cache_engine,
-                model=config.get("whisper_model", "base"),
+                engine=result.get("engine") or cache_key["engine"],
+                model=result.get("model_size") or cache_key["model_size"],
                 language=config.get("language"),
             )
 
@@ -5409,7 +5413,7 @@ def main():
                       help="Also build small playback proxies of each camera and a mic mix on the timeline")
     mc_p.add_argument("--transcript", action="store_true",
                       help="Transcribe the episode with each word credited to whoever's mic was speaking")
-    mc_p.add_argument("--model", default="base", help="Whisper model for --transcript (default base)")
+    mc_p.add_argument("--model", default="small", help="Whisper model for --transcript (default small)")
     mc_p.add_argument("--engine", choices=["whisper-py", "whispercpp", "assemblyai", "omnilingual"],
                       help="Transcription engine for --transcript (default: the one podcli is set up with)")
     mc_p.add_argument("--activity", action="store_true", help="Report who speaks when (talk time, or spans with --json)")
@@ -5750,7 +5754,7 @@ def main():
     cmp_p.add_argument("--start", type=float, default=0.0, help="Sample start, seconds into the source (default: 0)")
     cmp_p.add_argument("--duration", type=float, default=120.0, help="Sample length in seconds (default: 120)")
     cmp_p.add_argument("--window", type=float, default=20.0, help="Report window size in seconds (default: 20)")
-    cmp_p.add_argument("--model-size", default="base", help="Model size for engines that take one (default: base)")
+    cmp_p.add_argument("--model-size", default="small", help="Model size for engines that take one (default: small)")
     cmp_p.add_argument("--language", help="ISO language code. Auto-detect if omitted.")
     cmp_p.add_argument("-o", "--output", default="./engine-comparison", help="Output directory for comparison.json/.html")
 

@@ -774,7 +774,7 @@ const onKeyActivate = (fn) => (e) => {
       const [timeAdjust, setTimeAdjust] = useState(-1);
       const [transcriptionEngine, setTranscriptionEngine] = useState('whisper');
       const [assemblyAiKey, setAssemblyAiKey] = useState('');
-      const [whisperModel, setWhisperModel] = useState('base');
+      const [whisperModel, setWhisperModel] = useState('small');
       const [captionStyle, setCaptionStyle] = useState('branded');
       const [captionPosition, setCaptionPosition] = useState('auto');
       const [captionFontScale, setCaptionFontScale] = useState(100);

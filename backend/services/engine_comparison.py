@@ -117,7 +117,7 @@ def compare_engines(
     start_seconds: float = 0.0,
     duration_seconds: Optional[float] = None,
     window_seconds: float = 20.0,
-    model_size: str = "base",
+    model_size: str = "small",
     language: Optional[str] = None,
     output_dir: Optional[str] = None,
     transcribe_fn=None,

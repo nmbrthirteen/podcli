@@ -108,6 +108,9 @@ def _load_existing_shorts(episodes_path: str) -> list[str]:
     return shorts
 
 
+DURATION_SLACK = 0.15
+
+
 # (filename, max_chars) that reach the selection prompt, highest priority first.
 # Shared with kb_signature so the suggestion cache and the prompt cannot drift.
 class ClipBounds:
@@ -140,6 +143,9 @@ class ClipBounds:
 
     def keeps(self, seconds: float) -> bool:
         return self.dur_min <= seconds <= self.dur_max
+
+    def keeps_with_slack(self, seconds: float, slack: float = DURATION_SLACK) -> bool:
+        return self.dur_min * (1 - slack) <= seconds <= self.dur_max * (1 + slack)
 
 
 KB_FILES = [
@@ -225,6 +231,11 @@ def _sample_transcript(transcript_text: str, limit: int = CODEX_TRANSCRIPT_LIMIT
     # truncation would have thrown away.
     if lines[-1] not in sampled[-1:]:
         sampled.append(lines[-1])
+    print(
+        f"Codex transcript sampled: dropped {len(lines) - len(sampled)} of {len(lines)} lines",
+        file=sys.stderr,
+        flush=True,
+    )
     return "\n".join(sampled)
 
 
@@ -483,6 +494,10 @@ def _split_prompt_for_cache(prompt: str, transcript_text: str) -> tuple[str, str
     return transcript_text, prompt[: -len(marker)]
 
 
+FULL_PROMPT_CHAR_BUDGET = 400000
+CANDIDATE_OVERSAMPLE = 2
+
+
 def _build_transcript_text(segments: list[dict]) -> str:
     """Serialize transcript segments into the prompt-friendly text format."""
     lines = []
@@ -505,22 +520,15 @@ def _segments_duration_seconds(segments: list[dict]) -> float:
 
 def _should_bucket_initial_selection(segments: list[dict]) -> bool:
     """
-    Use bucketed AI search for long or dense transcripts.
+    Bucket the search only when the transcript text is too big for one prompt.
 
-    This keeps initial clip discovery from spending many minutes on a single
-    whole-episode prompt for long podcasts.
+    A single prompt lets the model compare moments across the whole episode,
+    so buckets are the fallback for transcripts past FULL_PROMPT_CHAR_BUDGET.
     """
     if not segments:
         return False
 
-    duration_seconds = _segments_duration_seconds(segments)
-    transcript_chars = sum(len(str(seg.get("text", ""))) for seg in segments)
-
-    return bool(
-        duration_seconds >= 45 * 60
-        or len(segments) >= 180
-        or transcript_chars >= 18000
-    )
+    return len(_build_transcript_text(segments)) > FULL_PROMPT_CHAR_BUDGET
 
 
 def _dedupe_clips_by_range(clips: list[dict]) -> list[dict]:
@@ -898,7 +906,7 @@ def suggest_with_claude(
             keep_segments = [{"start": start_sec, "end": end_sec}]
 
         kept_duration = sum(seg["end"] - seg["start"] for seg in keep_segments)
-        if not bounds.keeps(kept_duration):
+        if not bounds.keeps_with_slack(kept_duration):
             continue
 
         clip_start = keep_segments[0]["start"] if keep_segments else start_sec
@@ -959,15 +967,17 @@ def suggest_initial_with_claude(
     """
     Initial clip discovery entry point.
 
-    For long podcasts, search transcript buckets first so the AI can return
-    quickly and cover the full timeline instead of timing out on one giant
-    prompt.
+    The whole transcript goes in one prompt when it fits FULL_PROMPT_CHAR_BUDGET,
+    and the model is asked for twice as many candidates as needed so the final
+    cut ranks them against each other. Past the budget, every timeline bucket
+    is asked for the same number of candidates and one global ranking picks the
+    winners.
     """
     exclude_clips = exclude_clips or []
     if not _should_bucket_initial_selection(segments):
-        return suggest_with_claude(
+        candidates = suggest_with_claude(
             segments=segments,
-            top_n=top_n,
+            top_n=top_n * CANDIDATE_OVERSAMPLE,
             exclude_clips=exclude_clips,
             progress_callback=progress_callback,
             error_sink=error_sink,
@@ -975,6 +985,7 @@ def suggest_initial_with_claude(
             reaction_times=reaction_times,
             bounds=bounds,
         )
+        return _select_top_by_score(candidates, top_n) if candidates else None
 
     start_bound = float(segments[0].get("start", 0))
     end_bound = float(segments[-1].get("end", segments[-1].get("start", 0)))
@@ -1013,7 +1024,7 @@ def suggest_initial_with_claude(
         progress_callback(0, f"Long episode detected: searching {len(buckets)} timeline buckets...")
 
     aggregated: list[dict] = []
-    per_bucket_top_n = max(2, math.ceil(top_n / max(1, len(buckets))))
+    per_bucket_top_n = max(2, top_n)
 
     for idx, bucket in enumerate(buckets):
         bucket_label = (

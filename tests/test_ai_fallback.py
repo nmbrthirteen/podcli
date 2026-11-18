@@ -178,7 +178,7 @@ class AIFallbackTests(unittest.TestCase):
                 "start": start,
                 "end": start + 45.0,
                 "speaker": "SPEAKER_00",
-                "text": f"Segment {i} with enough text to count as a normal transcript block.",
+                "text": f"Segment {i} " + "filler " * 3000,
             })
 
         calls = []
@@ -211,6 +211,120 @@ class AIFallbackTests(unittest.TestCase):
         self.assertTrue(all(call["timeout"] == 90 for call in calls[:4]))
         self.assertTrue(all(call["end"] - call["start"] < 2500 for call in calls[:4]))
         self.assertGreaterEqual(calls[1]["exclude_len"], 1)
+
+    def test_a_transcript_that_fits_one_prompt_is_read_whole_and_ranked_down(self):
+        segments = []
+        for i in range(20):
+            start = float(i * 330)
+            segments.append({
+                "start": start,
+                "end": start + 45.0,
+                "speaker": "SPEAKER_00",
+                "text": f"Segment {i} with enough text to count as a normal transcript block.",
+            })
+        calls = []
+        scores = [3.0, 9.0, 5.0, 8.0, 1.0, 7.0]
+
+        def fake_suggest(*, segments, top_n, **kw):
+            calls.append({"top_n": top_n, "segments": len(segments)})
+            return [
+                {
+                    "title": f"Clip {i}",
+                    "start_second": 100.0 * i,
+                    "end_second": 100.0 * i + 30.0,
+                    "segments": [{"start": 100.0 * i, "end": 100.0 * i + 30.0}],
+                    "score": score,
+                }
+                for i, score in enumerate(scores)
+            ]
+
+        with mock.patch.object(cs, "suggest_with_claude", side_effect=fake_suggest):
+            clips = cs.suggest_initial_with_claude(segments=segments, top_n=3)
+
+        self.assertEqual(calls, [{"top_n": 6, "segments": 20}])
+        self.assertEqual([c["title"] for c in clips], ["Clip 1", "Clip 3", "Clip 5"])
+        self.assertEqual([c["score"] for c in clips], [9.0, 8.0, 7.0])
+
+    def test_a_failed_single_prompt_search_returns_none(self):
+        segments = [{"start": 0.0, "end": 40.0, "speaker": "SPEAKER_00", "text": "Short."}]
+
+        with mock.patch.object(cs, "suggest_with_claude", return_value=None) as fake:
+            clips = cs.suggest_initial_with_claude(segments=segments, top_n=3)
+
+        self.assertIsNone(clips)
+        self.assertEqual(fake.call_args.kwargs["top_n"], 6)
+
+    def test_every_bucket_is_asked_for_the_same_count_and_one_ranking_picks_winners(self):
+        segments = []
+        for i in range(20):
+            start = float(i * 330)
+            segments.append({
+                "start": start,
+                "end": start + 45.0,
+                "speaker": "SPEAKER_00",
+                "text": f"Segment {i} " + "filler " * 3000,
+            })
+        calls = []
+
+        def fake_suggest(*, segments, top_n, **kw):
+            first_start = segments[0]["start"]
+            calls.append({"start": first_start, "top_n": top_n})
+            strong = first_start == 0.0
+            return [
+                {
+                    "title": f"Clip {first_start}-{k}",
+                    "start_second": first_start + 40.0 * k,
+                    "end_second": first_start + 40.0 * k + 28.0,
+                    "segments": [{"start": first_start + 40.0 * k, "end": first_start + 40.0 * k + 28.0}],
+                    "score": (90.0 - k) if strong else (10.0 - k),
+                }
+                for k in range(top_n)
+            ]
+
+        with mock.patch.object(cs, "suggest_with_claude", side_effect=fake_suggest):
+            clips = cs.suggest_initial_with_claude(segments=segments, top_n=3)
+
+        self.assertEqual(len(calls), 5)
+        self.assertEqual({call["top_n"] for call in calls}, {3})
+        self.assertEqual([c["title"] for c in clips], ["Clip 0.0-0", "Clip 0.0-1", "Clip 0.0-2"])
+        self.assertEqual([c["score"] for c in clips], [90.0, 89.0, 88.0])
+
+    def test_suggest_with_claude_allows_slack_on_both_ends_of_the_format_bounds(self):
+        segments = [
+            {"start": 0.0, "end": 12.0, "speaker": "SPEAKER_00", "text": "Warmup context."},
+            {"start": 12.0, "end": 40.0, "speaker": "SPEAKER_00", "text": "The best grid connection."},
+        ]
+
+        def clip(title, start, length):
+            return {
+                "title": title,
+                "start_second": start,
+                "end_second": start + length,
+                "segments": [{"start": start, "end": start + length}],
+                "content_type": "hot_take",
+                "scores": {"standalone": 5, "hook": 5, "relevance": 4, "quotability": 4},
+                "quote": title,
+                "why": "Strong.",
+            }
+
+        payload = json.dumps({"clips": [
+            clip("Fifty seconds", 100.0, 50.0),
+            clip("Fifty three seconds", 200.0, 53.0),
+            clip("Eighteen seconds", 300.0, 18.0),
+            clip("Sixteen seconds", 400.0, 16.0),
+        ]})
+
+        with mock.patch.object(
+            ap, "_chain", return_value=[("cli", "/tmp/claude", "claude")],
+        ), mock.patch.object(
+            ai,
+            "_run_ai_command",
+            return_value=subprocess.CompletedProcess(args=["claude"], returncode=0, stdout=payload, stderr=""),
+        ):
+            clips = cs.suggest_with_claude(segments=segments, top_n=10)
+
+        self.assertEqual([c["title"] for c in clips], ["Fifty seconds", "Eighteen seconds"])
+        self.assertEqual([c["duration"] for c in clips], [50, 18])
 
     def test_suggest_with_claude_reports_actual_timeout_limit(self):
         segments = [

@@ -1878,7 +1878,7 @@ def build_preview(session: MulticamSession, progress_callback: ProgressCallback 
     return latest
 
 
-def transcript(session: MulticamSession, *, model_size: str = "base", engine: Optional[str] = None,
+def transcript(session: MulticamSession, *, model_size: str = "small", engine: Optional[str] = None,
                language: Optional[str] = None, progress_callback: ProgressCallback = None) -> dict:
     """Words on the timeline, each credited to the person who said it.
 

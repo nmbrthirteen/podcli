@@ -15,7 +15,7 @@ const deps: TranscribeDeps = {
     getPackedMarkdown: cacheGetPackedMock,
     getFileHashForEngine: cacheGetHashForEngineMock,
   },
-  resolveEngine: async () => "whispercpp",
+  resolveEngine: async () => ({ engine: "whispercpp", model: "small" }),
 };
 
 describe("handleTranscribe, sample mode", () => {
@@ -108,5 +108,56 @@ describe("handleTranscribe, sample mode", () => {
 
     expect(cacheGetMock).toHaveBeenCalled();
     expect(cacheSetMock).toHaveBeenCalled();
+  });
+
+  it("keys the cache by the model the backend says it will run, not the request default", async () => {
+    cacheGetMock.mockResolvedValue(null);
+    executeMock.mockResolvedValue({
+      data: { transcript: "hi", segments: [], words: [], duration: 400, language: "en", engine: "whispercpp" },
+    });
+    cacheGetPackedMock.mockResolvedValue("# packed");
+
+    const baseOnlyDeps: TranscribeDeps = {
+      ...deps,
+      resolveEngine: async () => ({ engine: "whispercpp", model: "base" }),
+    };
+
+    await handleTranscribe({ file_path: "/video.mp4" }, baseOnlyDeps);
+
+    expect(cacheGetMock).toHaveBeenCalledWith("/video.mp4", {
+      engine: "whispercpp",
+      model: "base",
+      language: undefined,
+    });
+    expect(executeMock).toHaveBeenCalledWith("transcribe", expect.objectContaining({ model_size: "small" }));
+    expect(cacheSetMock).toHaveBeenCalledWith("/video.mp4", expect.anything(), {
+      engine: "whispercpp",
+      model: "base",
+      language: undefined,
+    });
+  });
+
+  it("caches under the model the transcript reports it ran with", async () => {
+    cacheGetMock.mockResolvedValue(null);
+    executeMock.mockResolvedValue({
+      data: {
+        transcript: "hi",
+        segments: [],
+        words: [],
+        duration: 400,
+        language: "en",
+        engine: "whispercpp",
+        model_size: "base",
+      },
+    });
+    cacheGetPackedMock.mockResolvedValue("# packed");
+
+    await handleTranscribe({ file_path: "/video.mp4" }, deps);
+
+    expect(cacheSetMock).toHaveBeenCalledWith("/video.mp4", expect.anything(), {
+      engine: "whispercpp",
+      model: "base",
+      language: undefined,
+    });
   });
 });

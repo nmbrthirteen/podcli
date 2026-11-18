@@ -8,7 +8,8 @@ import type { TaskExecutor } from "./python-executor.js";
  * request (e.g. undefined, meaning "whisper-py unless this install can't run
  * it") instead of what transcribe_file resolves to always misses on a native
  * install, because the write afterward lands under "whispercpp", the key
- * the read never looked at.
+ * the read never looked at. The model is resolved the same way: an install
+ * without the small whisper.cpp model runs on base, and keys the cache so.
  */
 /**
  * Whether the resolved engine can ever produce speaker labels. whisper.cpp
@@ -22,22 +23,30 @@ export function engineCanDiarize(engine: string | undefined): boolean {
   return engine !== "whispercpp" && engine !== "omnilingual";
 }
 
-export async function resolveTranscribeEngine(
+export interface ResolvedTranscribe {
+  engine: string;
+  model: string;
+}
+
+export async function resolveTranscribeInfo(
   executor: TaskExecutor,
   engine: string | undefined,
   modelSize: string
-): Promise<string> {
+): Promise<ResolvedTranscribe> {
   try {
-    const result = await executor.execute<{ engine: string }>("resolve_transcribe_engine", {
-      engine,
-      model_size: modelSize,
-    });
+    const result = await executor.execute<{ engine: string; model_size?: string }>(
+      "resolve_transcribe_engine",
+      { engine, model_size: modelSize }
+    );
 
-    return result.data?.engine ?? engine ?? "whisper-py";
+    return {
+      engine: result.data?.engine ?? engine ?? "whisper-py",
+      model: result.data?.model_size ?? modelSize,
+    };
   } catch {
     // Resolution is a best-effort cache-key optimization; a failure here
     // should fall through to a normal (possibly-missed) cache lookup rather
     // than block transcription.
-    return engine ?? "whisper-py";
+    return { engine: engine ?? "whisper-py", model: modelSize };
   }
 }

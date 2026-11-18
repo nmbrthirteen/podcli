@@ -232,7 +232,7 @@ func runEngine(args []string) int {
 	if !helpOrVersion {
 		switch transcribeEngine(args) {
 		case "whispercpp":
-			model, err := provision.EnsureModel(transcribeModel(args))
+			model, err := ensureModelWithFallback(transcribeModel(args), provision.EnsureModel)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "podcli: provisioning model:", err)
 				return 1
@@ -282,6 +282,19 @@ func hasFlag(args []string, names ...string) bool {
 	return false
 }
 
+func ensureModelWithFallback(size string, ensure func(string) (string, error)) (string, error) {
+	path, err := ensure(size)
+	if err == nil || size != provision.DefaultModelSize {
+		return path, err
+	}
+	fallback := provision.ModelPath(provision.FallbackModelSize)
+	if _, statErr := os.Stat(fallback); statErr != nil {
+		return "", err
+	}
+	fmt.Fprintf(os.Stderr, "podcli: model %q unavailable (%v), using %q instead\n", size, err, provision.FallbackModelSize)
+	return fallback, nil
+}
+
 func transcribeModel(args []string) string {
 	fast := false
 	for _, arg := range args {
@@ -291,7 +304,7 @@ func transcribeModel(args []string) string {
 		}
 	}
 	if !fast {
-		return "base"
+		return provision.DefaultModelSize
 	}
 	// tiny.en is English-only; unset language runs auto-detection, which
 	// needs the multilingual tiny model same as any non-English request.
@@ -374,7 +387,7 @@ func transcribeEngine(args []string) string {
 }
 
 func setup(args []string) int {
-	size := "base"
+	size := provision.DefaultModelSize
 	vad := false
 	speakers := false
 	refresh := false
@@ -1206,7 +1219,7 @@ Launcher commands:
   version              Print version
   update               Check for and apply a newer release
   uninstall            Remove podcli app files (keeps user data unless --purge)
-  setup [--model base] [--vad] [--speakers]
+  setup [--model small] [--vad] [--speakers]
                        Provision runtimes + models (--speakers adds openai-whisper, pyannote, torch, ~2GB)
   setup --refresh      Re-provision runtimes for this launcher version, skipping models
   mcp                  Run the MCP server (stdio) for Claude/Codex

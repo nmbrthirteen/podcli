@@ -73,6 +73,7 @@ export interface TranscriptResult {
   speakers: SpeakerSummary;
   speaker_segments: SpeakerSegment[];
   engine?: string;
+  model_size?: string;
   // Present only for a sample-mode transcription (start_seconds/duration_seconds):
   // complete is always false, and timestamps are relative to the sample window,
   // offset from the source by sample_offset_seconds.
