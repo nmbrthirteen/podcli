@@ -50,7 +50,7 @@ import { playbackDuration, validateHook } from "../utils/clip-hook.js";
 import { hookSchema } from "../handlers/suggest-clips.handler.js";
 import { needsFrame, thumbnailRenderArgs } from "../utils/thumbnail-layout.js";
 import { parseThumbnailRender } from "../utils/thumbnail-render-output.js";
-import { advanceProgress, tagSubmittedClip, tagSubmittedClips } from "../utils/clip-results.js";
+import { advanceProgress, summarizeBatchOutcome, tagSubmittedClip, tagSubmittedClips } from "../utils/clip-results.js";
 import { DEMO_ASSETS_DIR } from "./demo-fixtures.js";
 import { registerConfigIntegrationRoutes } from "../handlers/integrations.routes.js";
 import { childLogger } from "../utils/logger.js";
@@ -1811,9 +1811,11 @@ app.post("/api/batch-clips", async (req, res) => {
     )
     .then(async (result) => {
       const data = tagSubmittedClips(result.data, enrichedClips);
-      job.status = "done";
+      const outcome = summarizeBatchOutcome(data, "Batch complete!");
+      job.status = outcome.status;
       job.progress = 100;
-      job.message = "Batch complete!";
+      job.message = outcome.message;
+      job.error = outcome.error;
       job.result = data;
       // Persist here too: the studio tab may be closed (an MCP-driven
       // export), and it only stores results when it hears job-complete.
@@ -1828,8 +1830,13 @@ app.post("/api/batch-clips", async (req, res) => {
         });
       }
 
-      setExportState("done", null);
-      broadcastSSE("job-complete", { jobId, result: data });
+      if (outcome.status === "error") {
+        setExportState("review", null);
+        broadcastSSE("job-error", { jobId, error: outcome.error, result: data });
+      } else {
+        setExportState("done", null);
+        broadcastSSE("job-complete", { jobId, result: data });
+      }
     })
     .catch((err) => {
       job.status = "error";
@@ -5750,9 +5757,11 @@ app.post("/api/mcp/export", async (req, res) => {
     )
     .then(async (result) => {
       const data = tagSubmittedClips(result.data, styledClips);
-      job.status = "done";
+      const outcome = summarizeBatchOutcome(data, "Export complete!");
+      job.status = outcome.status;
       job.progress = 100;
-      job.message = "Export complete!";
+      job.message = outcome.message;
+      job.error = outcome.error;
       job.result = data;
       uiState.results = data?.results ?? [];
 
@@ -5765,8 +5774,13 @@ app.post("/api/mcp/export", async (req, res) => {
         });
       }
 
-      setExportState("done", null);
-      broadcastSSE("job-complete", { jobId, result: data });
+      if (outcome.status === "error") {
+        setExportState("review", null);
+        broadcastSSE("job-error", { jobId, error: outcome.error, result: data });
+      } else {
+        setExportState("done", null);
+        broadcastSSE("job-complete", { jobId, result: data });
+      }
     })
     .catch((err) => {
       job.status = "error";

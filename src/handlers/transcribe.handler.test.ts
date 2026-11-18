@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { handleTranscribe, type TranscribeDeps } from "./transcribe.handler.js";
+import { handleJobStatus, handleTranscribe, type TranscribeDeps } from "./transcribe.handler.js";
 
 const executeMock = vi.fn();
 const cacheGetMock = vi.fn();
@@ -108,5 +108,34 @@ describe("handleTranscribe, sample mode", () => {
 
     expect(cacheGetMock).toHaveBeenCalled();
     expect(cacheSetMock).toHaveBeenCalled();
+  });
+});
+
+describe("handleJobStatus, web server jobs", () => {
+  it("passes the job's result through so output paths and per-clip errors reach the caller", async () => {
+    const result = {
+      total_clips: 2,
+      successful_clips: 1,
+      results: [
+        { clip_index: 0, status: "success", output_path: "/out/a.mp4" },
+        { clip_index: 1, status: "error", error: "Remotion caption render failed" },
+      ],
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: "done", progress: 100, message: "1 of 2 clips rendered.", result })),
+      ),
+    );
+
+    try {
+      const parsed = JSON.parse(await handleJobStatus({ job_id: "job-1", wait_seconds: 0 }));
+
+      expect(parsed.done).toBe(true);
+      expect(parsed.result).toEqual(result);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

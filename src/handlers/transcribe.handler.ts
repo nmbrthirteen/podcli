@@ -433,12 +433,15 @@ export async function handleJobStatus(input: {
           progress: job.progress,
           message: job.message,
           done: terminal,
+          // Renders list output paths and, for a batch, each clip's own error here;
+          // without it a failed clip is only visible through the web server's API.
+          result: job.result,
           error: job.error,
           next_step:
             job.status === "done"
-              ? "Job complete. For transcription: get_ui_state(include_transcript: true). For renders: clips are on disk. The result field lists paths."
+              ? "Job complete. For transcription: get_ui_state(include_transcript: true). For renders: the result field lists output paths; a batch's message names any clips that failed, and result.results[].error has each one's full error."
               : job.status === "error"
-              ? "Job failed: check the error. Retry the original start call if appropriate."
+              ? "Job failed: check the error (for a batch, result.results[].error has each clip's error). Fix the cause before retrying the original start call."
               : `Still running: call job_status("${input.job_id}", wait_seconds: 30) again and emit one terse progress line to the user between polls.`,
         });
       }
