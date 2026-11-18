@@ -89,7 +89,7 @@ def _transcribe(video: str, language: str | None, engine: str | None):
     label = "AssemblyAI" if is_assemblyai_engine(engine or os.environ.get("PODCLI_ENGINE", "")) else "Whisper"
     print(f"  [transcribe] running {label}...", flush=True)
     res = transcribe_file(
-        file_path=video, model_size="base", engine=engine, language=language,
+        file_path=video, model_size="small", engine=engine, language=language,
         enable_diarization=False,
         progress_callback=lambda p, m: print(f"    {p}% {m}", flush=True),
     )

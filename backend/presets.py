@@ -37,7 +37,7 @@ DEFAULT_PRESET = {
     "video_path": "",
     "transcript_path": "",
     "output_dir": "",
-    "whisper_model": "base",
+    "whisper_model": "small",
     "top_clips": 5,
     "max_clip_duration": MAX_CLIP_DURATION,
     "min_clip_duration": MIN_CLIP_DURATION,

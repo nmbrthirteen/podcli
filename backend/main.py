@@ -76,7 +76,7 @@ def handle_resolve_transcribe_engine(task_id: str, params: dict):
     emit_result(
         task_id,
         "success",
-        data=resolve_engine_info(params.get("engine"), params.get("model_size", "base")),
+        data=resolve_engine_info(params.get("engine"), params.get("model_size", "small")),
     )
 
 
@@ -89,7 +89,7 @@ def handle_transcribe(task_id: str, params: dict):
     emit_progress(task_id, "transcribing", 0, "Starting transcription...")
     file_path = params["file_path"]
     engine = params.get("engine")
-    model_size = params.get("model_size", "base")
+    model_size = params.get("model_size", "small")
     language = params.get("language")
     previous_engine = os.environ.get("PODCLI_ENGINE")
     previous_assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
@@ -122,7 +122,7 @@ def handle_transcribe(task_id: str, params: dict):
     try:
         result = transcribe_file(
             file_path=file_path,
-            model_size=params.get("model_size", "base"),
+            model_size=params.get("model_size", "small"),
             engine=engine,
             language=params.get("language"),
             enable_diarization=params.get("enable_diarization", True),
@@ -163,7 +163,7 @@ def handle_transcribe(task_id: str, params: dict):
             # Pulls energy data so the packed view includes peak moments for clip reasoning.
             try:
                 cache_hash = compute_cache_hash(file_path) + cache_key_suffix(
-                    engine=result.get("engine") or engine, model=model_size, language=language
+                    engine=result.get("engine") or engine, model=result.get("model_size") or model_size, language=language
                 )
                 packed_path, packed_md = write_packed(
                     result,
@@ -1150,7 +1150,7 @@ def handle_compare_engines(task_id: str, params: dict):
             start_seconds=params.get("start_seconds", 0.0) or 0.0,
             duration_seconds=params.get("duration_seconds", 120.0) or 120.0,
             window_seconds=params.get("window_seconds", 20.0) or 20.0,
-            model_size=params.get("model_size", "base"),
+            model_size=params.get("model_size", "small"),
             language=params.get("language"),
             output_dir=output_dir,
         )

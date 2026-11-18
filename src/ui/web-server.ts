@@ -37,7 +37,7 @@ import { v4 as uuidv4 } from "uuid";
 
 import { createExecutor, terminateProcessTree } from "../services/python-executor.js";
 import { needsDiarizationRetry, TranscriptCache } from "../services/transcript-cache.js";
-import { resolveTranscribeEngine, engineCanDiarize } from "../services/engine-resolve.js";
+import { resolveTranscribeInfo, engineCanDiarize } from "../services/engine-resolve.js";
 import { FileManager } from "../services/file-manager.js";
 import { AssetManager, assetTypeSchema, inferType, safeName } from "../services/asset-manager.js";
 import { ClipsHistory, reframeStateSchema } from "../services/clips-history.js";
@@ -1244,7 +1244,7 @@ app.post("/api/parse-transcript", async (req, res) => {
 app.post("/api/transcribe", async (req, res) => {
   const {
     file_path,
-    model_size = "base",
+    model_size = "small",
     engine,
     assemblyai_api_key,
     language,
@@ -1267,8 +1267,9 @@ app.post("/api/transcribe", async (req, res) => {
   // Resolve before reading the cache: an unset engine is written under
   // whatever transcribe_file actually ran (e.g. "whispercpp" on a native
   // install), so reading with the raw unset request always misses.
-  const resolvedEngine = await resolveTranscribeEngine(executor, engine, model_size);
-  const cacheKey = { engine: resolvedEngine, model: model_size, language };
+  const resolved = await resolveTranscribeInfo(executor, engine, model_size);
+  const resolvedEngine = resolved.engine;
+  const cacheKey = { engine: resolvedEngine, model: resolved.model, language };
 
   // A sample is a throwaway check on a slice of the file. Never serve or
   // populate the session/UI state from the main cache (keyed by, and
@@ -1371,7 +1372,7 @@ app.post("/api/transcribe", async (req, res) => {
 
         await cache.set(file_path, transcript, {
           engine: actualEngine,
-          model: model_size,
+          model: transcript.model_size ?? resolved.model,
           language,
         });
       } catch (err) {

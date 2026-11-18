@@ -444,7 +444,7 @@ export function createServer(): McpServer {
       model_size: z
         .enum(["tiny", "base", "small", "medium", "large"])
         .optional()
-        .default("base")
+        .default("small")
         .describe("Whisper model size"),
       engine: z
         .enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"])
@@ -561,7 +561,7 @@ export function createServer(): McpServer {
       model_size: z
         .enum(["tiny", "base", "small", "medium", "large"])
         .optional()
-        .default("base"),
+        .default("small"),
       language: z.string().optional(),
       engine: z.enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"]).optional(),
       enable_diarization: z.boolean().optional().default(true),
@@ -3259,7 +3259,7 @@ export function createServer(): McpServer {
       model_size: z
         .enum(["tiny", "base", "small", "medium", "large"])
         .optional()
-        .describe("Model size for engines that take one. Default: base."),
+        .describe("Model size for engines that take one. Default: small."),
       language: z.string().optional().describe("ISO language code. Leave empty for auto-detect."),
       output_dir: z
         .string()

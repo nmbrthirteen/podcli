@@ -51,7 +51,7 @@ export const compareEnginesToolDef = {
       model_size: {
         type: "string",
         enum: ["tiny", "base", "small", "medium", "large"],
-        description: "Model size for engines that take one. Default: base.",
+        description: "Model size for engines that take one. Default: small.",
       },
       language: {
         type: "string",

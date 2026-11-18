@@ -58,6 +58,9 @@ def _whispercpp_cli() -> Optional[str]:
 # builds); provisioning always fetches large-v3, so resolve the same way here.
 _WHISPERCPP_MODEL_ALIASES = {"large": "large-v3"}
 
+DEFAULT_MODEL_SIZE = "small"
+FALLBACK_MODEL_SIZE = "base"
+
 
 def _whispercpp_model(model_size: str) -> str:
     resolved = _WHISPERCPP_MODEL_ALIASES.get(model_size, model_size)
@@ -66,8 +69,20 @@ def _whispercpp_model(model_size: str) -> str:
     )
 
 
+def resolve_whispercpp_model_size(model_size: str) -> str:
+    if (
+        model_size == DEFAULT_MODEL_SIZE
+        and not os.path.exists(_whispercpp_model(DEFAULT_MODEL_SIZE))
+        and os.path.exists(_whispercpp_model(FALLBACK_MODEL_SIZE))
+    ):
+        return FALLBACK_MODEL_SIZE
+    return model_size
+
+
 def _whispercpp_ready(model_size: str) -> bool:
-    return _whispercpp_cli() is not None and os.path.exists(_whispercpp_model(model_size))
+    return _whispercpp_cli() is not None and os.path.exists(
+        _whispercpp_model(resolve_whispercpp_model_size(model_size))
+    )
 
 
 def _omnilingual_model() -> str:
@@ -124,6 +139,16 @@ def _default_whisper_threads() -> int:
 
 def _transcribe_with_whispercpp(file_path, model_size, language, progress_callback, wav_path=None):
     from services import transcription_whispercpp as wcpp
+
+    requested_size = model_size
+    model_size = resolve_whispercpp_model_size(model_size)
+    if model_size != requested_size:
+        print(
+            f"Whisper model '{requested_size}' is not installed, using '{model_size}' instead. "
+            f"Run `podcli setup --model {requested_size}` to download it.",
+            file=sys.stderr,
+            flush=True,
+        )
 
     if progress_callback:
         progress_callback(10, "Transcribing with whisper.cpp...")
@@ -684,7 +709,7 @@ def _resolve_whisper_py_fallback(requested: Optional[str], model_size: str, prob
         return False, None, e
 
 
-def resolve_engine_info(requested: Optional[str], model_size: str = "base") -> dict:
+def resolve_engine_info(requested: Optional[str], model_size: str = DEFAULT_MODEL_SIZE) -> dict:
     """Predict which engine transcribe_file will actually use, without doing
     any transcription work. Callers cache transcripts by engine; the cache
     key has to match what transcribe_file resolves to, not the raw request,
@@ -692,15 +717,19 @@ def resolve_engine_info(requested: Optional[str], model_size: str = "base") -> d
     """
     requested = requested if requested is not None else os.environ.get("PODCLI_ENGINE", "")
     engine = normalize_engine(requested)
+    if engine == "whispercpp":
+        return {"engine": engine, "model_size": resolve_whispercpp_model_size(model_size)}
     if engine != "whisper-py":
         return {"engine": engine, "model_size": model_size}
     fall_back, _model, _error = _resolve_whisper_py_fallback(requested, model_size, probe_model=False)
-    return {"engine": "whispercpp" if fall_back else "whisper-py", "model_size": model_size}
+    if fall_back:
+        return {"engine": "whispercpp", "model_size": resolve_whispercpp_model_size(model_size)}
+    return {"engine": "whisper-py", "model_size": model_size}
 
 
 def transcribe_file(
     file_path: str,
-    model_size: str = "base",
+    model_size: str = DEFAULT_MODEL_SIZE,
     engine: Optional[str] = None,
     language: Optional[str] = None,
     enable_diarization: bool = True,
@@ -786,7 +815,7 @@ def transcribe_file(
 
 def _transcribe_file_inner(
     file_path: str,
-    model_size: str = "base",
+    model_size: str = DEFAULT_MODEL_SIZE,
     engine: Optional[str] = None,
     language: Optional[str] = None,
     enable_diarization: bool = True,
@@ -844,6 +873,7 @@ def _transcribe_file_inner(
             file_path, model_size, language, progress_callback, wav_path=wav_path
         )
         base["engine"] = "whispercpp"
+        base["model_size"] = resolve_whispercpp_model_size(model_size)
         # whisper.cpp is the no-torch path: importing torch for diarization can
         # hard-crash native runtimes. Skip diarization, keep face analysis (OpenCV).
         # Never possible on this engine, see the omnilingual branch above.

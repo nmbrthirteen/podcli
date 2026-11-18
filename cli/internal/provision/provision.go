@@ -44,6 +44,11 @@ func whisperCppURL(file string) string {
 	return "https://huggingface.co/ggerganov/whisper.cpp/resolve/" + whisperCppRevision + "/" + file
 }
 
+const (
+	DefaultModelSize  = "small"
+	FallbackModelSize = "base"
+)
+
 var models = map[string]model{
 	"base": {
 		URL:    whisperCppURL("ggml-base.bin"),

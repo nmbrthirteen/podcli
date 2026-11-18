@@ -95,17 +95,28 @@ class ShouldBucketTests(unittest.TestCase):
         segments = [{"start": 0, "end": 10, "text": "short"}]
         self.assertFalse(cs._should_bucket_initial_selection(segments))
 
-    def test_long_duration_buckets(self):
-        # 50 minutes: over the 45 min threshold
-        segments = [{"start": 0, "end": 3000, "text": "x" * 100}]
+    def test_a_three_hour_conversation_that_fits_one_prompt_does_not_bucket(self):
+        segments = [
+            {"start": i * 5.4, "end": i * 5.4 + 5.0, "text": "a short spoken line here"}
+            for i in range(2000)
+        ]
+        self.assertGreater(segments[-1]["end"], 10000)
+        self.assertFalse(cs._should_bucket_initial_selection(segments))
+
+    def test_many_short_segments_do_not_bucket(self):
+        segments = [{"start": i, "end": i + 1, "text": "hi"} for i in range(5000)]
+        self.assertFalse(cs._should_bucket_initial_selection(segments))
+
+    def test_text_just_under_the_budget_does_not_bucket(self):
+        segments = [{"start": 0, "end": 60, "text": "x" * 399000}]
+        self.assertFalse(cs._should_bucket_initial_selection(segments))
+
+    def test_text_just_over_the_budget_buckets(self):
+        segments = [{"start": 0, "end": 60, "text": "x" * 401000}]
         self.assertTrue(cs._should_bucket_initial_selection(segments))
 
-    def test_many_segments_buckets(self):
-        segments = [{"start": i, "end": i + 1, "text": "hi"} for i in range(200)]
-        self.assertTrue(cs._should_bucket_initial_selection(segments))
-
-    def test_dense_text_buckets(self):
-        segments = [{"start": 0, "end": 60, "text": "x" * 20000}]
+    def test_the_budget_counts_the_prompt_text_not_just_the_words(self):
+        segments = [{"start": 0, "end": 1, "speaker": "SPEAKER_00", "text": "x" * 399990}]
         self.assertTrue(cs._should_bucket_initial_selection(segments))
 
     def test_empty_does_not_bucket(self):
@@ -418,6 +429,38 @@ class ClipBoundsTests(unittest.TestCase):
         self.assertFalse(b.keeps(19.9))
         self.assertFalse(b.keeps(45.1))
 
+    def test_slack_keeps_a_vertical_clip_a_little_over_the_max(self):
+        b = cs.ClipBounds.of("vertical")
+        self.assertTrue(b.keeps_with_slack(50))
+        self.assertTrue(b.keeps_with_slack(51.7))
+        self.assertFalse(b.keeps_with_slack(51.8))
+        self.assertFalse(b.keeps_with_slack(53))
+
+    def test_slack_keeps_a_vertical_clip_a_little_under_the_min(self):
+        b = cs.ClipBounds.of("vertical")
+        self.assertTrue(b.keeps_with_slack(17.1))
+        self.assertFalse(b.keeps_with_slack(16.9))
+        self.assertFalse(b.keeps_with_slack(10))
+
+    def test_slack_scales_with_the_format_bounds(self):
+        b = cs.ClipBounds.of("horizontal")
+        self.assertTrue(b.keeps_with_slack(340))
+        self.assertFalse(b.keeps_with_slack(346))
+        self.assertTrue(b.keeps_with_slack(52))
+        self.assertFalse(b.keeps_with_slack(50))
+
+    def test_slack_follows_an_explicit_override(self):
+        b = cs.ClipBounds.of("vertical", 30, 40)
+        self.assertTrue(b.keeps_with_slack(45.9))
+        self.assertFalse(b.keeps_with_slack(46.1))
+        self.assertTrue(b.keeps_with_slack(25.6))
+        self.assertFalse(b.keeps_with_slack(25.4))
+
+    def test_strict_keeps_is_unchanged_by_the_slack_check(self):
+        b = cs.ClipBounds.of("vertical")
+        self.assertFalse(b.keeps(50))
+        self.assertFalse(b.keeps(17.1))
+
     def test_a_horizontal_length_survives_the_filter_that_used_to_drop_it(self):
         self.assertFalse(cs.ClipBounds.of("vertical").keeps(120))
         self.assertTrue(cs.ClipBounds.of("horizontal").keeps(120))
@@ -495,6 +538,27 @@ class CodexTranscriptTests(unittest.TestCase):
         self.assertIn("line 0", out)
         # The last line is the half a tail truncation would have thrown away.
         self.assertIn(f"line {3999}", out)
+
+    def test_sampling_logs_how_many_lines_it_dropped(self):
+        import io
+        from contextlib import redirect_stderr
+
+        text = self._transcript(4000)
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            out = cs._sample_transcript(text)
+        kept = len(out.split("\n"))
+        self.assertIn(f"dropped {4000 - kept} of 4000 lines", buf.getvalue())
+        self.assertGreater(4000 - kept, 0)
+
+    def test_an_untouched_transcript_logs_nothing(self):
+        import io
+        from contextlib import redirect_stderr
+
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            cs._sample_transcript(self._transcript(10))
+        self.assertEqual(buf.getvalue(), "")
 
     def test_only_codex_is_adapted(self):
         text = self._transcript()

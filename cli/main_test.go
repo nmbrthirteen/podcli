@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"podcli/internal/provision"
 )
 
 func TestIsMetaFlag(t *testing.T) {
@@ -60,8 +63,8 @@ func TestHasFlag(t *testing.T) {
 }
 
 func TestTranscribeModel(t *testing.T) {
-	if got := transcribeModel([]string{"process", "episode.mp4"}); got != "base" {
-		t.Fatalf("default model = %q, want base", got)
+	if got := transcribeModel([]string{"process", "episode.mp4"}); got != "small" {
+		t.Fatalf("default model = %q, want small", got)
 	}
 	if got := transcribeModel([]string{"process", "episode.mp4", "--fast"}); got != "tiny" {
 		t.Fatalf("fast model with unset language = %q, want tiny (multilingual, no language conditioning)", got)
@@ -74,6 +77,63 @@ func TestTranscribeModel(t *testing.T) {
 	}
 	if got := transcribeModel([]string{"process", "episode.mp4", "--fast", "--language=ka"}); got != "tiny" {
 		t.Fatalf("fast non-english model (= form) = %q, want tiny", got)
+	}
+}
+
+func TestEnsureModelWithFallbackUsesBaseWhenSmallFails(t *testing.T) {
+	home := t.TempDir()
+	old, hadOld := os.LookupEnv("PODCLI_HOME")
+	os.Setenv("PODCLI_HOME", home)
+	t.Cleanup(func() {
+		if hadOld {
+			os.Setenv("PODCLI_HOME", old)
+		} else {
+			os.Unsetenv("PODCLI_HOME")
+		}
+	})
+	basePath := provision.ModelPath("base")
+	if err := os.MkdirAll(filepath.Dir(basePath), 0o755); err != nil {
+		t.Fatalf("mkdir models dir: %v", err)
+	}
+	if err := os.WriteFile(basePath, []byte("base bytes"), 0o644); err != nil {
+		t.Fatalf("seed base model: %v", err)
+	}
+	failing := func(string) (string, error) { return "", errors.New("offline") }
+
+	got, err := ensureModelWithFallback("small", failing)
+	if err != nil {
+		t.Fatalf("expected a fallback to base, got error %v", err)
+	}
+	if got != basePath {
+		t.Fatalf("fallback path = %q, want %q", got, basePath)
+	}
+	if _, err := ensureModelWithFallback("medium", failing); err == nil {
+		t.Fatal("a non-default model must not fall back to base")
+	}
+}
+
+func TestEnsureModelWithFallbackFailsWhenBaseIsMissing(t *testing.T) {
+	home := t.TempDir()
+	old, hadOld := os.LookupEnv("PODCLI_HOME")
+	os.Setenv("PODCLI_HOME", home)
+	t.Cleanup(func() {
+		if hadOld {
+			os.Setenv("PODCLI_HOME", old)
+		} else {
+			os.Unsetenv("PODCLI_HOME")
+		}
+	})
+	failing := func(string) (string, error) { return "", errors.New("offline") }
+	if _, err := ensureModelWithFallback("small", failing); err == nil {
+		t.Fatal("expected the original error when base is not installed")
+	}
+}
+
+func TestEnsureModelWithFallbackPassesThroughSuccess(t *testing.T) {
+	ok := func(size string) (string, error) { return "/models/ggml-" + size + ".bin", nil }
+	got, err := ensureModelWithFallback("small", ok)
+	if err != nil || got != "/models/ggml-small.bin" {
+		t.Fatalf("got %q, %v", got, err)
 	}
 }
 
