@@ -181,9 +181,11 @@ class AgentOutputHelpersTests(unittest.TestCase):
             clips=[{"title": "A", "start_second": 1, "end_second": 12, "score": 9}],
             results=[{"output_path": "/out/a.mp4", "duration": 11, "status": "ok"}],
             interrupted=False,
+            transcript={"engine": "whispercpp", "model": "base"},
         )
         payload = json.loads(buf.getvalue())
         self.assertTrue(payload["ok"])
+        self.assertEqual(payload["transcript"], {"engine": "whispercpp", "model": "base"})
         self.assertEqual(payload["quality"], "high")
         self.assertEqual(payload["clips"][0]["title"], "A")
         self.assertEqual(payload["clips"][0]["path"], "/out/a.mp4")
