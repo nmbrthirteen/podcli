@@ -13,7 +13,9 @@ import hashlib
 import http.client
 import importlib.util
 import os
+import platform
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -101,7 +103,23 @@ def _whisper_threads() -> int:
         n = int(raw)
     except ValueError:
         n = 0
-    return n if n > 0 else 4
+    return n if n > 0 else _default_whisper_threads()
+
+
+def _default_whisper_threads() -> int:
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        try:
+            out = subprocess.run(
+                ["sysctl", "-n", "hw.perflevel0.physicalcpu"],
+                capture_output=True, text=True, timeout=5, check=True,
+            ).stdout.strip()
+            perf = int(out)
+            if perf > 0:
+                return perf
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+        return os.cpu_count() or 4
+    return 4
 
 
 def _transcribe_with_whispercpp(file_path, model_size, language, progress_callback, wav_path=None):

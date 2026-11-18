@@ -536,6 +536,7 @@ def handle_manage_reel(task_id: str, params: dict):
     try:
         if action == "new":
             from services.transcript_packer import compute_cache_hash, load_cached_transcript_for_video
+            import cli as cli_mod
             video_paths = params.get("video_paths") or []
             # Auto lets the saliency threshold decide how many moments clear the bar,
             # capped for sanity, with a wide length range so windows aren't constrained.
@@ -558,7 +559,7 @@ def handle_manage_reel(task_id: str, params: dict):
                 video = params["video_path"]
                 sid = compute_cache_hash(video)
                 out_dir = params.get("out_dir") or os.path.join(os.getcwd(), f"reel_{sid[:8]}")
-                cached = load_cached_transcript_for_video(video)
+                cached = load_cached_transcript_for_video(video, engine=cli_mod._transcript_cache_engine())
                 words = cached.get("words") if cached else None
                 session = seed_session(sid, video, out_dir, words=words, **common)
             reel = build_reel(session, progress_callback=lambda p, m: emit_progress(task_id, "building", p, m))
@@ -819,7 +820,7 @@ def handle_rank_candidates(task_id: str, params: dict):
         if not video_path:
             emit_result(task_id, "error", error="video_path or segments is required")
             return
-        cached = load_cached_transcript_for_video(video_path)
+        cached = load_cached_transcript_for_video(video_path, engine=cli_mod._transcript_cache_engine())
         if not cached:
             emit_result(
                 task_id,

@@ -79,29 +79,29 @@ class FindCachedTranscriptPathTests(unittest.TestCase):
     def test_prefers_the_engine_only_key_when_present(self):
         self._touch("abc123.json")
         self._touch("abc123-msmall-lka.json")
-        found = tp.find_cached_transcript_path("abc123", engine=None)
+        found = tp.find_cached_transcript_path("abc123", engine="whisper-py")
         self.assertEqual(os.path.basename(found), "abc123.json")
 
     def test_falls_back_to_the_most_recently_modified_match(self):
         self._touch("abc123-msmall.json", mtime=1000)
         self._touch("abc123-mmedium-lka.json", mtime=2000)
-        found = tp.find_cached_transcript_path("abc123", engine=None)
+        found = tp.find_cached_transcript_path("abc123", engine="whisper-py")
         self.assertEqual(os.path.basename(found), "abc123-mmedium-lka.json")
 
     def test_never_crosses_into_a_different_engines_files(self):
         # Only a whispercpp entry exists; a whisper-py (engine-only) lookup
         # must not adopt it.
         self._touch("abc123-whispercpp.json")
-        found = tp.find_cached_transcript_path("abc123", engine=None)
+        found = tp.find_cached_transcript_path("abc123", engine="whisper-py")
         self.assertIsNone(found)
 
     def test_matches_only_this_hash_not_a_hash_with_extra_suffix(self):
         self._touch("abc123extra-msmall.json")
-        found = tp.find_cached_transcript_path("abc123", engine=None)
+        found = tp.find_cached_transcript_path("abc123", engine="whisper-py")
         self.assertIsNone(found)
 
     def test_no_matches_returns_none(self):
-        self.assertIsNone(tp.find_cached_transcript_path("nope", engine=None))
+        self.assertIsNone(tp.find_cached_transcript_path("nope", engine="whisper-py"))
 
 
 class LoadSaveCachedTranscriptModelLanguageTests(unittest.TestCase):

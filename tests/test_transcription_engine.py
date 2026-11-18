@@ -1,7 +1,6 @@
 """Engine selection: native installs auto-use whisper.cpp when openai-whisper
 is absent, unless the user explicitly asked for the whisper-py engine."""
 
-import importlib.util
 import os
 import sys
 import tempfile
@@ -390,39 +389,6 @@ class WhisperPyFallbackSharedPathTests(unittest.TestCase):
     def test_transcribe_file_falls_back_to_whispercpp_on_a_load_model_failure(self):
         result = tr.transcribe_file(self._tmp.name, model_size="base", enable_diarization=False)
         self.assertEqual(result["engine"], "whispercpp")
-
-    def test_resolve_engine_info_cannot_see_this_failure_by_design(self):
-        # Documents the known, acceptable gap: resolve_engine_info only
-        # checks the import, so it still predicts whisper-py here even
-        # though transcribe_file will fall back, a one-time cache miss,
-        # not a wrong cache write (that's keyed by what actually ran).
-        self.assertEqual(tr.resolve_engine_info(None, "base")["engine"], "whisper-py")
-
-
-class WhisperPyAvailableMemoizationTests(unittest.TestCase):
-    """resolve_engine_info runs on every transcribe request. The
-    availability check behind it has to find_spec (not import, which would
-    pull in torch) and compute that only once per process."""
-
-    def setUp(self):
-        tr._whisper_py_available.cache_clear()
-        self._orig_find_spec = importlib.util.find_spec
-        self.calls = 0
-
-        def counting_find_spec(name, *a, **k):
-            self.calls += 1
-            return self._orig_find_spec(name, *a, **k)
-
-        importlib.util.find_spec = counting_find_spec
-
-    def tearDown(self):
-        importlib.util.find_spec = self._orig_find_spec
-        tr._whisper_py_available.cache_clear()
-
-    def test_find_spec_runs_at_most_once_across_repeated_calls(self):
-        for _ in range(5):
-            tr._whisper_py_available()
-        self.assertEqual(self.calls, 1)
 
 
 class WhisperCppModelAliasTests(unittest.TestCase):

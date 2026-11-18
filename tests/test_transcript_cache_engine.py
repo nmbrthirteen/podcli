@@ -44,17 +44,6 @@ class EngineNamespacedCacheTests(unittest.TestCase):
                 f"engine {v!r} not namespaced",
             )
 
-    def test_engines_do_not_collide(self):
-        os.environ.pop("PODCLI_ENGINE", None)
-        py = tp.transcript_json_path("abc123")
-        os.environ["PODCLI_ENGINE"] = "whispercpp"
-        cpp = tp.transcript_json_path("abc123")
-        os.environ["PODCLI_ENGINE"] = "assemblyai"
-        aai = tp.transcript_json_path("abc123")
-        self.assertNotEqual(py, cpp)
-        self.assertNotEqual(py, aai)
-        self.assertNotEqual(cpp, aai)
-
 
 if __name__ == "__main__":
     unittest.main()

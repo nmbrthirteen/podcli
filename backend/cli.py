@@ -182,12 +182,19 @@ def _json_object_arg(raw: str | None, name: str):
     return parsed
 
 
+def _transcript_cache_engine(model_size: str | None = None) -> str:
+    from presets import DEFAULT_PRESET
+    from services.transcription import resolve_engine_info
+
+    return resolve_engine_info(None, model_size or DEFAULT_PRESET["whisper_model"])["engine"]
+
+
 def _cached_transcript(video_path: str) -> dict:
     """The cached transcript for this video, or {} when there is none."""
     try:
         from services.transcript_packer import load_cached_transcript_for_video
 
-        return load_cached_transcript_for_video(video_path) or {}
+        return load_cached_transcript_for_video(video_path, engine=_transcript_cache_engine()) or {}
     except Exception:
         return {}
 
@@ -677,7 +684,7 @@ def cmd_reel(args):
         video = _clean_path(args.video)
         sid = compute_cache_hash(video)
         out_dir = args.output or os.path.join(os.getcwd(), f"reel_{sid[:8]}")
-        cached = load_cached_transcript_for_video(video)
+        cached = load_cached_transcript_for_video(video, engine=_transcript_cache_engine())
         words = cached.get("words") if cached else None
         print("  Detecting moments (one-time)...")
         session = seed_session(
@@ -1462,12 +1469,14 @@ def cmd_process(args):
         save_cached_transcript_for_video,
     )
 
+    cache_engine = _transcript_cache_engine(config.get("whisper_model", "base"))
+
     if skip_transcript:
         # Reuse an existing transcript so highlight boundaries snap to whole sentences;
         # only skip transcription outright when there is none (true no-dialogue footage).
         cached = load_cached_transcript_for_video(
             video_path,
-            engine=os.environ.get("PODCLI_ENGINE"),
+            engine=cache_engine,
             model=config.get("whisper_model", "base"),
             language=config.get("language"),
         )
@@ -1517,7 +1526,7 @@ def cmd_process(args):
         # different one that happens to share the file.
         cached = load_cached_transcript_for_video(
             video_path,
-            engine=os.environ.get("PODCLI_ENGINE"),
+            engine=cache_engine,
             model=config.get("whisper_model", "base"),
             language=config.get("language"),
         )
@@ -1589,13 +1598,10 @@ def cmd_process(args):
             segments = result["segments"]
             print(f"         Done: {len(segments)} segments, {len(words)} words")
 
-            # Save to cache for next run, under the same key the read above
-            # checked. result["engine"] is what actually ran, which can
-            # differ from the env var on a fallback (see transcribe_file).
             save_cached_transcript_for_video(
                 video_path,
                 result,
-                engine=result.get("engine") or os.environ.get("PODCLI_ENGINE"),
+                engine=cache_engine,
                 model=config.get("whisper_model", "base"),
                 language=config.get("language"),
             )
