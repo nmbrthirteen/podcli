@@ -9,7 +9,6 @@ import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND = os.path.join(ROOT, "backend")
-sys.path.insert(0, BACKEND)
 
 STAGE_RE = re.compile(r"\[([1-4])/4\]")
 STAGE_NAMES = {"1": "transcribe", "2": "audio", "3": "select", "4": "render"}
@@ -29,26 +28,6 @@ def stage_times(marks: list[tuple[str, float]], finished: float) -> dict[str, fl
         ended = marks[i + 1][1] if i + 1 < len(marks) else finished
         times[STAGE_NAMES[stage]] += ended - started
     return {k: round(v, 1) for k, v in times.items()}
-
-
-def transcript_info(video: str) -> tuple[str, str]:
-    from config.paths import paths
-    from services.transcript_packer import compute_cache_hash
-
-    cache_dir = paths["transcripts"]
-    cache_hash = compute_cache_hash(video)
-    try:
-        names = [n for n in os.listdir(cache_dir) if n.startswith(cache_hash) and n.endswith(".json")]
-    except FileNotFoundError:
-        return "", ""
-    if not names:
-        return "", ""
-    newest = max(names, key=lambda n: os.path.getmtime(os.path.join(cache_dir, n)))
-    with open(os.path.join(cache_dir, newest), encoding="utf-8") as f:
-        data = json.load(f)
-    model_match = re.search(r"-m([a-z0-9]+)", newest[len(cache_hash):])
-    model = data.get("model_size") or (model_match.group(1) if model_match else "base")
-    return data.get("engine") or "whisper-py", model
 
 
 def run_format(video: str, fmt: str, out_dir: str, top: int) -> tuple[dict, dict[str, float], float]:
@@ -89,12 +68,15 @@ def main() -> int:
         return 1
     os.makedirs(args.output_dir, exist_ok=True)
 
-    clip_rows, score_rows = [], []
+    clip_rows, score_rows, failed = [], [], []
     for fmt in [f.strip() for f in args.formats.split(",") if f.strip()]:
         fmt_dir = os.path.join(os.path.abspath(args.output_dir), fmt)
         payload, times, total = run_format(video, fmt, fmt_dir, args.top)
-        engine, model = transcript_info(video)
+        transcript = payload.get("transcript") or {}
         for clip in payload.get("clips", []):
+            if clip.get("status") != "ok" or not clip.get("path"):
+                failed.append(f"{fmt}-{clip.get('index')}: {clip.get('error') or 'no output file'}")
+                continue
             clip_id = f"{fmt}-{clip.get('index')}"
             clip_rows.append({
                 "clip_id": clip_id,
@@ -104,15 +86,15 @@ def main() -> int:
                 "duration": clip.get("output_duration") or clip.get("duration"),
                 "title": clip.get("title"),
                 "crop_strategy": clip.get("crop_strategy", ""),
-                "engine": engine,
-                "model": model,
+                "engine": transcript.get("engine", ""),
+                "model": transcript.get("model", ""),
                 "transcribe_s": times["transcribe"],
                 "audio_s": times["audio"],
                 "select_s": times["select"],
                 "render_s": times["render"],
                 "total_s": total,
             })
-            score_rows.append({"clip_id": clip_id, "file": clip.get("path", "")})
+            score_rows.append({"clip_id": clip_id, "file": clip["path"]})
 
     clips_csv = os.path.join(args.output_dir, "clips.csv")
     scores_csv = os.path.join(args.output_dir, "scores.csv")
@@ -124,8 +106,10 @@ def main() -> int:
         writer = csv.DictWriter(f, fieldnames=SCORE_FIELDS)
         writer.writeheader()
         writer.writerows(score_rows)
+    for line in failed:
+        print(f"Failed export, not scored: {line}", file=sys.stderr)
     print(f"{len(clip_rows)} clips. Wrote {clips_csv} and {scores_csv}")
-    return 0
+    return 0 if clip_rows else 1
 
 
 if __name__ == "__main__":

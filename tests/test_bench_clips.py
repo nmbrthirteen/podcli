@@ -1,6 +1,5 @@
 import csv
 import importlib.util
-import json
 import os
 import shutil
 import sys
@@ -13,7 +12,6 @@ spec = importlib.util.spec_from_file_location("bench_clips", os.path.join(ROOT, 
 bench = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bench)
 
-from services import transcript_packer as tp
 
 
 class StageTimesTests(unittest.TestCase):
@@ -31,38 +29,6 @@ class StageTimesTests(unittest.TestCase):
         )
 
 
-class TranscriptInfoTests(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.mkdtemp()
-        self.video = os.path.join(self._tmp, "ep.mp4")
-        with open(self.video, "wb") as f:
-            f.write(b"episode bytes" * 50)
-        self.cache = os.path.join(self._tmp, "transcripts")
-        os.makedirs(self.cache)
-        patcher = mock.patch.dict("config.paths.paths", {"transcripts": self.cache})
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def tearDown(self):
-        shutil.rmtree(self._tmp, ignore_errors=True)
-
-    def _write(self, suffix, data):
-        name = f"{tp.compute_cache_hash(self.video)}{suffix}.json"
-        with open(os.path.join(self.cache, name), "w", encoding="utf-8") as f:
-            json.dump(data, f)
-
-    def test_reads_engine_and_model_from_the_cached_transcript(self):
-        self._write("-whispercpp-msmall", {"engine": "whispercpp"})
-        self.assertEqual(bench.transcript_info(self.video), ("whispercpp", "small"))
-
-    def test_bare_key_means_base(self):
-        self._write("", {"engine": "whispercpp"})
-        self.assertEqual(bench.transcript_info(self.video), ("whispercpp", "base"))
-
-    def test_no_transcript_is_blank(self):
-        self.assertEqual(bench.transcript_info(self.video), ("", ""))
-
-
 class MainWritesCsvTests(unittest.TestCase):
     def test_writes_one_clip_row_and_one_blank_score_row_per_clip(self):
         tmp = tempfile.mkdtemp()
@@ -70,11 +36,16 @@ class MainWritesCsvTests(unittest.TestCase):
         video = os.path.join(tmp, "ep.mp4")
         with open(video, "wb") as f:
             f.write(b"x")
-        payload = {"clips": [{"index": 1, "title": "Why we quit", "start_second": 61.2, "end_second": 98.4,
-                              "duration": 37.2, "crop_strategy": "speaker", "path": "/out/1.mp4"}]}
+        payload = {
+            "transcript": {"engine": "whispercpp", "model": "small"},
+            "clips": [
+                {"index": 1, "title": "Why we quit", "start_second": 61.2, "end_second": 98.4, "duration": 37.2,
+                 "crop_strategy": "speaker", "path": "/out/1.mp4", "status": "ok"},
+                {"index": 2, "title": "Broken", "status": "error", "error": "ffmpeg died"},
+            ],
+        }
         times = {"transcribe": 40.0, "audio": 3.0, "select": 50.0, "render": 20.0}
         with mock.patch.object(bench, "run_format", return_value=(payload, times, 113.0)), \
-                mock.patch.object(bench, "transcript_info", return_value=("whispercpp", "small")), \
                 mock.patch.object(sys, "argv", ["bench_clips.py", video, tmp, "--formats", "topic"]):
             self.assertEqual(bench.main(), 0)
         with open(os.path.join(tmp, "clips.csv"), encoding="utf-8") as f:
@@ -89,6 +60,19 @@ class MainWritesCsvTests(unittest.TestCase):
         self.assertEqual(scores[0]["clip_id"], "topic-1")
         self.assertEqual(scores[0]["file"], "/out/1.mp4")
         self.assertEqual(scores[0]["post_as_is"], "")
+        self.assertEqual(len(scores), 1)
+
+    def test_exits_with_failure_when_no_clip_rendered(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        video = os.path.join(tmp, "ep.mp4")
+        with open(video, "wb") as f:
+            f.write(b"x")
+        payload = {"clips": [{"index": 1, "status": "error", "error": "ffmpeg died"}]}
+        times = {"transcribe": 1.0, "audio": 1.0, "select": 1.0, "render": 1.0}
+        with mock.patch.object(bench, "run_format", return_value=(payload, times, 4.0)), \
+                mock.patch.object(sys, "argv", ["bench_clips.py", video, tmp, "--formats", "vertical"]):
+            self.assertEqual(bench.main(), 1)
 
 
 if __name__ == "__main__":

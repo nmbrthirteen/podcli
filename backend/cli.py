@@ -1181,7 +1181,7 @@ def _parse_content_text(raw: str) -> dict:
     }
 
 
-def _emit_process_json(*, json_out, video_path, output_dir, quality, clips, results, interrupted):
+def _emit_process_json(*, json_out, video_path, output_dir, quality, clips, results, interrupted, transcript=None):
     payload_clips = []
     for i, result in enumerate(results):
         clip = clips[i] if i < len(clips) else {}
@@ -1225,6 +1225,7 @@ def _emit_process_json(*, json_out, video_path, output_dir, quality, clips, resu
         "video": video_path,
         "output_dir": output_dir,
         "quality": quality,
+        "transcript": transcript,
         "clips": payload_clips,
     }
     print(json.dumps(payload, ensure_ascii=False), file=json_out, flush=True)
@@ -1659,6 +1660,11 @@ def cmd_process(args):
                 model=result.get("model_size") or cache_key["model_size"],
                 language=config.get("language"),
             )
+
+    transcript_info = None if args.transcript or not result.get("words") else {
+        "engine": result.get("engine") or cache_key["engine"],
+        "model": result.get("model_size") or cache_key["model_size"],
+    }
 
     # Apply word corrections (Whisper misheard proper nouns, brand names)
     from services.corrections import apply_corrections
@@ -2275,6 +2281,7 @@ def cmd_process(args):
             clips=clips,
             results=results,
             interrupted=interrupted,
+            transcript=transcript_info,
         )
 
     # ── Post-render iteration ──
