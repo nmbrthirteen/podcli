@@ -16,13 +16,19 @@ def bench_whispercpp(path: str, model: str) -> tuple[float, int]:
     return time.perf_counter() - started, len(result.get("words") or [])
 
 
-def bench_mlx(path: str, model: str) -> tuple[float, int]:
+def prepare_mlx(model: str) -> tuple[str, float]:
+    from huggingface_hub import snapshot_download
+
+    started = time.perf_counter()
+    local = snapshot_download(f"mlx-community/whisper-{model}-mlx")
+    return local, time.perf_counter() - started
+
+
+def bench_mlx(path: str, model_dir: str) -> tuple[float, int]:
     import mlx_whisper
 
     started = time.perf_counter()
-    result = mlx_whisper.transcribe(
-        path, path_or_hf_repo=f"mlx-community/whisper-{model}-mlx", word_timestamps=True
-    )
+    result = mlx_whisper.transcribe(path, path_or_hf_repo=model_dir, word_timestamps=True)
     words = sum(len(seg.get("words") or []) for seg in result.get("segments") or [])
     return time.perf_counter() - started, words
 
@@ -48,7 +54,9 @@ def main() -> int:
         print(f"whisper.cpp skipped: binary or ggml-{args.model}.bin not found")
 
     if importlib.util.find_spec("mlx_whisper") is not None:
-        rows.append(("mlx-whisper", *bench_mlx(args.file, args.model)))
+        model_dir, prepare_seconds = prepare_mlx(args.model)
+        print(f"mlx-whisper model ready in {prepare_seconds:.1f}s (not counted below)")
+        rows.append(("mlx-whisper", *bench_mlx(args.file, model_dir)))
     else:
         print("mlx-whisper skipped: pip install mlx-whisper to include it")
 

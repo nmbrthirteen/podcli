@@ -1601,7 +1601,7 @@ def cmd_process(args):
             save_cached_transcript_for_video(
                 video_path,
                 result,
-                engine=cache_engine,
+                engine=result.get("engine") or cache_engine,
                 model=config.get("whisper_model", "base"),
                 language=config.get("language"),
             )
