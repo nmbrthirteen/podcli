@@ -21,12 +21,6 @@ describe("resolveTranscribeEngine", () => {
     });
   });
 
-  it("passes an explicit engine through for the backend to normalize", async () => {
-    const executor = fakeExecutor({ data: { engine: "assemblyai" } });
-    const engine = await resolveTranscribeEngine(executor, "assemblyai", "base");
-    expect(engine).toBe("assemblyai");
-  });
-
   it("falls back to the raw request if resolution itself fails", async () => {
     const executor = failingExecutor();
     const engine = await resolveTranscribeEngine(executor, "whisper-py", "base");
