@@ -35,10 +35,19 @@ describe("validateClipRange", () => {
     expect(validateClipRange(0, 301, "horizontal")).toMatch(/Max 300 seconds/);
   });
 
+  it("caps topic clips at 15 minutes", () => {
+    expect(validateClipRange(0, 900, "topic")).toBeNull();
+    expect(validateClipRange(0, 901, "topic")).toMatch(/Max 900 seconds/);
+    expect(validateClipRange(0, 901, "horizontal")).toMatch(/Max 300 seconds/);
+  });
+
   it("maxClipSeconds matches the range check", () => {
     expect(maxClipSeconds()).toBe(180);
     expect(maxClipSeconds("vertical")).toBe(180);
+    expect(maxClipSeconds("square")).toBe(180);
     expect(maxClipSeconds("horizontal")).toBe(300);
+    expect(maxClipSeconds("topic")).toBe(900);
+    expect(maxClipSeconds("constructor")).toBe(180);
   });
 });
 
@@ -47,12 +56,17 @@ describe("validateSuggestionRange", () => {
     expect(validateSuggestionRange(0, 400)).toBeNull();
   });
 
+  it("accepts a topic-length range with cuts inside it", () => {
+    expect(validateSuggestionRange(0, 1200)).toBeNull();
+    expect(validateSuggestionRange(0, 1800)).toBeNull();
+  });
+
   it("rejects end <= start", () => {
     expect(validateSuggestionRange(50, 50)).toMatch(/greater than start_second/);
   });
 
   it("rejects absurdly long ranges", () => {
-    expect(validateSuggestionRange(0, 601)).toMatch(/Max 600 seconds/);
+    expect(validateSuggestionRange(0, 1801)).toMatch(/Max 1800 seconds/);
   });
 
   it("rejects non-numbers", () => {

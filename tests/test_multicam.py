@@ -495,6 +495,32 @@ def test_exports_point_a_second_audio_stream_at_the_right_track_not_channel_one(
     assert mic_asset.get("audioChannels") == "2"
 
 
+def test_exports_carry_a_fifteen_minute_cut_frame_for_frame(sandbox):
+    cam_a = _source("cam_a.mp4", role="camera", person="host", offset=0.0, duration=900.0)
+    cam_b = _source("cam_b.mp4", role="camera", person="guest", offset=0.0, duration=900.0)
+    mic = _source("mic.mp4", kind="video", role="mic", person="host", offset=0.0, duration=900.0)
+    session = mc.MulticamSession(
+        session_id="abc123abc900", name="topic", people=[mc.Person("host", "Host"), mc.Person("guest", "Guest")],
+        sources=[cam_a, cam_b, mic], reference_id="mic",
+        cuts=[{"start": 0.0, "end": 300.0, "source_id": "cam_a"},
+              {"start": 300.0, "end": 900.0, "source_id": "cam_b"}],
+    )
+
+    premiere = ET.parse(mc.export_xml(session, "premiere")).getroot()
+    assert premiere.findtext("./sequence/rate/timebase") == "30"
+    assert premiere.findtext("./sequence/duration") == "27000"
+    video = premiere.findall("./sequence/media/video/track/clipitem")
+    assert [(c.findtext("start"), c.findtext("end")) for c in video] == [("0", "9000"), ("9000", "27000")]
+
+    fcp = ET.parse(mc.export_xml(session, "fcpxml")).getroot()
+    sequence = fcp.find("./library/event/project/sequence")
+    assert sequence.get("duration") == "900s"
+    assert sequence.find("./spine/gap").get("duration") == "900s"
+    picture = [(c.get("name"), c.get("offset"), c.get("duration")) for c in fcp.iter("asset-clip") if c.get("lane") == "1"]
+    assert picture == [("cam_a.mp4", "0s", "300s"), ("cam_b.mp4", "300s", "600s")]
+    assert {a.get("duration") for a in fcp.iter("asset")} == {"900s"}
+
+
 # --- podcli multicam ------------------------------------------------------------
 
 def run_cli(monkeypatch, *argv):

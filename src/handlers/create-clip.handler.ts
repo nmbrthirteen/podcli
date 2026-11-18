@@ -2,10 +2,12 @@ import { PythonExecutor } from "../services/python-executor.js";
 import { FileManager } from "../services/file-manager.js";
 import { readUIStateFile } from "../services/ui-state-file.js";
 import { paths } from "../config/paths.js";
+import { FORMATS } from "../models/index.js";
 import type { ClipResult, CreateClipInput, SuggestedClip, UIState } from "../models/index.js";
 import { childLogger } from "../utils/logger.js";
 import { sliceTranscript } from "../utils/transcript.js";
 import { validateClipRange } from "../utils/clip-validation.js";
+import { resolveCleanFillers } from "../utils/clean-fillers.js";
 import { validateHook } from "../utils/clip-hook.js";
 import { transcriptVideoMismatch } from "../utils/video-identity.js";
 
@@ -72,9 +74,9 @@ export const createClipToolDef = {
       },
       format: {
         type: "string",
-        enum: ["vertical", "horizontal", "square"],
+        enum: [...FORMATS],
         description:
-          "Output aspect ratio. vertical=9:16 shorts, horizontal=16:9, square=1:1. Auto-loaded from session settings if omitted. Default: vertical.",
+          "Output aspect ratio. vertical=9:16 shorts, horizontal=16:9 up to 5 minutes, square=1:1, topic=16:9 segments of 5-15 minutes. Auto-loaded from session settings if omitted. Default: vertical.",
       },
       transcript_words: {
         type: "array",
@@ -247,7 +249,7 @@ export async function handleCreateClip(input: CreateClipInput): Promise<string> 
     transcript_words: transcriptWords,
     title,
     output_dir: paths.output,
-    clean_fillers: input.clean_fillers ?? settings.cleanFillers ?? true,
+    clean_fillers: resolveCleanFillers(input.clean_fillers, settings.cleanFillers, format),
     allow_ass_fallback: input.allow_ass_fallback === true,
     keep_caption_overlay: input.keep_caption_overlay === true,
     write_clean_variant: input.write_clean_variant === true,

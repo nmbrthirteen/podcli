@@ -43,7 +43,7 @@ from services.opening_hook import (
 )
 from config.caption_styles import get_style
 from services.formats import get_format
-from services.media_probe import align_av_duration, ffmpeg_timeout
+from services.media_probe import align_av_duration, ffmpeg_timeout, remotion_timeout
 
 _FILLER_WORDS = frozenset([
     "um", "uh", "uhh", "uhm", "umm", "hmm", "hm", "mhm",
@@ -735,6 +735,7 @@ def _render_with_remotion(
     font_family: Optional[str] = None,
     theme: Optional[dict] = None,
     captions: bool = True,
+    duration: Optional[float] = None,
 ) -> tuple[bool, Optional[str]]:
     """
     Render captions using Remotion. Returns (success, optional_prores_overlay_path).
@@ -916,7 +917,7 @@ def _render_with_remotion(
         # for months and the reason went to /dev/null with the rest of it.
         result = _run_streaming(
             cmd,
-            timeout=2 * 50 * 60 + 300,
+            timeout=remotion_timeout(duration),
             cwd=project_root,
             env=remotion_env,
         )
@@ -974,7 +975,7 @@ def generate_clip(
     name_card: Optional[dict] = None,
     motion: Optional[dict] = None,
     bookend_fade: float = 0.0,
-    clean_fillers: bool = True,
+    clean_fillers: Optional[bool] = None,
     keep_segments: list[dict] = None,
     hook: Optional[dict] = None,
     trim_opening: Optional[bool] = None,
@@ -1060,6 +1061,9 @@ def generate_clip(
 
     spec = get_format(format)
 
+    tighten_body = spec.auto_tighten if clean_fillers is None else clean_fillers
+    clean_caption_words = clean_fillers is not False
+
     # An episode that was never filmed takes the other road entirely. Branching
     # here rather than at the five call sites means every caller of this
     # function gets it, and none of them has to know the difference: what comes
@@ -1140,7 +1144,7 @@ def generate_clip(
 
         # If Claude returned a single segment, still auto-trim pauses within it.
         # Multiple segments means Claude made deliberate editorial cuts. Trust those.
-        if len(keep_segments) == 1 and transcript_words and clean_fillers:
+        if len(keep_segments) == 1 and transcript_words and tighten_body:
             auto_segments = _build_tight_segments(
                 transcript_words, start_second, end_second,
             )
@@ -1160,7 +1164,7 @@ def generate_clip(
             end_second, _ = _bound_range_to_source(start_second, end_second, None, source_duration)
 
         # Auto-build tight segments: cut long pauses and isolated fillers
-        if transcript_words and clean_fillers:
+        if transcript_words and tighten_body:
             auto_segments = _build_tight_segments(
                 transcript_words, start_second, end_second,
             )
@@ -1371,7 +1375,7 @@ def generate_clip(
             words_in_range = len(clip_words)
 
             # Clean filler words
-            if clean_fillers:
+            if clean_caption_words:
                 clip_words = _clean_transcript_words(clip_words)
 
             if not clip_words:
@@ -1425,6 +1429,7 @@ def generate_clip(
                         font_family=font_family,
                         theme=theme,
                         captions=captions,
+                        duration=duration,
                     )
 
                 if not remotion_ok and not captions:

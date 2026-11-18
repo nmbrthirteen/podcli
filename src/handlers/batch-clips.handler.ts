@@ -6,10 +6,12 @@ import { ClipsHistory } from "../services/clips-history.js";
 import { paths } from "../config/paths.js";
 import { webServerUrl } from "../config/server.js";
 import { validateClipRange } from "../utils/clip-validation.js";
+import { resolveCleanFillers } from "../utils/clean-fillers.js";
 import { findContentType } from "../utils/transcript.js";
 import { validateHook } from "../utils/clip-hook.js";
 import { transcriptVideoMismatch } from "../utils/video-identity.js";
 import { childLogger } from "../utils/logger.js";
+import { FORMATS } from "../models/index.js";
 import type {
   BatchClipsInput,
   BatchClipSpec,
@@ -85,7 +87,7 @@ export const batchClipsToolDef = {
             },
             format: {
               type: "string",
-              enum: ["vertical", "horizontal", "square"],
+              enum: [...FORMATS],
             },
             allow_ass_fallback: {
               type: "boolean",
@@ -185,7 +187,7 @@ export async function handleBatchClips(input: BatchClipsInput): Promise<string> 
   const deselected = state?.deselectedIndices ?? [];
 
   const batchFormat = input.format || settings.format || "vertical";
-  const cleanFillers = input.clean_fillers ?? settings.cleanFillers ?? true;
+  const cleanFillers = resolveCleanFillers(input.clean_fillers, settings.cleanFillers, batchFormat);
 
   const buildClipFromSuggestion = (s: SuggestedClip, num: number): BatchClipSpec => ({
     start_second: s.start_second,

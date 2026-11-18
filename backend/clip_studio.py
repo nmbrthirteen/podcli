@@ -281,7 +281,7 @@ def _render_fragment(video, start, end, words, style, crop, title, out_dir, fmt=
         logo_path=logo, name_card=name_card, motion=motion,
         topic=topic, progress=progress, cards=cards, brand=brand, theme=theme, font_family=font_family,
         captions=captions, hook=hook,
-        clean_fillers=True, allow_ass_fallback=True,
+        allow_ass_fallback=True,
         progress_callback=lambda p, m: print(f"    {p}% {m}", flush=True),
     )
     return res["output_path"]
@@ -360,6 +360,8 @@ def _concat(parts: list[str], out_path: str, fps: int = 30,
 
 
 def main():
+    from services.formats import FORMATS
+
     ap = argparse.ArgumentParser(description="Cut a fragment + add intro/outro bookends.")
     ap.add_argument("video")
     ap.add_argument("--start", type=float, help="Fragment start (seconds)")
@@ -372,7 +374,7 @@ def main():
     ap.add_argument("--caption-position", default="auto", choices=["auto", "upper", "center", "lower"])
     ap.add_argument("--caption-scale", type=float, default=1.0)
     ap.add_argument("--crop", default="face", choices=["center", "face", "speaker", "speaker-hardcut"])
-    ap.add_argument("--format", default="vertical", choices=["vertical", "horizontal", "square"],
+    ap.add_argument("--format", default="vertical", choices=list(FORMATS),
                     help="Output aspect ratio (default: vertical)")
     ap.add_argument("--output", default=None, help="Final output path")
     ap.add_argument("--logo", default=None, help="Logo image (asset name or path)")

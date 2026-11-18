@@ -56,8 +56,35 @@ def ffmpeg_timeout(duration_s: float | None = None) -> float:
     """Seconds allowed for one encode. Probes keep using FFMPEG_TIMEOUT."""
     base = float(FFMPEG_TIMEOUT)
     if duration_s and duration_s > 0:
-        return min(1800.0, max(base, duration_s * 20.0 + 120.0))
+        ceiling = max(1800.0, min(7200.0, duration_s * 4.0))
+        return min(ceiling, max(base, duration_s * 20.0 + 120.0))
     return base
+
+
+REMOTION_TIMEOUT = 2 * 50 * 60 + 300
+
+
+def remotion_timeout(duration_s: float | None = None) -> float:
+    base = float(REMOTION_TIMEOUT)
+    if duration_s and duration_s > 0:
+        return max(base, duration_s * 12.0 + 900.0)
+    return base
+
+
+def _encode_duration(cmd_parts: list) -> float | None:
+    for i, part in enumerate(cmd_parts[:-1]):
+        if part == "-t":
+            try:
+                seconds = float(cmd_parts[i + 1])
+            except (TypeError, ValueError):
+                break
+            if seconds > 0:
+                return seconds
+    for i, part in enumerate(cmd_parts[:-1]):
+        if part == "-i":
+            seconds = get_media_duration_seconds(str(cmd_parts[i + 1]))
+            return seconds if seconds > 0 else None
+    return None
 
 
 def run_ffmpeg_with_fallback(
@@ -78,6 +105,8 @@ def run_ffmpeg_with_fallback(
     enc_flags = get_video_encode_flags()
     fallback_flags = cpu_flags()
     cmd = cmd_parts_before_enc + enc_flags + cmd_parts_after_enc + [output_path]
+    if duration_s is None:
+        duration_s = _encode_duration(cmd_parts_before_enc)
     timeout = ffmpeg_timeout(duration_s)
 
     result = proc_run(cmd, timeout=timeout, check=False)
