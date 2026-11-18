@@ -233,6 +233,7 @@ def crop_to_vertical(
     face_map: dict = None,
     crop_keyframes: list = None,
     target_dims: tuple = (1080, 1920),
+    report: Optional[dict] = None,
 ) -> str:
     """
     Crop/scale video to 1080x1920 (9:16 vertical).
@@ -248,8 +249,16 @@ def crop_to_vertical(
     transcript_words: Word dicts with 'speaker', 'start', 'end' keys (from Whisper+pyannote).
                       Used by 'face' strategy when speaker data is available.
     clip_start: The start time of this clip in the original video (for timestamp alignment).
+    report: When a dict is passed, report["strategy_used"] is set to the strategy
+            that produced the frame: manual, speaker-hardcut, speaker, face or center.
+            A face or speaker request with speaker labels in the clip reports speaker.
     """
     width, height = get_dimensions(input_path)
+
+    def used(name: str) -> None:
+        if report is not None:
+            report["strategy_used"] = name
+
     # What the caller asked for, kept because `strategy` is reassigned on the
     # way down the ladder. A clip that asked to follow the speaker and ended up
     # letterboxed should say so in those words, not report a centre crop as
@@ -277,6 +286,7 @@ def crop_to_vertical(
         crop_y = max(0, (height - crop_h) // 2)
         x_expr = _manual_crop_x_expr(crop_keyframes, crop_w, width)
         vf = f"crop={crop_w}:{crop_h}:x='{x_expr}':y={crop_y},scale={target_w}:{target_h}"
+        used("manual")
         return _run_ffmpeg_with_fallback(
             cmd_parts_before_enc=["ffmpeg", "-y", "-i", input_path, "-vf", vf],
             cmd_parts_after_enc=["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-movflags", "+faststart"],
@@ -302,6 +312,7 @@ def crop_to_vertical(
             crop_w = int(crop_h * target_ratio)
             crop_w = min(crop_w, width)
             vf = f"crop={crop_w}:{crop_h}:{x_expr}:{crop_y},scale={target_w}:{target_h}"
+            used("speaker-hardcut")
             return _run_ffmpeg_with_fallback(
                 cmd_parts_before_enc=[
                     "ffmpeg", "-y",
@@ -368,6 +379,7 @@ def crop_to_vertical(
                     label="crop_local_reframe",
                 )
                 if result:
+                    used("speaker")
                     return result
                 log_event("crop", "fallback", reason="local_reframe_ffmpeg_failed")
 
@@ -385,6 +397,7 @@ def crop_to_vertical(
             )
             if result:
                 log_event("crop", "chose=speaker-track", speakers=len(speakers_in_clip))
+                used("speaker" if speakers_in_clip else "face")
                 return result
             log_event("crop", "fallback", reason="speaker_track_failed", speakers=len(speakers_in_clip))
 
@@ -405,6 +418,7 @@ def crop_to_vertical(
                 crop_w = int(crop_h * target_ratio)
                 crop_w = min(crop_w, width)
                 vf = f"crop={crop_w}:{crop_h}:{x_expr}:{crop_y},scale={target_w}:{target_h}"
+                used("face")
                 return _run_ffmpeg_with_fallback(
                     cmd_parts_before_enc=[
                         "ffmpeg", "-y",
@@ -429,11 +443,13 @@ def crop_to_vertical(
         )
         if result:
             log_event("crop", "chose=face-track")
+            used("face")
             return result
         log_event("crop", "fallback", reason="face_track_failed", to="center")
         strategy = "center"
 
     if strategy == "center":
+        used("center")
         if source_ratio > target_ratio:
             log_event("crop", "chose=center-blur-bg", source=f"{width}x{height}", asked=wanted)
             # The whole wide frame, shrunk into a band with a blur behind it.

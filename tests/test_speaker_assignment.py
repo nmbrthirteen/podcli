@@ -3,13 +3,14 @@
 import os
 import sys
 import unittest
+from unittest import mock
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND_ROOT = os.path.join(ROOT, "backend")
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
-from services.speaker_detection import assign_speakers_to_words
+from services.speaker_detection import assign_speakers_to_words, run_diarization
 
 
 class AssignSpeakersToWordsTests(unittest.TestCase):
@@ -55,6 +56,22 @@ class AssignSpeakersToWordsTests(unittest.TestCase):
         segments = [{"speaker": "SPEAKER_00", "start": 0.0, "end": 10.0}]
         out = assign_speakers_to_words(words, segments)
         self.assertIsNone(out[0]["speaker"])
+
+
+class MissingTokenMessageTests(unittest.TestCase):
+    def test_missing_token_error_carries_the_exact_fix(self):
+        fake_pyannote = mock.MagicMock()
+        with mock.patch.dict(os.environ), \
+             mock.patch.dict(sys.modules, {"pyannote": fake_pyannote, "pyannote.audio": fake_pyannote.audio}):
+            os.environ.pop("HF_TOKEN", None)
+            with self.assertRaises(PermissionError) as ctx:
+                run_diarization("episode.wav")
+
+        message = str(ctx.exception)
+        first_line = message.splitlines()[0]
+        self.assertIn("podcli env set HF_TOKEN hf_...", first_line)
+        self.assertNotIn("\u2014", message)
+        self.assertNotIn("\u2013", message)
 
 
 if __name__ == "__main__":

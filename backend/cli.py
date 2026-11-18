@@ -91,6 +91,52 @@ def _use_color(stream=None) -> bool:
     return hasattr(stream, "isatty") and stream.isatty()
 
 
+def _yellow(text: str) -> str:
+    if not _use_color():
+        return text
+    return f"\033[38;2;250;204;21m{text}\033[0m"
+
+
+_WHISPERCPP_SPEAKERS_NOTE = (
+    "Speaker detection needs the whisper-py engine plus HF_TOKEN. "
+    "Crop will use face tracking."
+)
+
+
+def _diarization_notice_lines(result: dict, no_speakers: bool) -> list[str]:
+    from services.transcription import DIARIZATION_DISABLED_WARNING
+
+    if no_speakers:
+        return []
+    if result.get("engine") == "whispercpp":
+        return [_WHISPERCPP_SPEAKERS_NOTE]
+    warning = result.get("diarization_warning")
+    if not warning or warning == DIARIZATION_DISABLED_WARNING:
+        return []
+    return [line.rstrip() for line in str(warning).splitlines() if line.strip()]
+
+
+def _print_diarization_notice(result: dict, no_speakers: bool) -> None:
+    for i, line in enumerate(_diarization_notice_lines(result, no_speakers)):
+        prefix = "         ⚠ " if i == 0 else "           "
+        print(_yellow(f"{prefix}{line}"))
+
+
+def _crop_strategy_summary(results: list, requested: str) -> str | None:
+    counts: dict[str, int] = {}
+    for result in results:
+        used = result.get("crop_strategy_used") if isinstance(result, dict) else None
+        if used:
+            counts[used] = counts.get(used, 0) + 1
+    if not counts:
+        return None
+    ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    line = "Crop used: " + ", ".join(f"{n} {name}" for name, n in ordered)
+    if "center" in counts and requested != "center":
+        return _yellow(line)
+    return line
+
+
 def _want_spinner() -> bool:
     if os.environ.get("NO_COLOR") or os.environ.get("PODCLI_QUIET"):
         return False
@@ -1540,6 +1586,7 @@ def cmd_process(args):
             segments = cached["segments"]
             result = cached
             print(f"         {len(segments)} segments, {len(words)} words")
+            _print_diarization_notice(result, config.get("no_speakers", False))
         else:
             from services.engines import is_assemblyai_engine, normalize_engine
             engine_label = "AssemblyAI" if is_assemblyai_engine(os.environ.get("PODCLI_ENGINE", "")) else "Whisper"
@@ -1601,6 +1648,7 @@ def cmd_process(args):
             words = result["words"]
             segments = result["segments"]
             print(f"         Done: {len(segments)} segments, {len(words)} words")
+            _print_diarization_notice(result, config.get("no_speakers", False))
 
             save_cached_transcript_for_video(
                 video_path,
@@ -1658,9 +1706,6 @@ def cmd_process(args):
 
     # Check speaker data availability (needed for smart cropping)
     speakers_in_words = set(w.get("speaker") for w in words if w.get("speaker"))
-    diarization_warning = result.get("diarization_warning")
-    if diarization_warning:
-        print(f"         ⚠ {diarization_warning}")
     if len(speakers_in_words) > 1:
         print(f"         Speakers detected: {len(speakers_in_words)} (crop will follow active speaker)")
     elif len(speakers_in_words) == 1:
@@ -2203,6 +2248,9 @@ def cmd_process(args):
         print(f"\n         Interrupted with {success}/{len(clips)} completed clips in {elapsed:.1f}s")
     else:
         print(f"\n         {success}/{len(clips)} clips exported in {elapsed:.1f}s")
+    crop_summary = _crop_strategy_summary(results, config.get("crop_strategy", "face"))
+    if crop_summary:
+        print(f"         {crop_summary}")
     if _thumb_enabled:
         print(f"         Thumbnails saved to {thumb_dir}/")
 
