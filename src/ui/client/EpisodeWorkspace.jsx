@@ -49,6 +49,7 @@ const FORMAT_BOUNDS = {
   vertical: { min: 20, max: 45, ceiling: 60 },
   square: { min: 20, max: 45, ceiling: 60 },
   horizontal: { min: 60, max: 300, ceiling: 360 },
+  topic: { min: 300, max: 900, ceiling: 960 },
 };
 
 const boundsFor = (f) => FORMAT_BOUNDS[f] || FORMAT_BOUNDS.vertical;
@@ -1477,7 +1478,7 @@ const onKeyActivate = (fn) => (e) => {
 
       const onCaptionChange = (v) => { setCaptionStyle(v); flashSetting('caption'); };
       const onCropChange = (v) => { setCropStrategy(v); flashSetting('crop'); };
-      const onFormatChange = (v) => { setFormat(v); flashSetting('format'); };
+      const onFormatChange = (v) => { setFormat(v); setCleanFillers(v !== 'topic'); flashSetting('format'); };
 
       // Click clip row → seek source video
       const onClipClick = (idx) => {
@@ -2567,7 +2568,7 @@ const onKeyActivate = (fn) => (e) => {
                   <div>
                     <label className="field-label">Format</label>
                     <select value={format} onChange={e => onFormatChange(e.target.value)} disabled={isProcessing}>
-                      <option value="vertical">Vertical 9:16</option><option value="horizontal">Horizontal 16:9</option><option value="square">Square 1:1</option>
+                      <option value="vertical">Vertical 9:16</option><option value="horizontal">Horizontal 16:9</option><option value="square">Square 1:1</option><option value="topic">Topic 16:9 (5-15 min)</option>
                     </select>
                   </div>
                 </div>

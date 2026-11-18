@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from services.media_probe import FFMPEG_TIMEOUT
+from services.media_probe import ffmpeg_timeout, get_media_duration_seconds
 from utils.proc import run as proc_run
 
 
@@ -25,6 +25,8 @@ def normalize_audio(
     Falls back to a single-pass loudnorm when measurement is missing
     or returns −inf (silent / very short clips).
     """
+    timeout = ffmpeg_timeout(get_media_duration_seconds(input_path))
+
     # First pass: measure current loudness.
     measure_cmd = [
         "ffmpeg", "-y",
@@ -32,7 +34,7 @@ def normalize_audio(
         "-af", f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11:print_format=json",
         "-f", "null", "-",
     ]
-    result = proc_run(measure_cmd, timeout=FFMPEG_TIMEOUT, check=False)
+    result = proc_run(measure_cmd, timeout=timeout, check=False)
 
     loudnorm_data = _parse_loudnorm_stats(result.stderr)
 
@@ -62,7 +64,7 @@ def normalize_audio(
         "-movflags", "+faststart",
         output_path,
     ]
-    result = proc_run(cmd, timeout=FFMPEG_TIMEOUT, check=False)
+    result = proc_run(cmd, timeout=timeout, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg normalize failed: {result.stderr[-500:]}")
     return output_path

@@ -16,6 +16,7 @@ from typing import Optional, Callable
 from utils.proc import run as proc_run
 from config.paths import paths
 from services.formats import get_format
+from services.media_probe import ffmpeg_timeout
 
 
 def _sessions_dir() -> str:
@@ -228,7 +229,7 @@ def _cut(source: str, out_dir: str, idx: int, m: Moment, format: str, logo: str 
     else:
         cmd += ["-vf", _scale_filter(format)]
     cmd += [*_encode_flags(), out, "-loglevel", "error"]
-    proc_run(cmd, timeout=300, check=True)
+    proc_run(cmd, timeout=ffmpeg_timeout(m.duration), check=True)
     return out
 
 
@@ -248,17 +249,19 @@ def build_reel(session: ReelSession, progress_callback: Optional[Callable] = Non
     session.save()
 
     reel = os.path.join(session.out_dir, "highlights_reel.mp4")
+    reel_seconds = sum(m.duration for _, m in active)
     lst = os.path.join(session.out_dir, "_concat.txt")
     with open(lst, "w", encoding="utf-8") as f:
         for x in files:
             p = os.path.abspath(x).replace("\\", "/").replace("'", "'\\''")
             f.write(f"file '{p}'\n")
     r = proc_run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lst,
-                  "-c", "copy", reel, "-loglevel", "error"], timeout=300, check=False)
+                  "-c", "copy", reel, "-loglevel", "error"],
+                 timeout=ffmpeg_timeout(reel_seconds), check=False)
     if r.returncode != 0:
         proc_run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lst,
                   *_encode_flags(), reel, "-loglevel", "error"],
-                 timeout=900, check=True)
+                 timeout=max(900.0, ffmpeg_timeout(reel_seconds)), check=True)
     if progress_callback:
         progress_callback(100, f"built reel with {len(files)} moments")
     return reel

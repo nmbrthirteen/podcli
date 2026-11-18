@@ -47,6 +47,7 @@ import { childLogger } from "./utils/logger.js";
 import { mcpError } from "./utils/errors.js";
 import { transcriptVideoMismatch } from "./utils/video-identity.js";
 import { podcliVersion, studioStartCommand } from "./version.js";
+import { FORMATS } from "./models/index.js";
 import type { ClipHook, SuggestedClip, UIState } from "./models/index.js";
 
 const log = childLogger("server");
@@ -194,7 +195,7 @@ const apiResponseSchema = z.looseObject({
 });
 
 const cropStrategySchema = z.enum(["center", "face", "speaker"]);
-const formatSchema = z.enum(["vertical", "horizontal", "square"]);
+const formatSchema = z.enum(FORMATS);
 
 function exportClipFromSuggestion(
   s: SuggestedClip,
@@ -613,7 +614,7 @@ export function createServer(): McpServer {
       quality: z.enum(["low", "medium", "high", "max"]).optional(),
       caption_style: z.enum(["branded", "hormozi", "karaoke", "subtle"]).optional(),
       crop: z.enum(["center", "face", "speaker", "speaker-hardcut"]).optional(),
-      format: z.enum(["vertical", "horizontal", "square"]).optional(),
+      format: z.enum(FORMATS).optional(),
       language: z.string().optional(),
       engine: z.enum(["whisper-py", "whispercpp", "assemblyai", "omnilingual"]).optional(),
       fast: z.boolean().optional(),
@@ -746,10 +747,12 @@ export function createServer(): McpServer {
         .default("speaker")
         .describe("Cropping strategy"),
       format: z
-        .enum(["vertical", "horizontal", "square"])
+        .enum(FORMATS)
         .optional()
         .default("vertical")
-        .describe("Output aspect ratio (vertical=9:16, horizontal=16:9, square=1:1)"),
+        .describe(
+          "Output aspect ratio (vertical=9:16, horizontal=16:9 up to 5 minutes, square=1:1, topic=16:9 segments of 5-15 minutes)",
+        ),
       allow_ass_fallback: z
         .boolean()
         .optional()
@@ -1092,7 +1095,7 @@ export function createServer(): McpServer {
               .enum(["hormozi", "karaoke", "subtle", "branded"])
               .optional(),
             crop_strategy: z.enum(["center", "face", "speaker"]).optional(),
-            format: z.enum(["vertical", "horizontal", "square"]).optional(),
+            format: z.enum(FORMATS).optional(),
             allow_ass_fallback: z.boolean().optional(),
             keep_caption_overlay: z.boolean().optional(),
             write_clean_variant: z.boolean().optional(),
@@ -1616,10 +1619,7 @@ export function createServer(): McpServer {
         .string()
         .optional()
         .describe("Crop strategy (for check)"),
-      format: z
-        .enum(["vertical", "horizontal", "square"])
-        .optional()
-        .describe("Output format (for check)"),
+      format: z.enum(FORMATS).optional().describe("Output format (for check)"),
       limit: z.number().optional().default(20).describe("Max results for list"),
     },
     async ({

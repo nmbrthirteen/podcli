@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { absentWhenNull } from "../utils/zod-helpers.js";
 import { paths, pythonEnv } from "../config/paths.js";
+import { FORMATS } from "../models/index.js";
 import type { TaskRequest, TaskResult, ProgressEvent } from "../models/index.js";
 
 type ProgressCallback = (event: ProgressEvent) => void;
@@ -111,7 +112,7 @@ const clipResultRowSchema = z.looseObject({
   source_end_second: absentWhenNull(z.number()),
   caption_style: absentWhenNull(z.string()),
   crop_strategy: absentWhenNull(z.string()),
-  format: absentWhenNull(z.enum(["vertical", "horizontal", "square"])),
+  format: absentWhenNull(z.enum(FORMATS)),
   title: absentWhenNull(z.string()),
   file_size_mb: absentWhenNull(z.number()),
   duration: absentWhenNull(z.number()),

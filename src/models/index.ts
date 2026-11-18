@@ -92,7 +92,9 @@ export type CaptionStyle = "branded" | "hormozi" | "karaoke" | "subtle";
 
 export type CropStrategy = "center" | "face" | "speaker";
 
-export type Format = "vertical" | "horizontal" | "square";
+export const FORMATS = ["vertical", "horizontal", "square", "topic"] as const;
+
+export type Format = (typeof FORMATS)[number];
 
 export interface ClipRequest {
   video_path: string;

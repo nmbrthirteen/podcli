@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from services.media_probe import FFMPEG_TIMEOUT
+from services.media_probe import FFMPEG_TIMEOUT, ffmpeg_timeout, get_media_duration_seconds
 from utils.proc import run as proc_run
 
 
@@ -43,7 +43,7 @@ def cut_segment(
         "-avoid_negative_ts", "make_zero",
         output_path,
     ]
-    result = proc_run(cmd, timeout=FFMPEG_TIMEOUT, check=False)
+    result = proc_run(cmd, timeout=ffmpeg_timeout(duration), check=False)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg cut failed: {result.stderr[-500:]}")
     return output_path
@@ -113,7 +113,7 @@ def cut_multi_segment(
             "-movflags", "+faststart",
             output_path,
         ]
-        result = proc_run(cmd, timeout=FFMPEG_TIMEOUT, check=False)
+        result = proc_run(cmd, timeout=ffmpeg_timeout(sum(part_durations)), check=False)
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg concat failed: {result.stderr[-500:]}")
 
@@ -159,7 +159,7 @@ def verify_full_decode(path: str, max_error_lines: int = 3) -> str | None:
     as a real decode failure once more than a few such lines show up.
     """
     cmd = ["ffmpeg", "-v", "error", "-threads", "auto", "-i", path, "-f", "null", "-"]
-    result = proc_run(cmd, timeout=FFMPEG_TIMEOUT, check=False)
+    result = proc_run(cmd, timeout=ffmpeg_timeout(get_media_duration_seconds(path)), check=False)
     stderr = (result.stderr or "").strip()
     if result.returncode != 0:
         return stderr[-1000:] if stderr else f"ffmpeg exited {result.returncode} decoding the output"

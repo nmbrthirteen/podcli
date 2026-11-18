@@ -76,6 +76,7 @@ def _reveal_in_os(path: str) -> None:
 
 from config.paths import paths
 from config.server import DEFAULT_PORT, resolve_web_server_port, web_server_url
+from services.formats import FORMATS
 from presets import DEFAULT_PRESET, MIN_CLIP_DURATION, MAX_CLIP_DURATION, TARGET_CLIP_DURATION_MIN, TARGET_CLIP_DURATION_MAX
 from services.knowledge_base import is_empty as kb_is_empty, kb_files
 
@@ -5319,7 +5320,7 @@ def main():
                            "speaker framing work on a transcript that carries no speaker labels.")
     proc.add_argument("--crop-keyframes", dest="crop_keyframes", default=None,
                       help="Hand-placed crop positions, as JSON. Used by --crop manual.")
-    proc.add_argument("--format", choices=["vertical", "horizontal", "square"], help="Output aspect ratio (default: vertical)")
+    proc.add_argument("--format", choices=list(FORMATS), help="Output aspect ratio (default: vertical). topic is a 5-15 minute 16:9 segment")
     proc.add_argument("--profile", choices=["podcast", "party", "action"], help="Detection profile: podcast (transcript-first, default), party/action (laughter/energy highlights)")
     proc.add_argument("--logo", help="Logo image (asset name or path)")
     proc.add_argument("--logo-position", choices=["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"],
@@ -5491,7 +5492,7 @@ def main():
                              "speaker framing work on a transcript that carries no speaker labels.")
     studio.add_argument("--crop-keyframes", dest="crop_keyframes", default=None,
                         help="Hand-placed crop positions, as JSON. Used by --crop manual.")
-    studio.add_argument("--format", choices=["vertical", "horizontal", "square"], default="vertical",
+    studio.add_argument("--format", choices=list(FORMATS), default="vertical",
                         help="Output aspect ratio (default: vertical)")
     studio.add_argument("--template", help="Cut in a saved look (podcli Pro). Name or id.")
     studio.add_argument("--logo", help="Logo image (asset name or path)")

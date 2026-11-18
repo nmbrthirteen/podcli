@@ -46,6 +46,7 @@ import { paths, pythonEnv } from "../config/paths.js";
 import { webServerPort } from "../config/server.js";
 import { writeFileAtomicSync } from "../utils/atomic-file.js";
 import { maxClipSeconds, validateClipRange, validateSuggestionRange } from "../utils/clip-validation.js";
+import { resolveCleanFillers } from "../utils/clean-fillers.js";
 import { playbackDuration, validateHook } from "../utils/clip-hook.js";
 import { hookSchema } from "../handlers/suggest-clips.handler.js";
 import { needsFrame, thumbnailRenderArgs } from "../utils/thumbnail-layout.js";
@@ -73,6 +74,7 @@ import {
   parseFullEpisodeProgress,
 } from "../utils/full-episode-export.js";
 import { buildYtDlpArgs, isCookieBrowser, ytDlpHint } from "../utils/ytdlp-args.js";
+import { FORMATS } from "../models/index.js";
 import type {
   BatchClipsResult,
   ClipHistoryEntry,
@@ -86,6 +88,8 @@ import type {
 } from "../models/index.js";
 
 const log = childLogger("web-server");
+
+const FORMAT_NAMES: readonly string[] = FORMATS;
 
 const stringValue = z.string();
 const numberValue = z.number();
@@ -1464,7 +1468,7 @@ app.post("/api/create-clip", async (req, res) => {
   }
 
   const duration = end_second - start_second;
-  const maxDur = format === "horizontal" ? 300 : 180;
+  const maxDur = maxClipSeconds(format);
 
   if (duration > maxDur) {
     res.status(400).json({
@@ -1494,12 +1498,10 @@ app.post("/api/create-clip", async (req, res) => {
     return;
   }
 
-  const validFormats = ["vertical", "horizontal", "square"];
-
-  if (!validFormats.includes(format)) {
+  if (!FORMAT_NAMES.includes(format)) {
     res
       .status(400)
-      .json({ error: `Invalid format. Use: ${validFormats.join(", ")}` });
+      .json({ error: `Invalid format. Use: ${FORMAT_NAMES.join(", ")}` });
 
     return;
   }
@@ -1711,8 +1713,8 @@ app.post("/api/batch-clips", async (req, res) => {
       return;
     }
 
-    if (c.format && !["vertical", "horizontal", "square"].includes(c.format)) {
-      res.status(400).json({ error: `Clip ${i + 1}: invalid format "${c.format}". Use: vertical, horizontal, square` });
+    if (c.format && !FORMAT_NAMES.includes(c.format)) {
+      res.status(400).json({ error: `Clip ${i + 1}: invalid format "${c.format}". Use: ${FORMAT_NAMES.join(", ")}` });
 
       return;
     }
@@ -5617,10 +5619,11 @@ app.post("/api/mcp/export", async (req, res) => {
 
   // An agent that says nothing about fillers gets the studio's toggle, so an
   // export it triggers matches what the user set up there.
-  const cleanFillers =
-    req.body.clean_fillers !== undefined
-      ? req.body.clean_fillers !== false
-      : uiState.settings.cleanFillers !== false;
+  const cleanFillers = resolveCleanFillers(
+    req.body.clean_fillers === undefined ? undefined : req.body.clean_fillers !== false,
+    uiState.settings.cleanFillers !== false,
+    format,
+  );
 
   const keepCaptionOverlay = req.body.keep_caption_overlay === true;
   const writeCleanVariant = req.body.write_clean_variant === true;

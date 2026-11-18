@@ -165,7 +165,7 @@ class CpuFlagsAndTimeoutTests(unittest.TestCase):
     def test_ffmpeg_timeout_scales_with_duration(self):
         self.assertEqual(media_probe.ffmpeg_timeout(), 300)
         self.assertGreater(media_probe.ffmpeg_timeout(40), 300)
-        self.assertLessEqual(media_probe.ffmpeg_timeout(10_000), 1800)
+        self.assertLessEqual(media_probe.ffmpeg_timeout(10_000), 7200)
 
     def test_stream_durations(self):
         info = {

@@ -80,6 +80,9 @@ const timeoutFor = (durationSec) => {
   return Math.round(Math.min(50 * 60_000, Math.max(120_000, 90_000 + durationSec * 15_000)));
 };
 
+const compositeTimeoutFor = (durationSec) =>
+  Math.round(Math.min(60 * 60_000, Math.max(300_000, 120_000 + durationSec * 20_000)));
+
 const videoCacheBytes = () => {
   const mb = parseInt(process.env.PODCLI_REMOTION_VIDEO_CACHE_MB ?? "", 10);
 
@@ -425,7 +428,7 @@ async function main() {
         "-map", "0:a", "-c:a", "copy",
         path.resolve(opts.output),
       ],
-      { stdio: ["pipe", "pipe", "pipe"], timeout: 300000, encoding: "utf8" }
+      { stdio: ["pipe", "pipe", "pipe"], timeout: compositeTimeoutFor(durationSec), encoding: "utf8" }
     );
 
     if (composite.error || composite.status !== 0) {

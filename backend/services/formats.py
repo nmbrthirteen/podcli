@@ -27,6 +27,7 @@ class FormatSpec:
     editor: str
     pacing: str
     lens: str
+    auto_tighten: bool = True
 
     @property
     def dims(self) -> tuple[int, int]:
@@ -73,6 +74,23 @@ FORMATS = {
         editor="a viral clip editor for feeds where the frame is square",
         pacing="SHORTER IS BETTER. A punchy 25s clip outperforms a 40s clip every time.",
         lens="think like a social editor",
+    ),
+    "topic": FormatSpec(
+        name="topic",
+        width=1920, height=1080,
+        reframe=False,
+        caption_profile="lower_third",
+        dur_min=300, dur_max=900,
+        target_min=420, target_max=720,
+        editor="an editor cutting a full standalone topic segment out of a long-form show",
+        pacing=(
+            "The segment needs a clear setup, a developed middle, and a payoff "
+            "that closes the topic. Open where the topic is introduced and end "
+            "where it is resolved. Cut tangents, but keep the back and forth "
+            "that builds toward the point."
+        ),
+        lens="think like a long-form editor building a chapter",
+        auto_tighten=False,
     ),
 }
 

@@ -1,5 +1,12 @@
+const DEFAULT_MAX_CLIP_SECONDS = 180;
+
+const FORMAT_MAX_CLIP_SECONDS = new Map<string, number>([
+  ["horizontal", 300],
+  ["topic", 900],
+]);
+
 export function maxClipSeconds(format?: string): number {
-  return format === "horizontal" ? 300 : 180;
+  return (format && FORMAT_MAX_CLIP_SECONDS.get(format)) || DEFAULT_MAX_CLIP_SECONDS;
 }
 
 /** A range bound as it arrives from a request or tool call, before it is checked. */
@@ -33,7 +40,7 @@ export function validateClipRange(
 
 // Suggestions aren't bound to a format yet, so allow up to the longest
 // renderable duration plus trim headroom.
-const MAX_SUGGESTION_SECONDS = 600;
+const MAX_SUGGESTION_SECONDS = 1800;
 
 export function validateSuggestionRange(start: RangeBound, end: RangeBound): string | null {
   if (!isFiniteBound(start) || !isFiniteBound(end)) {
