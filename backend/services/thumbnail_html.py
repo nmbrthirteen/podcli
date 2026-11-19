@@ -794,7 +794,8 @@ def generate_thumbnail(
     tmp_html.write(html)
     tmp_html.close()
 
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    output_path = os.path.abspath(output_path)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     try:
         w = cfg["width"]

@@ -1,6 +1,8 @@
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -124,9 +126,29 @@ class ThumbnailHtmlTests(unittest.TestCase):
              ]) as run_mock:
             output = th.generate_thumbnail("line1", "line2", "/tmp/thumb.png")
 
-        self.assertEqual(output, "/tmp/thumb.png")
+        self.assertEqual(output, os.path.abspath("/tmp/thumb.png"))
         self.assertEqual(run_mock.call_args_list[0].args[0], ["node", "script", "a", "b", "1080", "1920", "1500"])
 
+
+    def test_a_relative_output_path_reaches_the_screenshot_tool_as_absolute(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        here = os.getcwd()
+        os.chdir(tmp)
+        self.addCleanup(os.chdir, here)
+        with mock.patch.object(th, "_build_html", return_value="<html></html>"), \
+             mock.patch.object(th, "_remotion_screenshot_script_path", return_value=__file__), \
+             mock.patch.object(th, "_playwright_cli_candidates", return_value=[]), \
+             mock.patch.object(th.os.path, "exists", return_value=True), \
+             mock.patch.object(th.shutil, "which", return_value="/usr/bin/node"), \
+             mock.patch.object(th.subprocess, "run", return_value=subprocess.CompletedProcess(
+                 args=["node"], returncode=0, stdout="", stderr="")) as run_mock:
+            output = th.generate_thumbnail("line1", "line2", os.path.join("clips", "thumb.png"))
+
+        expected = os.path.join(os.path.realpath(tmp), "clips", "thumb.png")
+        self.assertEqual(os.path.realpath(output), expected)
+        call = run_mock.call_args
+        self.assertEqual(os.path.realpath(os.path.join(call.kwargs["cwd"], call.args[0][3])), expected)
 
 class LayerTests(unittest.TestCase):
     """
