@@ -126,7 +126,7 @@ class ThumbnailHtmlTests(unittest.TestCase):
              ]) as run_mock:
             output = th.generate_thumbnail("line1", "line2", "/tmp/thumb.png")
 
-        self.assertEqual(output, "/tmp/thumb.png")
+        self.assertEqual(output, os.path.abspath("/tmp/thumb.png"))
         self.assertEqual(run_mock.call_args_list[0].args[0], ["node", "script", "a", "b", "1080", "1920", "1500"])
 
 
