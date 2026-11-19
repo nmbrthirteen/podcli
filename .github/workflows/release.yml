@@ -26,7 +26,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - { runner: macos-14, goos: darwin, goarch: arm64 }
+          - { runner: macos-latest, goos: darwin, goarch: arm64 }
           - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
           - { runner: ubuntu-latest, goos: linux, goarch: arm64 }
           - { runner: ubuntu-latest, goos: windows, goarch: amd64 }
@@ -69,7 +69,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-14, goos: darwin, goarch: arm64 }
+          - { runner: macos-latest, goos: darwin, goarch: arm64 }
           - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
           - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
           - { runner: windows-latest, goos: windows, goarch: amd64 }
@@ -108,7 +108,7 @@ jobs:
   # and the URL we pointed at serves x86_64 to every Mac, so ffmpeg ran under
   # Rosetta at roughly a third of native encode speed.
   ffmpeg-darwin:
-    runs-on: macos-14
+    runs-on: macos-latest
     env:
       FFMPEG_VERSION: '7.1'
       FFMPEG_SHA256: 40973d44970dbc83ef302b0609f2e74982be2d85916dd2ee7472d30678a7abe6
@@ -205,7 +205,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-14, goos: darwin, goarch: arm64 }
+          - { runner: macos-latest, goos: darwin, goarch: arm64 }
           - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
           - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
           - { runner: windows-latest, goos: windows, goarch: amd64 }
