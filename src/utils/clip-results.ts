@@ -44,3 +44,63 @@ export function advanceProgress(job: { progress: number }, percent: number): num
 
   return job.progress;
 }
+
+export interface BatchOutcome {
+  status: "done" | "error";
+  message: string;
+  /** Set when no clip rendered: the first clip's error, for the job's error field. */
+  error?: string;
+}
+
+// Remotion failures carry long stack traces; the status line only needs the gist.
+// The full text stays in result.results[].error.
+const MAX_ERROR_CHARS = 300;
+
+function shortError(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+
+  return oneLine.length > MAX_ERROR_CHARS ? `${oneLine.slice(0, MAX_ERROR_CHARS - 1)}…` : oneLine;
+}
+
+function clipLabel(row: ClipResultRow, position: number): string {
+  return `clip ${(row.clip_index ?? position) + 1}`;
+}
+
+// The Python batch task succeeds as a task even when every clip in it failed, so
+// the job's final state has to come from the per-clip rows: a batch where nothing
+// rendered is a failed job, and a partial one says which clips are missing.
+export function summarizeBatchOutcome(
+  data: BatchClipsResult | undefined,
+  successMessage: string,
+): BatchOutcome {
+  const results = data?.results ?? [];
+
+  if (!data || results.length === 0) {
+    const error = "The batch render returned no clip results.";
+
+    return { status: "error", message: `Error: ${error}`, error };
+  }
+
+  const total = data.total_clips ?? results.length;
+
+  const failures = results
+    .map((row, position) => ({ row, position }))
+    .filter(({ row }) => row.status !== "success");
+
+  const rendered = results.length - failures.length;
+
+  if (failures.length === 0) return { status: "done", message: successMessage };
+
+  const failureList = failures
+    .map(({ row, position }) => `${clipLabel(row, position)}: ${shortError(row.error || "unknown error")}`)
+    .join("; ");
+
+  if (rendered === 0) {
+    const first = failures[0];
+    const error = `All ${total} clips failed. First error (${clipLabel(first.row, first.position)}): ${shortError(first.row.error || "unknown error")}`;
+
+    return { status: "error", message: `Error: ${error}`, error };
+  }
+
+  return { status: "done", message: `${rendered} of ${total} clips rendered. Failed: ${failureList}` };
+}
