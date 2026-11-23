@@ -212,6 +212,26 @@ class AIFallbackTests(unittest.TestCase):
         self.assertTrue(all(call["timeout"] == cs.WINDOW_TIMEOUT for call in calls[:4]))
         self.assertTrue(all(call["end"] - call["start"] < 2500 for call in calls[:4]))
 
+    def test_one_window_that_raises_does_not_discard_the_others(self):
+        segments = [
+            {"start": float(i * 330), "end": float(i * 330) + 45.0, "speaker": "SPEAKER_00", "text": f"Segment {i}."}
+            for i in range(17)
+        ]
+
+        def fake_suggest(*, segments, top_n, **kw):
+            first = segments[0]["start"]
+            if first == 0.0:
+                raise TimeoutError("cloud stalled")
+            return [{
+                "title": f"Clip {first}", "start_second": first, "end_second": first + 28.0,
+                "segments": [{"start": first, "end": first + 28.0}], "duration": 28, "score": 5.0,
+            }]
+
+        with mock.patch.object(cs, "suggest_with_claude", side_effect=fake_suggest):
+            clips = cs.suggest_initial_with_claude(segments=segments, top_n=3)
+
+        self.assertEqual(len(clips), 3)
+
     def test_long_episode_windows_are_asked_at_the_same_time(self):
         segments = [
             {"start": float(i * 330), "end": float(i * 330) + 45.0, "speaker": "SPEAKER_00", "text": f"Segment {i}."}
@@ -305,9 +325,9 @@ class AIFallbackTests(unittest.TestCase):
             clips = cs.suggest_initial_with_claude(segments=segments, top_n=3)
 
         self.assertEqual(len(calls), 5)
-        self.assertEqual({call["top_n"] for call in calls}, {2})
-        self.assertEqual([c["title"] for c in clips[:2]], ["Clip 0.0-0", "Clip 0.0-1"])
-        self.assertEqual([c["score"] for c in clips], [90.0, 89.0, 10.0])
+        self.assertEqual(sum(call["top_n"] for call in calls), 3 * cs.CANDIDATE_OVERSAMPLE)
+        self.assertEqual(len(clips), 3)
+        self.assertEqual([c["score"] for c in clips[:2]], [90.0, 89.0])
 
     def test_suggest_with_claude_allows_slack_on_both_ends_of_the_format_bounds(self):
         segments = [

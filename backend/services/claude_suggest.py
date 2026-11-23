@@ -1033,7 +1033,9 @@ def suggest_initial_with_claude(
     if progress_callback:
         progress_callback(0, f"Long episode detected: searching {len(buckets)} timeline buckets together...")
 
-    per_bucket_top_n = max(2, math.ceil(top_n * CANDIDATE_OVERSAMPLE / len(buckets)))
+    budget = top_n * CANDIDATE_OVERSAMPLE
+    share, extra = divmod(budget, len(buckets))
+    window_top_n = [max(1, share + (1 if i < extra else 0)) for i in range(len(buckets))]
 
     def search_bucket(item):
         idx, bucket = item
@@ -1042,24 +1044,28 @@ def suggest_initial_with_claude(
             f"[{int(bucket['start'] // 60)}:{int(bucket['start'] % 60):02d}-"
             f"{int(bucket['end'] // 60)}:{int(bucket['end'] % 60):02d}]"
         )
-        return suggest_with_claude(
-            segments=bucket["segments"],
-            top_n=per_bucket_top_n,
-            exclude_clips=exclude_clips,
-            progress_callback=(
-                None if progress_callback is None
-                else lambda pct, msg, bucket_label=bucket_label: progress_callback(
-                    pct,
-                    f"{bucket_label}: {msg}" if msg else msg,
-                )
-            ),
-            error_sink=error_sink,
-            timeout=WINDOW_TIMEOUT,
-            reaction_times=[
-                t for t in (reaction_times or []) if bucket["start"] <= t <= bucket["end"]
-            ] or None,
-            bounds=bounds,
-        )
+        try:
+            return suggest_with_claude(
+                segments=bucket["segments"],
+                top_n=window_top_n[idx],
+                exclude_clips=exclude_clips,
+                progress_callback=(
+                    None if progress_callback is None
+                    else lambda pct, msg, bucket_label=bucket_label: progress_callback(
+                        pct,
+                        f"{bucket_label}: {msg}" if msg else msg,
+                    )
+                ),
+                error_sink=error_sink,
+                timeout=WINDOW_TIMEOUT,
+                reaction_times=[
+                    t for t in (reaction_times or []) if bucket["start"] <= t <= bucket["end"]
+                ] or None,
+                bounds=bounds,
+            )
+        except Exception as exc:
+            print(f"Moment search error in {bucket_label}: {exc}", file=sys.stderr, flush=True)
+            return None
 
     with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_WINDOWS, len(buckets))) as pool:
         found = list(pool.map(search_bucket, enumerate(buckets)))
