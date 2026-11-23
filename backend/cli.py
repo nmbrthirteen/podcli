@@ -1950,6 +1950,17 @@ def cmd_process(args):
 
     _ai_label = " (+ AI titles)" if (_ai_cli_path and config.get("generate_content", True)) else ""
     print(f"\n  [4/4] Exporting {len(clips)} clips{_ai_label} to {output_dir}/")
+    _content_pool = None
+    _content_jobs = {}
+    if _ai_cli_path and config.get("generate_content", True):
+        from concurrent.futures import ThreadPoolExecutor
+        from services.content_generator import generate_clip_content
+
+        _content_pool = ThreadPoolExecutor(max_workers=3)
+        _content_jobs = {
+            idx: _content_pool.submit(generate_clip_content, clip=c, transcript_segments=segments)
+            for idx, c in enumerate(clips)
+        }
     results = []
     t0 = time.time()
     _skip_review = (
@@ -2053,13 +2064,9 @@ def cmd_process(args):
                     print(f"                 ⚠ thumbnail: {e}")
 
             # Generate titles, descriptions, tags for this clip immediately
-            if _ai_cli_path and config.get("generate_content", True) and result.get("output_path"):
+            if i in _content_jobs and result.get("output_path"):
                 try:
-                    from services.content_generator import generate_clip_content
-                    content_result = generate_clip_content(
-                        clip=clip,
-                        transcript_segments=segments,
-                    )
+                    content_result = _content_jobs[i].result()
                     if content_result and content_result.get("raw_text"):
                         # Save per-clip content to file
                         _content_path = result["output_path"].replace(".mp4", "_content.md")
@@ -2249,6 +2256,9 @@ def cmd_process(args):
     except KeyboardInterrupt:
         interrupted = True
         print(f"\n         ⚠ Render interrupted: keeping completed clips")
+    finally:
+        if _content_pool:
+            _content_pool.shutdown(wait=False, cancel_futures=True)
 
     elapsed = time.time() - t0
     success = sum(1 for r in results if "output_path" in r)
