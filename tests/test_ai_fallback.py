@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import threading
 import sys
 import tempfile
 import unittest
@@ -208,14 +209,33 @@ class AIFallbackTests(unittest.TestCase):
 
         self.assertIsNotNone(clips)
         self.assertGreaterEqual(len(calls), 4)
-        self.assertTrue(all(call["timeout"] == 90 for call in calls[:4]))
+        self.assertTrue(all(call["timeout"] == cs.WINDOW_TIMEOUT for call in calls[:4]))
         self.assertTrue(all(call["end"] - call["start"] < 2500 for call in calls[:4]))
-        self.assertGreaterEqual(calls[1]["exclude_len"], 1)
+
+    def test_long_episode_windows_are_asked_at_the_same_time(self):
+        segments = [
+            {"start": float(i * 330), "end": float(i * 330) + 45.0, "speaker": "SPEAKER_00", "text": f"Segment {i}."}
+            for i in range(17)
+        ]
+        in_flight = threading.Barrier(4, timeout=10)
+
+        def fake_suggest(*, segments, top_n, **kw):
+            in_flight.wait()
+            first = segments[0]["start"]
+            return [{
+                "title": f"Clip {first}", "start_second": first, "end_second": first + 28.0,
+                "segments": [{"start": first, "end": first + 28.0}], "duration": 28, "score": 5.0,
+            }]
+
+        with mock.patch.object(cs, "suggest_with_claude", side_effect=fake_suggest):
+            clips = cs.suggest_initial_with_claude(segments=segments, top_n=3)
+
+        self.assertEqual(len(clips), 3)
 
     def test_a_transcript_that_fits_one_prompt_is_read_whole_and_ranked_down(self):
         segments = []
         for i in range(20):
-            start = float(i * 330)
+            start = float(i * 100)
             segments.append({
                 "start": start,
                 "end": start + 45.0,
@@ -285,9 +305,9 @@ class AIFallbackTests(unittest.TestCase):
             clips = cs.suggest_initial_with_claude(segments=segments, top_n=3)
 
         self.assertEqual(len(calls), 5)
-        self.assertEqual({call["top_n"] for call in calls}, {3})
-        self.assertEqual([c["title"] for c in clips], ["Clip 0.0-0", "Clip 0.0-1", "Clip 0.0-2"])
-        self.assertEqual([c["score"] for c in clips], [90.0, 89.0, 88.0])
+        self.assertEqual({call["top_n"] for call in calls}, {2})
+        self.assertEqual([c["title"] for c in clips[:2]], ["Clip 0.0-0", "Clip 0.0-1"])
+        self.assertEqual([c["score"] for c in clips], [90.0, 89.0, 10.0])
 
     def test_suggest_with_claude_allows_slack_on_both_ends_of_the_format_bounds(self):
         segments = [
@@ -575,9 +595,45 @@ class AICliDiscoveryTests(unittest.TestCase):
                 )
 
             args, kwargs = run_mock.call_args
-            self.assertEqual(args[0], [cli, "--print", "-p", "-"])
+            self.assertEqual(args[0], [cli, "--print", "-p", "-", *ai.CLAUDE_LEAN_FLAGS])
             self.assertIn("stdin", kwargs)
             self.assertFalse(kwargs.get("shell"))
+
+    def test_claude_falls_back_to_the_plain_command_when_the_cli_rejects_the_lean_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt_file = os.path.join(tmp, "prompt.txt")
+            with open(prompt_file, "w", encoding="utf-8") as fh:
+                fh.write("find clips")
+            cli = os.path.join(tmp, "claude")
+            rejected = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="error: unknown option '--tools'")
+            accepted = subprocess.CompletedProcess(args=[], returncode=0, stdout="{}", stderr="")
+
+            with mock.patch("services.ai_cli.subprocess.run", side_effect=[rejected, accepted]) as run_mock:
+                result = ai._run_ai_command(
+                    cli_path=cli, engine="claude", prompt="find clips",
+                    prompt_file=prompt_file, project_dir=tmp, timeout=30,
+                )
+
+            self.assertEqual(result.stdout, "{}")
+            self.assertEqual(run_mock.call_count, 2)
+            self.assertEqual(run_mock.call_args_list[1].args[0], [cli, "--print", "-p", "-"])
+
+    def test_claude_keeps_a_real_failure_instead_of_retrying_without_the_lean_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt_file = os.path.join(tmp, "prompt.txt")
+            with open(prompt_file, "w", encoding="utf-8") as fh:
+                fh.write("find clips")
+            cli = os.path.join(tmp, "claude")
+            failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="usage limit reached")
+
+            with mock.patch("services.ai_cli.subprocess.run", return_value=failed) as run_mock:
+                result = ai._run_ai_command(
+                    cli_path=cli, engine="claude", prompt="find clips",
+                    prompt_file=prompt_file, project_dir=tmp, timeout=30,
+                )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(run_mock.call_count, 1)
 
     def test_codex_exec_uses_current_read_only_args(self):
         with tempfile.TemporaryDirectory() as tmp:

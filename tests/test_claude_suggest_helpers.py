@@ -95,16 +95,26 @@ class ShouldBucketTests(unittest.TestCase):
         segments = [{"start": 0, "end": 10, "text": "short"}]
         self.assertFalse(cs._should_bucket_initial_selection(segments))
 
-    def test_a_three_hour_conversation_that_fits_one_prompt_does_not_bucket(self):
+    def test_a_three_hour_conversation_is_searched_in_windows_even_when_it_fits_one_prompt(self):
         segments = [
             {"start": i * 5.4, "end": i * 5.4 + 5.0, "text": "a short spoken line here"}
             for i in range(2000)
         ]
         self.assertGreater(segments[-1]["end"], 10000)
+        self.assertTrue(cs._should_bucket_initial_selection(segments))
+
+    def test_an_episode_just_under_the_window_length_is_read_whole(self):
+        minutes = cs.PARALLEL_WINDOW_MIN_MINUTES
+        segments = [{"start": 0, "end": minutes * 60 - 1, "text": "talk"}]
         self.assertFalse(cs._should_bucket_initial_selection(segments))
 
+    def test_an_episode_just_over_the_window_length_is_searched_in_windows(self):
+        minutes = cs.PARALLEL_WINDOW_MIN_MINUTES
+        segments = [{"start": 0, "end": minutes * 60 + 1, "text": "talk"}]
+        self.assertTrue(cs._should_bucket_initial_selection(segments))
+
     def test_many_short_segments_do_not_bucket(self):
-        segments = [{"start": i, "end": i + 1, "text": "hi"} for i in range(5000)]
+        segments = [{"start": i * 0.1, "end": i * 0.1 + 0.1, "text": "hi"} for i in range(5000)]
         self.assertFalse(cs._should_bucket_initial_selection(segments))
 
     def test_text_just_under_the_budget_does_not_bucket(self):
