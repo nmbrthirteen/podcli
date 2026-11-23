@@ -49,6 +49,18 @@ def _extract_wav(media_path: str, wav_path: str, ffmpeg: str = "ffmpeg") -> None
     )
 
 
+def _load_whisper_json(path: str) -> dict:
+    # whisper.cpp can split one multi-byte character across two tokens, which
+    # leaves invalid UTF-8 in the file. surrogateescape keeps those bytes so
+    # _heal_utf8 can rejoin them once the tokens are concatenated.
+    with open(path, encoding="utf-8", errors="surrogateescape") as f:
+        return json.load(f)
+
+
+def _heal_utf8(text: str) -> str:
+    return text.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+
 def _tokens_to_words(tokens: list[dict]) -> list[dict]:
     """Merge whisper.cpp subword tokens into words with start/end seconds."""
     words: list[dict] = []
@@ -58,7 +70,7 @@ def _tokens_to_words(tokens: list[dict]) -> list[dict]:
 
     def flush():
         nonlocal cur_text, cur_start, cur_end
-        text = cur_text.strip().lstrip("▁").strip()
+        text = _heal_utf8(cur_text.strip().lstrip("▁").strip())
         if text and cur_start is not None:
             words.append({
                 "word": text,
@@ -221,8 +233,7 @@ def transcribe_file(
         cmd += ["-l", language or "auto"]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=7200)
 
-        with open(out_base + ".json", encoding="utf-8") as f:
-            data = json.load(f)
+        data = _load_whisper_json(out_base + ".json")
 
         transcription = data.get("transcription", [])
         segments, words = [], []
@@ -232,7 +243,7 @@ def transcribe_file(
                 "id": i,
                 "start": round((off.get("from") or 0) / 1000.0, 3),
                 "end": round((off.get("to") or 0) / 1000.0, 3),
-                "text": (seg.get("text") or "").strip(),
+                "text": _heal_utf8((seg.get("text") or "").strip()),
                 "speaker": None,
             })
             words.extend(_tokens_to_words(seg.get("tokens", [])))
