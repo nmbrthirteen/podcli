@@ -13,6 +13,8 @@ One-command processing:
 import argparse
 import json
 import os
+import threading
+import queue
 from utils.log import warn as log_warn
 import re
 import shlex
@@ -1950,6 +1952,14 @@ def cmd_process(args):
 
     _ai_label = " (+ AI titles)" if (_ai_cli_path and config.get("generate_content", True)) else ""
     print(f"\n  [4/4] Exporting {len(clips)} clips{_ai_label} to {output_dir}/")
+    _content_jobs = {}
+    if _ai_cli_path and config.get("generate_content", True):
+        from services.content_generator import generate_clip_content
+
+        _content_jobs = _start_background_jobs(
+            {idx: (lambda c=c: generate_clip_content(clip=c, transcript_segments=segments)) for idx, c in enumerate(clips)},
+            workers=3,
+        )
     results = []
     t0 = time.time()
     _skip_review = (
@@ -2053,13 +2063,9 @@ def cmd_process(args):
                     print(f"                 ⚠ thumbnail: {e}")
 
             # Generate titles, descriptions, tags for this clip immediately
-            if _ai_cli_path and config.get("generate_content", True) and result.get("output_path"):
+            if i in _content_jobs and result.get("output_path"):
                 try:
-                    from services.content_generator import generate_clip_content
-                    content_result = generate_clip_content(
-                        clip=clip,
-                        transcript_segments=segments,
-                    )
+                    content_result = _content_jobs[i].result()
                     if content_result and content_result.get("raw_text"):
                         # Save per-clip content to file
                         _content_path = result["output_path"].replace(".mp4", "_content.md")
@@ -2249,6 +2255,9 @@ def cmd_process(args):
     except KeyboardInterrupt:
         interrupted = True
         print(f"\n         ⚠ Render interrupted: keeping completed clips")
+    finally:
+        for job in _content_jobs.values():
+            job.cancel()
 
     elapsed = time.time() - t0
     success = sum(1 for r in results if "output_path" in r)
@@ -2343,6 +2352,53 @@ class _Spinner:
 def _wrap_text(text: str, indent: str) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 100)
     return textwrap.fill(text, width=width, initial_indent=indent, subsequent_indent=indent)
+
+
+class _BackgroundJob:
+    """A result computed on a daemon thread, so an interrupted run can exit while it is still going."""
+
+    def __init__(self, work):
+        self._work = work
+        self._done = threading.Event()
+        self._cancelled = False
+        self._value = None
+        self._error = None
+
+    def run(self):
+        if not self._cancelled:
+            try:
+                self._value = self._work()
+            except BaseException as exc:
+                self._error = exc
+        self._done.set()
+
+    def cancel(self):
+        self._cancelled = True
+
+    def result(self):
+        self._done.wait()
+        if self._error is not None:
+            raise self._error
+        return self._value
+
+
+def _start_background_jobs(works: dict, workers: int) -> dict:
+    """Start the jobs in order, at most `workers` at a time, on daemon threads."""
+    jobs = {key: _BackgroundJob(work) for key, work in works.items()}
+    pending = queue.Queue()
+    for job in jobs.values():
+        pending.put(job)
+
+    def drain():
+        while True:
+            try:
+                pending.get_nowait().run()
+            except queue.Empty:
+                return
+
+    for _ in range(min(workers, len(jobs))):
+        threading.Thread(target=drain, daemon=True).start()
+    return jobs
 
 
 def _print_clips(clips: list):

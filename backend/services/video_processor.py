@@ -215,7 +215,7 @@ def _replace_layout_flash_frames(video_path: str, cut_times: list[float], durati
     parts.append("".join(labels) + f"concat=n={len(labels)}:v=1:a=0[v]")
     temp = video_path + ".layout-guard.mp4"
     cmd = ["ffmpeg", "-y", "-i", video_path, "-filter_complex", ";".join(parts),
-           "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p",
+           "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-crf", "18", "-preset", "veryfast", "-pix_fmt", "yuv420p",
            "-c:a", "copy", "-t", f"{duration:.3f}", "-movflags", "+faststart", temp]
     result = proc_run(cmd, timeout=_FFMPEG_TIMEOUT, check=False)
     if result.returncode != 0 or not os.path.exists(temp):
@@ -1796,7 +1796,7 @@ def _track_and_crop_inner(
                         "-i", input_path,
                         "-vf", seg_vf,
                         "-an",
-                        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                        "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
                         "-pix_fmt", "yuv420p",
                         "-avoid_negative_ts", "make_zero",
                         part_path,
@@ -1861,7 +1861,7 @@ def _track_and_crop_inner(
                     if _has_audio_stream(input_path):
                         cmd += ["-map", f"{source_index}:a", "-c:a", "aac", "-b:a", "192k"]
                     cmd += [
-                        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                        "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
                         # xfade answers format negotiation with yuv444p even
                         # when both of its inputs are yuv420p, and nothing here
                         # asked for a format, so this wrote High 4:4:4
@@ -1905,7 +1905,7 @@ def _track_and_crop_inner(
                         "-i", input_path,
                         "-vf", (f"crop={crop_w}:{crop_h}:{_crop_for(r_cx)}:{crop_y},"
                                 f"scale={target_w}:{target_h}"),
-                        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                        "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
                         "-pix_fmt", "yuv420p",
                         "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
                         "-avoid_negative_ts", "make_zero",
@@ -2422,7 +2422,7 @@ def _crop_split_screen(
                     "-ss", str(start_t), "-t", str(seg_duration),
                     "-i", input_path,
                     "-vf", vf,
-                    "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                    "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
                     "-pix_fmt", "yuv420p",
                     "-c:a", "aac", "-b:a", "192k",
                     "-avoid_negative_ts", "make_zero",
