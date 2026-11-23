@@ -32,6 +32,7 @@ CONTENT_KB_FILES = [
     ("02-voice-and-tone.md", 2000),
     ("01-brand-identity.md", 1000),
     ("12-quick-reference.md", 1500),
+    ("14-learned-style.md", 1500),
 ]
 
 
