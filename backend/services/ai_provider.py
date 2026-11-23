@@ -203,6 +203,9 @@ def _run_cloud(purpose: str, instruction: str, system: Optional[str],
             episode_source_hash=episode_source_hash,
             timeout=timeout,
         )
+    except TimeoutError:
+        return AIResult(ok=False, provider="cloud", label="podcli Pro",
+                        error=f"podcli Pro timed out ({ai_cli._format_timeout_label(timeout)} limit)")
     except podcli_cloud.CloudError as exc:
         return AIResult(ok=False, provider="cloud", label="podcli Pro", error=str(exc))
 

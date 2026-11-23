@@ -428,6 +428,12 @@ def _format_timeout_label(timeout: int) -> str:
     return f"{timeout}s"
 
 
+# A bare `claude --print` loads every plugin, hook and MCP server the user has
+# configured before it reads the prompt (about 20s on a busy setup, 4s without).
+# These calls only need text in and text out.
+CLAUDE_LEAN_FLAGS = ["--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]
+
+
 def _run_ai_command(
     cli_path: str,
     engine: str,
@@ -473,19 +479,32 @@ def _run_ai_command(
         return result
 
     shell = sys.platform == "win32" and cli_path.lower().endswith((".cmd", ".bat"))
-    cmd = f'"{cli_path}" --print -p -' if shell else [cli_path, "--print", "-p", "-"]
-    with open(prompt_file, encoding="utf-8") as prompt_fh:
-        return subprocess.run(
-            cmd,
-            stdin=prompt_fh,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=project_dir,
-            timeout=timeout,
-            shell=shell,
-        )
+
+    def run_claude(cmd):
+        with open(prompt_file, encoding="utf-8") as prompt_fh:
+            return subprocess.run(
+                cmd,
+                stdin=prompt_fh,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=project_dir,
+                timeout=timeout,
+                shell=shell,
+            )
+
+    if shell:
+        return run_claude(f'"{cli_path}" --print -p -')
+    result = run_claude([cli_path, "--print", "-p", "-", *CLAUDE_LEAN_FLAGS])
+    if result.returncode != 0 and _rejects_flags(result.stderr):
+        return run_claude([cli_path, "--print", "-p", "-"])
+    return result
+
+
+def _rejects_flags(stderr: str) -> bool:
+    low = (stderr or "").lower()
+    return any(s in low for s in ("unknown option", "unrecognized option", "unknown argument", "unexpected argument", "invalid option"))
 
 
 def classify_cli_error(detail: str) -> str:

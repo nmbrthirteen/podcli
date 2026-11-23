@@ -8,6 +8,7 @@ Priority: podcli Pro cloud, then Claude Code or Codex, then the Anthropic API, t
 """
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import os
@@ -497,6 +498,12 @@ def _split_prompt_for_cache(prompt: str, transcript_text: str) -> tuple[str, str
 
 FULL_PROMPT_CHAR_BUDGET = 400000
 CANDIDATE_OVERSAMPLE = 2
+# One call that reads a long episode and writes a long answer outlasts its
+# timeout on a slow model, and the fallback then reads a sampled transcript.
+# Past this length the episode is split and the windows are asked together.
+PARALLEL_WINDOW_MIN_MINUTES = 45
+MAX_PARALLEL_WINDOWS = 4
+WINDOW_TIMEOUT = 180
 
 
 def _build_transcript_text(segments: list[dict]) -> str:
@@ -521,14 +528,17 @@ def _segments_duration_seconds(segments: list[dict]) -> float:
 
 def _should_bucket_initial_selection(segments: list[dict]) -> bool:
     """
-    Bucket the search only when the transcript text is too big for one prompt.
+    Bucket the search when the transcript is too big for one prompt, or the
+    episode is long enough that one call would outlast its timeout.
 
     A single prompt lets the model compare moments across the whole episode,
-    so buckets are the fallback for transcripts past FULL_PROMPT_CHAR_BUDGET.
+    so shorter episodes keep it.
     """
     if not segments:
         return False
 
+    if _segments_duration_seconds(segments) > PARALLEL_WINDOW_MIN_MINUTES * 60:
+        return True
     return len(_build_transcript_text(segments)) > FULL_PROMPT_CHAR_BUDGET
 
 
@@ -1022,42 +1032,45 @@ def suggest_initial_with_claude(
         )
 
     if progress_callback:
-        progress_callback(0, f"Long episode detected: searching {len(buckets)} timeline buckets...")
+        progress_callback(0, f"Long episode detected: searching {len(buckets)} timeline buckets together...")
 
-    aggregated: list[dict] = []
-    per_bucket_top_n = max(2, top_n)
+    budget = top_n * CANDIDATE_OVERSAMPLE
+    share, extra = divmod(budget, len(buckets))
+    window_top_n = [max(1, share + (1 if i < extra else 0)) for i in range(len(buckets))]
 
-    for idx, bucket in enumerate(buckets):
+    def search_bucket(item):
+        idx, bucket = item
         bucket_label = (
             f"bucket {idx + 1}/{len(buckets)} "
             f"[{int(bucket['start'] // 60)}:{int(bucket['start'] % 60):02d}-"
             f"{int(bucket['end'] // 60)}:{int(bucket['end'] % 60):02d}]"
         )
-        if progress_callback:
-            progress_callback(0, f"Searching {bucket_label}...")
+        try:
+            return suggest_with_claude(
+                segments=bucket["segments"],
+                top_n=window_top_n[idx],
+                exclude_clips=exclude_clips,
+                progress_callback=(
+                    None if progress_callback is None
+                    else lambda pct, msg, bucket_label=bucket_label: progress_callback(
+                        pct,
+                        f"{bucket_label}: {msg}" if msg else msg,
+                    )
+                ),
+                error_sink=error_sink,
+                timeout=WINDOW_TIMEOUT,
+                reaction_times=[
+                    t for t in (reaction_times or []) if bucket["start"] <= t <= bucket["end"]
+                ] or None,
+                bounds=bounds,
+            )
+        except Exception as exc:
+            print(f"Moment search error in {bucket_label}: {exc}", file=sys.stderr, flush=True)
+            return None
 
-        bucket_clips = suggest_with_claude(
-            segments=bucket["segments"],
-            top_n=per_bucket_top_n,
-            exclude_clips=exclude_clips + aggregated,
-            progress_callback=(
-                None if progress_callback is None
-                else lambda pct, msg, bucket_label=bucket_label: progress_callback(
-                    pct,
-                    f"{bucket_label}: {msg}" if msg else msg,
-                )
-            ),
-            error_sink=error_sink,
-            timeout=90,
-            reaction_times=[
-                t for t in (reaction_times or []) if bucket["start"] <= t <= bucket["end"]
-            ] or None,
-            bounds=bounds,
-        )
-        if not bucket_clips:
-            continue
-
-        aggregated.extend(bucket_clips)
+    with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_WINDOWS, len(buckets))) as pool:
+        found = list(pool.map(search_bucket, enumerate(buckets)))
+    aggregated: list[dict] = [clip for clips in found if clips for clip in clips]
 
     deduped = _dedupe_clips_by_range(aggregated)
     if len(deduped) >= top_n:
