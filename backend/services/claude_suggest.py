@@ -157,6 +157,7 @@ KB_FILES = [
     ("12-quick-reference.md", 2000),         # hook bank, title formulas, hashtags
     ("08-topics-themes.md", 1000),           # topic areas, audience interest map
     ("00-master-instructions.md", 1500),     # quality gate, auto-detection rules
+    ("14-learned-style.md", 1500),           # taste learned from past clips
 ]
 
 

@@ -109,7 +109,7 @@ After publishing: `/retro-episode`
 
 ## Knowledge base
 
-All slash commands read from `.podcli/knowledge/`. This is where your show's brand, voice, and style live. 14 files:
+All slash commands read from `.podcli/knowledge/`. This is where your show's brand, voice, and style live. 15 files:
 
 | File | What it contains |
 |------|-----------------|
@@ -127,6 +127,7 @@ All slash commands read from `.podcli/knowledge/`. This is where your show's bra
 | `11-inspiration-channels.md` | Reference channels, viral hooks |
 | `12-quick-reference.md` | Copy-paste resources |
 | `13-learnings.md` | Cross-episode learnings, appended by `/retro-episode` |
+| `14-learned-style.md` | Taste learned from your past clips (what you keep, how you title). Optional; read by clip picking and title writing when present |
 
 ---
 
