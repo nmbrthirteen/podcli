@@ -314,7 +314,9 @@ class OpeningHookRenderTests(unittest.TestCase):
         # Each of the three parts can round up to a whole frame on its own,
         # depending on the ffmpeg build; captions follow the probed lengths.
         self.assertAlmostEqual(self._video_duration(path), 6.0, delta=3 / self.FPS)
-        self.assertAlmostEqual(result["duration"], 6.0, delta=0.1)
+        # The reported length adds up each part's container duration, which
+        # can also carry a little audio padding beyond its last frame.
+        self.assertAlmostEqual(result["duration"], 6.0, delta=3 / self.FPS + 0.05)
         self._assert_words(words, [
             ("w5", 0.2), ("w6", 1.2), ("w2", 2.2), ("w3", 3.2), ("w4", 4.2), ("w7", 5.2),
         ])
