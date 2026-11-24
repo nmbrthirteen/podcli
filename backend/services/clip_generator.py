@@ -375,6 +375,20 @@ def _reserve_output_path(output_dir: str, stem: str, ext: str) -> str:
         return candidate
 
 
+def keep_existing_outputs(output_dir: str, title: str) -> None:
+    """Make this process skip every clip already on disk for `title`, so the
+    next render lands at a new `-N` path and earlier versions stay intact."""
+    stem = f"{safe_filename(title)}_short"
+    try:
+        names = os.listdir(output_dir)
+    except OSError:
+        return
+    with _output_path_lock:
+        for name in names:
+            if name.endswith(".mp4") and (name == f"{stem}.mp4" or name.startswith(f"{stem}-")):
+                _reserved_output_paths.add(os.path.join(output_dir, name))
+
+
 def _reframe_can_jump(
     reframe: bool,
     crop_strategy: str,
@@ -1085,6 +1099,7 @@ def generate_clip(
             transcript_words=transcript_words,
             title=title,
             output_dir=output_dir,
+            output_path=_reserve_output_path(output_dir, f"{safe_filename(title)}_short", ".mp4") if output_dir else None,
             progress_callback=progress_callback,
         )
 

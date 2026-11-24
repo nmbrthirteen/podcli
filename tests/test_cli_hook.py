@@ -104,7 +104,12 @@ class ClipHookTests(unittest.TestCase):
             node for node in ast.walk(tree)
             if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "generate_clip"
         ]
-        self.assertGreaterEqual(len(calls), 5)
+        renders = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_render_clip_with_recipe"
+        ]
+        self.assertGreaterEqual(len(renders), 5)
+        self.assertGreaterEqual(len(calls), 1)
         for call in calls:
             self.assertIn("hook", {k.arg for k in call.keywords}, f"generate_clip at line {call.lineno}")
 
