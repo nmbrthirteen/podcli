@@ -148,6 +148,7 @@ def render_audiogram(
     transcript_words: Optional[list] = None,
     title: str = "clip",
     output_dir: Optional[str] = None,
+    output_path: Optional[str] = None,
     fps: int = 30,
     bars: int = 48,
     progress_callback=None,
@@ -165,10 +166,14 @@ def render_audiogram(
         if progress_callback:
             progress_callback(percent, message)
 
-    out_dir = output_dir or os.path.join(os.getcwd(), "output")
-    os.makedirs(out_dir, exist_ok=True)
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in title)[:60] or "clip"
-    final_path = os.path.join(out_dir, f"{safe}.mp4")
+    if output_path:
+        final_path = output_path
+        os.makedirs(os.path.dirname(final_path) or ".", exist_ok=True)
+    else:
+        out_dir = output_dir or os.path.join(os.getcwd(), "output")
+        os.makedirs(out_dir, exist_ok=True)
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in title)[:60] or "clip"
+        final_path = os.path.join(out_dir, f"{safe}.mp4")
 
     say(10, "Reading the waveform")
     levels = envelope(audio_path, start_second, end_second, fps=fps, bars=bars)

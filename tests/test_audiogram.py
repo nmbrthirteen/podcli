@@ -99,6 +99,20 @@ class RenderRoutingTests(unittest.TestCase):
         self.assertEqual(render.call_args.kwargs["start_second"], 0)
         self.assertEqual(render.call_args.kwargs["end_second"], 3)
 
+    def test_an_audio_clip_takes_a_reserved_path_beside_earlier_versions(self):
+        from services import clip_generator
+
+        with tempfile.TemporaryDirectory() as tmp:
+            open(os.path.join(tmp, "Big_Answer_short.mp4"), "wb").close()
+            clip_generator.keep_existing_outputs(tmp, "Big Answer")
+            with mock.patch.object(audiogram, "is_audio_only", return_value=True):
+                with mock.patch.object(audiogram, "render_audiogram", return_value={}) as render:
+                    clip_generator.generate_clip(
+                        video_path=__file__, start_second=0, end_second=3,
+                        title="Big Answer", output_dir=tmp,
+                    )
+            self.assertEqual(render.call_args.kwargs["output_path"], os.path.join(tmp, "Big_Answer_short-2.mp4"))
+
     def test_a_video_file_never_reaches_it(self):
         from services import clip_generator
 

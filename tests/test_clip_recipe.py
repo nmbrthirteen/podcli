@@ -45,6 +45,14 @@ class BuildAndSaveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertNotIn("logo_path", _recipe(tmp)["settings"])
 
+    def test_refuses_a_file_that_is_not_an_object(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "x.recipe.json")
+            with open(path, "w") as fh:
+                json.dump([], fh)
+            with self.assertRaisesRegex(ValueError, "not a clip recipe"):
+                clip_recipe.load(path)
+
     def test_refuses_a_recipe_from_another_version(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "x.recipe.json")
@@ -72,6 +80,12 @@ class ApplyChangesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(ValueError, "caption_colour"):
                 clip_recipe.apply_changes(_recipe(tmp), {"caption_colour": "red"})
+
+    def test_edges_that_are_not_numbers_are_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in (None, "12", True, float("nan")):
+                with self.assertRaisesRegex(ValueError, "start_second"):
+                    clip_recipe.apply_changes(_recipe(tmp), {"start_second": bad})
 
     def test_end_before_start_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -108,6 +122,18 @@ class KeepExistingOutputsTests(unittest.TestCase):
             self.assertEqual(path, os.path.join(tmp, "Big_Answer_short-3.mp4"))
 
 
+class SnapshotWordsTests(unittest.TestCase):
+    def test_same_content_reuses_one_file_and_new_content_never_overwrites_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = clip_recipe.snapshot_words(tmp, [{"word": "a"}], None)
+            again = clip_recipe.snapshot_words(tmp, [{"word": "a"}], None)
+            other = clip_recipe.snapshot_words(tmp, [{"word": "b"}], None)
+            self.assertEqual(first, again)
+            self.assertNotEqual(first, other)
+            with open(first) as fh:
+                self.assertEqual(json.load(fh)["words"], [{"word": "a"}])
+
+
 class ParseValueTests(unittest.TestCase):
     def test_reads_json_and_falls_back_to_text(self):
         self.assertEqual(clip_recipe.parse_value("0.3"), 0.3)
@@ -121,7 +147,7 @@ class RenderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             open(os.path.join(tmp, "episode.mp4"), "wb").close()
             recipe = _recipe(tmp)
-            clip_recipe.save_episode_words(recipe["words"], [{"word": "hi", "start": 11.0, "end": 11.4}], {"faces": 1})
+            recipe["words"] = clip_recipe.snapshot_words(tmp, [{"word": "hi", "start": 11.0, "end": 11.4}], {"faces": 1})
             new_output = os.path.join(tmp, "Big_Answer_short-2.mp4")
             with mock.patch("services.clip_generator.generate_clip", return_value={"output_path": new_output}) as generate, \
                     mock.patch("services.clip_generator.keep_existing_outputs") as keep:
@@ -143,16 +169,39 @@ class RenderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             open(os.path.join(tmp, "episode.mp4"), "wb").close()
             recipe = clip_recipe.apply_changes(_recipe(tmp), {"end_second": 22.0})
-            clip_recipe.save_episode_words(recipe["words"], [], None)
+            recipe["words"] = clip_recipe.snapshot_words(tmp, [], None)
             with mock.patch("services.clip_generator.generate_clip", return_value={"output_path": os.path.join(tmp, "v2.mp4")}) as generate, \
                     mock.patch("services.clip_generator.keep_existing_outputs"):
                 clip_recipe.render(recipe)
             self.assertIsNone(generate.call_args.kwargs["hook"])
+            self.assertIsNone(clip_recipe.load(clip_recipe.recipe_path_for(os.path.join(tmp, "v2.mp4")))["hook"])
 
     def test_missing_source_video_fails_before_rendering(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(FileNotFoundError):
                 clip_recipe.render(_recipe(tmp))
+
+
+class ProcessRenderTests(unittest.TestCase):
+    def test_each_render_reads_the_current_settings_and_saves_a_matching_recipe(self):
+        import cli
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = {"caption_style": "branded", "crop_strategy": "face"}
+            outputs = iter([os.path.join(tmp, "one_short.mp4"), os.path.join(tmp, "two_short.mp4")])
+            generate = mock.Mock(side_effect=lambda **kw: {"output_path": next(outputs)})
+            render = lambda clip: cli._render_clip_with_recipe(
+                generate, clip, config=config, video_path=os.path.join(tmp, "episode.mp4"),
+                words=[{"word": "hi"}], face_map=None, output_dir=tmp,
+            )
+            first = render({"start_second": 1.0, "end_second": 20.0, "title": "one"})
+            config["caption_style"] = "karaoke"
+            second = render({"start_second": 30.0, "end_second": 50.0, "title": "two"})
+            self.assertEqual(generate.call_args_list[0].kwargs["caption_style"], "branded")
+            self.assertEqual(generate.call_args_list[1].kwargs["caption_style"], "karaoke")
+            self.assertEqual(clip_recipe.load(first["recipe_path"])["settings"]["caption_style"], "branded")
+            self.assertEqual(clip_recipe.load(second["recipe_path"])["settings"]["caption_style"], "karaoke")
+            self.assertEqual(clip_recipe.load(second["recipe_path"])["start_second"], 30.0)
 
 
 if __name__ == "__main__":

@@ -1961,39 +1961,6 @@ def cmd_process(args):
             {idx: (lambda c=c: generate_clip_content(clip=c, transcript_segments=segments)) for idx, c in enumerate(clips)},
             workers=3,
         )
-    from services import clip_recipe
-
-    render_settings = {
-        "caption_style": config.get("caption_style", "branded"),
-        "caption_position": config.get("caption_position", "auto"),
-        "caption_font_scale": config.get("caption_font_scale", 100),
-        "logo_position": config.get("logo_position", "top-left"),
-        "logo_scale": config.get("logo_scale", 1.0),
-        "topic": config.get("topic"),
-        "progress": config.get("progress"),
-        "brand": config.get("brand"),
-        "theme": config.get("style"),
-        "font_family": config.get("font_family"),
-        "crop_strategy": config.get("crop_strategy", "face"),
-        "format": config.get("format", "vertical"),
-        "logo_path": config.get("logo_path") or None,
-        "outro_path": config.get("outro_path") or None,
-        "intro_path": config.get("intro_path") or None,
-        "name_card": config.get("name_card"),
-        "motion": config.get("motion"),
-        "bookend_fade": config.get("bookend_fade", 0.0),
-        "allow_ass_fallback": config.get("allow_ass_fallback", False),
-        "use_ass_captions": config.get("use_ass_captions", False),
-    }
-    try:
-        from services.transcript_packer import compute_cache_hash as _recipe_hash
-
-        words_path = clip_recipe.save_episode_words(
-            clip_recipe.episode_words_path(output_dir, _recipe_hash(video_path)), words, face_map
-        )
-    except (OSError, TypeError, ValueError) as e:
-        print(f"         ⚠ Clip recipes will reread the transcript cache ({e})")
-        words_path = None
     results = []
     t0 = time.time()
     _skip_review = (
@@ -2009,31 +1976,13 @@ def cmd_process(args):
             result = None
             with _Spinner(f"Clip {i+1}/{len(clips)}: {clip['title'][:40]}...") as sp:
                 try:
-                    result = generate_clip(
-                        video_path=video_path,
-                        start_second=clip["start_second"],
-                        end_second=clip["end_second"],
-                        transcript_words=words,
-                        title=clip.get("title", f"clip_{i+1}"),
-                        output_dir=output_dir,
-                        keep_segments=clip.get("segments"),
-                        hook=_clip_hook(clip),
-                        face_map=face_map,
-                        **render_settings,
+                    clip.setdefault("title", f"clip_{i+1}")
+                    result = _render_clip_with_recipe(
+                        generate_clip, clip, config=config, video_path=video_path,
+                        words=words, face_map=face_map, output_dir=output_dir,
                     )
                     results.append(result)
                     ok = True
-                    try:
-                        result["recipe_path"] = clip_recipe.save(clip_recipe.build(
-                            video_path=video_path,
-                            clip={**clip, "title": clip.get("title", f"clip_{i+1}")},
-                            settings=render_settings,
-                            result=result,
-                            words_path=words_path,
-                            quality=quality,
-                        ))
-                    except (OSError, TypeError, ValueError) as e:
-                        print(f"         ⚠ recipe not saved: {e}")
                 except Exception as e:
                     print(f"\n         ✗ {e}")
                     results.append({"status": "error", "error": str(e)})
@@ -2241,35 +2190,9 @@ def cmd_process(args):
                     # Re-render
                     with _Spinner(f"Re-rendering clip {i+1}..."):
                         try:
-                            result = generate_clip(
-                                video_path=video_path,
-                                start_second=clip["start_second"],
-                                end_second=clip["end_second"],
-                                caption_style=config.get("caption_style", "branded"),
-                                caption_position=config.get("caption_position", "auto"),
-                                caption_font_scale=config.get("caption_font_scale", 100),
-                                logo_position=config.get("logo_position", "top-left"),
-                                logo_scale=config.get("logo_scale", 1.0),
-                                topic=config.get("topic"),
-                                progress=config.get("progress"),
-                                brand=config.get("brand"),
-                                theme=config.get("style"),
-                                font_family=config.get("font_family"),
-                                crop_strategy=config.get("crop_strategy", "face"),
-                                format=config.get("format", "vertical"),
-                                transcript_words=words,
-                                title=clip.get("title", f"clip_{i+1}"),
-                                output_dir=output_dir,
-                                logo_path=config.get("logo_path") or None,
-                                outro_path=config.get("outro_path") or None,
-                                intro_path=config.get("intro_path") or None,
-                                keep_segments=clip.get("segments"),
-                                hook=_clip_hook(clip),
-                                face_map=face_map,
-                                allow_ass_fallback=config.get("allow_ass_fallback", False),
-                                use_ass_captions=config.get("use_ass_captions", False),
-                                name_card=config.get("name_card"),
-                                bookend_fade=config.get("bookend_fade", 0.0),
+                            result = _render_clip_with_recipe(
+                                generate_clip, clip, config=config, video_path=video_path,
+                                words=words, face_map=face_map, output_dir=output_dir,
                             )
                             results[-1] = result
                             print(f"         ✓ Re-rendered: {result['file_size_mb']}MB")
@@ -2584,6 +2507,66 @@ def _review_clips(clips: list, segments: list, energy_scores: list | None, confi
                 print(f"         No additional suggestions found.")
 
 
+def _render_settings(config: dict) -> dict:
+    """The render settings every process path passes to generate_clip, read
+    from config at render time so changes made during review reach later clips."""
+    return {
+        "caption_style": config.get("caption_style", "branded"),
+        "caption_position": config.get("caption_position", "auto"),
+        "caption_font_scale": config.get("caption_font_scale", 100),
+        "logo_position": config.get("logo_position", "top-left"),
+        "logo_scale": config.get("logo_scale", 1.0),
+        "topic": config.get("topic"),
+        "progress": config.get("progress"),
+        "brand": config.get("brand"),
+        "theme": config.get("style"),
+        "font_family": config.get("font_family"),
+        "crop_strategy": config.get("crop_strategy", "face"),
+        "format": config.get("format", "vertical"),
+        "logo_path": config.get("logo_path") or None,
+        "outro_path": config.get("outro_path") or None,
+        "intro_path": config.get("intro_path") or None,
+        "name_card": config.get("name_card"),
+        "motion": config.get("motion"),
+        "bookend_fade": config.get("bookend_fade", 0.0),
+        "allow_ass_fallback": config.get("allow_ass_fallback", False),
+        "use_ass_captions": config.get("use_ass_captions", False),
+    }
+
+
+def _render_clip_with_recipe(generate_clip, clip: dict, *, config, video_path, words, face_map, output_dir) -> dict:
+    """Render one clip and save the recipe `podcli render` reads to render it
+    again. A recipe that can't be written never fails the render."""
+    from services import clip_recipe
+
+    settings = _render_settings(config)
+    hook = _clip_hook(clip)
+    result = generate_clip(
+        video_path=video_path,
+        start_second=clip["start_second"],
+        end_second=clip["end_second"],
+        transcript_words=words,
+        title=clip.get("title", "clip"),
+        output_dir=output_dir,
+        keep_segments=clip.get("segments"),
+        hook=hook,
+        face_map=face_map,
+        **settings,
+    )
+    try:
+        result["recipe_path"] = clip_recipe.save(clip_recipe.build(
+            video_path=video_path,
+            clip={**clip, "hook": hook},
+            settings=settings,
+            result=result,
+            words_path=clip_recipe.snapshot_words(output_dir, words, face_map),
+            quality=os.environ.get("PODCLI_QUALITY"),
+        ))
+    except (OSError, TypeError, ValueError) as e:
+        print(f"         ⚠ recipe not saved: {e}")
+    return result
+
+
 def _clip_hook(clip: dict) -> dict | None:
     """The clip's opening hook when it still fits the clip, else None.
 
@@ -2664,25 +2647,9 @@ def _post_render_loop(
         ok = False
         with _Spinner(f"Rendering: {clip['title'][:40]}..."):
             try:
-                new_result = generate_clip(
-                    video_path=video_path,
-                    start_second=clip["start_second"],
-                    end_second=clip["end_second"],
-                    caption_style=config.get("caption_style", "branded"),
-                    crop_strategy=config.get("crop_strategy", "face"),
-                    format=config.get("format", "vertical"),
-                    transcript_words=words,
-                    title=clip.get("title", "clip"),
-                    output_dir=output_dir,
-                    logo_path=config.get("logo_path") or None,
-                    outro_path=config.get("outro_path") or None,
-                    intro_path=config.get("intro_path") or None,
-                    keep_segments=clip.get("segments"),
-                    hook=_clip_hook(clip),
-                    face_map=face_map,
-                    allow_ass_fallback=config.get("allow_ass_fallback", False),
-                    use_ass_captions=config.get("use_ass_captions", False),
-                    theme=config.get("style"),
+                new_result = _render_clip_with_recipe(
+                    generate_clip, clip, config=config, video_path=video_path,
+                    words=words, face_map=face_map, output_dir=output_dir,
                 )
                 r["result"] = new_result
                 ok = True
@@ -2852,25 +2819,9 @@ def _post_render_loop(
                             ok = False
                             with _Spinner(f"Rendering: {f_clip['title'][:40]}..."):
                                 try:
-                                    new_result = generate_clip(
-                                        video_path=video_path,
-                                        start_second=f_clip["start_second"],
-                                        end_second=f_clip["end_second"],
-                                        caption_style=config.get("caption_style", "branded"),
-                                        crop_strategy=config.get("crop_strategy", "face"),
-                                        format=config.get("format", "vertical"),
-                                        transcript_words=words,
-                                        title=f_clip.get("title", "clip"),
-                                        output_dir=output_dir,
-                                        logo_path=config.get("logo_path") or None,
-                                        outro_path=config.get("outro_path") or None,
-                                        intro_path=config.get("intro_path") or None,
-                                        keep_segments=f_clip.get("segments"),
-                                        hook=_clip_hook(f_clip),
-                                        face_map=face_map,
-                                        allow_ass_fallback=config.get("allow_ass_fallback", False),
-                                        use_ass_captions=config.get("use_ass_captions", False),
-                                        theme=config.get("style"),
+                                    new_result = _render_clip_with_recipe(
+                                        generate_clip, f_clip, config=config, video_path=video_path,
+                                        words=words, face_map=face_map, output_dir=output_dir,
                                     )
                                     rendered.append({"clip": f_clip, "result": new_result, "index": len(clips)})
                                     clips.append(f_clip)
@@ -2910,25 +2861,9 @@ def _post_render_loop(
                             ok = False
                             with _Spinner(f"Rendering: {nc['title'][:40]}..."):
                                 try:
-                                    new_result = generate_clip(
-                                        video_path=video_path,
-                                        start_second=nc["start_second"],
-                                        end_second=nc["end_second"],
-                                        caption_style=config.get("caption_style", "branded"),
-                                        crop_strategy=config.get("crop_strategy", "face"),
-                                        format=config.get("format", "vertical"),
-                                        transcript_words=words,
-                                        title=nc.get("title", "clip"),
-                                        output_dir=output_dir,
-                                        logo_path=config.get("logo_path") or None,
-                                        outro_path=config.get("outro_path") or None,
-                                        intro_path=config.get("intro_path") or None,
-                                        keep_segments=nc.get("segments"),
-                                        hook=_clip_hook(nc),
-                                        face_map=face_map,
-                                        allow_ass_fallback=config.get("allow_ass_fallback", False),
-                                        use_ass_captions=config.get("use_ass_captions", False),
-                                        theme=config.get("style"),
+                                    new_result = _render_clip_with_recipe(
+                                        generate_clip, nc, config=config, video_path=video_path,
+                                        words=words, face_map=face_map, output_dir=output_dir,
                                     )
                                     rendered.append({"clip": nc, "result": new_result, "index": len(clips)})
                                     clips.append(nc)

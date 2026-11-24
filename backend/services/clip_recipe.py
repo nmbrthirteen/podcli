@@ -1,7 +1,9 @@
 """Everything needed to render one clip again, saved next to the clip.
 
 `podcli process` writes `<clip>.recipe.json` beside every clip it renders, plus
-one words file per episode under `<output>/.podcli/`. `podcli render` reads a
+the words and face map it used under `<output>/.podcli/`, named by content so
+a later run with a different transcript never changes what an earlier recipe
+reads. `podcli render` reads a
 recipe, applies changes, and renders a new version without touching the old
 file, so an app or a person can iterate on a clip without rerunning the whole
 episode.
@@ -9,7 +11,9 @@ episode.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 from typing import Any, Callable, Optional
 
@@ -42,14 +46,17 @@ SETTING_KEYS = (
 CLIP_KEYS = ("start_second", "end_second", "title", "keep_segments", "hook", "quality", "trim_opening")
 
 
-def episode_words_path(output_dir: str, cache_hash: str) -> str:
-    return os.path.join(output_dir, ".podcli", f"{cache_hash}.words.json")
-
-
-def save_episode_words(path: str, words: list, face_map: Optional[dict]) -> str:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump({"words": words or [], "face_map": face_map}, fh, ensure_ascii=False)
+def snapshot_words(output_dir: str, words: list, face_map: Optional[dict]) -> str:
+    """Save the words and face map once per distinct content and return the path."""
+    payload = json.dumps({"words": words or [], "face_map": face_map}, ensure_ascii=False, sort_keys=True)
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
+    path = os.path.join(output_dir, ".podcli", f"{digest}.words.json")
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        staged = f"{path}.{os.getpid()}.tmp"
+        with open(staged, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+        os.replace(staged, path)
     return path
 
 
@@ -94,6 +101,8 @@ def save(recipe: dict) -> str:
 def load(path: str) -> dict:
     with open(path, encoding="utf-8") as fh:
         recipe = json.load(fh)
+    if not isinstance(recipe, dict):
+        raise ValueError(f"{os.path.basename(path)} is not a clip recipe")
     if recipe.get("version") != RECIPE_VERSION:
         raise ValueError(f"{os.path.basename(path)} is recipe version {recipe.get('version')}, this podcli reads {RECIPE_VERSION}")
     return recipe
@@ -124,6 +133,12 @@ def apply_changes(recipe: dict, changes: dict) -> dict:
         # A start someone picked by hand is the start they want, so the sentence
         # snap and weak-opening trim stay off for this version.
         updated["trim_opening"] = False
+    for edge in ("start_second", "end_second"):
+        value = updated.get(edge)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"{edge} must be a number of seconds")
+    if updated["start_second"] < 0:
+        raise ValueError("start_second can't be before the episode starts")
     if float(updated["end_second"]) <= float(updated["start_second"]):
         raise ValueError("end_second must be after start_second")
     updated["keep_segments"] = _fit_segments(updated.get("keep_segments"), updated["start_second"], updated["end_second"])
@@ -182,6 +197,7 @@ def render(
     from services.clip_generator import generate_clip, keep_existing_outputs
 
     words, face_map = _load_words(recipe)
+    hook = _valid_hook(recipe)
     settings = dict(recipe.get("settings") or {})
     theme = settings.pop("theme", None)
     target_dir = output_dir or os.path.dirname(recipe["output"])
@@ -196,7 +212,7 @@ def render(
         output_dir=target_dir,
         face_map=face_map,
         keep_segments=recipe.get("keep_segments"),
-        hook=_valid_hook(recipe),
+        hook=hook,
         trim_opening=recipe.get("trim_opening"),
         theme=theme,
         progress_callback=progress_callback,
@@ -207,7 +223,7 @@ def render(
         "end_second": recipe["end_second"],
         "title": recipe.get("title"),
         "keep_segments": recipe.get("keep_segments"),
-        "hook": recipe.get("hook"),
+        "hook": hook,
         "trim_opening": recipe.get("trim_opening"),
     }
     next_recipe = build(

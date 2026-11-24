@@ -1099,6 +1099,7 @@ def generate_clip(
             transcript_words=transcript_words,
             title=title,
             output_dir=output_dir,
+            output_path=_reserve_output_path(output_dir, f"{safe_filename(title)}_short", ".mp4") if output_dir else None,
             progress_callback=progress_callback,
         )
 
