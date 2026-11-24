@@ -134,6 +134,20 @@ class SnapshotWordsTests(unittest.TestCase):
                 self.assertEqual(json.load(fh)["words"], [{"word": "a"}])
 
 
+class SnapshotEditedFileTests(unittest.TestCase):
+    def test_an_edited_snapshot_is_left_alone_and_a_new_one_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = clip_recipe.snapshot_words(tmp, [{"word": "a"}], None)
+            with open(first, "w") as fh:
+                fh.write("edited")
+            second = clip_recipe.snapshot_words(tmp, [{"word": "a"}], None)
+            self.assertNotEqual(first, second)
+            with open(first) as fh:
+                self.assertEqual(fh.read(), "edited")
+            with open(second) as fh:
+                self.assertEqual(json.load(fh)["words"], [{"word": "a"}])
+
+
 class ParseValueTests(unittest.TestCase):
     def test_reads_json_and_falls_back_to_text(self):
         self.assertEqual(clip_recipe.parse_value("0.3"), 0.3)

@@ -50,14 +50,21 @@ def snapshot_words(output_dir: str, words: list, face_map: Optional[dict]) -> st
     """Save the words and face map once per distinct content and return the path."""
     payload = json.dumps({"words": words or [], "face_map": face_map}, ensure_ascii=False, sort_keys=True)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
-    path = os.path.join(output_dir, ".podcli", f"{digest}.words.json")
-    if not os.path.exists(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        staged = f"{path}.{os.getpid()}.tmp"
-        with open(staged, "w", encoding="utf-8") as fh:
-            fh.write(payload)
-        os.replace(staged, path)
-    return path
+    folder = os.path.join(output_dir, ".podcli")
+    os.makedirs(folder, exist_ok=True)
+    n = 1
+    while True:
+        path = os.path.join(folder, f"{digest}.words.json" if n == 1 else f"{digest}-{n}.words.json")
+        if not os.path.exists(path):
+            staged = f"{path}.{os.getpid()}.tmp"
+            with open(staged, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+            os.replace(staged, path)
+            return path
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            if fh.read() == payload:
+                return path
+        n += 1
 
 
 def recipe_path_for(output_path: str) -> str:
