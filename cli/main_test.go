@@ -36,6 +36,9 @@ func TestWantsRuntimeSkipsHelp(t *testing.T) {
 	if !wantsRuntime([]string{"process", "episode.mp4"}) {
 		t.Fatal("process should provision")
 	}
+	if !wantsRuntime([]string{"render", "clip.recipe.json"}) {
+		t.Fatal("render should provision")
+	}
 	if wantsRuntime([]string{"process", "--help"}) {
 		t.Fatal("process --help must not provision")
 	}

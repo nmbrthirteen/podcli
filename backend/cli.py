@@ -1219,6 +1219,7 @@ def _emit_process_json(*, json_out, video_path, output_dir, quality, clips, resu
             "captions": captions or None,
             "thumbnails": result.get("thumbnail_paths") or None,
             "content": content or None,
+            "recipe": result.get("recipe_path"),
         }
         payload_clips.append({k: v for k, v in entry.items() if v is not None})
     payload = {
@@ -1960,6 +1961,39 @@ def cmd_process(args):
             {idx: (lambda c=c: generate_clip_content(clip=c, transcript_segments=segments)) for idx, c in enumerate(clips)},
             workers=3,
         )
+    from services import clip_recipe
+
+    render_settings = {
+        "caption_style": config.get("caption_style", "branded"),
+        "caption_position": config.get("caption_position", "auto"),
+        "caption_font_scale": config.get("caption_font_scale", 100),
+        "logo_position": config.get("logo_position", "top-left"),
+        "logo_scale": config.get("logo_scale", 1.0),
+        "topic": config.get("topic"),
+        "progress": config.get("progress"),
+        "brand": config.get("brand"),
+        "theme": config.get("style"),
+        "font_family": config.get("font_family"),
+        "crop_strategy": config.get("crop_strategy", "face"),
+        "format": config.get("format", "vertical"),
+        "logo_path": config.get("logo_path") or None,
+        "outro_path": config.get("outro_path") or None,
+        "intro_path": config.get("intro_path") or None,
+        "name_card": config.get("name_card"),
+        "motion": config.get("motion"),
+        "bookend_fade": config.get("bookend_fade", 0.0),
+        "allow_ass_fallback": config.get("allow_ass_fallback", False),
+        "use_ass_captions": config.get("use_ass_captions", False),
+    }
+    try:
+        from services.transcript_packer import compute_cache_hash as _recipe_hash
+
+        words_path = clip_recipe.save_episode_words(
+            clip_recipe.episode_words_path(output_dir, _recipe_hash(video_path)), words, face_map
+        )
+    except (OSError, TypeError, ValueError) as e:
+        print(f"         ⚠ Clip recipes will reread the transcript cache ({e})")
+        words_path = None
     results = []
     t0 = time.time()
     _skip_review = (
@@ -1979,35 +2013,27 @@ def cmd_process(args):
                         video_path=video_path,
                         start_second=clip["start_second"],
                         end_second=clip["end_second"],
-                        caption_style=config.get("caption_style", "branded"),
-                        caption_position=config.get("caption_position", "auto"),
-                        caption_font_scale=config.get("caption_font_scale", 100),
-                        logo_position=config.get("logo_position", "top-left"),
-                        logo_scale=config.get("logo_scale", 1.0),
-                        topic=config.get("topic"),
-                        progress=config.get("progress"),
-                        brand=config.get("brand"),
-                        theme=config.get("style"),
-                        font_family=config.get("font_family"),
-                        crop_strategy=config.get("crop_strategy", "face"),
-                        format=config.get("format", "vertical"),
                         transcript_words=words,
                         title=clip.get("title", f"clip_{i+1}"),
                         output_dir=output_dir,
-                        logo_path=config.get("logo_path") or None,
-                        outro_path=config.get("outro_path") or None,
-                        intro_path=config.get("intro_path") or None,
-                        name_card=config.get("name_card"),
-                        motion=config.get("motion"),
-                        bookend_fade=config.get("bookend_fade", 0.0),
                         keep_segments=clip.get("segments"),
                         hook=_clip_hook(clip),
                         face_map=face_map,
-                        allow_ass_fallback=config.get("allow_ass_fallback", False),
-                        use_ass_captions=config.get("use_ass_captions", False),
+                        **render_settings,
                     )
                     results.append(result)
                     ok = True
+                    try:
+                        result["recipe_path"] = clip_recipe.save(clip_recipe.build(
+                            video_path=video_path,
+                            clip={**clip, "title": clip.get("title", f"clip_{i+1}")},
+                            settings=render_settings,
+                            result=result,
+                            words_path=words_path,
+                            quality=quality,
+                        ))
+                    except (OSError, TypeError, ValueError) as e:
+                        print(f"         ⚠ recipe not saved: {e}")
                 except Exception as e:
                     print(f"\n         ✗ {e}")
                     results.append({"status": "error", "error": str(e)})
@@ -4162,6 +4188,59 @@ def _print_config_result(action: str, data: dict) -> None:
         print(f"    {gray}{data.get('home')}{reset}\n")
 
 
+def cmd_render(args):
+    """Render a new version of one clip from its recipe, with changes."""
+    from services import clip_recipe
+
+    json_out = sys.stdout
+    if args.json:
+        sys.stdout = sys.stderr
+    try:
+        changes = {}
+        for item in args.set or []:
+            key, sep, raw = item.partition("=")
+            if not sep:
+                raise ValueError(f"--set needs key=value, got {item!r}")
+            changes[key.strip()] = clip_recipe.parse_value(raw)
+        for key in ("title", "start_second", "end_second", "quality"):
+            value = getattr(args, key, None)
+            if value is not None:
+                changes[key] = value
+        recipe = clip_recipe.apply_changes(clip_recipe.load(args.recipe), changes)
+        print(f"  Rendering {recipe.get('title')} ({recipe['start_second']:.1f}s to {recipe['end_second']:.1f}s)")
+        result, recipe_path = clip_recipe.render(
+            recipe,
+            output_dir=args.output,
+            progress_callback=lambda pct, msg: print(f"         {msg} ({pct}%)") if msg else None,
+        )
+    except (OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as e:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(e)}), file=json_out, flush=True)
+        else:
+            print(f"  ✗ {e}")
+        sys.exit(1)
+    path = result.get("output_path")
+    base = os.path.splitext(path)[0] if path else ""
+    payload = {
+        "ok": bool(path),
+        "path": path,
+        "recipe": recipe_path,
+        "previous": recipe.get("output"),
+        "title": recipe.get("title"),
+        "duration": result.get("duration"),
+        "output_duration": result.get("output_duration"),
+        "start_second": result.get("start_second", recipe["start_second"]),
+        "end_second": result.get("end_second", recipe["end_second"]),
+        "crop_strategy": result.get("crop_strategy_used"),
+        "file_size_mb": result.get("file_size_mb"),
+        "captions": {k: base + "." + k for k in ("srt", "vtt") if base and os.path.exists(base + "." + k)} or None,
+    }
+    if args.json:
+        print(json.dumps({k: v for k, v in payload.items() if v is not None}, ensure_ascii=False), file=json_out, flush=True)
+    else:
+        print(f"  ✓ {path}")
+
+
 def cmd_clips(args):
     """Browse and edit saved clips (.podcli/history/clips.json)."""
     from services.clips_history import (
@@ -5800,6 +5879,20 @@ def main():
     clips_delete.add_argument("clip_id", help="Clip id (full or 8-char prefix)")
     clips_delete.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
+    # ── render ──
+    render_p = sub.add_parser("render", help="Render a new version of one clip from its .recipe.json")
+    render_p.add_argument("recipe", help="The clip's .recipe.json, written next to it by process")
+    render_p.add_argument(
+        "--set", action="append", metavar="KEY=VALUE",
+        help="Change a setting, e.g. caption_style=karaoke, crop_strategy=center, bookend_fade=0.3 (repeatable; values are JSON when they parse)",
+    )
+    render_p.add_argument("--title", help="New title")
+    render_p.add_argument("--start", dest="start_second", type=float, help="New start, seconds into the episode")
+    render_p.add_argument("--end", dest="end_second", type=float, help="New end, seconds into the episode")
+    render_p.add_argument("--quality", choices=["low", "medium", "high", "max"], help="Encode quality")
+    render_p.add_argument("-o", "--output", help="Output directory (default: next to the previous version)")
+    render_p.add_argument("--json", action="store_true", help="Write one JSON object to stdout")
+
     # ── bake-thumbnail ──
     bt = sub.add_parser("bake-thumbnail", help="Composite a thumbnail PNG into a clip as an opening card")
     bt.add_argument("clip", help="Rendered clip (.mp4) to modify in place")
@@ -5949,6 +6042,8 @@ def main():
         cmd_knowledge(args)
     elif args.command == "clips":
         cmd_clips(args)
+    elif args.command == "render":
+        cmd_render(args)
     elif args.command == "youtube":
         cmd_youtube(args)
     elif args.command == "config":
